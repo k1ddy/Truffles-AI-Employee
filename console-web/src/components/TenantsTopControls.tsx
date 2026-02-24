@@ -29,6 +29,7 @@ type TenantsTopControlsProps = {
     onPageFilterBranchChange: (value: string | null) => void;
     onApplyContextToPageFilters: () => void;
     onClearPageFilters: () => void;
+    controlTowerEnabled: boolean;
     workspaceMode: TenantsWorkspaceMode;
     onWorkspaceModeChange: (value: TenantsWorkspaceMode) => void;
     viewPreset: TenantsViewPreset;
@@ -70,6 +71,7 @@ export default function TenantsTopControls({
     onPageFilterBranchChange,
     onApplyContextToPageFilters,
     onClearPageFilters,
+    controlTowerEnabled,
     workspaceMode,
     onWorkspaceModeChange,
     viewPreset,
@@ -203,74 +205,82 @@ export default function TenantsTopControls({
                     Контур используется при переходах между разделами. Для списка на этой странице используйте кнопку «Взять из рабочего контура».
                 </div>
             </div>
-            <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">
-                <div className="text-xs text-muted-foreground mb-2">Рабочая зона:</div>
-                <div className="flex flex-wrap items-center gap-2">
-                    <button
-                        className={workspaceMode === "portfolio" ? "btn-primary" : "btn-ghost"}
-                        onClick={() => onWorkspaceModeChange("portfolio")}
-                        data-testid="tenants-mode-portfolio"
-                    >
-                        Портфель
-                    </button>
-                    <button
-                        className={workspaceMode === "onboarding" ? "btn-primary" : "btn-ghost"}
-                        onClick={() => onWorkspaceModeChange("onboarding")}
-                        data-testid="tenants-mode-onboarding"
-                    >
-                        Онбординг
-                    </button>
-                    <button
-                        className={workspaceMode === "changes" ? "btn-primary" : "btn-ghost"}
-                        onClick={() => onWorkspaceModeChange("changes")}
-                        data-testid="tenants-mode-changes"
-                    >
-                        Изменения
-                    </button>
-                    <button
-                        className={workspaceMode === "decommission" ? "btn-primary" : "btn-ghost"}
-                        onClick={() => onWorkspaceModeChange("decommission")}
-                        data-testid="tenants-mode-decommission"
-                    >
-                        Вывод из эксплуатации
-                    </button>
+            {controlTowerEnabled ? (
+                <>
+                    <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">
+                        <div className="text-xs text-muted-foreground mb-2">Рабочая зона:</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                className={workspaceMode === "portfolio" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => onWorkspaceModeChange("portfolio")}
+                                data-testid="tenants-mode-portfolio"
+                            >
+                                Портфель
+                            </button>
+                            <button
+                                className={workspaceMode === "onboarding" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => onWorkspaceModeChange("onboarding")}
+                                data-testid="tenants-mode-onboarding"
+                            >
+                                Онбординг
+                            </button>
+                            <button
+                                className={workspaceMode === "changes" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => onWorkspaceModeChange("changes")}
+                                data-testid="tenants-mode-changes"
+                            >
+                                Изменения
+                            </button>
+                            <button
+                                className={workspaceMode === "decommission" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => onWorkspaceModeChange("decommission")}
+                                data-testid="tenants-mode-decommission"
+                            >
+                                Вывод из эксплуатации
+                            </button>
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="tenants-view-preset">
+                            <span className="text-xs text-muted-foreground">Профиль интерфейса:</span>
+                            <button
+                                className={viewPreset === "operator" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => onViewPresetChange("operator")}
+                                data-testid="tenants-view-preset-operator"
+                            >
+                                Оператор
+                            </button>
+                            <button
+                                className={viewPreset === "platform" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => onViewPresetChange("platform")}
+                                disabled={!canSwitchViewPreset}
+                                data-testid="tenants-view-preset-platform"
+                            >
+                                Платформа
+                            </button>
+                        </div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-workspace-guide">
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-foreground/80">
+                            Операционный ориентир
+                        </div>
+                        <div className="text-xs text-foreground/80">
+                            Портфель: риски и состав клиентов. Онбординг: запуск нового филиала.
+                            Изменения: согласованное изменение и публикация. Вывод из эксплуатации: архив и восстановление.
+                        </div>
+                        <div className="mt-2 text-xs text-foreground/80">
+                            Перед запуском проверьте: карточку филиала, канал связи, часы работы,
+                            статус оплаты и актуальность базы знаний.
+                        </div>
+                        <div className="mt-2 text-xs text-foreground/80">
+                            Порядок работы: фильтры страницы, затем рабочий контур, затем профильная зона,
+                            после чего проверка результата по журналу действий.
+                        </div>
+                    </div>
+                </>
+            ) : (
+                <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-foreground/80" data-testid="tenants-control-tower-disabled">
+                    Расширенный режим отключён. Доступен базовый обзор портфеля с фильтрами и рабочим контекстом.
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="tenants-view-preset">
-                    <span className="text-xs text-muted-foreground">Профиль интерфейса:</span>
-                    <button
-                        className={viewPreset === "operator" ? "btn-primary" : "btn-ghost"}
-                        onClick={() => onViewPresetChange("operator")}
-                        data-testid="tenants-view-preset-operator"
-                    >
-                        Оператор
-                    </button>
-                    <button
-                        className={viewPreset === "platform" ? "btn-primary" : "btn-ghost"}
-                        onClick={() => onViewPresetChange("platform")}
-                        disabled={!canSwitchViewPreset}
-                        data-testid="tenants-view-preset-platform"
-                    >
-                        Платформа
-                    </button>
-                </div>
-            </div>
-            <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-workspace-guide">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-foreground/80">
-                    Операционный ориентир
-                </div>
-                <div className="text-xs text-foreground/80">
-                    Портфель: риски и состав клиентов. Онбординг: запуск нового филиала.
-                    Изменения: согласованное изменение и публикация. Вывод из эксплуатации: архив и восстановление.
-                </div>
-                <div className="mt-2 text-xs text-foreground/80">
-                    Перед запуском проверьте: `instance_id`, телефон, часовой пояс, `telegram_chat_id`,
-                    `knowledge_tag`, статус оплаты и активный reference pack.
-                </div>
-                <div className="mt-2 text-xs text-foreground/80">
-                    Порядок работы: очередь действий, затем фильтры страницы, затем профильная зона,
-                    после чего проверка результата по журналу действий.
-                </div>
-            </div>
+            )}
         </div>
     );
 }

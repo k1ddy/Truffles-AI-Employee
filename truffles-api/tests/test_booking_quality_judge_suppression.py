@@ -31,7 +31,10 @@ def test_suppresses_missed_question_for_provider_unavailable_booking_reply():
     suppress = fn(
         judge_result={"verdict": "fail", "reasons": ["missed_question"]},
         strict_reasons=[],
-        meta={"tool_decision": "provider_unavailable"},
+        meta={
+            "tool_decision": "provider_unavailable",
+            "llm_policy_override_reason_code": "tool_unavailable",
+        },
         meta_action="reply",
         expected_reply_type_value="time",
         booking_active=True,
@@ -48,7 +51,10 @@ def test_does_not_suppress_when_judge_reason_is_not_missed_question():
     suppress = fn(
         judge_result={"verdict": "fail", "reasons": ["hallucination"]},
         strict_reasons=[],
-        meta={"tool_decision": "provider_unavailable"},
+        meta={
+            "tool_decision": "provider_unavailable",
+            "llm_policy_override_reason_code": "tool_unavailable",
+        },
         meta_action="reply",
         expected_reply_type_value="time",
         booking_active=True,
@@ -65,7 +71,10 @@ def test_suppresses_missed_question_for_media_turn_during_booking_flow():
     suppress = fn(
         judge_result={"verdict": "fail", "reasons": ["missed_question"]},
         strict_reasons=[],
-        meta={"tool_decision": "ok"},
+        meta={
+            "tool_decision": "ok",
+            "llm_policy_override_reason_code": "required_slot_missing",
+        },
         meta_action="reply",
         expected_reply_type_value="service_choice",
         booking_active=True,
@@ -82,7 +91,10 @@ def test_suppresses_missed_question_when_followup_prompt_is_present():
     suppress = fn(
         judge_result={"verdict": "fail", "reasons": ["missed_question"]},
         strict_reasons=[],
-        meta={"tool_decision": "ok"},
+        meta={
+            "tool_decision": "ok",
+            "llm_policy_override_reason_code": "required_slot_missing",
+        },
         meta_action="reply",
         expected_reply_type_value="name",
         booking_active=True,
@@ -93,13 +105,76 @@ def test_suppresses_missed_question_when_followup_prompt_is_present():
     assert suppress is True
 
 
-def test_suppresses_missed_question_for_not_found_service_fallback():
+def test_does_not_suppress_missed_question_for_calendar_list_slots_booking_reply():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={
+            "intent": "calendar.list_slots",
+            "tool_decision": "ok",
+            "llm_policy_override_reason_code": "required_slot_missing",
+        },
+        meta_action="reply",
+        expected_reply_type_value="service_choice",
+        booking_active=True,
+        turn_tags=["booking"],
+        outbox_text="На какую услугу хотите записаться?",
+    )
+
+    assert suppress is False
+
+
+def test_does_not_suppress_missed_question_for_calendar_get_booking_booking_reply():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={
+            "intent": "calendar.get_booking",
+            "tool_decision": "not_found",
+            "llm_policy_override_reason_code": "required_slot_missing",
+        },
+        meta_action="reply",
+        expected_reply_type_value="time",
+        booking_active=True,
+        turn_tags=["booking", "check_booking"],
+        outbox_text="Проверил: пока не вижу подтвержденной записи.",
+    )
+
+    assert suppress is False
+
+
+def test_does_not_suppress_missed_question_without_whitelist_reason_code():
     fn = _load_suppress_helper()
 
     suppress = fn(
         judge_result={"verdict": "fail", "reasons": ["missed_question"]},
         strict_reasons=[],
         meta={"intent": "catalog.service_query", "tool_decision": "not_found_fallback"},
+        meta_action="reply",
+        expected_reply_type_value="service_choice",
+        booking_active=False,
+        turn_tags=["booking"],
+        outbox_text="На какую услугу хотите записаться?",
+    )
+
+    assert suppress is False
+
+
+def test_suppresses_missed_question_for_not_found_service_fallback_with_reason_code():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={
+            "intent": "catalog.service_query",
+            "tool_decision": "not_found_fallback",
+            "llm_policy_override_reason_code": "contract_validation_failure",
+        },
         meta_action="reply",
         expected_reply_type_value=None,
         booking_active=False,
@@ -116,7 +191,11 @@ def test_suppresses_missed_question_for_media_out_of_domain_safe_reply():
     suppress = fn(
         judge_result={"verdict": "fail", "reasons": ["missed_question"]},
         strict_reasons=[],
-        meta={"intent": "out_of_domain", "tool_decision": None},
+        meta={
+            "intent": "out_of_domain",
+            "tool_decision": None,
+            "llm_policy_override_reason_code": "contract_validation_failure",
+        },
         meta_action="out_of_domain",
         expected_reply_type_value=None,
         booking_active=False,

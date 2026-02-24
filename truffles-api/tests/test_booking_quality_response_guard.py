@@ -42,14 +42,24 @@ def _load_evaluate_turn():
     wanted_functions = {
         "_llm_quality_evaluate_turn",
         "_llm_quality_effective_intent",
+        "_llm_quality_has_general_consult_fallback",
         "_llm_quality_is_booking_confirmation_text",
+        "_llm_quality_is_unobserved_turn",
         "_llm_quality_normalize_tool_token",
         "_llm_quality_parse_slot_candidates",
+        "_llm_quality_normalize_time_token",
+        "_llm_quality_is_time_like_token",
+        "_llm_quality_extract_availability_claim",
+        "_llm_quality_extract_available_slots_by_specialist",
+        "_llm_quality_has_booking_prompt_leak",
+        "_llm_quality_has_stale_booking_carryover",
+        "_llm_quality_has_timeout_degrade_booking_generic",
         "_llm_quality_has_expected_followup_prompt",
         "_llm_quality_normalize_expect_token",
         "_llm_quality_outbox_delivery_state",
         "_llm_quality_resolve_outbox_status",
         "_llm_quality_normalize_outbox_status",
+        "_llm_quality_trace_missing_soft",
     }
     selected_nodes = []
     for node in tree.body:
@@ -59,6 +69,7 @@ def _load_evaluate_turn():
                 "LLM_QUALITY_KNOWN_STATES",
                 "LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS",
                 "LLM_QUALITY_BOOKING_CONFIRM_PHRASES",
+                "LLM_QUALITY_CALENDAR_INTENTS",
                 "LLM_QUALITY_OUTBOX_SUCCESS_STATUSES",
                 "LLM_QUALITY_OUTBOX_FAILURE_STATUSES",
                 "LLM_QUALITY_OUTBOX_PENDING_STATUSES",
@@ -429,6 +440,7 @@ def test_missing_bot_reply_marks_outbox_failed_reason():
     )
     assert "missing_bot_reply" in reasons
     assert "outbox_delivery_failed" in reasons
+    assert "unobserved_turn" not in reasons
     assert "outbox_delivery_timeout" not in reasons
 
 
@@ -526,6 +538,22 @@ def test_duplicate_ack_does_not_infer_for_pending_actions():
         meta={"action": "booking_captured_pending"},
         meta_error=None,
         state="pending",
+    )
+
+
+def test_duplicate_ack_does_not_infer_when_outbox_failed():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_should_infer_bot_response_from_duplicate_ack"]
+    assert not fn(
+        bot_response=False,
+        expected_response=True,
+        response_payload={"message": "duplicate message_id"},
+        attempts=2,
+        meta={"action": "reply", "delivery_error_code": "CHATFLOW_BILLING_BLOCKED"},
+        meta_error=None,
+        state="bot_active",
+        outbox_payload_status="FAILED",
+        outbox_summary={"count": 1, "status": "FAILED"},
     )
 
 
@@ -887,3 +915,298 @@ def test_expected_reply_fallback_allows_pending_info_reply():
         conv_meta={},
         handover_meta={"status": "active"},
     )
+
+
+def test_evaluate_turn_flags_slot_date_resolution_miss():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "calendar.list_slots",
+            "tool_action": "calendar.list_slots",
+            "tool_decision": "missing_slot",
+            "slot_contract_error": "slot_date_resolution_miss",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На какую дату и время вам удобно?",
+        tool_signals={"calendar": {"outcome": "pending"}},
+    )
+
+    assert "slot_date_resolution_miss" in reasons
+
+
+def test_evaluate_turn_flags_slot_availability_contradiction():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "calendar.list_slots",
+            "tool_action": "calendar.list_slots",
+            "tool_decision": "ok",
+            "availability_claim": "yes",
+            "requested_time": "19:00",
+            "available_slots_by_specialist": {"Айгерим": ["10:00", "11:00"]},
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text=(
+            "Да, на 19:00 есть свободное окно. "
+            "Свободные слоты: Айгерим: 10:00, 11:00"
+        ),
+        tool_signals={"calendar": {"outcome": "success"}},
+    )
+
+    assert "slot_availability_contradiction" in reasons
+
+
+def test_evaluate_turn_flags_fabricated_conflict_time():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "calendar.book_slot",
+            "tool_action": "calendar.book_slot",
+            "tool_decision": "conflict",
+            "requested_time": None,
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На 00:00 свободного окна нет. Доступны: 10:00, 11:00.",
+        tool_signals={"calendar": {"outcome": "pending"}},
+    )
+
+    assert "fabricated_conflict_time" in reasons
+
+
+def test_evaluate_turn_flags_booking_prompt_leak():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "catalog.service_query",
+            "tool_action": "catalog.service_query",
+            "tool_decision": "duration",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Стрижка занимает 30 минут.\n\nОтлично, время подходит. Как вас зовут?",
+        tool_signals={},
+    )
+
+    assert "booking_prompt_leak" in reasons
+
+
+def test_evaluate_turn_does_not_flag_booking_prompt_leak_for_services_overview():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "catalog.service_query",
+            "tool_action": "catalog.service_query",
+            "tool_decision": "services_overview",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text=(
+            "Мы салон красоты: парикмахерские услуги, маникюр и педикюр.\n\n"
+            "На какую услугу хотите записаться?"
+        ),
+        tool_signals={},
+    )
+
+    assert "booking_prompt_leak" not in reasons
+
+
+def test_evaluate_turn_flags_requested_date_time_like():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "calendar.list_slots",
+            "tool_action": "calendar.list_slots",
+            "tool_decision": "ok",
+            "requested_date": "16:30",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На 16:30 свободного окна нет. Доступны: 17:00, 18:00.",
+        tool_signals={"calendar": {"outcome": "success"}},
+    )
+
+    assert "requested_date_time_like" in reasons
+
+
+def test_evaluate_turn_flags_stale_booking_carryover():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "discounts",
+            "source": "policy_pack",
+            "tool_decision": "ok",
+        },
+        trace_entries=[{"stage": "policy_gate"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="name",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text=(
+            "Ещё был вопрос по записи. Уточните, пожалуйста.\n\n"
+            "Официальные акции: ..."
+        ),
+        tool_signals={},
+    )
+
+    assert "stale_booking_carryover" in reasons
+
+
+def test_evaluate_turn_flags_timeout_degrade_booking_generic():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "policy_core_guard",
+            "policy_core_mode": "degraded_fallback",
+            "policy_core_degrade_reason": "policy_error:timeout",
+        },
+        trace_entries=[{"stage": "policy_core_guard"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state=None,
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Подскажите, пожалуйста, что именно вас интересует?",
+        tool_signals={},
+    )
+
+    assert "timeout_degrade_booking_generic" in reasons

@@ -16,8 +16,10 @@ from app.services.pack_runtime_service import (
     _has_guest_waiting_signal,
     _has_parking_signal,
     _has_price_signal,
+    _normalize_text,
     build_info_combined_reply,
     compose_multi_truth_reply,
+    ensure_resolver_meta,
     format_reply_from_truth,
     get_pack_decision,
     get_pack_service_hint,
@@ -74,6 +76,55 @@ def _has_anchor_prefix(tokens: list[str], prefix: str) -> bool:
 
 def _anchor_group_hit(tokens: list[str], group: tuple[str, ...]) -> bool:
     return all(_has_anchor_prefix(tokens, prefix) for prefix in group)
+
+
+def _resolve_team_focus_key(
+    *,
+    client_slug: str | None,
+    message_text: str | None,
+    service_query: str | None,
+) -> str | None:
+    candidate = (
+        str(service_query).strip()
+        if isinstance(service_query, str) and str(service_query).strip()
+        else None
+    )
+    if not candidate and message_text:
+        candidate = get_pack_service_hint(message_text, client_slug=client_slug)
+    normalized = _normalize_text(candidate or "")
+    if not normalized:
+        return None
+    focus_tokens = {
+        "nails": (
+            "маникюр",
+            "педикюр",
+            "ногт",
+            "покрытие",
+            "наращивание",
+            "гель лак",
+        ),
+        "hair": (
+            "стрижка",
+            "окрашивание",
+            "укладка",
+            "волос",
+        ),
+        "brows_lashes": (
+            "бров",
+            "ресниц",
+            "ламинирование",
+        ),
+        "facial": (
+            "уход за лицом",
+            "чистка лица",
+            "пилинг",
+            "депиляция",
+        ),
+    }
+    for team_key, tokens in focus_tokens.items():
+        if any(token in normalized for token in tokens):
+            return team_key
+    return None
 
 
 def _count_anchor_hits(tokens: list[str], groups: list[tuple[str, ...]]) -> int:
@@ -162,48 +213,53 @@ def _detect_info_class_intents(
         location_signal = True
     hours_phrases = _signal_phrase_list(client_slug, "hours_keywords")
     hours_signal = bool(hours_phrases) and any(phrase in normalized for phrase in hours_phrases)
+    hours_stems = _signal_phrase_list(client_slug, "info_hours_stems")
+    time_markers = _signal_phrase_list(client_slug, "info_time_markers")
     if not hours_signal and question_like:
-        has_work_schedule_signal = any(stem in normalized for stem in ("работ", "рабоч")) and any(
-            marker in normalized for marker in ("врем", "час")
+        has_work_schedule_signal = bool(
+            hours_stems
+            and time_markers
+            and any(stem in normalized for stem in hours_stems)
+            and any(marker in normalized for marker in time_markers)
         )
         if has_work_schedule_signal:
             hours_signal = True
     pricing_signal = _has_price_signal(normalized, message_text, client_slug=client_slug)
     duration_signal = _has_duration_signal(normalized, message_text, client_slug=client_slug)
+    duration_fallback_verbs = _signal_phrase_list(client_slug, "info_duration_fallback_verbs")
+    duration_fallback_questions = _signal_phrase_list(
+        client_slug, "info_duration_fallback_question_markers"
+    )
     if not duration_signal:
         duration_signal = bool(
-            ("займет" in normalized or "занимает" in normalized)
-            and ("врем" in normalized or "сколько" in normalized)
+            duration_fallback_verbs
+            and duration_fallback_questions
+            and any(marker in normalized for marker in duration_fallback_verbs)
+            and any(marker in normalized for marker in duration_fallback_questions)
         )
-    service_duration_context = any(
-        marker in normalized
-        for marker in ("процедур", "услуг", "сеанс", "маникюр", "педикюр", "стриж", "окраш", "массаж")
+    service_duration_markers = _signal_phrase_list(client_slug, "info_duration_service_context_markers")
+    service_duration_context = bool(
+        service_duration_markers
+        and any(marker in normalized for marker in service_duration_markers)
     )
-    if duration_signal and any(stem in normalized for stem in ("работ", "рабоч")) and not service_duration_context:
+    if duration_signal and any(stem in normalized for stem in hours_stems) and not service_duration_context:
         duration_signal = False
         hours_signal = True
+    master_keywords = _signal_phrase_list(client_slug, "info_master_keywords")
+    master_person_keywords = _signal_phrase_list(client_slug, "info_master_person_keywords")
+    master_action_keywords = _signal_phrase_list(client_slug, "info_master_action_keywords")
+    master_service_keywords = _signal_phrase_list(client_slug, "info_master_service_keywords")
     master_signal = False
-    if normalized and any(
-        keyword in normalized
-        for keyword in (
-            "мастер",
-            "специалист",
-            "кто делает",
-            "кто будет делать",
-            "кто будет проводить",
-            "кто будет дела",
-            "кто выполняет",
-            "шебер",
-            "маман",
-            "ким жасайд",
-        )
-    ):
+    if normalized and master_keywords and any(keyword in normalized for keyword in master_keywords):
         master_signal = True
     if (
         not master_signal
-        and "кто" in normalized
-        and ("дела" in normalized or "провод" in normalized)
-        and any(token in normalized for token in ("процедур", "услуг", "сеанс", "маникюр", "стриж"))
+        and master_person_keywords
+        and master_action_keywords
+        and master_service_keywords
+        and any(token in normalized for token in master_person_keywords)
+        and any(token in normalized for token in master_action_keywords)
+        and any(token in normalized for token in master_service_keywords)
     ):
         master_signal = True
     if not master_signal and message_text and client_slug:
@@ -250,7 +306,11 @@ def _detect_info_class_intents(
         intents.add(question_type.kind)
         meta["question_type"] = question_type.kind
         meta["question_type_score"] = question_type.score
-    work_schedule_phrase = any(stem in normalized for stem in ("работ", "рабоч")) and not service_duration_context
+    work_schedule_phrase = bool(
+        hours_stems
+        and any(stem in normalized for stem in hours_stems)
+        and not service_duration_context
+    )
     if work_schedule_phrase and "duration" in intents:
         intents.discard("duration")
         intents.add("hours")
@@ -421,6 +481,19 @@ def _build_info_intent_reply(
         intent in {"location", "hours"} or location_signal or parking_signal or guest_signal
     )
 
+    def _resolverize(
+        meta_payload: dict | None,
+        *,
+        resolved_intent: str | None = None,
+        resolved_action: str = "reply",
+    ) -> dict:
+        return ensure_resolver_meta(
+            meta_payload if isinstance(meta_payload, dict) else {},
+            action=resolved_action,
+            intent=resolved_intent or intent,
+            resolver_id="webhook.info_intent",
+        )
+
     if intent == "contact":
         truth = load_yaml_truth(client_slug)
         salon = truth.get("salon", {}) if isinstance(truth, dict) else {}
@@ -447,7 +520,7 @@ def _build_info_intent_reply(
                     fact_intents=["contact"],
                     info_sections=["contact"],
                 )
-                return " ".join(lines), meta or None
+                return " ".join(lines), _resolverize(meta, resolved_intent="contact")
 
     if intent == "hours":
         if not (parking_signal or guest_signal or location_signal):
@@ -476,7 +549,7 @@ def _build_info_intent_reply(
                         fact_intents=[intent],
                         info_sections=["hours"],
                     )
-                    return hours_text, meta or None
+                    return hours_text, _resolverize(meta)
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,
@@ -487,7 +560,7 @@ def _build_info_intent_reply(
             fact_source="truth",
             fact_intents=[intent],
         )
-        return reply, meta or None
+        return reply, _resolverize(meta)
     if intent == "location":
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
@@ -499,7 +572,7 @@ def _build_info_intent_reply(
             fact_source="truth",
             fact_intents=[intent],
         )
-        return reply, meta or None
+        return reply, _resolverize(meta)
     if intent == "master":
         explicit_team_lookup = bool(
             normalized
@@ -519,8 +592,16 @@ def _build_info_intent_reply(
                 )
             )
         )
+        service_hint = service_query or (
+            get_pack_service_hint(message_text, client_slug=client_slug) if message_text else None
+        )
+        team_focus = _resolve_team_focus_key(
+            client_slug=client_slug,
+            message_text=message_text,
+            service_query=service_hint,
+        )
         # When the message asks about a concrete service ("короткая стрижка" etc.)
-        # and does not explicitly ask for team listing, prefer service/price answer.
+        # and does not explicitly ask for full team listing, prefer service-context answer.
         if message_text and not explicit_team_lookup:
             decision = get_pack_decision(message_text, client_slug=client_slug)
             if (
@@ -530,7 +611,11 @@ def _build_info_intent_reply(
                 and decision.response
             ):
                 meta = decision.meta if isinstance(decision.meta, dict) else None
-                return decision.response, meta or None
+                return decision.response, _resolverize(
+                    meta,
+                    resolved_intent=decision.intent,
+                    resolved_action=decision.action or "reply",
+                )
         truth = load_yaml_truth(client_slug)
         team = truth.get("team") if isinstance(truth, dict) else None
         if isinstance(team, dict):
@@ -540,6 +625,28 @@ def _build_info_intent_reply(
                 "brows_lashes": "Брови и ресницы",
                 "facial": "Лицо",
             }
+            if team_focus in labels:
+                focused_text = team.get(team_focus)
+                if isinstance(focused_text, str) and focused_text.strip():
+                    area_label = labels[team_focus]
+                    service_label = (
+                        str(service_hint).strip()
+                        if isinstance(service_hint, str) and str(service_hint).strip()
+                        else "этой услуге"
+                    )
+                    focused_summary = focused_text.strip()
+                    if not focused_summary.endswith((".", "!", "?")):
+                        focused_summary = f"{focused_summary}."
+                    reply = (
+                        f"По услуге «{service_label}» работают мастера направления "
+                        f"«{area_label}»: {focused_summary}"
+                    )
+                    meta = _build_fact_meta(
+                        fact_source="truth",
+                        fact_intents=["master"],
+                        info_sections=["master"],
+                    )
+                    return reply, _resolverize(meta, resolved_intent="master")
             parts: list[str] = []
             for key in ("nails", "hair", "brows_lashes", "facial"):
                 value = team.get(key)
@@ -555,14 +662,18 @@ def _build_info_intent_reply(
                     fact_intents=["master"],
                     info_sections=["master"],
                 )
-                return reply, meta
+                return reply, _resolverize(meta, resolved_intent="master")
         fallback = "Можно к конкретному мастеру, если он свободен на выбранное время."
         meta = _build_fact_meta(
             fact_source="truth",
             fact_intents=["master"],
             info_sections=["master"],
         )
-        return fallback, meta
+        return fallback, _resolverize(
+            meta,
+            resolved_intent="master",
+            resolved_action="collect",
+        )
     if intent == "promotions":
         reply = format_reply_from_truth("promotions", client_slug=client_slug)
         if not reply:
@@ -574,7 +685,7 @@ def _build_info_intent_reply(
             fact_intents=["promotions"],
             info_sections=["promotions"],
         )
-        return reply, meta
+        return reply, _resolverize(meta, resolved_intent="promotions")
     if intent in {"pricing", "duration"} and not service_query and message_text:
         service_query = get_pack_service_hint(message_text, client_slug=client_slug)
         if not service_query:
@@ -586,7 +697,16 @@ def _build_info_intent_reply(
                 and decision.response
             ):
                 meta = decision.meta if isinstance(decision.meta, dict) else None
-                return decision.response, meta or None
+                resolved_action = (
+                    "collect"
+                    if decision.intent in {"service_not_found", "service_clarify"}
+                    else (decision.action or "reply")
+                )
+                return decision.response, _resolverize(
+                    meta,
+                    resolved_intent=decision.intent,
+                    resolved_action=resolved_action,
+                )
     if intent == "pricing":
         question = f"Сколько стоит {service_query}?" if service_query else "Сколько стоит?"
     elif intent == "duration":
@@ -616,7 +736,16 @@ def _build_info_intent_reply(
             fact_intents=[intent],
             info_sections=duration_info_sections,
         )
-        return reply_text, meta or None
+        resolved_action = (
+            "collect"
+            if decision.intent in {"service_not_found", "service_clarify", "duration_or_price_clarify"}
+            else (decision.action or "reply")
+        )
+        return reply_text, _resolverize(
+            meta,
+            resolved_intent=decision.intent,
+            resolved_action=resolved_action,
+        )
     fallback = format_reply_from_truth("duration_or_price_clarify", client_slug=client_slug)
     if info_prefix:
         fallback = f"{info_prefix} {fallback}".strip() if fallback else info_prefix
@@ -626,7 +755,11 @@ def _build_info_intent_reply(
         fact_intents=[intent],
         info_sections=duration_info_sections,
     )
-    return fallback, meta or None
+    return fallback, _resolverize(
+        meta,
+        resolved_action="collect",
+        resolved_intent="duration_or_price_clarify",
+    )
 
 
 def _extract_truth_gate_info_intents(
@@ -1561,7 +1694,7 @@ def _handle_truth_gate_fallback(
     log_timing: Callable[[str, float, dict | None], None],
     record_escalation_metric: Callable[[str], None],
 ) -> WebhookResponse | None:
-    from app.services.pack_runtime_service import PackDecision
+    from app.services.pack_runtime_service import PackDecision, ensure_resolver_meta
 
     from . import _legacy as legacy
 
@@ -1884,6 +2017,27 @@ def _handle_truth_gate_fallback(
                 conversation=conversation,
                 class_router_result=class_router_result,
             )
+        resolver_action = decision.action
+        if decision.action != "escalate" and decision.intent in {
+            "service_not_found",
+            "service_clarify",
+            "duration_or_price_clarify",
+            "info_clarify",
+        }:
+            resolver_action = "collect"
+        resolver_meta = ensure_resolver_meta(
+            decision.meta if isinstance(decision.meta, dict) else {},
+            action=resolver_action,
+            intent=decision.intent,
+            resolver_id="webhook.truth_gate",
+        )
+        decision = PackDecision(
+            action=decision.action,
+            response=decision.response,
+            intent=decision.intent,
+            collect=decision.collect,
+            meta=resolver_meta,
+        )
         trace_payload = {
             "stage": "truth_gate",
             "decision": decision.action,

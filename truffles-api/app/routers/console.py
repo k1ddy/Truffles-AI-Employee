@@ -1,12 +1,15 @@
+import hashlib
 import json
 import os
 import re
 import secrets
+from collections import deque
 from dataclasses import dataclass
 from datetime import date as dt_date
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
+from time import monotonic, perf_counter
 from typing import Any, Callable, Literal, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
@@ -18,11 +21,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
-from sqlalchemy import and_, case, func, or_, text
+from sqlalchemy import and_, case, delete, event, func, or_, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
+from app.logging_config import (
+    record_tenants_endpoint_latency,
+    record_tenants_fleet_projection_observation,
+)
 from app.models import (
     Agent,
     AgentIdentity,
@@ -47,6 +54,9 @@ from app.models import (
     Message,
     OutboxMessage,
     ReferencePack,
+    TenantsFleetCache,
+    TenantsFleetClientProjection,
+    TenantsFleetPrewarmJob,
     TenantsWeeklySnapshot,
     User,
 )
@@ -740,8 +750,12 @@ def _serialize_branch(branch: Branch) -> ConsoleBranch:
     go_live_reviewed_at = _coerce_utc(getattr(branch, "go_live_reviewed_at", None))
     go_live_waiver_until = _coerce_utc(getattr(branch, "go_live_waiver_until", None))
     go_live_waiver_active = _is_branch_go_live_waiver_active(branch)
+    branch_client = getattr(branch, "client", None)
+    company_id = getattr(branch_client, "company_id", None) if branch_client is not None else None
     return ConsoleBranch(
         id=branch.id,
+        client_id=branch.client_id,
+        company_id=company_id,
         slug=branch.slug,
         name=branch.name,
         is_active=branch.is_active,
@@ -1380,6 +1394,102 @@ def _normalize_outreach_destination(value: Optional[str]) -> str:
     return normalized
 
 
+def _resolve_outreach_auto_case_bucket_minutes() -> int:
+    raw_value = _normalize_optional_text(os.environ.get("OUTREACH_AUTO_CASE_BUCKET_MINUTES"))
+    if raw_value is None:
+        return _OUTREACH_AUTO_CASE_BUCKET_MINUTES_DEFAULT
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        return _OUTREACH_AUTO_CASE_BUCKET_MINUTES_DEFAULT
+    if parsed < _OUTREACH_AUTO_CASE_BUCKET_MINUTES_MIN:
+        return _OUTREACH_AUTO_CASE_BUCKET_MINUTES_MIN
+    if parsed > _OUTREACH_AUTO_CASE_BUCKET_MINUTES_MAX:
+        return _OUTREACH_AUTO_CASE_BUCKET_MINUTES_MAX
+    return parsed
+
+
+def _resolve_outreach_auto_case_bucket_start(*, now_utc: datetime, bucket_minutes: int) -> datetime:
+    bucket_seconds = max(60, bucket_minutes * 60)
+    bucket_epoch = int(now_utc.timestamp()) // bucket_seconds * bucket_seconds
+    return datetime.fromtimestamp(bucket_epoch, tz=timezone.utc)
+
+
+def _build_outreach_auto_case_dedupe_key(
+    *,
+    client_id: UUID,
+    branch_id: UUID,
+    remote_jid: str,
+    bucket_started_at: datetime,
+) -> str:
+    payload = (
+        f"{str(client_id)}:"
+        f"{str(branch_id)}:"
+        f"{remote_jid.strip().lower()}:"
+        f"{int(bucket_started_at.timestamp())}"
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+    return f"outreach-no-case:{digest}"
+
+
+def _record_outreach_auto_case_trace(
+    *,
+    conversation: Conversation,
+    case_id: UUID,
+    decision: str,
+    reason: str,
+    dedupe_key: str,
+    bucket_started_at: datetime,
+    bucket_minutes: int,
+) -> None:
+    raw_context = getattr(conversation, "context", None)
+    context = raw_context if isinstance(raw_context, dict) else {}
+    raw_trace = context.get("decision_trace")
+    if isinstance(raw_trace, list):
+        trace_list = [item for item in raw_trace if isinstance(item, dict)]
+    elif isinstance(raw_trace, dict):
+        trace_list = [raw_trace]
+    else:
+        trace_list = []
+    trace_list.append(
+        {
+            "stage": _OUTREACH_AUTO_CASE_TRACE_STAGE,
+            "decision": decision,
+            "reason": reason,
+            "case_id": str(case_id),
+            "dedupe_key": dedupe_key,
+            "bucket_started_at": bucket_started_at.isoformat(),
+            "bucket_minutes": bucket_minutes,
+            "source": "console_outreach",
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    if len(trace_list) > _OUTREACH_AUTO_CASE_TRACE_MAX:
+        trace_list = trace_list[-_OUTREACH_AUTO_CASE_TRACE_MAX :]
+    context["decision_trace"] = trace_list
+    conversation.context = context
+
+
+def _update_outreach_auto_case_meta(
+    case: Handover,
+    *,
+    reason: str,
+    dedupe_key: str,
+    bucket_started_at: datetime,
+    bucket_minutes: int,
+) -> None:
+    raw_meta = getattr(case, "meta", None)
+    meta = raw_meta if isinstance(raw_meta, dict) else {}
+    meta["origin"] = "console_outreach"
+    meta["auto_case"] = True
+    meta["outreach_bootstrap_reason"] = reason
+    meta["outreach_dedupe_key"] = dedupe_key
+    meta["outreach_dedupe_bucket_started_at"] = bucket_started_at.isoformat()
+    meta["outreach_dedupe_bucket_minutes"] = bucket_minutes
+    meta["outreach_bootstrap_at"] = datetime.now(timezone.utc).isoformat()
+    case.meta = meta
+
+
 def _resolve_console_conversation_or_404(
     db: Session,
     *,
@@ -1425,22 +1535,97 @@ def _bootstrap_outreach_conversation_case(
         channel="whatsapp",
         branch_id=branch_id,
     )
+    locked_conversation = (
+        db.query(Conversation)
+        .filter(
+            Conversation.id == conversation.id,
+            Conversation.client_id == context.client.id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if locked_conversation:
+        conversation = locked_conversation
     if conversation.branch_id is None:
         conversation.branch_id = branch_id
     conversation.last_message_at = now_utc
+    bucket_minutes = _resolve_outreach_auto_case_bucket_minutes()
+    bucket_started_at = _resolve_outreach_auto_case_bucket_start(
+        now_utc=now_utc,
+        bucket_minutes=bucket_minutes,
+    )
+    dedupe_key = _build_outreach_auto_case_dedupe_key(
+        client_id=context.client.id,
+        branch_id=branch_id,
+        remote_jid=remote_jid,
+        bucket_started_at=bucket_started_at,
+    )
 
     existing_case = (
         db.query(Handover)
         .filter(
             Handover.client_id == context.client.id,
             Handover.conversation_id == conversation.id,
-            Handover.status.in_(["pending", "active"]),
+            Handover.status.in_(list(_OUTREACH_AUTO_CASE_ACTIVE_STATUSES)),
         )
         .order_by(Handover.created_at.desc())
         .first()
     )
     if existing_case:
+        _update_outreach_auto_case_meta(
+            existing_case,
+            reason="active_case_reused",
+            dedupe_key=dedupe_key,
+            bucket_started_at=bucket_started_at,
+            bucket_minutes=bucket_minutes,
+        )
+        _record_outreach_auto_case_trace(
+            conversation=conversation,
+            case_id=existing_case.id,
+            decision="case_reused",
+            reason="active_case_reused",
+            dedupe_key=dedupe_key,
+            bucket_started_at=bucket_started_at,
+            bucket_minutes=bucket_minutes,
+        )
         return conversation, existing_case, False
+
+    dedupe_case = (
+        db.query(Handover)
+        .filter(
+            Handover.client_id == context.client.id,
+            Handover.conversation_id == conversation.id,
+            Handover.trigger_type == "manual",
+            Handover.trigger_value == _OUTREACH_AUTO_CASE_TRIGGER_VALUE,
+            Handover.created_at >= bucket_started_at,
+        )
+        .order_by(Handover.created_at.desc())
+        .first()
+    )
+    if dedupe_case:
+        if dedupe_case.status not in _OUTREACH_AUTO_CASE_ACTIVE_STATUSES:
+            dedupe_case.status = "active"
+            dedupe_case.resolved_at = None
+            dedupe_case.resolution_type = None
+            dedupe_case.resolution_notes = None
+            dedupe_case.first_response_at = dedupe_case.first_response_at or now_utc
+        _update_outreach_auto_case_meta(
+            dedupe_case,
+            reason="dedupe_bucket_reused",
+            dedupe_key=dedupe_key,
+            bucket_started_at=bucket_started_at,
+            bucket_minutes=bucket_minutes,
+        )
+        _record_outreach_auto_case_trace(
+            conversation=conversation,
+            case_id=dedupe_case.id,
+            decision="case_reused",
+            reason="dedupe_bucket_reused",
+            dedupe_key=dedupe_key,
+            bucket_started_at=bucket_started_at,
+            bucket_minutes=bucket_minutes,
+        )
+        return conversation, dedupe_case, False
 
     agent_id = str(getattr(context.agent, "id", "")) if getattr(context.agent, "id", None) else None
     agent_name = _normalize_optional_text(getattr(context.agent, "name", None))
@@ -1448,7 +1633,7 @@ def _bootstrap_outreach_conversation_case(
         conversation_id=conversation.id,
         client_id=context.client.id,
         trigger_type="manual",
-        trigger_value="console_outreach_no_case",
+        trigger_value=_OUTREACH_AUTO_CASE_TRIGGER_VALUE,
         context_summary=f"Manual outreach without existing case ({remote_jid})",
         messages=[],
         meta={
@@ -1456,6 +1641,11 @@ def _bootstrap_outreach_conversation_case(
             "auto_case": True,
             "destination": remote_jid,
             "branch_id": str(branch_id),
+            "outreach_bootstrap_reason": "new_case_created",
+            "outreach_dedupe_key": dedupe_key,
+            "outreach_dedupe_bucket_started_at": bucket_started_at.isoformat(),
+            "outreach_dedupe_bucket_minutes": bucket_minutes,
+            "outreach_bootstrap_at": now_utc.isoformat(),
         },
         status="active",
         manager_id=agent_id,
@@ -1469,7 +1659,18 @@ def _bootstrap_outreach_conversation_case(
         channel="whatsapp",
         channel_ref=remote_jid,
     )
+    if auto_case.id is None:
+        auto_case.id = uuid4()
     db.add(auto_case)
+    _record_outreach_auto_case_trace(
+        conversation=conversation,
+        case_id=auto_case.id,
+        decision="case_created",
+        reason="new_case_created",
+        dedupe_key=dedupe_key,
+        bucket_started_at=bucket_started_at,
+        bucket_minutes=bucket_minutes,
+    )
     return conversation, auto_case, True
 
 
@@ -1832,6 +2033,27 @@ def _parse_env_csv_set(name: str, *, default: set[str]) -> set[str]:
     return {value for value in values if value}
 
 
+def _parse_env_int(
+    name: str,
+    *,
+    default: int,
+    min_value: int,
+    max_value: int,
+) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw.strip())
+    except (TypeError, ValueError):
+        return default
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
+
+
 def _dedupe_list(values: list[str]) -> list[str]:
     unique: list[str] = []
     seen: set[str] = set()
@@ -1924,6 +2146,24 @@ _FLEET_LIFECYCLE_STATES = {
 }
 _FLEET_PAYMENT_STATES = {"pending", "confirmed", "rejected", "unknown"}
 _FLEET_SERVICE_STATES = {"ok", "degraded", "attention"}
+_FLEET_COMMERCIAL_STATES = {
+    "payment_confirmed",
+    "payment_pending",
+    "payment_rejected",
+    "contract_missing",
+}
+_FLEET_NEXT_ACTION_STATES = {
+    "qualify_and_collect_contract",
+    "collect_signed_contract_and_payment",
+    "complete_onboarding_steps",
+    "confirm_payment_and_approve_go_live",
+    "approve_go_live",
+    "resolve_payment_or_service_blocker",
+    "archived_no_action",
+    "run_integration_recovery",
+    "resolve_attention_items",
+    "monitor_sla_and_quality",
+}
 _FLEET_LIFECYCLE_ORDER = [
     "lead",
     "contracting",
@@ -1941,17 +2181,137 @@ _FLEET_ATTENTION_HIGH_THRESHOLD = 70
 _FLEET_ATTENTION_MEDIUM_THRESHOLD = 35
 _FLEET_REFERENCE_BRANCH_RECENT_INBOUND_DAYS = 30
 _ONBOARDING_THROUGHPUT_WINDOW_HOURS = 30 * 24
+_TENANTS_FLEET_CACHE_TABLE_NAME = "tenants_fleet_cache"
+_TENANTS_FLEET_PREWARM_JOB_TABLE_NAME = "tenants_fleet_prewarm_jobs"
+_TENANTS_FLEET_CACHE_SUMMARY_TYPE = "fleet_summary"
+_TENANTS_FLEET_CACHE_ATTENTION_TYPE = "fleet_attention"
+_TENANTS_FLEET_CACHE_SCHEMA_VERSION = "v1"
+_TENANTS_FLEET_CACHE_TTL_SECONDS = _parse_env_int(
+    "TENANTS_FLEET_CACHE_TTL_SECONDS",
+    default=180,
+    min_value=30,
+    max_value=3600,
+)
+_TENANTS_FLEET_CACHE_ASYNC_REFRESH_ENABLED = _parse_env_bool(
+    "TENANTS_FLEET_CACHE_ASYNC_REFRESH_ENABLED",
+    default=True,
+)
+_TENANTS_FLEET_CACHE_ASYNC_REFRESH_BUFFER_SECONDS = _parse_env_int(
+    "TENANTS_FLEET_CACHE_ASYNC_REFRESH_BUFFER_SECONDS",
+    default=60,
+    min_value=10,
+    max_value=1800,
+)
+_TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS = _parse_env_int(
+    "TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS",
+    default=5000,
+    min_value=50,
+    max_value=100000,
+)
+_TENANTS_FLEET_CACHE_PREWARM_ON_INVALIDATION_ENABLED = _parse_env_bool(
+    "TENANTS_FLEET_CACHE_PREWARM_ON_INVALIDATION_ENABLED",
+    default=True,
+)
+_TENANTS_FLEET_CACHE_PREWARM_MAX_COMPANY_SCOPES = _parse_env_int(
+    "TENANTS_FLEET_CACHE_PREWARM_MAX_COMPANY_SCOPES",
+    default=50,
+    min_value=1,
+    max_value=10000,
+)
+_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_SCOPE_ENABLED = _parse_env_bool(
+    "TENANTS_FLEET_CACHE_PREWARM_GLOBAL_SCOPE_ENABLED",
+    default=True,
+)
+_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MAX_ACTIVE_CLIENTS = _parse_env_int(
+    "TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MAX_ACTIVE_CLIENTS",
+    default=20000,
+    min_value=100,
+    max_value=200000,
+)
+_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT = _parse_env_int(
+    "TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT",
+    default=20,
+    min_value=1,
+    max_value=200,
+)
+_TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT = _parse_env_int(
+    "TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT",
+    default=20,
+    min_value=1,
+    max_value=200,
+)
+_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MIN_INTERVAL_SECONDS = _parse_env_int(
+    "TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MIN_INTERVAL_SECONDS",
+    default=30,
+    min_value=1,
+    max_value=3600,
+)
+_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX = _parse_env_int(
+    "TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX",
+    default=512,
+    min_value=16,
+    max_value=10000,
+)
+_TENANTS_FLEET_PREWARM_DISPATCH_BATCH_MAX = _parse_env_int(
+    "TENANTS_FLEET_PREWARM_DISPATCH_BATCH_MAX",
+    default=64,
+    min_value=1,
+    max_value=512,
+)
+_TENANTS_FLEET_PREWARM_DISPATCH_STUCK_SECONDS = _parse_env_int(
+    "TENANTS_FLEET_PREWARM_DISPATCH_STUCK_SECONDS",
+    default=120,
+    min_value=30,
+    max_value=7200,
+)
 _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
 _DEFAULT_RUNTIME_REDIS_URL = "redis://truffles_redis_1:6379/0"
+_OUTREACH_AUTO_CASE_BUCKET_MINUTES_DEFAULT = 30
+_OUTREACH_AUTO_CASE_BUCKET_MINUTES_MIN = 1
+_OUTREACH_AUTO_CASE_BUCKET_MINUTES_MAX = 240
+_OUTREACH_AUTO_CASE_TRACE_MAX = 100
+_OUTREACH_AUTO_CASE_TRACE_STAGE = "outreach_auto_case_bootstrap"
+_OUTREACH_AUTO_CASE_TRIGGER_VALUE = "console_outreach_no_case"
+_OUTREACH_AUTO_CASE_ACTIVE_STATUSES = {"pending", "active"}
 _TENANTS_WEEKLY_SNAPSHOT_EVENT_TYPE = "tenants_weekly_snapshot_saved"
 _TENANTS_WEEKLY_SNAPSHOT_ENTITY_TYPE = "tenant_snapshot"
 _TENANTS_WEEKLY_SNAPSHOT_TABLE_NAME = "tenants_weekly_snapshots"
+_TENANTS_FLEET_CLIENT_PROJECTION_TABLE_NAME = "tenants_fleet_client_projection"
 _TENANTS_WEEKLY_SNAPSHOT_WEEK_KEY_PATTERN = re.compile(r"^\d{4}-W\d{2}$")
 _TENANTS_SENSITIVE_ACCESS_EVENT_TYPE = "tenants_sensitive_id_accessed"
 _TENANTS_SENSITIVE_FIELDS = {"instance_id"}
 _TENANTS_SENSITIVE_ACTIONS = {"reveal", "copy"}
+_TENANTS_FLEET_CACHE_REFRESH_INFLIGHT: set[str] = set()
+_TENANTS_FLEET_CACHE_REFRESH_LOCK = Lock()
+_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY = "tenants_fleet_cache_prewarm_company_ids"
+_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY = "tenants_fleet_cache_prewarm_global"
+_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY = "tenants_fleet_cache_prewarm_events"
+_TENANTS_FLEET_CACHE_GLOBAL_PREWARM_LOCK = Lock()
+_TENANTS_FLEET_CACHE_GLOBAL_PREWARM_NEXT_ALLOWED_AT = 0.0
+_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE: deque[dict[str, Any]] = deque()
+_TENANTS_FLEET_PREWARM_DISPATCH_LOCK = Lock()
+_TENANTS_FLEET_PREWARM_DISPATCH_WORKER: Optional[Thread] = None
+_TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING = "pending"
+_TENANTS_FLEET_PREWARM_JOB_STATUS_PROCESSING = "processing"
+_TENANTS_FLEET_PREWARM_JOB_STATUS_DONE = "done"
+_TENANTS_FLEET_CLIENT_PROJECTION_ENABLED = _parse_env_bool(
+    "TENANTS_FLEET_CLIENT_PROJECTION_ENABLED",
+    default=True,
+)
+_TENANTS_FLEET_CLIENT_PROJECTION_MAX_SYNC_CLIENTS = _parse_env_int(
+    "TENANTS_FLEET_CLIENT_PROJECTION_MAX_SYNC_CLIENTS",
+    default=8000,
+    min_value=100,
+    max_value=100000,
+)
+_TENANTS_FLEET_CLIENT_PROJECTION_COMPACTION_MAX_CLIENTS = _parse_env_int(
+    "TENANTS_FLEET_CLIENT_PROJECTION_COMPACTION_MAX_CLIENTS",
+    default=4000,
+    min_value=100,
+    max_value=100000,
+)
 
 
 @dataclass
@@ -1968,6 +2328,13 @@ class _FleetClientDetails:
     go_live_ready_branches: int
     reference_branch_ids: tuple[UUID, ...] = ()
     reference_branch_reason: str = "no_active_branches"
+
+
+@dataclass
+class _TenantsFleetCacheEntry:
+    payload_json: dict[str, Any]
+    generated_at: datetime
+    expires_at: datetime
 
 
 @dataclass
@@ -2137,6 +2504,1561 @@ def _is_tenants_weekly_snapshot_table_missing_error(exc: ProgrammingError) -> bo
     )
 
 
+def _is_tenants_fleet_cache_table_missing_error(exc: ProgrammingError) -> bool:
+    message = str(exc.orig if getattr(exc, "orig", None) is not None else exc).lower()
+    return (
+        _TENANTS_FLEET_CACHE_TABLE_NAME in message
+        and "does not exist" in message
+    )
+
+
+def _is_tenants_fleet_prewarm_job_table_missing_error(exc: ProgrammingError) -> bool:
+    message = str(exc.orig if getattr(exc, "orig", None) is not None else exc).lower()
+    return (
+        _TENANTS_FLEET_PREWARM_JOB_TABLE_NAME in message
+        and "does not exist" in message
+    )
+
+
+def _is_tenants_fleet_client_projection_table_missing_error(exc: ProgrammingError) -> bool:
+    message = str(exc.orig if getattr(exc, "orig", None) is not None else exc).lower()
+    return (
+        _TENANTS_FLEET_CLIENT_PROJECTION_TABLE_NAME in message
+        and "does not exist" in message
+    )
+
+
+def _hash_uuid_values(values: set[UUID]) -> str:
+    if not values:
+        return "none"
+    payload = ",".join(sorted(str(value) for value in values))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _build_tenants_fleet_cache_scope_key(scope: dict[str, Any]) -> str:
+    encoded = json.dumps(scope, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _build_clients_query_for_scope(
+    db: Session,
+    *,
+    accessible_client_ids: set[UUID],
+    lifecycle_mode: str,
+    company_uuid: Optional[UUID],
+    query_value: Optional[str],
+    cursor_cutoff: Optional[datetime],
+):
+    query = db.query(Client)
+    if accessible_client_ids:
+        query = query.filter(Client.id.in_(list(accessible_client_ids)))
+    # Keep legacy platform_admin behavior for empty in-memory scope in tests/recovery paths.
+    if lifecycle_mode == "active":
+        query = query.filter(Client.status == "active")
+    elif lifecycle_mode == "archived":
+        query = query.filter(Client.status != "active")
+    if company_uuid:
+        query = query.filter(Client.company_id == company_uuid)
+    if query_value:
+        query_value_lower = query_value.lower()
+        uuid_value = _looks_like_uuid(query_value)
+        filters = []
+        if uuid_value:
+            filters.append(Client.id == uuid_value)
+        filters.append(func.lower(Client.name).like(f"%{query_value_lower}%"))
+        query = query.filter(or_(*filters))
+    if cursor_cutoff is not None:
+        query = query.filter(Client.created_at < cursor_cutoff)
+    return query
+
+
+def _build_clients_summary_cache_scope_key(
+    *,
+    accessible_clients_hash: str,
+    company_uuid: Optional[UUID],
+    lifecycle_mode: str,
+    query_value: Optional[str],
+    fleet_lifecycle_filter: Optional[str],
+    payment_status_filter: Optional[str],
+    service_state_filter: Optional[str],
+) -> str:
+    return _build_tenants_fleet_cache_scope_key(
+        {
+            "scope": "clients_summary",
+            "accessible_clients_hash": accessible_clients_hash,
+            "company_id": str(company_uuid) if company_uuid else None,
+            "lifecycle": lifecycle_mode,
+            "q": query_value,
+            "fleet_lifecycle": fleet_lifecycle_filter,
+            "payment_status": payment_status_filter,
+            "service_state": service_state_filter,
+        }
+    )
+
+
+def _build_fleet_attention_cache_scope_key(
+    *,
+    active_client_ids: set[UUID],
+    stale_after_minutes: int,
+    include_low_mode: bool,
+    limit: int,
+) -> str:
+    return _build_tenants_fleet_cache_scope_key(
+        {
+            "scope": "fleet_attention",
+            "active_clients_hash": _hash_uuid_values(active_client_ids),
+            "stale_after_minutes": stale_after_minutes,
+            "include_low": include_low_mode,
+            "limit": limit,
+        }
+    )
+
+
+def _fleet_cache_refresh_token(cache_type: str, scope_key: str) -> str:
+    return f"{cache_type}:{scope_key}"
+
+
+def _try_claim_fleet_cache_refresh(cache_type: str, scope_key: str) -> bool:
+    token = _fleet_cache_refresh_token(cache_type, scope_key)
+    with _TENANTS_FLEET_CACHE_REFRESH_LOCK:
+        if token in _TENANTS_FLEET_CACHE_REFRESH_INFLIGHT:
+            return False
+        _TENANTS_FLEET_CACHE_REFRESH_INFLIGHT.add(token)
+    return True
+
+
+def _release_fleet_cache_refresh(cache_type: str, scope_key: str) -> None:
+    token = _fleet_cache_refresh_token(cache_type, scope_key)
+    with _TENANTS_FLEET_CACHE_REFRESH_LOCK:
+        _TENANTS_FLEET_CACHE_REFRESH_INFLIGHT.discard(token)
+
+
+def _load_tenants_fleet_cache_entry(
+    db: Session,
+    *,
+    cache_type: str,
+    scope_key: str,
+    now: datetime,
+) -> Optional[_TenantsFleetCacheEntry]:
+    try:
+        row = (
+            db.query(TenantsFleetCache)
+            .filter(
+                TenantsFleetCache.cache_type == cache_type,
+                TenantsFleetCache.scope_key == scope_key,
+                TenantsFleetCache.expires_at > now,
+            )
+            .first()
+        )
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_cache_table_missing_error(exc):
+            return None
+        return None
+    except Exception:
+        db.rollback()
+        return None
+    if row is None or not isinstance(row.payload_json, dict):
+        return None
+    generated_at = row.generated_at if isinstance(row.generated_at, datetime) else now
+    expires_at = row.expires_at if isinstance(row.expires_at, datetime) else now
+    return _TenantsFleetCacheEntry(
+        payload_json=row.payload_json,
+        generated_at=generated_at,
+        expires_at=expires_at,
+    )
+
+
+def _load_tenants_fleet_cache_payload(
+    db: Session,
+    *,
+    cache_type: str,
+    scope_key: str,
+    now: datetime,
+) -> Optional[dict[str, Any]]:
+    entry = _load_tenants_fleet_cache_entry(
+        db,
+        cache_type=cache_type,
+        scope_key=scope_key,
+        now=now,
+    )
+    if entry is None:
+        return None
+    return entry.payload_json
+
+
+def _upsert_tenants_fleet_cache_payload(
+    db: Session,
+    *,
+    cache_type: str,
+    scope_key: str,
+    scope_company_id: Optional[UUID] = None,
+    scope_client_id: Optional[UUID] = None,
+    payload: dict[str, Any],
+    now: datetime,
+    ttl_seconds: int = _TENANTS_FLEET_CACHE_TTL_SECONDS,
+) -> None:
+    expires_at = now + timedelta(seconds=max(ttl_seconds, 1))
+    try:
+        row = (
+            db.query(TenantsFleetCache)
+            .filter(
+                TenantsFleetCache.cache_type == cache_type,
+                TenantsFleetCache.scope_key == scope_key,
+            )
+            .first()
+        )
+        if row is None:
+            row = TenantsFleetCache(
+                cache_type=cache_type,
+                scope_key=scope_key,
+            )
+            db.add(row)
+        row.payload_json = payload
+        row.scope_company_id = scope_company_id
+        row.scope_client_id = scope_client_id
+        row.schema_version = _TENANTS_FLEET_CACHE_SCHEMA_VERSION
+        row.generated_at = now
+        row.expires_at = expires_at
+        row.updated_at = now
+        db.commit()
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_cache_table_missing_error(exc):
+            return
+        return
+    except Exception:
+        db.rollback()
+        return
+
+
+def _load_cached_fleet_summary(
+    db: Session,
+    *,
+    scope_key: str,
+    now: datetime,
+) -> Optional[ConsoleFleetSummary]:
+    payload = _load_tenants_fleet_cache_payload(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_SUMMARY_TYPE,
+        scope_key=scope_key,
+        now=now,
+    )
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return ConsoleFleetSummary.model_validate(payload)
+    except ValidationError:
+        return None
+
+
+def _store_cached_fleet_summary(
+    db: Session,
+    *,
+    scope_key: str,
+    scope_company_id: Optional[UUID],
+    now: datetime,
+    summary: ConsoleFleetSummary,
+) -> None:
+    _upsert_tenants_fleet_cache_payload(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_SUMMARY_TYPE,
+        scope_key=scope_key,
+        scope_company_id=scope_company_id,
+        payload=summary.model_dump(mode="json"),
+        now=now,
+    )
+
+
+def _load_cached_fleet_attention(
+    db: Session,
+    *,
+    scope_key: str,
+    now: datetime,
+) -> Optional[ConsoleFleetAttentionResponse]:
+    payload = _load_tenants_fleet_cache_payload(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_ATTENTION_TYPE,
+        scope_key=scope_key,
+        now=now,
+    )
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return ConsoleFleetAttentionResponse.model_validate(payload)
+    except ValidationError:
+        return None
+
+
+def _store_cached_fleet_attention(
+    db: Session,
+    *,
+    scope_key: str,
+    scope_company_id: Optional[UUID] = None,
+    now: datetime,
+    response: ConsoleFleetAttentionResponse,
+) -> None:
+    _upsert_tenants_fleet_cache_payload(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_ATTENTION_TYPE,
+        scope_key=scope_key,
+        scope_company_id=scope_company_id,
+        payload=response.model_dump(mode="json"),
+        now=now,
+    )
+
+
+def _is_fleet_cache_async_refresh_due(
+    db: Session,
+    *,
+    cache_type: str,
+    scope_key: str,
+    now: datetime,
+) -> bool:
+    if not _TENANTS_FLEET_CACHE_ASYNC_REFRESH_ENABLED:
+        return False
+    entry = _load_tenants_fleet_cache_entry(
+        db,
+        cache_type=cache_type,
+        scope_key=scope_key,
+        now=now,
+    )
+    if entry is None:
+        return False
+    remaining_seconds = (entry.expires_at - now).total_seconds()
+    return remaining_seconds <= _TENANTS_FLEET_CACHE_ASYNC_REFRESH_BUFFER_SECONDS
+
+
+def _refresh_fleet_summary_cache_worker(task: dict[str, Any]) -> None:
+    scope_key = str(task.get("scope_key") or "").strip()
+    if not scope_key:
+        return
+    db = SessionLocal()
+    try:
+        raw_client_ids = task.get("accessible_client_ids") or []
+        accessible_client_ids = {
+            UUID(str(raw_id))
+            for raw_id in raw_client_ids
+            if raw_id
+        }
+        if not accessible_client_ids:
+            return
+
+        company_id_raw = task.get("company_id")
+        company_uuid = UUID(str(company_id_raw)) if company_id_raw else None
+        lifecycle_mode = str(task.get("lifecycle_mode") or "active").strip().lower()
+        if lifecycle_mode not in _TENANT_LIFECYCLE_MODES:
+            lifecycle_mode = "active"
+
+        query_value_raw = task.get("query_value")
+        query_value = str(query_value_raw).strip() if isinstance(query_value_raw, str) and query_value_raw.strip() else None
+        fleet_lifecycle_filter = (
+            str(task.get("fleet_lifecycle_filter")).strip().lower()
+            if isinstance(task.get("fleet_lifecycle_filter"), str)
+            else None
+        )
+        payment_status_filter = (
+            str(task.get("payment_status_filter")).strip().lower()
+            if isinstance(task.get("payment_status_filter"), str)
+            else None
+        )
+        service_state_filter = (
+            str(task.get("service_state_filter")).strip().lower()
+            if isinstance(task.get("service_state_filter"), str)
+            else None
+        )
+        batch_size_raw = task.get("batch_size")
+        batch_size = int(batch_size_raw) if isinstance(batch_size_raw, int) and batch_size_raw > 0 else 100
+
+        def _build_query(cursor_cutoff: Optional[datetime]):
+            return _build_clients_query_for_scope(
+                db,
+                accessible_client_ids=accessible_client_ids,
+                lifecycle_mode=lifecycle_mode,
+                company_uuid=company_uuid,
+                query_value=query_value,
+                cursor_cutoff=cursor_cutoff,
+            )
+
+        materialize_projection = (
+            _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED
+            and lifecycle_mode == "active"
+            and query_value is None
+            and fleet_lifecycle_filter is None
+            and payment_status_filter is None
+            and service_state_filter is None
+        )
+        materialize_processed_clients = 0
+        materialize_truncated = False
+        materialized_company_client_ids: set[UUID] = set()
+        materialize_now = datetime.now(timezone.utc)
+
+        def _on_batch_details(batch_clients: list[Client], details_map: dict[UUID, _FleetClientDetails]) -> None:
+            nonlocal materialize_projection
+            nonlocal materialize_processed_clients
+            nonlocal materialize_truncated
+            if not materialize_projection:
+                return
+            if materialize_processed_clients >= _TENANTS_FLEET_CLIENT_PROJECTION_MAX_SYNC_CLIENTS:
+                materialize_truncated = True
+                return
+            remaining = _TENANTS_FLEET_CLIENT_PROJECTION_MAX_SYNC_CLIENTS - materialize_processed_clients
+            selected_clients = batch_clients[:remaining]
+            if not selected_clients:
+                return
+            selected_details: dict[UUID, _FleetClientDetails] = {}
+            company_id_by_client: dict[UUID, Optional[UUID]] = {}
+            for client in selected_clients:
+                details = details_map.get(client.id)
+                if not details:
+                    continue
+                selected_details[client.id] = details
+                company_id_by_client[client.id] = client.company_id
+                if company_uuid and client.company_id == company_uuid:
+                    materialized_company_client_ids.add(client.id)
+            if not selected_details:
+                return
+            persisted = _upsert_materialized_fleet_client_details(
+                db,
+                details_by_client_id=selected_details,
+                company_id_by_client_id=company_id_by_client,
+                now=materialize_now,
+            )
+            if not persisted:
+                materialize_projection = False
+                return
+            materialize_processed_clients += len(selected_details)
+            if len(batch_clients) > remaining:
+                materialize_truncated = True
+
+        summary = _build_fleet_summary_for_scope(
+            db,
+            build_client_query=_build_query,
+            fleet_lifecycle=fleet_lifecycle_filter,
+            payment_status=payment_status_filter,
+            service_state=service_state_filter,
+            batch_size=batch_size,
+            on_batch_details=_on_batch_details,
+        )
+        if (
+            materialize_projection
+            and company_uuid is not None
+            and not materialize_truncated
+        ):
+            _compact_materialized_fleet_client_scope(
+                db,
+                company_id=company_uuid,
+                keep_client_ids=materialized_company_client_ids,
+            )
+        _store_cached_fleet_summary(
+            db,
+            scope_key=scope_key,
+            scope_company_id=company_uuid,
+            now=materialize_now,
+            summary=summary,
+        )
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+        _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, scope_key)
+
+
+def _schedule_fleet_summary_async_refresh(
+    db: Session,
+    *,
+    scope_key: str,
+    accessible_client_ids: set[UUID],
+    lifecycle_mode: str,
+    company_uuid: Optional[UUID],
+    query_value: Optional[str],
+    fleet_lifecycle_filter: Optional[str],
+    payment_status_filter: Optional[str],
+    service_state_filter: Optional[str],
+    batch_size: int,
+    now: datetime,
+) -> None:
+    if not _TENANTS_FLEET_CACHE_ASYNC_REFRESH_ENABLED:
+        return
+    if not accessible_client_ids:
+        return
+    if len(accessible_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+        return
+    if not _is_fleet_cache_async_refresh_due(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_SUMMARY_TYPE,
+        scope_key=scope_key,
+        now=now,
+    ):
+        return
+    if not _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, scope_key):
+        return
+    task = {
+        "scope_key": scope_key,
+        "accessible_client_ids": [str(client_id) for client_id in sorted(accessible_client_ids, key=str)],
+        "lifecycle_mode": lifecycle_mode,
+        "company_id": str(company_uuid) if company_uuid else None,
+        "query_value": query_value,
+        "fleet_lifecycle_filter": fleet_lifecycle_filter,
+        "payment_status_filter": payment_status_filter,
+        "service_state_filter": service_state_filter,
+        "batch_size": batch_size,
+    }
+    _start_fleet_summary_refresh_task(
+        scope_key=scope_key,
+        task=task,
+        thread_name="tenants-fleet-summary-refresh",
+    )
+
+
+def _start_fleet_summary_refresh_task(
+    *,
+    scope_key: str,
+    task: dict[str, Any],
+    thread_name: str,
+) -> None:
+    try:
+        Thread(
+            target=_refresh_fleet_summary_cache_worker,
+            kwargs={"task": task},
+            daemon=True,
+            name=thread_name,
+        ).start()
+    except Exception:
+        _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, scope_key)
+
+
+def _queue_fleet_summary_prewarm_company_ids(
+    db: Session,
+    *,
+    company_ids: set[UUID],
+) -> None:
+    if not _TENANTS_FLEET_CACHE_PREWARM_ON_INVALIDATION_ENABLED:
+        return
+    if not company_ids:
+        return
+    scoped_ids = {company_id for company_id in company_ids if company_id is not None}
+    if not scoped_ids:
+        return
+    info_value = db.info.get(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY)
+    if not isinstance(info_value, set):
+        info_value = set()
+        db.info[_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY] = info_value
+    info_value.update(scoped_ids)
+
+
+def _queue_fleet_global_prewarm(db: Session) -> None:
+    if not _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_SCOPE_ENABLED:
+        return
+    db.info[_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY] = True
+
+
+def _queue_fleet_incremental_prewarm_event(
+    db: Session,
+    *,
+    reason: str,
+    company_ids: set[UUID],
+) -> None:
+    scoped_ids = {
+        company_id
+        for company_id in company_ids
+        if company_id is not None
+    }
+    info_value = db.info.get(_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY)
+    if not isinstance(info_value, list):
+        info_value = []
+        db.info[_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY] = info_value
+    normalized_event = {
+        "reason": reason,
+        "company_ids": [str(company_id) for company_id in sorted(scoped_ids, key=str)],
+    }
+    if normalized_event not in info_value:
+        info_value.append(normalized_event)
+
+    # Keep current scheduling contract while adding event stream metadata.
+    _queue_fleet_summary_prewarm_company_ids(
+        db,
+        company_ids=scoped_ids,
+    )
+    _queue_fleet_global_prewarm(db)
+
+
+def _extract_incremental_prewarm_targets(
+    events: list[dict[str, Any]],
+) -> tuple[set[UUID], bool]:
+    scoped_company_ids: set[UUID] = set()
+    global_prewarm_required = False
+    for raw_event in events:
+        if not isinstance(raw_event, dict):
+            continue
+        global_prewarm_required = True
+        event_company_ids = raw_event.get("company_ids")
+        if not isinstance(event_company_ids, list):
+            continue
+        for raw_company_id in event_company_ids:
+            if isinstance(raw_company_id, UUID):
+                scoped_company_ids.add(raw_company_id)
+                continue
+            if not isinstance(raw_company_id, str):
+                continue
+            try:
+                scoped_company_ids.add(UUID(raw_company_id))
+            except (TypeError, ValueError):
+                continue
+    return scoped_company_ids, global_prewarm_required
+
+
+def _coalesce_incremental_prewarm_dispatch_batch(
+    batch: list[dict[str, Any]],
+) -> tuple[set[UUID], bool]:
+    scoped_company_ids: set[UUID] = set()
+    global_prewarm_required = False
+    for raw_item in batch:
+        if not isinstance(raw_item, dict):
+            continue
+        global_prewarm_required = global_prewarm_required or bool(raw_item.get("global_required"))
+        raw_company_ids = raw_item.get("company_ids")
+        if not isinstance(raw_company_ids, list):
+            continue
+        for raw_company_id in raw_company_ids:
+            if isinstance(raw_company_id, UUID):
+                scoped_company_ids.add(raw_company_id)
+                continue
+            if not isinstance(raw_company_id, str):
+                continue
+            try:
+                scoped_company_ids.add(UUID(raw_company_id))
+            except (TypeError, ValueError):
+                continue
+    return scoped_company_ids, global_prewarm_required
+
+
+def _normalize_fleet_incremental_prewarm_company_ids(raw_company_ids: Any) -> set[UUID]:
+    normalized: set[UUID] = set()
+    if not isinstance(raw_company_ids, list):
+        return normalized
+    for raw_company_id in raw_company_ids:
+        if isinstance(raw_company_id, UUID):
+            normalized.add(raw_company_id)
+            continue
+        if not isinstance(raw_company_id, str):
+            continue
+        try:
+            normalized.add(UUID(raw_company_id))
+        except (TypeError, ValueError):
+            continue
+    return normalized
+
+
+def _enqueue_fleet_incremental_prewarm_dispatch_inmemory(
+    *,
+    company_ids: set[UUID],
+    global_prewarm_required: bool,
+) -> None:
+    normalized_company_ids = [str(company_id) for company_id in sorted(company_ids, key=str)]
+    payload = {
+        "company_ids": normalized_company_ids,
+        "global_required": global_prewarm_required,
+    }
+
+    with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        if len(_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE) >= _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX:
+            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
+            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(
+                {
+                    "company_ids": normalized_company_ids,
+                    "global_required": True,
+                    "reason": "dispatch_queue_overflow",
+                }
+            )
+        else:
+            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(payload)
+
+
+def _drain_fleet_incremental_prewarm_dispatch_queue_inmemory_once() -> bool:
+    with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        if not _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE:
+            return False
+        batch: list[dict[str, Any]] = []
+        while (
+            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE
+            and len(batch) < _TENANTS_FLEET_PREWARM_DISPATCH_BATCH_MAX
+        ):
+            batch.append(_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.popleft())
+
+    scoped_company_ids, global_prewarm_required = _coalesce_incremental_prewarm_dispatch_batch(batch)
+    if scoped_company_ids:
+        _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
+        _schedule_fleet_attention_prewarm_for_company_ids(company_ids=scoped_company_ids)
+    if global_prewarm_required:
+        _schedule_fleet_global_prewarm()
+    return True
+
+
+def _enqueue_fleet_incremental_prewarm_dispatch_durable(
+    *,
+    company_ids: set[UUID],
+    global_prewarm_required: bool,
+) -> bool:
+    db = SessionLocal()
+    now = datetime.now(timezone.utc)
+    normalized_company_ids = [str(company_id) for company_id in sorted(company_ids, key=str)]
+    job_global_required = global_prewarm_required
+    job_reason: Optional[str] = None
+    try:
+        pending_count = (
+            db.query(func.count(TenantsFleetPrewarmJob.id))
+            .filter(
+                TenantsFleetPrewarmJob.status.in_(
+                    [
+                        _TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING,
+                        _TENANTS_FLEET_PREWARM_JOB_STATUS_PROCESSING,
+                    ]
+                )
+            )
+            .scalar()
+            or 0
+        )
+        if pending_count >= _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX:
+            # Collapse pending backlog into a single global rebuild signal.
+            db.query(TenantsFleetPrewarmJob).filter(
+                TenantsFleetPrewarmJob.status == _TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING
+            ).update(
+                {
+                    TenantsFleetPrewarmJob.status: _TENANTS_FLEET_PREWARM_JOB_STATUS_DONE,
+                    TenantsFleetPrewarmJob.completed_at: now,
+                    TenantsFleetPrewarmJob.updated_at: now,
+                    TenantsFleetPrewarmJob.last_error: "dispatch_queue_overflow",
+                },
+                synchronize_session=False,
+            )
+            job_global_required = True
+            job_reason = "dispatch_queue_overflow"
+        db.add(
+            TenantsFleetPrewarmJob(
+                company_ids=normalized_company_ids,
+                global_required=job_global_required,
+                reason=job_reason,
+                status=_TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING,
+                updated_at=now,
+            )
+        )
+        db.commit()
+        return True
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_prewarm_job_table_missing_error(exc):
+            return False
+        return False
+    except Exception:
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+def _claim_fleet_incremental_prewarm_dispatch_batch() -> list[dict[str, Any]]:
+    db = SessionLocal()
+    now = datetime.now(timezone.utc)
+    stale_before = now - timedelta(seconds=_TENANTS_FLEET_PREWARM_DISPATCH_STUCK_SECONDS)
+    try:
+        try:
+            db.query(TenantsFleetPrewarmJob).filter(
+                TenantsFleetPrewarmJob.status == _TENANTS_FLEET_PREWARM_JOB_STATUS_PROCESSING,
+                TenantsFleetPrewarmJob.locked_at.isnot(None),
+                TenantsFleetPrewarmJob.locked_at < stale_before,
+            ).update(
+                {
+                    TenantsFleetPrewarmJob.status: _TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING,
+                    TenantsFleetPrewarmJob.locked_at: None,
+                    TenantsFleetPrewarmJob.updated_at: now,
+                    TenantsFleetPrewarmJob.last_error: "processing_timeout_auto_heal",
+                },
+                synchronize_session=False,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        rows = (
+            db.query(TenantsFleetPrewarmJob)
+            .filter(TenantsFleetPrewarmJob.status == _TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING)
+            .order_by(TenantsFleetPrewarmJob.created_at.asc(), TenantsFleetPrewarmJob.id.asc())
+            .with_for_update(skip_locked=True)
+            .limit(_TENANTS_FLEET_PREWARM_DISPATCH_BATCH_MAX)
+            .all()
+        )
+        if not rows:
+            db.commit()
+            return []
+
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            row.status = _TENANTS_FLEET_PREWARM_JOB_STATUS_PROCESSING
+            row.locked_at = now
+            row.updated_at = now
+            row.attempt_count = max(int(row.attempt_count or 0), 0) + 1
+            items.append(
+                {
+                    "job_id": str(row.id),
+                    "company_ids": [str(company_id) for company_id in _normalize_fleet_incremental_prewarm_company_ids(row.company_ids)],
+                    "global_required": bool(row.global_required),
+                }
+            )
+        db.commit()
+        return items
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_prewarm_job_table_missing_error(exc):
+            return []
+        return []
+    except Exception:
+        db.rollback()
+        return []
+    finally:
+        db.close()
+
+
+def _mark_fleet_incremental_prewarm_dispatch_jobs_completed(job_ids: set[UUID]) -> None:
+    if not job_ids:
+        return
+    db = SessionLocal()
+    now = datetime.now(timezone.utc)
+    try:
+        db.query(TenantsFleetPrewarmJob).filter(TenantsFleetPrewarmJob.id.in_(list(job_ids))).update(
+            {
+                TenantsFleetPrewarmJob.status: _TENANTS_FLEET_PREWARM_JOB_STATUS_DONE,
+                TenantsFleetPrewarmJob.locked_at: None,
+                TenantsFleetPrewarmJob.completed_at: now,
+                TenantsFleetPrewarmJob.updated_at: now,
+                TenantsFleetPrewarmJob.last_error: None,
+            },
+            synchronize_session=False,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _mark_fleet_incremental_prewarm_dispatch_jobs_retry(job_ids: set[UUID], *, error_message: str) -> None:
+    if not job_ids:
+        return
+    db = SessionLocal()
+    now = datetime.now(timezone.utc)
+    truncated_error = (error_message or "").strip()[:500]
+    try:
+        db.query(TenantsFleetPrewarmJob).filter(TenantsFleetPrewarmJob.id.in_(list(job_ids))).update(
+            {
+                TenantsFleetPrewarmJob.status: _TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING,
+                TenantsFleetPrewarmJob.locked_at: None,
+                TenantsFleetPrewarmJob.updated_at: now,
+                TenantsFleetPrewarmJob.last_error: truncated_error or "dispatch_retry",
+            },
+            synchronize_session=False,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _drain_fleet_incremental_prewarm_dispatch_queue_once() -> bool:
+    durable_batch = _claim_fleet_incremental_prewarm_dispatch_batch()
+    if durable_batch:
+        scoped_company_ids, global_prewarm_required = _coalesce_incremental_prewarm_dispatch_batch(durable_batch)
+        job_ids: set[UUID] = set()
+        for raw_item in durable_batch:
+            raw_job_id = raw_item.get("job_id")
+            if not isinstance(raw_job_id, str):
+                continue
+            try:
+                job_ids.add(UUID(raw_job_id))
+            except (TypeError, ValueError):
+                continue
+        try:
+            if scoped_company_ids:
+                _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
+                _schedule_fleet_attention_prewarm_for_company_ids(company_ids=scoped_company_ids)
+            if global_prewarm_required:
+                _schedule_fleet_global_prewarm()
+            _mark_fleet_incremental_prewarm_dispatch_jobs_completed(job_ids)
+        except Exception as exc:
+            _mark_fleet_incremental_prewarm_dispatch_jobs_retry(
+                job_ids,
+                error_message=str(exc),
+            )
+        return True
+
+    return _drain_fleet_incremental_prewarm_dispatch_queue_inmemory_once()
+
+
+def _fleet_incremental_prewarm_dispatch_worker() -> None:
+    global _TENANTS_FLEET_PREWARM_DISPATCH_WORKER
+
+    try:
+        while _drain_fleet_incremental_prewarm_dispatch_queue_once():
+            continue
+    finally:
+        should_restart = False
+        with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+            _TENANTS_FLEET_PREWARM_DISPATCH_WORKER = None
+            should_restart = bool(_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE)
+        if should_restart:
+            _ensure_fleet_incremental_prewarm_dispatch_worker()
+
+
+def _ensure_fleet_incremental_prewarm_dispatch_worker() -> None:
+    global _TENANTS_FLEET_PREWARM_DISPATCH_WORKER
+
+    worker: Optional[Thread]
+    with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        current_worker = _TENANTS_FLEET_PREWARM_DISPATCH_WORKER
+        if current_worker is not None and current_worker.is_alive():
+            return
+        worker = Thread(
+            target=_fleet_incremental_prewarm_dispatch_worker,
+            daemon=True,
+            name="tenants-fleet-prewarm-dispatch",
+        )
+        _TENANTS_FLEET_PREWARM_DISPATCH_WORKER = worker
+
+    try:
+        worker.start()
+    except Exception:
+        with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+            if _TENANTS_FLEET_PREWARM_DISPATCH_WORKER is worker:
+                _TENANTS_FLEET_PREWARM_DISPATCH_WORKER = None
+
+
+def _enqueue_fleet_incremental_prewarm_dispatch(
+    *,
+    company_ids: set[UUID],
+    global_prewarm_required: bool,
+) -> None:
+    if not company_ids and not global_prewarm_required:
+        return
+
+    persisted = _enqueue_fleet_incremental_prewarm_dispatch_durable(
+        company_ids=company_ids,
+        global_prewarm_required=global_prewarm_required,
+    )
+    if not persisted:
+        _enqueue_fleet_incremental_prewarm_dispatch_inmemory(
+            company_ids=company_ids,
+            global_prewarm_required=global_prewarm_required,
+        )
+    _ensure_fleet_incremental_prewarm_dispatch_worker()
+
+
+def _load_global_active_client_ids(
+    *,
+    max_clients: int,
+) -> tuple[set[UUID], bool]:
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Client.id)
+            .filter(Client.status == _CLIENT_STATUS_ACTIVE)
+            .order_by(Client.created_at.desc(), Client.id.desc())
+            .limit(max_clients + 1)
+            .all()
+        )
+        overflow = len(rows) > max_clients
+        selected_rows = rows[:max_clients]
+        return {
+            row[0]
+            for row in selected_rows
+            if row and row[0] is not None
+        }, overflow
+    except Exception:
+        db.rollback()
+        return set(), False
+    finally:
+        db.close()
+
+
+def _reserve_fleet_global_prewarm_slot(now_mono: float) -> bool:
+    global _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_NEXT_ALLOWED_AT
+
+    with _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_LOCK:
+        if now_mono < _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_NEXT_ALLOWED_AT:
+            return False
+        _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_NEXT_ALLOWED_AT = (
+            now_mono + _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MIN_INTERVAL_SECONDS
+        )
+    return True
+
+
+def _load_active_clients_by_company(
+    *,
+    company_ids: set[UUID],
+) -> dict[UUID, set[UUID]]:
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Client.id, Client.company_id)
+            .filter(
+                Client.status == _CLIENT_STATUS_ACTIVE,
+                Client.company_id.in_(list(company_ids)),
+            )
+            .all()
+        )
+        result: dict[UUID, set[UUID]] = {}
+        for client_id, company_id in rows:
+            if not company_id:
+                continue
+            result.setdefault(company_id, set()).add(client_id)
+        return result
+    except Exception:
+        db.rollback()
+        return {}
+    finally:
+        db.close()
+
+
+def _schedule_fleet_summary_prewarm_for_company_ids(
+    *,
+    company_ids: set[UUID],
+) -> None:
+    if not _TENANTS_FLEET_CACHE_PREWARM_ON_INVALIDATION_ENABLED:
+        return
+    if not company_ids:
+        return
+    capped_company_ids = set(sorted(company_ids, key=str)[:_TENANTS_FLEET_CACHE_PREWARM_MAX_COMPANY_SCOPES])
+    if not capped_company_ids:
+        return
+    active_clients_by_company = _load_active_clients_by_company(company_ids=capped_company_ids)
+    if not active_clients_by_company:
+        return
+    for company_id, active_client_ids in active_clients_by_company.items():
+        if not active_client_ids:
+            continue
+        if len(active_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+            continue
+        scope_key = _build_clients_summary_cache_scope_key(
+            accessible_clients_hash=_hash_uuid_values(active_client_ids),
+            company_uuid=company_id,
+            lifecycle_mode="active",
+            query_value=None,
+            fleet_lifecycle_filter=None,
+            payment_status_filter=None,
+            service_state_filter=None,
+        )
+        if not _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, scope_key):
+            continue
+        task = {
+            "scope_key": scope_key,
+            "accessible_client_ids": [str(client_id) for client_id in sorted(active_client_ids, key=str)],
+            "lifecycle_mode": "active",
+            "company_id": str(company_id),
+            "query_value": None,
+            "fleet_lifecycle_filter": None,
+            "payment_status_filter": None,
+            "service_state_filter": None,
+            "batch_size": 100,
+        }
+        _start_fleet_summary_refresh_task(
+            scope_key=scope_key,
+            task=task,
+            thread_name="tenants-fleet-summary-prewarm",
+        )
+
+
+def _schedule_fleet_attention_prewarm_for_company_ids(
+    *,
+    company_ids: set[UUID],
+) -> None:
+    if not _TENANTS_FLEET_CACHE_PREWARM_ON_INVALIDATION_ENABLED:
+        return
+    if not company_ids:
+        return
+    capped_company_ids = set(sorted(company_ids, key=str)[:_TENANTS_FLEET_CACHE_PREWARM_MAX_COMPANY_SCOPES])
+    if not capped_company_ids:
+        return
+    active_clients_by_company = _load_active_clients_by_company(company_ids=capped_company_ids)
+    if not active_clients_by_company:
+        return
+    for active_client_ids in active_clients_by_company.values():
+        if not active_client_ids:
+            continue
+        if len(active_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+            continue
+        scope_key = _build_fleet_attention_cache_scope_key(
+            active_client_ids=active_client_ids,
+            stale_after_minutes=_INTEGRATION_DEFAULT_STALE_MINUTES,
+            include_low_mode=False,
+            limit=_TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT,
+        )
+        if not _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key):
+            continue
+        task = {
+            "scope_key": scope_key,
+            "active_client_ids": [str(client_id) for client_id in sorted(active_client_ids, key=str)],
+            "stale_after_minutes": _INTEGRATION_DEFAULT_STALE_MINUTES,
+            "include_low_mode": False,
+            "limit": _TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT,
+        }
+        _start_fleet_attention_refresh_task(
+            scope_key=scope_key,
+            task=task,
+            thread_name="tenants-fleet-attention-prewarm-company",
+        )
+
+
+def _schedule_fleet_global_prewarm() -> None:
+    if not _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_SCOPE_ENABLED:
+        return
+    if not _reserve_fleet_global_prewarm_slot(monotonic()):
+        return
+
+    active_client_ids, overflow = _load_global_active_client_ids(
+        max_clients=_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MAX_ACTIVE_CLIENTS,
+    )
+    if overflow or not active_client_ids:
+        return
+    if len(active_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+        return
+
+    active_client_ids_sorted = sorted(active_client_ids, key=str)
+
+    summary_scope_key = _build_clients_summary_cache_scope_key(
+        accessible_clients_hash=_hash_uuid_values(active_client_ids),
+        company_uuid=None,
+        lifecycle_mode="active",
+        query_value=None,
+        fleet_lifecycle_filter=None,
+        payment_status_filter=None,
+        service_state_filter=None,
+    )
+    if _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, summary_scope_key):
+        summary_task = {
+            "scope_key": summary_scope_key,
+            "accessible_client_ids": [str(client_id) for client_id in active_client_ids_sorted],
+            "lifecycle_mode": "active",
+            "company_id": None,
+            "query_value": None,
+            "fleet_lifecycle_filter": None,
+            "payment_status_filter": None,
+            "service_state_filter": None,
+            "batch_size": 100,
+        }
+        _start_fleet_summary_refresh_task(
+            scope_key=summary_scope_key,
+            task=summary_task,
+            thread_name="tenants-fleet-summary-prewarm-global",
+        )
+
+    attention_scope_key = _build_fleet_attention_cache_scope_key(
+        active_client_ids=active_client_ids,
+        stale_after_minutes=_INTEGRATION_DEFAULT_STALE_MINUTES,
+        include_low_mode=False,
+        limit=_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT,
+    )
+    if _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, attention_scope_key):
+        attention_task = {
+            "scope_key": attention_scope_key,
+            "active_client_ids": [str(client_id) for client_id in active_client_ids_sorted],
+            "stale_after_minutes": _INTEGRATION_DEFAULT_STALE_MINUTES,
+            "include_low_mode": False,
+            "limit": _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT,
+        }
+        _start_fleet_attention_refresh_task(
+            scope_key=attention_scope_key,
+            task=attention_task,
+            thread_name="tenants-fleet-attention-prewarm-global",
+        )
+
+
+@event.listens_for(Session, "after_commit")
+def _on_console_session_after_commit(session: Session) -> None:
+    raw_events = session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY, None)
+    if isinstance(raw_events, list):
+        scoped_company_ids, global_prewarm_required = _extract_incremental_prewarm_targets(raw_events)
+
+        # Clear legacy keys if event stream was present.
+        session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
+        session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY, None)
+
+        _enqueue_fleet_incremental_prewarm_dispatch(
+            company_ids=scoped_company_ids,
+            global_prewarm_required=global_prewarm_required,
+        )
+        return
+
+    raw_company_ids = session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
+    global_prewarm_required = bool(
+        session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY, False)
+    )
+    if not isinstance(raw_company_ids, set):
+        raw_company_ids = set()
+    scoped_company_ids = {company_id for company_id in raw_company_ids if isinstance(company_id, UUID)}
+    _enqueue_fleet_incremental_prewarm_dispatch(
+        company_ids=scoped_company_ids,
+        global_prewarm_required=global_prewarm_required,
+    )
+
+
+@event.listens_for(Session, "after_rollback")
+def _on_console_session_after_rollback(session: Session) -> None:
+    session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY, None)
+    session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
+    session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY, None)
+
+
+def _build_fleet_attention_response_for_clients(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    stale_after_minutes: int,
+    include_low_mode: bool,
+    limit: int,
+    now: datetime,
+) -> ConsoleFleetAttentionResponse:
+    fleet_details_map = _load_or_build_fleet_client_details_map(
+        db,
+        clients=active_clients,
+        companies_by_id=companies_by_id,
+    )
+
+    client_ids = [client.id for client in active_clients]
+    branches = db.query(Branch).filter(Branch.client_id.in_(client_ids)).all()
+    branches_by_client: dict[UUID, list[Branch]] = {client.id: [] for client in active_clients}
+    for branch in branches:
+        branches_by_client.setdefault(branch.client_id, []).append(branch)
+
+    token_rows = (
+        db.query(
+            ClientSettings.client_id,
+            ClientSettings.telegram_bot_token,
+        )
+        .filter(ClientSettings.client_id.in_(client_ids))
+        .all()
+    )
+    telegram_token_map: dict[UUID, bool] = {}
+    for client_id, token in token_rows:
+        telegram_token_map[client_id] = bool(_normalize_optional_text(token))
+
+    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
+        db,
+        client_ids=client_ids,
+    )
+
+    outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
+    pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
+
+    summary = ConsoleFleetAttentionSummary(
+        active_clients_total=len(active_clients),
+        clients_with_attention=0,
+        high_risk_clients=0,
+        medium_risk_clients=0,
+        low_risk_clients=0,
+        stale_branches_total=0,
+        integration_error_branches_total=0,
+        integration_warn_branches_total=0,
+        outbox_failed_24h_total=0,
+        pending_handovers_total=0,
+    )
+
+    items: list[ConsoleFleetAttentionItem] = []
+    for client in active_clients:
+        details = fleet_details_map.get(client.id)
+        if not details:
+            continue
+
+        reference_branch_ids = set(details.reference_branch_ids or ())
+        stale_branches = 0
+        integration_error_branches = 0
+        integration_warn_branches = 0
+
+        for branch in branches_by_client.get(client.id, []):
+            if not branch.is_active:
+                continue
+            if reference_branch_ids and branch.id not in reference_branch_ids:
+                continue
+            observed = inbound_observations.get(branch.id)
+            last_inbound_at: Optional[datetime] = None
+            last_inbound_instance_id: Optional[str] = None
+            if observed:
+                last_inbound_at, last_inbound_instance_id = observed
+
+            status = _build_branch_integration_status(
+                client_id=client.id,
+                client_slug=client.name,
+                branch=branch,
+                has_telegram_bot_token=telegram_token_map.get(client.id, False),
+                stale_after_minutes=stale_after_minutes,
+                last_inbound_at=last_inbound_at,
+                last_inbound_instance_id=last_inbound_instance_id,
+                now=now,
+            )
+            if status.whatsapp_status == "no_recent_inbound":
+                stale_branches += 1
+            if status.status == "error":
+                integration_error_branches += 1
+            elif status.status == "warn":
+                integration_warn_branches += 1
+
+        outbox_failed_24h = outbox_failed_map.get(client.id, 0)
+        pending_handovers = pending_handovers_map.get(client.id, 0)
+        score, level, reasons, suggested_actions = _resolve_fleet_attention_profile(
+            service_state=details.service_state,
+            stale_branches=stale_branches,
+            integration_error_branches=integration_error_branches,
+            integration_warn_branches=integration_warn_branches,
+            outbox_failed_24h=outbox_failed_24h,
+            pending_handovers=pending_handovers,
+        )
+
+        if score > 0:
+            summary.clients_with_attention += 1
+            if level == "high":
+                summary.high_risk_clients += 1
+            elif level == "medium":
+                summary.medium_risk_clients += 1
+            else:
+                summary.low_risk_clients += 1
+        summary.stale_branches_total += stale_branches
+        summary.integration_error_branches_total += integration_error_branches
+        summary.integration_warn_branches_total += integration_warn_branches
+        summary.outbox_failed_24h_total += outbox_failed_24h
+        summary.pending_handovers_total += pending_handovers
+
+        if not include_low_mode and level == "low":
+            continue
+
+        company = companies_by_id.get(client.company_id) if client.company_id else None
+        items.append(
+            ConsoleFleetAttentionItem(
+                client_id=client.id,
+                client_slug=client.name,
+                client_name=client.name,
+                company_id=client.company_id,
+                company_name=company.name if company else None,
+                lifecycle_state=details.lifecycle_state,
+                payment_status=details.payment_status,
+                commercial_state=details.commercial_state,
+                service_state=details.service_state,
+                owner_name=details.owner_name,
+                next_action=details.next_action,
+                total_branches=details.total_branches,
+                active_branches=details.active_branches,
+                degraded_branches=details.degraded_branches,
+                go_live_ready_branches=details.go_live_ready_branches,
+                reference_branch_ids=list(details.reference_branch_ids),
+                reference_branch_reason=details.reference_branch_reason,
+                stale_branches=stale_branches,
+                integration_error_branches=integration_error_branches,
+                integration_warn_branches=integration_warn_branches,
+                outbox_failed_24h=outbox_failed_24h,
+                pending_handovers=pending_handovers,
+                attention_score=score,
+                attention_level=level,
+                reasons=reasons,
+                suggested_actions=suggested_actions,
+            )
+        )
+
+    items.sort(
+        key=lambda item: (
+            item.attention_score,
+            item.integration_error_branches,
+            item.outbox_failed_24h,
+            item.pending_handovers,
+        ),
+        reverse=True,
+    )
+    return ConsoleFleetAttentionResponse(
+        generated_at=now.isoformat(),
+        stale_after_minutes=stale_after_minutes,
+        summary=summary,
+        items=items[:limit],
+    )
+
+
+def _refresh_fleet_attention_cache_worker(task: dict[str, Any]) -> None:
+    scope_key = str(task.get("scope_key") or "").strip()
+    if not scope_key:
+        return
+    db = SessionLocal()
+    try:
+        raw_client_ids = task.get("active_client_ids") or []
+        active_client_ids = {
+            UUID(str(raw_id))
+            for raw_id in raw_client_ids
+            if raw_id
+        }
+        if not active_client_ids:
+            return
+        stale_after_minutes_raw = task.get("stale_after_minutes")
+        stale_after_minutes = (
+            int(stale_after_minutes_raw)
+            if isinstance(stale_after_minutes_raw, int)
+            else _INTEGRATION_DEFAULT_STALE_MINUTES
+        )
+        include_low_mode = bool(task.get("include_low_mode"))
+        limit_raw = task.get("limit")
+        limit = int(limit_raw) if isinstance(limit_raw, int) and limit_raw > 0 else 20
+        now = datetime.now(timezone.utc)
+
+        active_clients = (
+            db.query(Client)
+            .filter(
+                Client.id.in_(list(active_client_ids)),
+                Client.status == _CLIENT_STATUS_ACTIVE,
+            )
+            .all()
+        )
+        if not active_clients:
+            response = ConsoleFleetAttentionResponse(
+                generated_at=now.isoformat(),
+                stale_after_minutes=stale_after_minutes,
+                summary=ConsoleFleetAttentionSummary(
+                    active_clients_total=0,
+                    clients_with_attention=0,
+                    high_risk_clients=0,
+                    medium_risk_clients=0,
+                    low_risk_clients=0,
+                    stale_branches_total=0,
+                    integration_error_branches_total=0,
+                    integration_warn_branches_total=0,
+                    outbox_failed_24h_total=0,
+                    pending_handovers_total=0,
+                ),
+                items=[],
+            )
+        else:
+            company_ids = {client.company_id for client in active_clients if client.company_id}
+            companies_by_id = {
+                company.id: company
+                for company in db.query(Company).filter(Company.id.in_(list(company_ids))).all()
+            } if company_ids else {}
+            response = _build_fleet_attention_response_for_clients(
+                db,
+                active_clients=active_clients,
+                companies_by_id=companies_by_id,
+                stale_after_minutes=stale_after_minutes,
+                include_low_mode=include_low_mode,
+                limit=limit,
+                now=now,
+            )
+        _store_cached_fleet_attention(
+            db,
+            scope_key=scope_key,
+            now=now,
+            response=response,
+        )
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+        _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key)
+
+
+def _schedule_fleet_attention_async_refresh(
+    db: Session,
+    *,
+    scope_key: str,
+    active_client_ids: set[UUID],
+    stale_after_minutes: int,
+    include_low_mode: bool,
+    limit: int,
+    now: datetime,
+) -> None:
+    if not _TENANTS_FLEET_CACHE_ASYNC_REFRESH_ENABLED:
+        return
+    if not active_client_ids:
+        return
+    if len(active_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+        return
+    if not _is_fleet_cache_async_refresh_due(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_ATTENTION_TYPE,
+        scope_key=scope_key,
+        now=now,
+    ):
+        return
+    if not _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key):
+        return
+    task = {
+        "scope_key": scope_key,
+        "active_client_ids": [str(client_id) for client_id in sorted(active_client_ids, key=str)],
+        "stale_after_minutes": stale_after_minutes,
+        "include_low_mode": include_low_mode,
+        "limit": limit,
+    }
+    _start_fleet_attention_refresh_task(
+        scope_key=scope_key,
+        task=task,
+        thread_name="tenants-fleet-attention-refresh",
+    )
+
+
+def _start_fleet_attention_refresh_task(
+    *,
+    scope_key: str,
+    task: dict[str, Any],
+    thread_name: str,
+) -> None:
+    try:
+        Thread(
+            target=_refresh_fleet_attention_cache_worker,
+            kwargs={"task": task},
+            daemon=True,
+            name=thread_name,
+        ).start()
+    except Exception:
+        _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key)
+
+
+def _invalidate_tenants_fleet_cache_scope(
+    db: Session,
+    *,
+    reason: str,
+    company_ids: Optional[set[UUID]] = None,
+) -> None:
+    # Keep cache invalidation best-effort and isolated from tenant mutations.
+    # If cache storage is unavailable, writes must still succeed.
+    _ = reason
+    scoped_company_ids = {
+        company_id
+        for company_id in (company_ids or set())
+        if company_id is not None
+    }
+    try:
+        with db.begin_nested():
+            statement = delete(TenantsFleetCache).where(
+                TenantsFleetCache.cache_type.in_(
+                    [
+                        _TENANTS_FLEET_CACHE_SUMMARY_TYPE,
+                        _TENANTS_FLEET_CACHE_ATTENTION_TYPE,
+                    ]
+                )
+            )
+            if scoped_company_ids:
+                statement = statement.where(
+                    or_(
+                        TenantsFleetCache.scope_company_id.is_(None),
+                        TenantsFleetCache.scope_company_id.in_(list(scoped_company_ids)),
+                    )
+                )
+            db.execute(statement)
+    except ProgrammingError as exc:
+        if _is_tenants_fleet_cache_table_missing_error(exc):
+            return
+        return
+    except Exception:
+        return
+    _queue_fleet_incremental_prewarm_event(
+        db,
+        reason=reason,
+        company_ids=scoped_company_ids,
+    )
+
+
 def _normalize_client_lifecycle_reason(reason: str) -> str:
     value = (reason or "").strip()
     if not value:
@@ -2294,14 +4216,37 @@ def _require_branch_scorecard_ready(
 
 
 def _accessible_client_ids(context: ConsoleAuthContext) -> set[UUID]:
-    client_ids = {client.id for client in (context.accessible_clients or [])}
-    if context.client and context.client.id:
-        client_ids.add(context.client.id)
+    accessible_clients = getattr(context, "accessible_clients", None) or []
+    client_ids = {client.id for client in accessible_clients if getattr(client, "id", None)}
+    context_client = getattr(context, "client", None)
+    if context_client and getattr(context_client, "id", None):
+        client_ids.add(context_client.id)
     return client_ids
 
 
 def _accessible_company_ids(context: ConsoleAuthContext) -> set[UUID]:
-    return {client.company_id for client in (context.accessible_clients or []) if client.company_id}
+    accessible_clients = getattr(context, "accessible_clients", None) or []
+    return {
+        client.company_id
+        for client in accessible_clients
+        if getattr(client, "company_id", None)
+    }
+
+
+def _resolve_company_id_for_client_in_context(
+    context: ConsoleAuthContext,
+    client_id: Optional[UUID],
+) -> Optional[UUID]:
+    if client_id is None:
+        return None
+    accessible_clients = getattr(context, "accessible_clients", None) or []
+    for client in accessible_clients:
+        if getattr(client, "id", None) == client_id:
+            return getattr(client, "company_id", None)
+    context_client = getattr(context, "client", None)
+    if context_client and getattr(context_client, "id", None) == client_id:
+        return getattr(context_client, "company_id", None)
+    return None
 
 
 def _require_client_access(
@@ -3575,6 +5520,239 @@ def _build_fleet_client_details_map(
     return details
 
 
+def _parse_projection_reference_branch_ids(raw_value: Any) -> tuple[UUID, ...]:
+    if not isinstance(raw_value, list):
+        return tuple()
+    normalized: list[UUID] = []
+    for item in raw_value:
+        if isinstance(item, UUID):
+            normalized.append(item)
+            continue
+        if not isinstance(item, str):
+            continue
+        try:
+            normalized.append(UUID(item))
+        except (TypeError, ValueError):
+            continue
+    return tuple(normalized)
+
+
+def _build_fleet_client_details_from_projection(
+    row: TenantsFleetClientProjection,
+) -> Optional[_FleetClientDetails]:
+    lifecycle_state = (row.lifecycle_state or "").strip().lower()
+    payment_status = (row.payment_status or "").strip().lower()
+    commercial_state = (row.commercial_state or "").strip().lower()
+    service_state = (row.service_state or "").strip().lower()
+    next_action = (row.next_action or "").strip().lower()
+    if lifecycle_state not in _FLEET_LIFECYCLE_STATES:
+        return None
+    if payment_status not in _FLEET_PAYMENT_STATES:
+        return None
+    if commercial_state not in _FLEET_COMMERCIAL_STATES:
+        return None
+    if service_state not in _FLEET_SERVICE_STATES:
+        return None
+    if next_action not in _FLEET_NEXT_ACTION_STATES:
+        return None
+    return _FleetClientDetails(
+        lifecycle_state=lifecycle_state,
+        payment_status=payment_status,
+        commercial_state=commercial_state,
+        service_state=service_state,
+        owner_name=_normalize_optional_text(row.owner_name),
+        next_action=next_action,
+        total_branches=max(int(row.total_branches or 0), 0),
+        active_branches=max(int(row.active_branches or 0), 0),
+        degraded_branches=max(int(row.degraded_branches or 0), 0),
+        go_live_ready_branches=max(int(row.go_live_ready_branches or 0), 0),
+        reference_branch_ids=_parse_projection_reference_branch_ids(row.reference_branch_ids),
+        reference_branch_reason=(row.reference_branch_reason or "no_active_branches").strip() or "no_active_branches",
+    )
+
+
+def _load_materialized_fleet_client_details_map(
+    db: Session,
+    *,
+    client_ids: set[UUID],
+) -> tuple[dict[UUID, _FleetClientDetails], Optional[float]]:
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED:
+        return {}, None
+    if not client_ids:
+        return {}, None
+    try:
+        rows = (
+            db.query(TenantsFleetClientProjection)
+            .filter(TenantsFleetClientProjection.client_id.in_(list(client_ids)))
+            .all()
+        )
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_client_projection_table_missing_error(exc):
+            return {}, None
+        return {}, None
+    except Exception:
+        db.rollback()
+        return {}, None
+
+    details_map: dict[UUID, _FleetClientDetails] = {}
+    max_freshness_lag_seconds: Optional[float] = None
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        details = _build_fleet_client_details_from_projection(row)
+        if not details:
+            continue
+        details_map[row.client_id] = details
+        refreshed_at = getattr(row, "refreshed_at", None)
+        if isinstance(refreshed_at, datetime):
+            refreshed_at_utc = refreshed_at if refreshed_at.tzinfo else refreshed_at.replace(tzinfo=timezone.utc)
+            lag_seconds = max((now - refreshed_at_utc).total_seconds(), 0.0)
+            if max_freshness_lag_seconds is None or lag_seconds > max_freshness_lag_seconds:
+                max_freshness_lag_seconds = lag_seconds
+    return details_map, max_freshness_lag_seconds
+
+
+def _upsert_materialized_fleet_client_details(
+    db: Session,
+    *,
+    details_by_client_id: dict[UUID, _FleetClientDetails],
+    company_id_by_client_id: dict[UUID, Optional[UUID]],
+    now: datetime,
+) -> bool:
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED:
+        return False
+    if not details_by_client_id:
+        return False
+    client_ids = list(details_by_client_id.keys())
+    try:
+        rows = (
+            db.query(TenantsFleetClientProjection)
+            .filter(TenantsFleetClientProjection.client_id.in_(client_ids))
+            .all()
+        )
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_client_projection_table_missing_error(exc):
+            return False
+        return False
+    except Exception:
+        db.rollback()
+        return False
+
+    row_by_client_id = {row.client_id: row for row in rows}
+    for client_id, details in details_by_client_id.items():
+        row = row_by_client_id.get(client_id)
+        if row is None:
+            row = TenantsFleetClientProjection(
+                client_id=client_id,
+                created_at=now,
+            )
+            db.add(row)
+        row.company_id = company_id_by_client_id.get(client_id)
+        row.lifecycle_state = details.lifecycle_state
+        row.payment_status = details.payment_status
+        row.commercial_state = details.commercial_state
+        row.service_state = details.service_state
+        row.owner_name = details.owner_name
+        row.next_action = details.next_action
+        row.total_branches = details.total_branches
+        row.active_branches = details.active_branches
+        row.degraded_branches = details.degraded_branches
+        row.go_live_ready_branches = details.go_live_ready_branches
+        row.reference_branch_ids = [str(branch_id) for branch_id in details.reference_branch_ids]
+        row.reference_branch_reason = details.reference_branch_reason
+        row.refreshed_at = now
+        row.updated_at = now
+    return True
+
+
+def _compact_materialized_fleet_client_scope(
+    db: Session,
+    *,
+    company_id: UUID,
+    keep_client_ids: set[UUID],
+) -> None:
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED:
+        return
+    if len(keep_client_ids) > _TENANTS_FLEET_CLIENT_PROJECTION_COMPACTION_MAX_CLIENTS:
+        return
+    try:
+        delete_query = db.query(TenantsFleetClientProjection).filter(
+            TenantsFleetClientProjection.company_id == company_id,
+        )
+        if keep_client_ids:
+            delete_query = delete_query.filter(
+                TenantsFleetClientProjection.client_id.notin_(list(keep_client_ids))
+            )
+        delete_query.delete(synchronize_session=False)
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_client_projection_table_missing_error(exc):
+            return
+    except Exception:
+        db.rollback()
+        return
+
+
+def _load_or_build_fleet_client_details_map(
+    db: Session,
+    *,
+    clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    persist_missing: bool = False,
+) -> dict[UUID, _FleetClientDetails]:
+    if not clients:
+        return {}
+    client_ids = {client.id for client in clients}
+    details_by_client, max_freshness_lag_seconds = _load_materialized_fleet_client_details_map(
+        db,
+        client_ids=client_ids,
+    )
+    materialized_clients = len(details_by_client)
+    missing_clients = [client for client in clients if client.id not in details_by_client]
+    if not missing_clients:
+        record_tenants_fleet_projection_observation(
+            total_clients=len(clients),
+            materialized_clients=materialized_clients,
+            fallback_clients=0,
+            max_freshness_lag_seconds=max_freshness_lag_seconds,
+        )
+        return details_by_client
+
+    missing_companies_by_id = dict(companies_by_id)
+    missing_company_ids = {
+        client.company_id
+        for client in missing_clients
+        if client.company_id and client.company_id not in missing_companies_by_id
+    }
+    if missing_company_ids:
+        extra_companies = db.query(Company).filter(Company.id.in_(list(missing_company_ids))).all()
+        for company in extra_companies:
+            missing_companies_by_id[company.id] = company
+    computed_details = _build_fleet_client_details_map(
+        db,
+        clients=missing_clients,
+        companies_by_id=missing_companies_by_id,
+    )
+    fallback_clients = len(computed_details)
+    details_by_client.update(computed_details)
+    if computed_details and persist_missing:
+        now = datetime.now(timezone.utc)
+        _upsert_materialized_fleet_client_details(
+            db,
+            details_by_client_id=computed_details,
+            company_id_by_client_id={client.id: client.company_id for client in missing_clients},
+            now=now,
+        )
+    record_tenants_fleet_projection_observation(
+        total_clients=len(clients),
+        materialized_clients=materialized_clients,
+        fallback_clients=fallback_clients,
+        max_freshness_lag_seconds=max_freshness_lag_seconds,
+    )
+    return details_by_client
+
+
 def _fleet_client_matches_filters(
     details: _FleetClientDetails,
     *,
@@ -3769,6 +5947,7 @@ def _build_fleet_summary_for_scope(
     payment_status: Optional[str],
     service_state: Optional[str],
     batch_size: int = 200,
+    on_batch_details: Optional[Callable[[list[Client], dict[UUID, _FleetClientDetails]], None]] = None,
 ) -> ConsoleFleetSummary:
     lifecycle_counts = {state: 0 for state in _FLEET_LIFECYCLE_ORDER}
     payment_counts = {state: 0 for state in _FLEET_PAYMENT_ORDER}
@@ -3794,11 +5973,13 @@ def _build_fleet_summary_for_scope(
             batch_companies = db.query(Company).filter(Company.id.in_(batch_company_ids)).all()
             batch_companies_by_id = {company.id: company for company in batch_companies}
 
-        batch_details = _build_fleet_client_details_map(
+        batch_details = _load_or_build_fleet_client_details_map(
             db,
             clients=batch,
             companies_by_id=batch_companies_by_id,
         )
+        if on_batch_details is not None:
+            on_batch_details(batch, batch_details)
 
         for client in batch:
             details = batch_details.get(client.id)
@@ -13221,29 +15402,21 @@ async def list_clients(
     )
     _validate_limit(limit)
 
+    accessible_client_ids = _accessible_client_ids(context)
+    accessible_clients_hash = _hash_uuid_values(accessible_client_ids)
     company_uuid = _parse_uuid_param("company_id", company_id)
     query_value = _normalize_search_query("q", q) if q else None
     cursor_date = _parse_cursor_param(cursor)
 
     def _build_client_query(cursor_cutoff: Optional[datetime]):
-        query = db.query(Client)
-        if lifecycle_mode == "active":
-            query = query.filter(Client.status == "active")
-        elif lifecycle_mode == "archived":
-            query = query.filter(Client.status != "active")
-        if company_uuid:
-            query = query.filter(Client.company_id == company_uuid)
-        if query_value:
-            query_value_lower = query_value.lower()
-            uuid_value = _looks_like_uuid(query_value)
-            filters = []
-            if uuid_value:
-                filters.append(Client.id == uuid_value)
-            filters.append(func.lower(Client.name).like(f"%{query_value_lower}%"))
-            query = query.filter(or_(*filters))
-        if cursor_cutoff is not None:
-            query = query.filter(Client.created_at < cursor_cutoff)
-        return query
+        return _build_clients_query_for_scope(
+            db,
+            accessible_client_ids=accessible_client_ids,
+            lifecycle_mode=lifecycle_mode,
+            company_uuid=company_uuid,
+            query_value=query_value,
+            cursor_cutoff=cursor_cutoff,
+        )
 
     clients: list[Client] = []
     has_more = False
@@ -13266,7 +15439,7 @@ async def list_clients(
             if batch_company_ids:
                 batch_companies = db.query(Company).filter(Company.id.in_(batch_company_ids)).all()
                 batch_companies_by_id = {company.id: company for company in batch_companies}
-            batch_details = _build_fleet_client_details_map(
+            batch_details = _load_or_build_fleet_client_details_map(
                 db,
                 clients=batch,
                 companies_by_id=batch_companies_by_id,
@@ -13316,7 +15489,7 @@ async def list_clients(
 
     fleet_details_map: dict[UUID, _FleetClientDetails] = {}
     if include_fleet_mode:
-        fleet_details_map = _build_fleet_client_details_map(
+        fleet_details_map = _load_or_build_fleet_client_details_map(
             db,
             clients=clients,
             companies_by_id=companies_by_id,
@@ -13324,14 +15497,52 @@ async def list_clients(
 
     summary = None
     if include_summary_mode:
-        summary = _build_fleet_summary_for_scope(
-            db,
-            build_client_query=_build_client_query,
-            fleet_lifecycle=fleet_lifecycle_filter,
-            payment_status=payment_status_filter,
-            service_state=service_state_filter,
-            batch_size=max(limit * 4, 100),
+        summary_scope_key = _build_clients_summary_cache_scope_key(
+            accessible_clients_hash=accessible_clients_hash,
+            company_uuid=company_uuid,
+            lifecycle_mode=lifecycle_mode,
+            query_value=query_value,
+            fleet_lifecycle_filter=fleet_lifecycle_filter,
+            payment_status_filter=payment_status_filter,
+            service_state_filter=service_state_filter,
         )
+        summary_cache_now = datetime.now(timezone.utc)
+        summary_batch_size = max(limit * 4, 100)
+        summary = _load_cached_fleet_summary(
+            db,
+            scope_key=summary_scope_key,
+            now=summary_cache_now,
+        )
+        if summary is None:
+            summary = _build_fleet_summary_for_scope(
+                db,
+                build_client_query=_build_client_query,
+                fleet_lifecycle=fleet_lifecycle_filter,
+                payment_status=payment_status_filter,
+                service_state=service_state_filter,
+                batch_size=summary_batch_size,
+            )
+            _store_cached_fleet_summary(
+                db,
+                scope_key=summary_scope_key,
+                scope_company_id=company_uuid,
+                now=summary_cache_now,
+                summary=summary,
+            )
+        else:
+            _schedule_fleet_summary_async_refresh(
+                db,
+                scope_key=summary_scope_key,
+                accessible_client_ids=accessible_client_ids,
+                lifecycle_mode=lifecycle_mode,
+                company_uuid=company_uuid,
+                query_value=query_value,
+                fleet_lifecycle_filter=fleet_lifecycle_filter,
+                payment_status_filter=payment_status_filter,
+                service_state_filter=service_state_filter,
+                batch_size=summary_batch_size,
+                now=summary_cache_now,
+            )
 
     return ConsoleClientListResponse(
         items=[
@@ -13381,7 +15592,9 @@ async def list_branches(
     cursor: Optional[str] = None,
     limit: int = 50,
     q: Optional[str] = None,
+    company_id: Optional[str] = None,
     client_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
     lifecycle: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleBranchListResponse:
@@ -13393,17 +15606,62 @@ async def list_branches(
         include_inactive_tenants=lifecycle_mode != "active",
     )
     _require_platform_admin(context)
-    _reject_unknown_query_params(request, {"cursor", "limit", "q", "client_id", "lifecycle"})
+    _reject_unknown_query_params(request, {"cursor", "limit", "q", "company_id", "client_id", "branch_id", "lifecycle"})
     _validate_limit(limit)
 
+    company_uuid = _parse_uuid_param("company_id", company_id)
     client_uuid = _parse_uuid_param("client_id", client_id)
+    branch_uuid = _parse_uuid_param("branch_id", branch_id)
     query = db.query(Branch)
+    client_join_applied = False
+
+    def _ensure_client_join() -> None:
+        nonlocal query, client_join_applied
+        if client_join_applied:
+            return
+        query = query.join(Client, Client.id == Branch.client_id)
+        client_join_applied = True
+
+    if company_uuid:
+        _require_company_access(context, company_uuid)
+        _ensure_client_join()
+        query = query.filter(Client.company_id == company_uuid)
     if lifecycle_mode == "active":
-        query = query.filter(Branch.is_active.is_(True))
+        _ensure_client_join()
+        query = query.filter(
+            Client.status == "active",
+            Branch.is_active.is_(True),
+        )
     elif lifecycle_mode == "archived":
         query = query.filter(Branch.is_active.is_(False))
     if client_uuid:
+        _require_client_access(context, client_uuid)
+        if company_uuid is not None:
+            resolved_company_id = _resolve_company_id_for_client_in_context(context, client_uuid)
+            if resolved_company_id is None:
+                resolved_company_id = (
+                    db.query(Client.company_id)
+                    .filter(Client.id == client_uuid)
+                    .scalar()
+                )
+            if resolved_company_id != company_uuid:
+                raise ConsoleAPIError(400, "INVALID_PARAM", "client_id does not belong to company_id")
         query = query.filter(Branch.client_id == client_uuid)
+    if branch_uuid:
+        _require_branch_access(context, branch_uuid, message="Branch belongs to another tenant")
+        branch_scope = (
+            db.query(Branch.client_id.label("client_id"), Client.company_id.label("company_id"))
+            .join(Client, Client.id == Branch.client_id)
+            .filter(Branch.id == branch_uuid)
+            .first()
+        )
+        if branch_scope is None:
+            return ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+        if client_uuid is not None and branch_scope.client_id != client_uuid:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
+        if company_uuid is not None and branch_scope.company_id != company_uuid:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to company_id")
+        query = query.filter(Branch.id == branch_uuid)
 
     query_value = _normalize_search_query("q", q) if q else None
     if query_value:
@@ -13464,68 +15722,72 @@ async def get_tenants_portfolio(
     include_low: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleTenantsPortfolioResponse:
-    _reject_unknown_query_params(
-        request,
-        {
-            "cursor",
-            "limit",
-            "q",
-            "company_id",
-            "lifecycle",
-            "attention_limit",
-            "stale_after_minutes",
-            "include_low",
-        },
-    )
-    _validate_limit(limit)
-    _validate_limit(attention_limit)
-    lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+    started_at = perf_counter()
+    try:
+        _reject_unknown_query_params(
+            request,
+            {
+                "cursor",
+                "limit",
+                "q",
+                "company_id",
+                "lifecycle",
+                "attention_limit",
+                "stale_after_minutes",
+                "include_low",
+            },
+        )
+        _validate_limit(limit)
+        _validate_limit(attention_limit)
+        lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
 
-    clients_request = _request_with_query_params(
-        request,
-        {
-            "cursor": cursor,
-            "limit": limit,
-            "q": q,
-            "company_id": company_id,
-            "lifecycle": lifecycle_mode,
-            "include_fleet": "true",
-            "include_summary": "true",
-        },
-    )
-    clients_response = await list_clients(
-        request=clients_request,
-        cursor=cursor,
-        limit=limit,
-        q=q,
-        company_id=company_id,
-        lifecycle=lifecycle_mode,
-        include_fleet="true",
-        include_summary="true",
-        db=db,
-    )
+        clients_request = _request_with_query_params(
+            request,
+            {
+                "cursor": cursor,
+                "limit": limit,
+                "q": q,
+                "company_id": company_id,
+                "lifecycle": lifecycle_mode,
+                "include_fleet": "true",
+                "include_summary": "true",
+            },
+        )
+        clients_response = await list_clients(
+            request=clients_request,
+            cursor=cursor,
+            limit=limit,
+            q=q,
+            company_id=company_id,
+            lifecycle=lifecycle_mode,
+            include_fleet="true",
+            include_summary="true",
+            db=db,
+        )
 
-    attention_request = _request_with_query_params(
-        request,
-        {
-            "limit": attention_limit,
-            "stale_after_minutes": stale_after_minutes,
-            "include_low": include_low,
-        },
-    )
-    attention_response = await list_fleet_attention(
-        request=attention_request,
-        limit=attention_limit,
-        stale_after_minutes=stale_after_minutes,
-        include_low=include_low,
-        db=db,
-    )
+        attention_request = _request_with_query_params(
+            request,
+            {
+                "limit": attention_limit,
+                "stale_after_minutes": stale_after_minutes,
+                "include_low": include_low,
+            },
+        )
+        attention_response = await list_fleet_attention(
+            request=attention_request,
+            limit=attention_limit,
+            stale_after_minutes=stale_after_minutes,
+            include_low=include_low,
+            db=db,
+        )
 
-    return ConsoleTenantsPortfolioResponse(
-        generated_at=datetime.now(timezone.utc).isoformat(),
-        clients=clients_response,
-        fleet_attention=attention_response,
-    )
+        return ConsoleTenantsPortfolioResponse(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            clients=clients_response,
+            fleet_attention=attention_response,
+        )
+    finally:
+        record_tenants_endpoint_latency("portfolio", (perf_counter() - started_at) * 1000.0)
 
 
 @router.get(
@@ -13537,6 +15799,7 @@ async def get_tenants_company_cockpit(
     request: Request,
     company_id: str,
     client_id: Optional[str] = None,
+    include_branches: Optional[str] = None,
     lifecycle: Optional[str] = None,
     client_limit: int = 20,
     branch_limit: int = 20,
@@ -13546,85 +15809,89 @@ async def get_tenants_company_cockpit(
     branch_q: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleTenantsCompanyCockpitResponse:
-    _reject_unknown_query_params(
-        request,
-        {
-            "company_id",
-            "client_id",
-            "lifecycle",
-            "client_limit",
-            "branch_limit",
-            "client_cursor",
-            "branch_cursor",
-            "client_q",
-            "branch_q",
-        },
-    )
-    _validate_limit(client_limit)
-    _validate_limit(branch_limit)
-    lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
-
-    company_uuid = _parse_uuid_param("company_id", company_id)
-    if company_uuid is None:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid company_id")
-
-    selected_client_uuid = _parse_uuid_param("client_id", client_id)
-
-    clients_request = _request_with_query_params(
-        request,
-        {
-            "cursor": client_cursor,
-            "limit": client_limit,
-            "q": client_q,
-            "company_id": str(company_uuid),
-            "lifecycle": lifecycle_mode,
-            "include_fleet": "true",
-        },
-    )
-    clients_response = await list_clients(
-        request=clients_request,
-        cursor=client_cursor,
-        limit=client_limit,
-        q=client_q,
-        company_id=str(company_uuid),
-        lifecycle=lifecycle_mode,
-        include_fleet="true",
-        db=db,
-    )
-
-    if selected_client_uuid is None and clients_response.items:
-        selected_client_uuid = clients_response.items[0].id
-
-    if selected_client_uuid is None:
-        branches_response = ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
-    else:
-        branches_request = _request_with_query_params(
+    started_at = perf_counter()
+    try:
+        _reject_unknown_query_params(
             request,
             {
-                "cursor": branch_cursor,
-                "limit": branch_limit,
-                "q": branch_q,
-                "client_id": str(selected_client_uuid),
-                "lifecycle": lifecycle_mode,
+                "company_id",
+                "client_id",
+                "include_branches",
+                "lifecycle",
+                "client_limit",
+                "branch_limit",
+                "client_cursor",
+                "branch_cursor",
+                "client_q",
+                "branch_q",
             },
         )
-        branches_response = await list_branches(
-            request=branches_request,
-            cursor=branch_cursor,
-            limit=branch_limit,
-            q=branch_q,
-            client_id=str(selected_client_uuid),
+        _validate_limit(client_limit)
+        _validate_limit(branch_limit)
+        lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+        include_branches_mode = _parse_bool_param("include_branches", include_branches, default=True)
+
+        company_uuid = _parse_uuid_param("company_id", company_id)
+        if company_uuid is None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid company_id")
+
+        selected_client_uuid = _parse_uuid_param("client_id", client_id)
+
+        clients_request = _request_with_query_params(
+            request,
+            {
+                "cursor": client_cursor,
+                "limit": client_limit,
+                "q": client_q,
+                "company_id": str(company_uuid),
+                "lifecycle": lifecycle_mode,
+                "include_fleet": "true",
+            },
+        )
+        clients_response = await list_clients(
+            request=clients_request,
+            cursor=client_cursor,
+            limit=client_limit,
+            q=client_q,
+            company_id=str(company_uuid),
             lifecycle=lifecycle_mode,
+            include_fleet="true",
             db=db,
         )
 
-    return ConsoleTenantsCompanyCockpitResponse(
-        generated_at=datetime.now(timezone.utc).isoformat(),
-        company_id=company_uuid,
-        selected_client_id=selected_client_uuid,
-        clients=clients_response,
-        branches=branches_response,
-    )
+        branches_response = ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+        if include_branches_mode:
+            branches_request = _request_with_query_params(
+                request,
+                {
+                    "cursor": branch_cursor,
+                    "limit": branch_limit,
+                    "q": branch_q,
+                    "company_id": str(company_uuid),
+                    "client_id": str(selected_client_uuid) if selected_client_uuid else None,
+                    "lifecycle": lifecycle_mode,
+                },
+            )
+            branches_response = await list_branches(
+                request=branches_request,
+                cursor=branch_cursor,
+                limit=branch_limit,
+                q=branch_q,
+                company_id=str(company_uuid),
+                client_id=str(selected_client_uuid) if selected_client_uuid else None,
+                lifecycle=lifecycle_mode,
+                db=db,
+            )
+
+        return ConsoleTenantsCompanyCockpitResponse(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            company_id=company_uuid,
+            selected_client_id=selected_client_uuid,
+            clients=clients_response,
+            branches=branches_response,
+        )
+    finally:
+        record_tenants_endpoint_latency("company_cockpit", (perf_counter() - started_at) * 1000.0)
 
 
 @router.get(
@@ -14989,6 +17256,7 @@ async def run_integration_reconcile_for_branch(
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
     _require_client_access(context, branch.client_id, message="Branch belongs to another tenant")
+    branch_company_id = _resolve_company_id_for_client_in_context(context, branch.client_id)
     if not branch.is_active:
         raise ConsoleAPIError(409, "INVALID_STATE", "Branch is inactive")
 
@@ -15040,6 +17308,11 @@ async def run_integration_reconcile_for_branch(
                 },
                 client_id=branch.client_id,
                 branch_id=branch.id,
+            )
+            _invalidate_tenants_fleet_cache_scope(
+                db,
+                reason="integration_reconcile_execute",
+                company_ids={branch_company_id} if branch_company_id else None,
             )
             db.commit()
         return ConsoleIntegrationBranchActionResponse(
@@ -15264,6 +17537,11 @@ async def run_integration_reconcile_for_branch(
                 target_type="branch",
                 target_id=branch.id,
             )
+        _invalidate_tenants_fleet_cache_scope(
+            db,
+            reason="provider_ops_execute",
+            company_ids={branch_company_id} if branch_company_id else None,
+        )
         db.commit()
     else:
         result["dry_run"] = True
@@ -15332,168 +17610,48 @@ async def list_fleet_attention(
             items=[],
         )
 
-    companies_by_id = {company.id: company for company in (context.companies or [])}
-    fleet_details_map = _build_fleet_client_details_map(
-        db,
-        clients=active_clients,
-        companies_by_id=companies_by_id,
-    )
-
-    client_ids = [client.id for client in active_clients]
-    branches = db.query(Branch).filter(Branch.client_id.in_(client_ids)).all()
-    branches_by_client: dict[UUID, list[Branch]] = {client.id: [] for client in active_clients}
-    for branch in branches:
-        branches_by_client.setdefault(branch.client_id, []).append(branch)
-
-    token_rows = (
-        db.query(
-            ClientSettings.client_id,
-            ClientSettings.telegram_bot_token,
-        )
-        .filter(ClientSettings.client_id.in_(client_ids))
-        .all()
-    )
-    telegram_token_map: dict[UUID, bool] = {}
-    for client_id, token in token_rows:
-        telegram_token_map[client_id] = bool(_normalize_optional_text(token))
-
-    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
-        db,
-        client_ids=client_ids,
-    )
-
+    active_client_ids = {client.id for client in active_clients}
     now = datetime.now(timezone.utc)
-    outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
-    pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
-
-    summary = ConsoleFleetAttentionSummary(
-        active_clients_total=len(active_clients),
-        clients_with_attention=0,
-        high_risk_clients=0,
-        medium_risk_clients=0,
-        low_risk_clients=0,
-        stale_branches_total=0,
-        integration_error_branches_total=0,
-        integration_warn_branches_total=0,
-        outbox_failed_24h_total=0,
-        pending_handovers_total=0,
-    )
-
-    items: list[ConsoleFleetAttentionItem] = []
-    for client in active_clients:
-        details = fleet_details_map.get(client.id)
-        if not details:
-            continue
-
-        reference_branch_ids = set(details.reference_branch_ids or ())
-        stale_branches = 0
-        integration_error_branches = 0
-        integration_warn_branches = 0
-
-        for branch in branches_by_client.get(client.id, []):
-            if not branch.is_active:
-                continue
-            if reference_branch_ids and branch.id not in reference_branch_ids:
-                continue
-            observed = inbound_observations.get(branch.id)
-            last_inbound_at: Optional[datetime] = None
-            last_inbound_instance_id: Optional[str] = None
-            if observed:
-                last_inbound_at, last_inbound_instance_id = observed
-
-            status = _build_branch_integration_status(
-                client_id=client.id,
-                client_slug=client.name,
-                branch=branch,
-                has_telegram_bot_token=telegram_token_map.get(client.id, False),
-                stale_after_minutes=stale_after_minutes,
-                last_inbound_at=last_inbound_at,
-                last_inbound_instance_id=last_inbound_instance_id,
-                now=now,
-            )
-            if status.whatsapp_status == "no_recent_inbound":
-                stale_branches += 1
-            if status.status == "error":
-                integration_error_branches += 1
-            elif status.status == "warn":
-                integration_warn_branches += 1
-
-        outbox_failed_24h = outbox_failed_map.get(client.id, 0)
-        pending_handovers = pending_handovers_map.get(client.id, 0)
-        score, level, reasons, suggested_actions = _resolve_fleet_attention_profile(
-            service_state=details.service_state,
-            stale_branches=stale_branches,
-            integration_error_branches=integration_error_branches,
-            integration_warn_branches=integration_warn_branches,
-            outbox_failed_24h=outbox_failed_24h,
-            pending_handovers=pending_handovers,
-        )
-
-        if score > 0:
-            summary.clients_with_attention += 1
-            if level == "high":
-                summary.high_risk_clients += 1
-            elif level == "medium":
-                summary.medium_risk_clients += 1
-            else:
-                summary.low_risk_clients += 1
-        summary.stale_branches_total += stale_branches
-        summary.integration_error_branches_total += integration_error_branches
-        summary.integration_warn_branches_total += integration_warn_branches
-        summary.outbox_failed_24h_total += outbox_failed_24h
-        summary.pending_handovers_total += pending_handovers
-
-        if not include_low_mode and level == "low":
-            continue
-
-        company = companies_by_id.get(client.company_id) if client.company_id else None
-        items.append(
-            ConsoleFleetAttentionItem(
-                client_id=client.id,
-                client_slug=client.name,
-                client_name=client.name,
-                company_id=client.company_id,
-                company_name=company.name if company else None,
-                lifecycle_state=details.lifecycle_state,
-                payment_status=details.payment_status,
-                commercial_state=details.commercial_state,
-                service_state=details.service_state,
-                owner_name=details.owner_name,
-                next_action=details.next_action,
-                total_branches=details.total_branches,
-                active_branches=details.active_branches,
-                degraded_branches=details.degraded_branches,
-                go_live_ready_branches=details.go_live_ready_branches,
-                reference_branch_ids=list(details.reference_branch_ids),
-                reference_branch_reason=details.reference_branch_reason,
-                stale_branches=stale_branches,
-                integration_error_branches=integration_error_branches,
-                integration_warn_branches=integration_warn_branches,
-                outbox_failed_24h=outbox_failed_24h,
-                pending_handovers=pending_handovers,
-                attention_score=score,
-                attention_level=level,
-                reasons=reasons,
-                suggested_actions=suggested_actions,
-            )
-        )
-
-    items.sort(
-        key=lambda item: (
-            item.attention_score,
-            item.integration_error_branches,
-            item.outbox_failed_24h,
-            item.pending_handovers,
-        ),
-        reverse=True,
-    )
-
-    return ConsoleFleetAttentionResponse(
-        generated_at=now.isoformat(),
+    attention_scope_key = _build_fleet_attention_cache_scope_key(
+        active_client_ids=active_client_ids,
         stale_after_minutes=stale_after_minutes,
-        summary=summary,
-        items=items[:limit],
+        include_low_mode=include_low_mode,
+        limit=limit,
     )
+    cached_response = _load_cached_fleet_attention(
+        db,
+        scope_key=attention_scope_key,
+        now=now,
+    )
+    if cached_response is not None:
+        _schedule_fleet_attention_async_refresh(
+            db,
+            scope_key=attention_scope_key,
+            active_client_ids=active_client_ids,
+            stale_after_minutes=stale_after_minutes,
+            include_low_mode=include_low_mode,
+            limit=limit,
+            now=now,
+        )
+        return cached_response
+
+    companies_by_id = {company.id: company for company in (context.companies or [])}
+    response = _build_fleet_attention_response_for_clients(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_low_mode=include_low_mode,
+        limit=limit,
+        now=now,
+    )
+    _store_cached_fleet_attention(
+        db,
+        scope_key=attention_scope_key,
+        now=now,
+        response=response,
+    )
+    return response
 
 
 @router.get(
@@ -15698,6 +17856,11 @@ async def update_company(
             actor_id=context.agent.id,
             actor_name=context.agent.name,
         )
+        _invalidate_tenants_fleet_cache_scope(
+            db,
+            reason="update_company",
+            company_ids={company.id},
+        )
         db.commit()
 
     return ConsoleCompany(
@@ -15765,6 +17928,11 @@ async def create_client(
         },
         client_id=client.id,
     )
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="create_client",
+        company_ids={company_id} if company_id else None,
+    )
     db.commit()
 
     return ConsoleClientCreateResponse(
@@ -15808,6 +17976,7 @@ async def update_client(
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
     _require_client_access(context, client.id)
+    previous_company_id = client.company_id
 
     updated_fields: list[str] = []
     fields_set = body.model_fields_set
@@ -15869,6 +18038,16 @@ async def update_client(
             client_id=client.id,
             actor_id=context.agent.id,
             actor_name=context.agent.name,
+        )
+        company_ids_to_invalidate = {
+            company_id
+            for company_id in {previous_company_id, client.company_id}
+            if company_id is not None
+        }
+        _invalidate_tenants_fleet_cache_scope(
+            db,
+            reason="update_client",
+            company_ids=company_ids_to_invalidate or None,
         )
         db.commit()
 
@@ -15972,6 +18151,11 @@ async def archive_client(
         actor_id=context.agent.id,
         actor_name=context.agent.name,
     )
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="archive_client",
+        company_ids={client.company_id} if client.company_id else None,
+    )
     db.commit()
 
     company = db.query(Company).filter(Company.id == client.company_id).first() if client.company_id else None
@@ -16028,6 +18212,11 @@ async def restore_client(
         client_id=client.id,
         actor_id=context.agent.id,
         actor_name=context.agent.name,
+    )
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="restore_client",
+        company_ids={client.company_id} if client.company_id else None,
     )
     db.commit()
 
@@ -16159,6 +18348,11 @@ async def create_branch(
         client_id=client.id,
         branch_id=branch.id,
     )
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="create_branch",
+        company_ids={client.company_id} if client.company_id else None,
+    )
     db.commit()
 
     return ConsoleBranchCreateResponse(
@@ -16195,6 +18389,7 @@ async def update_branch(
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
     _require_client_access(context, branch.client_id)
+    branch_company_id = _resolve_company_id_for_client_in_context(context, branch.client_id)
 
     confirmation = None
     previous_instance_id = branch.instance_id
@@ -16344,6 +18539,11 @@ async def update_branch(
                 target_type="branch",
                 target_id=branch.id,
             )
+        _invalidate_tenants_fleet_cache_scope(
+            db,
+            reason="update_branch",
+            company_ids={branch_company_id} if branch_company_id else None,
+        )
         db.commit()
 
     return _serialize_branch(branch)
@@ -16825,6 +19025,7 @@ async def approve_branch_go_live(
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
     _require_client_access(context, branch.client_id)
+    branch_company_id = _resolve_company_id_for_client_in_context(context, branch.client_id)
 
     reason = _normalize_access_reason(body.reason, required=True)
     _require_branch_scorecard_ready(
@@ -16858,6 +19059,11 @@ async def approve_branch_go_live(
         client_id=branch.client_id,
         branch_id=branch.id,
     )
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="approve_branch_go_live",
+        company_ids={branch_company_id} if branch_company_id else None,
+    )
     db.commit()
     return _serialize_branch(branch)
 
@@ -16885,6 +19091,7 @@ async def reject_branch_go_live(
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
     _require_client_access(context, branch.client_id)
+    branch_company_id = _resolve_company_id_for_client_in_context(context, branch.client_id)
 
     reason = _normalize_access_reason(body.reason, required=True)
     now = datetime.now(timezone.utc)
@@ -16911,6 +19118,11 @@ async def reject_branch_go_live(
         },
         client_id=branch.client_id,
         branch_id=branch.id,
+    )
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="reject_branch_go_live",
+        company_ids={branch_company_id} if branch_company_id else None,
     )
     db.commit()
     return _serialize_branch(branch)
@@ -16939,6 +19151,7 @@ async def waive_branch_go_live(
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
     _require_client_access(context, branch.client_id)
+    branch_company_id = _resolve_company_id_for_client_in_context(context, branch.client_id)
 
     reason = _normalize_access_reason(body.reason, required=True)
     ttl_hours = _normalize_go_live_waiver_ttl_hours(body.ttl_hours)
@@ -16969,6 +19182,11 @@ async def waive_branch_go_live(
         },
         client_id=branch.client_id,
         branch_id=branch.id,
+    )
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="waive_branch_go_live",
+        company_ids={branch_company_id} if branch_company_id else None,
     )
     db.commit()
     return _serialize_branch(branch)

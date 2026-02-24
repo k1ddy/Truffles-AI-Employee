@@ -21,29 +21,29 @@ import { writeConsoleContextScopeToStorage } from "@/lib/console-context-storage
 import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
 
 type SessionData = ReturnType<typeof useSession>["data"];
-type ProvisioningBranch = components["schemas"]["Branch"];
-type ProvisioningAgent = components["schemas"]["Agent"];
+type ProvisioningBranch = components["schemas"]["ConsoleBranch"];
+type ProvisioningAgent = components["schemas"]["ConsoleAgent"];
 type RawCapabilitiesPayload = components["schemas"]["CapabilitiesPayload"];
 type CapabilitiesPayload = RawCapabilitiesPayload & {
     channels: NonNullable<RawCapabilitiesPayload["channels"]>;
     providers: NonNullable<RawCapabilitiesPayload["providers"]>;
     features: NonNullable<RawCapabilitiesPayload["features"]>;
 };
-type CapabilitiesResponse = components["schemas"]["CapabilitiesResponse"];
-type OnboardingContractPayload = components["schemas"]["OnboardingContractPayload"];
-type OnboardingContractResponse = components["schemas"]["OnboardingContractResponse"];
-type OnboardingAutopilotRequest = components["schemas"]["OnboardingAutopilotRequest"];
-type OnboardingAutopilotResponse = components["schemas"]["OnboardingAutopilotResponse"];
-type OnboardingPurchasedService = components["schemas"]["OnboardingPurchasedService"];
-type ReferencePackListResponse = components["schemas"]["ReferencePackListResponse"];
-type OnboardingStatus = components["schemas"]["OnboardingStatusResponse"];
-type OnboardingStepStatus = components["schemas"]["OnboardingStepStatus"];
-type OnboardingScorecard = components["schemas"]["OnboardingScorecardResponse"];
-type OnboardingScorecardCheck = components["schemas"]["OnboardingScorecardCheck"];
-type OnboardingDocumentIngestion = components["schemas"]["OnboardingDocumentIngestion"];
-type OnboardingIntakeFieldState = components["schemas"]["OnboardingIntakeFieldState"];
-type OnboardingIntakeQuestion = components["schemas"]["OnboardingIntakeQuestion"];
-type OnboardingIntakeQualityDimension = components["schemas"]["OnboardingIntakeQualityDimension"];
+type CapabilitiesResponse = components["schemas"]["ConsoleCapabilitiesResponse"];
+type OnboardingContractPayload = components["schemas"]["OnboardingContractPayload-Input"];
+type OnboardingContractResponse = components["schemas"]["ConsoleOnboardingContractResponse"];
+type OnboardingAutopilotRequest = components["schemas"]["ConsoleOnboardingAutopilotRequest"];
+type OnboardingAutopilotResponse = components["schemas"]["ConsoleOnboardingAutopilotResponse"];
+type OnboardingPurchasedService = NonNullable<OnboardingAutopilotRequest["purchased_services"]>[number];
+type ReferencePackListResponse = components["schemas"]["ConsoleReferencePackListResponse"];
+type OnboardingStatus = components["schemas"]["ConsoleOnboardingStatusResponse"];
+type OnboardingStepStatus = components["schemas"]["ConsoleOnboardingStepStatus"];
+type OnboardingScorecard = components["schemas"]["ConsoleOnboardingScorecardResponse"];
+type OnboardingScorecardCheck = components["schemas"]["ConsoleOnboardingScorecardCheck"];
+type OnboardingDocumentIngestion = components["schemas"]["ConsoleOnboardingDocumentIngestion"];
+type OnboardingIntakeFieldState = components["schemas"]["ConsoleOnboardingIntakeFieldState"];
+type OnboardingIntakeQuestion = components["schemas"]["ConsoleOnboardingIntakeQuestion"];
+type OnboardingIntakeQualityDimension = components["schemas"]["ConsoleOnboardingIntakeQualityDimension"];
 
 type OnboardingSlaControlLoop = {
     status: "pass" | "warn" | "fail";
@@ -1507,7 +1507,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     }, [autoStepSync, onboardingStatus]);
 
     const createCompanyMutation = useMutation({
-        mutationFn: async (payload: components["schemas"]["CompanyCreateRequest"]) => {
+        mutationFn: async (payload: components["schemas"]["ConsoleCompanyCreateRequest"]) => {
             const response = await adminApi.createCompany(payload);
             return response.data;
         },
@@ -1523,7 +1523,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     });
 
     const createClientMutation = useMutation({
-        mutationFn: async (payload: components["schemas"]["ClientCreateRequest"]) => {
+        mutationFn: async (payload: components["schemas"]["ConsoleClientCreateRequest"]) => {
             const response = await adminApi.createClient(payload);
             return response.data;
         },
@@ -1539,7 +1539,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     });
 
     const createBranchMutation = useMutation({
-        mutationFn: async (payload: components["schemas"]["BranchCreateRequest"]) => {
+        mutationFn: async (payload: components["schemas"]["ConsoleBranchCreateRequest"]) => {
             const response = await adminApi.createBranch(payload);
             return response.data;
         },
@@ -1564,7 +1564,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     });
 
     const patchBranchMutation = useMutation({
-        mutationFn: async (payload: components["schemas"]["BranchUpdateRequest"]) => {
+        mutationFn: async (payload: components["schemas"]["ConsoleBranchUpdateRequest"]) => {
             if (!branchData?.id) {
                 throw new Error("BRANCH_REQUIRED");
             }
@@ -1656,7 +1656,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     });
 
     const createAgentMutation = useMutation({
-        mutationFn: async (payload: components["schemas"]["AgentCreateRequest"]) => {
+        mutationFn: async (payload: components["schemas"]["ConsoleAgentCreateRequest"]) => {
             const response = await adminApi.createAgent(payload);
             return response.data;
         },
@@ -1673,7 +1673,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     });
 
     const patchCapabilitiesMutation = useMutation({
-        mutationFn: async (payload: components["schemas"]["CapabilitiesPatchRequest"]) => {
+        mutationFn: async (payload: components["schemas"]["ConsoleCapabilitiesPatchRequest"]) => {
             const response = await adminApi.patchCapabilities(payload, clientId || undefined);
             return response.data;
         },
@@ -1690,7 +1690,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     });
 
     const patchOnboardingContractMutation = useMutation({
-        mutationFn: async (payload: components["schemas"]["OnboardingContractPatchRequest"]) => {
+        mutationFn: async (payload: components["schemas"]["ConsoleOnboardingContractPatchRequest"]) => {
             const response = await adminApi.patchOnboardingContract(payload, clientId || undefined);
             return response.data;
         },
@@ -2335,12 +2335,12 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         });
     };
 
-    const buildBranchBootstrapAccounts = (): components["schemas"]["BranchBootstrapAccountTemplate"][] => {
+    const buildBranchBootstrapAccounts = (): components["schemas"]["ConsoleBranchBootstrapAccountTemplate"][] => {
         if (!branchBootstrap.enabled) {
             return [];
         }
         const branchLabel = branchForm.name.trim() || "Branch";
-        const accounts: components["schemas"]["BranchBootstrapAccountTemplate"][] = [];
+        const accounts: components["schemas"]["ConsoleBranchBootstrapAccountTemplate"][] = [];
         if (branchBootstrap.createOwner) {
             accounts.push({
                 role: "owner",
@@ -2536,7 +2536,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return;
         }
         const roleValue = agentForm.role;
-        const payload: components["schemas"]["AgentCreateRequest"] = {
+        const payload: components["schemas"]["ConsoleAgentCreateRequest"] = {
             client_id: clientId,
             role: roleValue,
             name: agentForm.name.trim() || undefined,
@@ -2621,7 +2621,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 },
             },
         };
-        const requestPayload: components["schemas"]["OnboardingContractPatchRequest"] = {
+        const requestPayload: components["schemas"]["ConsoleOnboardingContractPatchRequest"] = {
             scope: "branch",
             branch_id: branchData.id,
             payload,

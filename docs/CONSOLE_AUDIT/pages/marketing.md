@@ -15,6 +15,7 @@ Owner-first concept
 - Маркетинг строится вокруг бизнес-цели (возврат, no-show recovery, интерес без записи).
 - У каждого сегмента есть human-readable описание, формула и редактируемые параметры.
 - Preview/Audience показывают не только коды, но и объяснения причин inclusion/suppression.
+- На странице есть встроенная пошаговая инструкция `1..4` + словарь терминов для владельца.
 
 Segment catalog (new)
 - Endpoint: `GET /console/v1/admin/marketing/segments`.
@@ -53,9 +54,16 @@ Business meaning of segments
 
 How owners edit filters
 - На форме кампании (create/edit) рендерятся поля `editable_fields` из segment catalog.
-- Int-поля ограничены min/max.
-- Bool-поля задаются чекбоксом.
+- Int-поля ограничены min/max и сопровождаются простым объяснением смысла параметра.
+- Bool-поля заданы owner-language:
+  - `Исключать клиентов с уже запланированной записью`.
 - Сохранённые значения уходят в `segment_params` и используются в materialize preview.
+
+Owner guidance block
+- В шапке вкладки встроен блок:
+  - как запустить кампанию в 4 шага;
+  - что значит `будущая запись`, `no-show`, `исключен из рассылки`.
+- Цель: владелец бизнеса понимает логику без чтения технической документации.
 
 Provider billing block behavior
 - Если `provider_billing_blocked=true`, execute остаётся заблокирован.

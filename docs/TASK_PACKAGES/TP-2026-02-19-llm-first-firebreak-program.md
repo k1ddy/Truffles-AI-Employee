@@ -1,5 +1,7 @@
 # TP-2026-02-19-llm-first-firebreak-program
 
+> Update 2026-02-21: для текущей remediation wave использовать contract-first execution TP: `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md` (supersedes operational plan этого документа для HQ1 closure).
+
 ## Название/цель
 Антикризисная программа стабилизации ядра консультанта в режиме "дом горит": быстро снизить долю неправильных ответов и ошибочных tool-вызовов, затем закрепить LLM-first архитектуру без semantic-хардкодов в deterministic слое.
 
@@ -69,6 +71,7 @@
 - До тестов сверять код в рабочем дереве и контейнере (`decision.py` минимум).
 - При mismatch: обязательная пересборка/перезапуск тестового или runtime контейнера.
 - Для детерминированных прогонов предпочтителен fresh запуск через `scripts/test_api_container.sh`.
+- Hash mismatch `worktree vs runtime/test container` = `BLOCKED` для replay/evidence (не informational warning).
 
 4. `Validation order`:
 - Порядок неизменный: `local realism (LLM+tools+chaos)` -> `local deterministic` -> `CI deterministic smoke`.
@@ -83,6 +86,22 @@
 - Для каждого inbound с `llm_policy_core.payload.tool_action` обязателен audit `plan -> final`.
 - Любой post-LLM override допускается только по whitelist reason-code (см. раздел `Override whitelist (contract v1)`).
 - Override без reason-code или вне whitelist = `NO_GO` для релиза.
+
+7. `Quality budget policy (cost-aware, mandatory)`:
+- `L0` (cheap, always): static/deterministic checks (`py_compile`, `ruff`, targeted pytest for touched contracts).
+- `L1` (cheap-medium, always for core): replay on canonical blocking scenarios with `--judge-mode off --allow-judge-off --max-failures 5`, manual forensic by `responses.jsonl + trace_bundle.jsonl`.
+- `L2` (medium, integration cadence): replay on canonical blocking scenarios with `--judge-mode critical`, only if `L1` passed and no freshness violations.
+- `L3` (expensive, release only): full lock/replay with `--judge-mode all` once per release candidate.
+- `L1/L2/L3` runs are valid only with fixed scenarios (`--scenarios-file`) and `--reset-before-dialog`.
+
+8. `Judge-off evidence contract`:
+- `judge-mode off` runs are debug-only and must be marked `comparison_blocked=true` in acceptance discussion.
+- `judge-mode off` evidence cannot be used to declare release readiness or canonical baseline updates.
+
+9. `Escalation criteria L0 -> L1 -> L2 -> L3`:
+- Any changes in `decision.py`, `tool_registry_service.py`, `ai_service.py`, `pack_runtime_*` => at least `L1`.
+- Any behavior diff in blocking reasons, expected-reply flow, or tool contract outcomes => escalate to `L2`.
+- Release candidate, baseline update, or canary go/no-go => `L3`.
 
 ## Problem decomposition
 1. Semantic misroute:
@@ -114,6 +133,9 @@
 
 10. Release quality gate gap:
 - aggregate thresholds не блокируют critical reason-set (`expected_action_mismatch`, contract drift и др.).
+
+11. Quality budget gap:
+- нет формального cost-aware протокола для частоты дорогих `judge-mode all` прогонов.
 
 ## Required analysis (обязательно до/параллельно внедрению)
 1. Production error heatmap (7-14 days):
@@ -318,6 +340,37 @@
 - `rewrite_reason_coverage == 100%`.
 - Любой regex/lexicon delta в core сопровождается resolver update + regression tests.
 
+### Wave HQ1 — Human quality firebreak (P0, immediate)
+1. Цель:
+- Остановить релиз при "плохих ответах консультанта", даже если структурные/контрактные метрики выглядят зелёными.
+
+2. Источники правды:
+- `/tmp/booking_quality/analysis-postfix-v7-strict-fails.tsv`
+- `/tmp/booking_quality/manual-strict-fails-v7.tsv`
+- `/tmp/booking_quality/booking-nojudge-manual-a120-r7-replay-nonreplay/manual_findings.md`
+- `/tmp/booking_quality/booking-blocking-nojudge-trackk-smoke-a1/summary.json`
+- `docs/evidence/2026-02-21-hq1-bad-turn-catalog.tsv`
+
+3. Blocking classes (release NO_GO):
+- `wrong_action`: выбран не тот продуктовый исход (FACT/COLLECT/HANDOFF) относительно смысла запроса.
+- `handoff_miss`: запрос на менеджера/перенос/изменение записи не приводит к `handoff` и `pending`.
+- `non_actionable_reply`: ответ уклончивый/бесполезный для следующего шага клиента.
+- `hallucinated_fact`: недоказанные/выдуманные факты в ответе.
+- `booking_flow_break`: ответ/действие ломает ожидаемую прогрессию записи.
+
+4. Изменения:
+- Ввести обязательный `bad-turn catalog` из ручного форензика и последних replay-run.
+- Ввести отдельный канонический сценарный файл `blocking_scenarios_human.json` для повторяемого replay.
+- Считать run `semantic_valid=false`, если обнаружен любой class из `Wave HQ1` blocking set.
+- Требовать ручной sign-off Brain/Top Architect по каталогу плохих turns перед GO.
+
+5. DoD:
+- `hq1_bad_turn_count == 0` на каноническом human-blocking сценарном наборе.
+- `expected_action_mismatch == 0` и `judge_fail == 0` на `blocking_scenarios_human.json`.
+- Для `reschedule/change booking` путь завершает в `handoff + pending` (без silent degrade).
+- Для `master/specialist` вопросов отсутствует route в `catalog.location` без explicit location/hours anchors.
+- Evidence-пакет содержит `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl`, `bad-turn catalog`.
+
 ## Override whitelist (contract v1)
 Разрешённые deterministic override reason-codes:
 1. `safety_policy_block`:
@@ -426,6 +479,10 @@
 11. Timeout purity:
 - `timeout_semantic_reroute_count` (target: `0`).
 
+12. Budget efficiency:
+- `llm_quality_run_cost_per_wave` (target: controlled and pre-approved by Brain/Top Architect).
+- `L3_runs_per_wave` (target: `1` for release candidate, unless explicit incident waiver).
+
 ## Execution plan (phased)
 1. Phase 0 (Day 0-1):
 - Baseline extraction + heatmap + top-100 forensic.
@@ -455,6 +512,8 @@
 - `ruff check` for touched runtime/tests.
 - `rg -n "demo_salon_knowledge" truffles-api/app/routers truffles-api/app/services | rg -v "pack_runtime_demo_adapter.py"` (должно быть пусто после Track F).
 - `rg -n "tool_decision_mismatch|expected_reply_type_mismatch|expected_action_mismatch|calendar_tool_contract_miss" /tmp/booking_quality/booking-replay-42/responses.jsonl`
+- `test -f /tmp/booking_quality/blocking_scenarios.json`
+- `test -f /tmp/booking_quality/blocking_scenarios_human.json`
 - `PROJECT_NAME=truffles-api-test-firebreak PYTEST_ARGS='/app/tests/test_booking_info_interrupt_contract.py' scripts/test_api_container.sh`
 - `pytest -q truffles-api/tests/test_message_endpoint.py`
 - `pytest -q truffles-api/tests/test_booking_chaos_dialogs.py`
@@ -462,11 +521,26 @@
 - `pytest -q truffles-api/tests/test_demo_salon_eval.py`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id booking-lock-42`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression --max-failures 20`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/blocking_scenarios.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-blocking-nojudge-42`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/blocking_scenarios.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode critical --fail-on-thresholds --max-failures 10 --run-id booking-blocking-critical-42`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 5 --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-human-nojudge-42`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 5 --tool-hooks auto --reset-before-dialog --judge-mode critical --fail-on-thresholds --max-failures 10 --run-id booking-human-critical-42`
 - `jq '.quality_status' /tmp/booking_quality/booking-replay-42/summary.json` (в dry-run обязателен `comparison_blocked=true`).
+
+## Canonical blocking scenarios (mandatory artifact)
+- Canonical path: `/tmp/booking_quality/blocking_scenarios.json`.
+- Source: lock/replay forensic turns containing `calendar_tool_contract_miss`, `expected_action_mismatch`, `expected_reply_type_mismatch`, `tool_decision_mismatch`, critical `judge_fail`.
+- Human-quality canonical path: `/tmp/booking_quality/blocking_scenarios_human.json`.
+- Human source: `docs/evidence/2026-02-21-hq1-bad-turn-catalog.tsv` + manual forensic artifacts.
+- Ownership: Brain/Top Architect approve updates; Hands cannot silently replace this file during bugfix waves.
+- Update policy: only when root-cause class changes or scenario invalidated by confirmed product decision.
 
 ## Evidence package (for each wave)
 - `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl`
+- `blocking_scenarios.json` checksum and generation command
+- `blocking_scenarios_human.json` checksum and generation command
 - manual forensic artifacts (`manual_findings.md`, audit TSV)
+- `bad-turn catalog` with class labels (`wrong_action`, `handoff_miss`, `non_actionable_reply`, `hallucinated_fact`, `booking_flow_break`)
 - top-failures taxonomy with owner-ready interpretation
 - explicit `plan-vs-final tool_action delta` table
 - run command and environment matrix
@@ -483,6 +557,7 @@
 - Рост `post_llm_semantic_rewrite_rate` выше порога.
 - Любой `blocking_reason` в release replay (`calendar_tool_contract_miss`, `expected_action_mismatch`, `tool_decision_mismatch`, critical `judge_fail`).
 - `expected_reply_type_mismatch` в blocking scenario set.
+- Любой `Wave HQ1` class (`wrong_action`, `handoff_miss`, `non_actionable_reply`, `hallucinated_fact`, `booking_flow_break`) в human-blocking replay.
 - Dry-run evidence, поданный как quality acceptance.
 4. Progressive rollout with kill-switches:
 - semantic arbitration mode
@@ -517,3 +592,4 @@
 
 ## Acceptance
 - Программа принимается только при выполнении DoD по всем трекам и подтверждённом снижении инцидентности на сопоставимых прогонах и production heatmap.
+- Для acceptance обязательно: `L0 + L1 + L2`; `L3` обязателен только для release candidate / baseline update / canary go-no-go.

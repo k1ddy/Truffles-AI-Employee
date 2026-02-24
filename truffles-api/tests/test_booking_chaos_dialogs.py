@@ -128,7 +128,7 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
             return "ресницы"
         return None
 
-    def _stub_datetime(message_text):
+    def _stub_datetime(message_text, *, client_slug=None):
         if not message_text:
             return None
         normalized = message_text.casefold()

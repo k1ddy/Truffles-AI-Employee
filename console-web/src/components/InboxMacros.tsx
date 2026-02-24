@@ -6,10 +6,10 @@ import toast from "react-hot-toast";
 import { inboxApi } from "@/lib/api-client";
 import type { components } from "@/types/api.generated";
 
-const DEFAULT_SCOPE: components["schemas"]["InboxMacro"]["scope"] = "personal";
+const DEFAULT_SCOPE: components["schemas"]["ConsoleMacro"]["scope"] = "personal";
 
-type InboxMacro = components["schemas"]["InboxMacro"];
-type InboxMacroListResponse = components["schemas"]["InboxMacroListResponse"];
+type InboxMacro = components["schemas"]["ConsoleMacro"];
+type InboxMacroListResponse = components["schemas"]["ConsoleMacroListResponse"];
 
 type InboxMacrosProps = {
     onSelect: (text: string) => void;
@@ -78,7 +78,7 @@ function InboxMacros({
     });
 
     const createMutation = useMutation({
-        mutationFn: async (payload: components["schemas"]["InboxMacroCreateRequest"]) => {
+        mutationFn: async (payload: components["schemas"]["ConsoleMacroCreateRequest"]) => {
             const response = await inboxApi.createMacro(payload, branchId);
             return response.data;
         },
@@ -108,7 +108,7 @@ function InboxMacros({
             payload,
         }: {
             macroId: string;
-            payload: components["schemas"]["InboxMacroUpdateRequest"];
+            payload: components["schemas"]["ConsoleMacroUpdateRequest"];
         }) => {
             const response = await inboxApi.updateMacro(macroId, payload, branchId);
             return response.data;

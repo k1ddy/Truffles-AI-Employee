@@ -319,6 +319,88 @@ def _update_session_memory_on_answer(
     return context, memory
 
 
+def _clear_session_memory_expected_reply(
+    context: dict,
+    *,
+    expected_reply_type: str | None,
+    now: datetime,
+) -> tuple[dict, dict, bool]:
+    from . import _legacy as legacy
+
+    memory = _get_session_memory(context)
+    if not memory:
+        return context, {}, False
+
+    memory = dict(memory)
+    expected_reply_tokens = {
+        legacy.EXPECTED_REPLY_SERVICE,
+        legacy.EXPECTED_REPLY_TIME,
+        legacy.EXPECTED_REPLY_NAME,
+    }
+    expected_clean = (
+        expected_reply_type.strip()
+        if isinstance(expected_reply_type, str) and expected_reply_type.strip()
+        else None
+    )
+    target_types: set[str] = set()
+    if expected_clean in expected_reply_tokens:
+        target_types.add(expected_clean)
+
+    last_question_type = memory.get("last_question_type")
+    if (
+        isinstance(last_question_type, str)
+        and last_question_type.strip()
+        and last_question_type.strip() in expected_reply_tokens
+    ):
+        target_types.add(last_question_type.strip())
+
+    if not target_types:
+        return context, memory, False
+
+    changed = False
+
+    if (
+        isinstance(memory.get("last_question_type"), str)
+        and memory.get("last_question_type").strip() in target_types
+    ):
+        memory.pop("last_question_type", None)
+        changed = True
+
+    unanswered = memory.get("unanswered_questions")
+    if isinstance(unanswered, list):
+        filtered_unanswered = [
+            item
+            for item in unanswered
+            if isinstance(item, str) and item.strip() and item.strip() not in target_types
+        ]
+        if filtered_unanswered != unanswered:
+            memory["unanswered_questions"] = filtered_unanswered
+            changed = True
+
+    slot_map = {
+        legacy.EXPECTED_REPLY_SERVICE: "service",
+        legacy.EXPECTED_REPLY_TIME: "datetime",
+        legacy.EXPECTED_REPLY_NAME: "name",
+    }
+    pending_slots = memory.get("pending_slots")
+    if isinstance(pending_slots, dict):
+        pending_map = dict(pending_slots)
+        for expected_type in target_types:
+            slot_key = slot_map.get(expected_type)
+            if slot_key and slot_key in pending_map:
+                pending_map.pop(slot_key, None)
+                changed = True
+        memory["pending_slots"] = pending_map
+
+    if not changed:
+        return context, memory, False
+
+    memory["last_updated_at"] = now.isoformat()
+    memory["ttl_hours"] = legacy.SESSION_MEMORY_TTL_HOURS
+    context = _set_session_memory(context, memory)
+    return context, memory, True
+
+
 def _update_session_memory_goal(
     context: dict,
     *,

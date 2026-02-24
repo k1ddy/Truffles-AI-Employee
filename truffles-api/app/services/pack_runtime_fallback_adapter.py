@@ -1,12 +1,8 @@
-"""Neutral fallback adapter for non-specialized packs.
-
-Current behavior intentionally mirrors demo runtime decisions to preserve
-backward compatibility while generic contracts are finalized.
-"""
+"""Neutral fallback adapter for non-specialized packs."""
 
 from __future__ import annotations
 
-from app.services.pack_runtime_demo_adapter import (
+from app.services.pack_runtime_neutral_adapter import (
     _build_fact_meta,
     _detect_promotion_intent,
     _format_service_not_found_reply,
