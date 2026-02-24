@@ -18131,8 +18131,9 @@ async def create_company(
         context,
         "provisioning",
         "write",
-        message="Only owner/admin can manage provisioning",
+        message="Only platform admin can manage tenant hierarchy",
     )
+    _require_platform_admin(context)
 
     name = _normalize_required_text(body.name, "name")
     billing_info = body.billing_info or {}
@@ -18188,14 +18189,13 @@ async def update_company(
         context,
         "provisioning",
         "write",
-        message="Only owner/admin can manage provisioning",
+        message="Only platform admin can manage tenant hierarchy",
     )
+    _require_platform_admin(context)
 
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
-    if context.role != "platform_admin":
-        _require_company_access(context, company.id)
 
     updated_fields: list[str] = []
     fields_set = body.model_fields_set
@@ -18256,8 +18256,9 @@ async def create_client(
         context,
         "provisioning",
         "write",
-        message="Only owner/admin can manage provisioning",
+        message="Only platform admin can manage tenant hierarchy",
     )
+    _require_platform_admin(context)
 
     slug = _normalize_slug(body.slug, "client_slug")
     existing = db.query(Client).filter(func.lower(Client.name) == slug.lower()).first()
@@ -18267,8 +18268,6 @@ async def create_client(
     company = db.query(Company).filter(Company.id == body.company_id).first()
     if not company:
         raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
-    if context.role != "platform_admin":
-        _require_company_access(context, company.id)
     company_id = company.id
 
     status_value = (body.status or "active").strip()
@@ -18335,8 +18334,9 @@ async def update_client(
         context,
         "provisioning",
         "write",
-        message="Only owner/admin can manage provisioning",
+        message="Only platform admin can manage tenant hierarchy",
     )
+    _require_platform_admin(context)
 
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
@@ -18373,8 +18373,6 @@ async def update_client(
             company = db.query(Company).filter(Company.id == body.company_id).first()
             if not company:
                 raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
-            if context.role != "platform_admin":
-                _require_company_access(context, company.id)
             next_company_id = company.id
         else:
             next_company_id = None
@@ -18455,8 +18453,9 @@ async def archive_client(
         context,
         "provisioning",
         "write",
-        message="Only owner/admin can manage provisioning",
+        message="Only platform admin can manage tenant hierarchy",
     )
+    _require_platform_admin(context)
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
@@ -18549,8 +18548,9 @@ async def restore_client(
         context,
         "provisioning",
         "write",
-        message="Only owner/admin can manage provisioning",
+        message="Only platform admin can manage tenant hierarchy",
     )
+    _require_platform_admin(context)
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
@@ -20370,8 +20370,9 @@ async def patch_capabilities(
         context,
         "provisioning",
         "write",
-        message="Only owner/admin can manage capabilities",
+        message="Only platform admin can manage capabilities",
     )
+    _require_platform_admin(context)
 
     schema_version = body.schema_version or CAPABILITIES_SCHEMA_VERSION
     if schema_version != CAPABILITIES_SCHEMA_VERSION:
@@ -21517,6 +21518,7 @@ async def list_onboarding_blueprints_api(
         "read",
         message="Only owner/admin can access provisioning",
     )
+    _require_platform_admin(context)
 
     items = list_onboarding_blueprints()
     if domain_slug:
@@ -21545,6 +21547,7 @@ async def list_reference_packs(
         "read",
         message="Only owner/admin can access provisioning",
     )
+    _require_platform_admin(context)
 
     query = db.query(ReferencePack)
     if domain_slug:

@@ -1,0 +1,71 @@
+# BLOCK_GRAPH.yaml
+# Source of truth for block-level dependency chain (zero-context delivery).
+#
+# Status values:
+# - planned
+# - in_progress
+# - passed
+# - blocked
+
+version: 1
+program: universal_control_plane_v1
+
+blocks:
+  - block_id: UCPV1-PHASE1
+    parent_block_id: UCPV1
+    depends_on: []
+    status: passed
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase1-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase1-a500.md
+    unlocks:
+      - UCPV1-PHASE2-SLICE1
+
+  - block_id: UCPV1-PHASE2-SLICE1
+    parent_block_id: UCPV1-PHASE2
+    depends_on:
+      - UCPV1-PHASE1
+    status: passed
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase2-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase2-a500.md
+    unlocks:
+      - UCPV1-PHASE2-SLICE2-ANALYSIS
+
+  - block_id: UCPV1-PHASE2-SLICE2-ANALYSIS
+    parent_block_id: UCPV1-PHASE2
+    depends_on:
+      - UCPV1-PHASE2-SLICE1
+    status: passed
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase2-slice2-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase2-slice2-analysis-a500.md
+    unlocks:
+      - UCPV1-PHASE2-SLICE2-IMPL1
+
+  - block_id: UCPV1-PHASE2-SLICE2-IMPL1
+    parent_block_id: UCPV1-PHASE2
+    depends_on:
+      - UCPV1-PHASE2-SLICE2-ANALYSIS
+    status: passed
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase2-slice2-impl1-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase2-slice2-impl1-a500.md
+    unlocks:
+      - UCPV1-GATES-SANITARY
+
+  - block_id: UCPV1-GATES-SANITARY
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE2-SLICE2-IMPL1
+    status: passed
+    task_package: docs/TASK_PACKAGES/TP-2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md
+    report: docs/REPORTS/2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md
+    unlocks:
+      - UCPV1-PHASE2-SLICE2-IMPL2
+
+  - block_id: UCPV1-PHASE2-SLICE2-IMPL2
+    parent_block_id: UCPV1-PHASE2
+    depends_on:
+      - UCPV1-GATES-SANITARY
+    status: planned
+    task_package: null
+    report: null
+    unlocks:
+      - UCPV1-PHASE3
