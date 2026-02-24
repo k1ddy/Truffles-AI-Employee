@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
@@ -18,10 +17,8 @@ import TenantsOperationalKpiPanel from "@/components/TenantsOperationalKpiPanel"
 import TenantsPortfolioCompaniesPanel from "@/components/TenantsPortfolioCompaniesPanel";
 import TenantsQuickCreatePanel from "@/components/TenantsQuickCreatePanel";
 import TenantsScopedErrorSummary from "@/components/TenantsScopedErrorSummary";
-import type { TenantsSensitiveAction } from "@/components/TenantsSensitiveIdCell";
 import TenantsTopControls from "@/components/TenantsTopControls";
 import {
-    adminApi,
     authApi,
     canAccessConsole,
     type TenantsWeeklySnapshotRecord,
@@ -41,6 +38,7 @@ import { useTenantsDataQueries } from "./use-tenants-data-queries";
 import { useTenantsActions } from "./use-tenants-actions";
 import { useTenantsActionQueue } from "./use-tenants-action-queue";
 import { useTenantsOperationalModel } from "./use-tenants-operational-model";
+import { useTenantsPageOrchestration } from "./use-tenants-page-orchestration";
 import { useTenantsPageOperations } from "./use-tenants-page-operations";
 import { useTenantsPageFilters } from "./use-tenants-page-filters";
 import {
@@ -248,22 +246,6 @@ export default function TenantsPage() {
     const queryClient = useQueryClient();
     const controlTowerEnabled = process.env.NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER !== "0";
     const { errors: inlineErrors, reportError, reportInlineError, clearErrors } = useInlineErrorSummary();
-    const reportValidationError = (
-        message: string,
-        code = "VALIDATION_ERROR",
-        scope?: string,
-    ) => {
-        const resolvedScope = scope ?? resolveErrorScopeFromWorkspace(controlTowerEnabled ? workspaceMode : "portfolio");
-        reportInlineError({ code, message, scope: resolvedScope });
-        toast.error(message);
-    };
-    const reportProvisioningError = (error: unknown, operation: string, endpoint: string) =>
-        reportError(error, {
-            includeProvisioningGuidance: true,
-            operation,
-            endpoint,
-            scope: resolveErrorScopeFromWorkspace(controlTowerEnabled ? workspaceMode : "portfolio"),
-        });
     const [clientQuery, setClientQuery] = useState("");
     const [branchQuery, setBranchQuery] = useState("");
     const [companyQuery, setCompanyQuery] = useState("");
@@ -299,6 +281,21 @@ export default function TenantsPage() {
     });
     const [quickCreateRunning, setQuickCreateRunning] = useState<"company" | "client" | "branch" | null>(null);
     const effectiveWorkspaceMode: TenantsWorkspaceMode = controlTowerEnabled ? workspaceMode : "portfolio";
+    const {
+        activeErrorScope,
+        reportValidationError,
+        reportProvisioningError,
+        refreshContext,
+        refreshTenants,
+        auditSensitiveAccess,
+    } = useTenantsPageOrchestration({
+        controlTowerEnabled,
+        workspaceMode,
+        queryClient,
+        reportInlineError,
+        reportError,
+        resolveErrorScopeFromWorkspace,
+    });
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -448,10 +445,6 @@ export default function TenantsPage() {
         meClientId: meData?.client?.id ?? null,
         meClientName: meData?.client?.name ?? null,
     });
-    const activeErrorScope = useMemo(
-        () => resolveErrorScopeFromWorkspace(effectiveWorkspaceMode),
-        [effectiveWorkspaceMode],
-    );
     const visibleInlineErrors = useMemo(() => {
         return inlineErrors.filter((error) => error.scope === "global" || error.scope === activeErrorScope);
     }, [activeErrorScope, inlineErrors]);
@@ -532,37 +525,6 @@ export default function TenantsPage() {
         effectiveWorkspaceMode,
         tenantLifecycle,
     });
-
-    const refreshContext = () => {
-        queryClient.invalidateQueries({ queryKey: ["console-me"] });
-    };
-
-    const refreshTenants = () => {
-        queryClient.invalidateQueries({ queryKey: ["tenants-companies"] });
-        queryClient.invalidateQueries({ queryKey: ["tenants-clients"] });
-        queryClient.invalidateQueries({ queryKey: ["tenants-branches"] });
-        queryClient.invalidateQueries({ queryKey: ["tenants-fleet-attention"] });
-        queryClient.invalidateQueries({ queryKey: ["tenants-branch-changes-recent-kpi"] });
-        queryClient.invalidateQueries({ queryKey: ["tenants-client-lifecycle-audit-api"] });
-    };
-    const auditSensitiveAccess = async (input: {
-        branchId: string;
-        field: "instance_id";
-        action: TenantsSensitiveAction;
-        contextScope?: string;
-    }) => {
-        try {
-            await adminApi.auditTenantsSensitiveAccess({
-                branch_id: input.branchId,
-                field: input.field,
-                action: input.action,
-                context: input.contextScope,
-            });
-        } catch (error) {
-            reportError(error, { scope: "changes" });
-            throw error;
-        }
-    };
 
     const {
         setCompanyContext,

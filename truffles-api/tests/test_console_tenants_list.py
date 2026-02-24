@@ -116,6 +116,42 @@ def test_build_fleet_client_details_from_projection_accepts_valid_row() -> None:
     assert details.reference_branch_ids == (branch_id,)
 
 
+def test_load_materialized_fleet_client_details_map_returns_max_freshness_lag() -> None:
+    client_id = uuid4()
+    now = datetime.now(timezone.utc)
+    row = SimpleNamespace(
+        client_id=client_id,
+        lifecycle_state="active",
+        payment_status="confirmed",
+        commercial_state="payment_confirmed",
+        service_state="ok",
+        owner_name="Owner",
+        next_action="monitor_sla_and_quality",
+        total_branches=3,
+        active_branches=2,
+        degraded_branches=1,
+        go_live_ready_branches=1,
+        reference_branch_ids=[],
+        reference_branch_reason="selected_active_branch",
+        refreshed_at=now - timedelta(seconds=90),
+    )
+    query_result = Mock()
+    query_result.all.return_value = [row]
+    query = Mock()
+    query.filter.return_value = query_result
+    db = Mock()
+    db.query.return_value = query
+
+    details_map, freshness_lag = console_router._load_materialized_fleet_client_details_map(
+        db,
+        client_ids={client_id},
+    )
+
+    assert client_id in details_map
+    assert freshness_lag is not None
+    assert freshness_lag >= 30.0
+
+
 def test_load_or_build_fleet_client_details_map_uses_materialized_when_complete(monkeypatch) -> None:
     client_id = uuid4()
     company_id = uuid4()
@@ -134,16 +170,22 @@ def test_load_or_build_fleet_client_details_map_uses_materialized_when_complete(
         go_live_ready_branches=1,
     )
     db = Mock()
+    observation_calls: list[dict[str, object]] = []
 
     monkeypatch.setattr(
         console_router,
         "_load_materialized_fleet_client_details_map",
-        lambda *_args, **_kwargs: {client_id: expected},
+        lambda *_args, **_kwargs: ({client_id: expected}, 42.0),
     )
     monkeypatch.setattr(
         console_router,
         "_build_fleet_client_details_map",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not rebuild details on full materialized hit")),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_fleet_projection_observation",
+        lambda **kwargs: observation_calls.append(kwargs),
     )
 
     result = console_router._load_or_build_fleet_client_details_map(
@@ -153,6 +195,14 @@ def test_load_or_build_fleet_client_details_map_uses_materialized_when_complete(
     )
 
     assert result == {client_id: expected}
+    assert observation_calls == [
+        {
+            "total_clients": 1,
+            "materialized_clients": 1,
+            "fallback_clients": 0,
+            "max_freshness_lag_seconds": 42.0,
+        }
+    ]
 
 
 def test_load_or_build_fleet_client_details_map_rebuilds_missing_and_upserts(monkeypatch) -> None:
@@ -188,11 +238,12 @@ def test_load_or_build_fleet_client_details_map_rebuilds_missing_and_upserts(mon
     )
     upsert_calls: list[dict[str, object]] = []
     db = Mock()
+    observation_calls: list[dict[str, object]] = []
 
     monkeypatch.setattr(
         console_router,
         "_load_materialized_fleet_client_details_map",
-        lambda *_args, **_kwargs: {hit_client_id: materialized_hit},
+        lambda *_args, **_kwargs: ({hit_client_id: materialized_hit}, 75.0),
     )
     monkeypatch.setattr(
         console_router,
@@ -203,6 +254,11 @@ def test_load_or_build_fleet_client_details_map_rebuilds_missing_and_upserts(mon
         console_router,
         "_upsert_materialized_fleet_client_details",
         lambda _db, **kwargs: upsert_calls.append(kwargs) or True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_fleet_projection_observation",
+        lambda **kwargs: observation_calls.append(kwargs),
     )
 
     result = console_router._load_or_build_fleet_client_details_map(
@@ -216,6 +272,14 @@ def test_load_or_build_fleet_client_details_map_rebuilds_missing_and_upserts(mon
     assert result[miss_client_id] == rebuilt_miss
     assert len(upsert_calls) == 1
     assert upsert_calls[0]["details_by_client_id"] == {miss_client_id: rebuilt_miss}
+    assert observation_calls == [
+        {
+            "total_clients": 2,
+            "materialized_clients": 1,
+            "fallback_clients": 1,
+            "max_freshness_lag_seconds": 75.0,
+        }
+    ]
 
 
 def test_select_reference_active_branches_filters_to_reference_subset() -> None:

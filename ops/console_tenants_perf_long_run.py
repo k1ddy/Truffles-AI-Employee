@@ -53,6 +53,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--portfolio-min-samples", type=int, default=40)
     parser.add_argument("--company-cockpit-min-samples", type=int, default=40)
     parser.add_argument("--branches-min-samples", type=int, default=80)
+    parser.add_argument("--projection-min-coverage", type=float, default=0.7)
+    parser.add_argument("--projection-max-fallback-rate", type=float, default=0.3)
+    parser.add_argument("--projection-max-freshness-lag-seconds", type=float, default=900.0)
+    parser.add_argument(
+        "--projection-observability-required",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--output", help="Path for combined load+snapshot report JSON.")
     parser.add_argument("--snapshot-output", help="Optional path for raw snapshot JSON.")
     parser.add_argument("--pretty", action="store_true")
@@ -198,6 +206,10 @@ def main() -> int:
         portfolio_min_samples=args.portfolio_min_samples,
         company_cockpit_min_samples=args.company_cockpit_min_samples,
         branches_min_samples=args.branches_min_samples,
+        projection_min_coverage=args.projection_min_coverage,
+        projection_max_fallback_rate=args.projection_max_fallback_rate,
+        projection_max_freshness_lag_seconds=args.projection_max_freshness_lag_seconds,
+        projection_observability_required=args.projection_observability_required,
         branch_path=perf_snapshot.DEFAULT_BRANCH_PATH,
     )
 

@@ -26,7 +26,10 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
-from app.logging_config import record_tenants_endpoint_latency
+from app.logging_config import (
+    record_tenants_endpoint_latency,
+    record_tenants_fleet_projection_observation,
+)
 from app.models import (
     Agent,
     AgentIdentity,
@@ -5572,11 +5575,11 @@ def _load_materialized_fleet_client_details_map(
     db: Session,
     *,
     client_ids: set[UUID],
-) -> dict[UUID, _FleetClientDetails]:
+) -> tuple[dict[UUID, _FleetClientDetails], Optional[float]]:
     if not _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED:
-        return {}
+        return {}, None
     if not client_ids:
-        return {}
+        return {}, None
     try:
         rows = (
             db.query(TenantsFleetClientProjection)
@@ -5586,19 +5589,27 @@ def _load_materialized_fleet_client_details_map(
     except ProgrammingError as exc:
         db.rollback()
         if _is_tenants_fleet_client_projection_table_missing_error(exc):
-            return {}
-        return {}
+            return {}, None
+        return {}, None
     except Exception:
         db.rollback()
-        return {}
+        return {}, None
 
     details_map: dict[UUID, _FleetClientDetails] = {}
+    max_freshness_lag_seconds: Optional[float] = None
+    now = datetime.now(timezone.utc)
     for row in rows:
         details = _build_fleet_client_details_from_projection(row)
         if not details:
             continue
         details_map[row.client_id] = details
-    return details_map
+        refreshed_at = getattr(row, "refreshed_at", None)
+        if isinstance(refreshed_at, datetime):
+            refreshed_at_utc = refreshed_at if refreshed_at.tzinfo else refreshed_at.replace(tzinfo=timezone.utc)
+            lag_seconds = max((now - refreshed_at_utc).total_seconds(), 0.0)
+            if max_freshness_lag_seconds is None or lag_seconds > max_freshness_lag_seconds:
+                max_freshness_lag_seconds = lag_seconds
+    return details_map, max_freshness_lag_seconds
 
 
 def _upsert_materialized_fleet_client_details(
@@ -5693,12 +5704,19 @@ def _load_or_build_fleet_client_details_map(
     if not clients:
         return {}
     client_ids = {client.id for client in clients}
-    details_by_client = _load_materialized_fleet_client_details_map(
+    details_by_client, max_freshness_lag_seconds = _load_materialized_fleet_client_details_map(
         db,
         client_ids=client_ids,
     )
+    materialized_clients = len(details_by_client)
     missing_clients = [client for client in clients if client.id not in details_by_client]
     if not missing_clients:
+        record_tenants_fleet_projection_observation(
+            total_clients=len(clients),
+            materialized_clients=materialized_clients,
+            fallback_clients=0,
+            max_freshness_lag_seconds=max_freshness_lag_seconds,
+        )
         return details_by_client
 
     missing_companies_by_id = dict(companies_by_id)
@@ -5716,6 +5734,7 @@ def _load_or_build_fleet_client_details_map(
         clients=missing_clients,
         companies_by_id=missing_companies_by_id,
     )
+    fallback_clients = len(computed_details)
     details_by_client.update(computed_details)
     if computed_details and persist_missing:
         now = datetime.now(timezone.utc)
@@ -5725,6 +5744,12 @@ def _load_or_build_fleet_client_details_map(
             company_id_by_client_id={client.id: client.company_id for client in missing_clients},
             now=now,
         )
+    record_tenants_fleet_projection_observation(
+        total_clients=len(clients),
+        materialized_clients=materialized_clients,
+        fallback_clients=fallback_clients,
+        max_freshness_lag_seconds=max_freshness_lag_seconds,
+    )
     return details_by_client
 
 
