@@ -155,18 +155,23 @@ def test_load_materialized_fleet_client_details_map_returns_max_freshness_lag() 
 def test_compact_stale_materialized_fleet_projection_rows_deletes_stale_ids(monkeypatch) -> None:
     stale_one = uuid4()
     stale_two = uuid4()
+    company_one = uuid4()
+    company_two = uuid4()
     stale_rows_query = Mock()
     stale_rows_query.filter.return_value = stale_rows_query
     stale_rows_query.order_by.return_value = stale_rows_query
     stale_rows_query.limit.return_value = stale_rows_query
-    stale_rows_query.all.return_value = [(stale_one,), (stale_two,)]
+    stale_rows_query.all.return_value = [
+        (stale_one, company_one),
+        (stale_two, company_two),
+    ]
     delete_query = Mock()
     delete_query.filter.return_value = delete_query
     delete_query.delete.return_value = 2
     db = Mock()
     query_calls = {"count": 0}
 
-    def _query_side_effect(_model):
+    def _query_side_effect(*_args):
         query_calls["count"] += 1
         if query_calls["count"] == 1:
             return stale_rows_query
@@ -174,6 +179,7 @@ def test_compact_stale_materialized_fleet_projection_rows_deletes_stale_ids(monk
 
     db.query.side_effect = _query_side_effect
     compaction_events: list[dict[str, object]] = []
+    prewarm_calls: list[list[UUID]] = []
 
     monkeypatch.setattr(console_router, "SessionLocal", lambda: db)
     monkeypatch.setattr(
@@ -181,13 +187,60 @@ def test_compact_stale_materialized_fleet_projection_rows_deletes_stale_ids(monk
         "record_tenants_fleet_projection_compaction",
         lambda **kwargs: compaction_events.append(kwargs),
     )
+    monkeypatch.setattr(
+        console_router,
+        "_maybe_enqueue_projection_fallback_prewarm_for_company_ids",
+        lambda **kwargs: prewarm_calls.append(kwargs.get("company_ids") or []),
+    )
 
     deleted = console_router._compact_stale_materialized_fleet_projection_rows()
 
     assert deleted == 2
     assert db.commit.call_count == 1
     assert db.close.call_count == 1
+    assert len(prewarm_calls) == 1
+    assert set(prewarm_calls[0]) == {company_one, company_two}
     assert compaction_events == [{"outcome": "success", "deleted_rows": 2}]
+
+
+def test_compact_stale_materialized_fleet_projection_rows_skips_prewarm_without_company_scope(
+    monkeypatch,
+) -> None:
+    stale_id = uuid4()
+    stale_rows_query = Mock()
+    stale_rows_query.filter.return_value = stale_rows_query
+    stale_rows_query.order_by.return_value = stale_rows_query
+    stale_rows_query.limit.return_value = stale_rows_query
+    stale_rows_query.all.return_value = [(stale_id, None)]
+    delete_query = Mock()
+    delete_query.filter.return_value = delete_query
+    delete_query.delete.return_value = 1
+    db = Mock()
+    query_calls = {"count": 0}
+
+    def _query_side_effect(*_args):
+        query_calls["count"] += 1
+        if query_calls["count"] == 1:
+            return stale_rows_query
+        return delete_query
+
+    db.query.side_effect = _query_side_effect
+    prewarm_calls: list[list[UUID]] = []
+
+    monkeypatch.setattr(console_router, "SessionLocal", lambda: db)
+    monkeypatch.setattr(console_router, "record_tenants_fleet_projection_compaction", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_maybe_enqueue_projection_fallback_prewarm_for_company_ids",
+        lambda **kwargs: prewarm_calls.append(kwargs.get("company_ids") or []),
+    )
+
+    deleted = console_router._compact_stale_materialized_fleet_projection_rows()
+
+    assert deleted == 1
+    assert prewarm_calls == []
+    assert db.commit.call_count == 1
+    assert db.close.call_count == 1
 
 
 def test_maybe_run_fleet_projection_maintenance_respects_interval(monkeypatch) -> None:

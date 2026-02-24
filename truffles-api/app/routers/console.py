@@ -5821,17 +5821,40 @@ def _compact_stale_materialized_fleet_projection_rows() -> int:
     stale_before = datetime.now(timezone.utc) - timedelta(seconds=_TENANTS_FLEET_CLIENT_PROJECTION_STALE_AFTER_SECONDS)
     try:
         stale_rows = (
-            db.query(TenantsFleetClientProjection.id)
+            db.query(
+                TenantsFleetClientProjection.id,
+                TenantsFleetClientProjection.company_id,
+            )
             .filter(TenantsFleetClientProjection.refreshed_at < stale_before)
             .order_by(TenantsFleetClientProjection.refreshed_at.asc(), TenantsFleetClientProjection.id.asc())
             .limit(_TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_MAX_DELETE)
             .all()
         )
-        stale_ids = [
-            row[0]
-            for row in stale_rows
-            if row and row[0] is not None
-        ]
+        stale_ids: list[UUID] = []
+        stale_company_ids: set[UUID] = set()
+        for row in stale_rows:
+            raw_projection_id: Any = None
+            raw_company_id: Any = None
+            if isinstance(row, tuple):
+                raw_projection_id = row[0] if len(row) > 0 else None
+                raw_company_id = row[1] if len(row) > 1 else None
+            else:
+                raw_projection_id = getattr(row, "id", None)
+                raw_company_id = getattr(row, "company_id", None)
+            if isinstance(raw_projection_id, UUID):
+                stale_ids.append(raw_projection_id)
+            elif raw_projection_id:
+                try:
+                    stale_ids.append(UUID(str(raw_projection_id)))
+                except (TypeError, ValueError):
+                    continue
+            if isinstance(raw_company_id, UUID):
+                stale_company_ids.add(raw_company_id)
+            elif raw_company_id:
+                try:
+                    stale_company_ids.add(UUID(str(raw_company_id)))
+                except (TypeError, ValueError):
+                    continue
         if not stale_ids:
             record_tenants_fleet_projection_compaction(outcome="noop", deleted_rows=0)
             return 0
@@ -5842,6 +5865,14 @@ def _compact_stale_materialized_fleet_projection_rows() -> int:
         )
         db.commit()
         deleted_count = max(int(deleted_rows or 0), 0)
+        if deleted_count > 0 and stale_company_ids:
+            try:
+                _maybe_enqueue_projection_fallback_prewarm_for_company_ids(
+                    company_ids=sorted(stale_company_ids, key=str),
+                )
+            except Exception:
+                # Compaction must stay fail-open even if async prewarm enqueue fails.
+                pass
         record_tenants_fleet_projection_compaction(outcome="success", deleted_rows=deleted_count)
         return deleted_count
     except ProgrammingError as exc:
