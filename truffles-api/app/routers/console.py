@@ -3,6 +3,7 @@ import json
 import os
 import re
 import secrets
+from collections import deque
 from dataclasses import dataclass
 from datetime import date as dt_date
 from datetime import datetime, time, timedelta, timezone
@@ -2221,6 +2222,18 @@ _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MIN_INTERVAL_SECONDS = _parse_env_int(
     min_value=1,
     max_value=3600,
 )
+_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX = _parse_env_int(
+    "TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX",
+    default=512,
+    min_value=16,
+    max_value=10000,
+)
+_TENANTS_FLEET_PREWARM_DISPATCH_BATCH_MAX = _parse_env_int(
+    "TENANTS_FLEET_PREWARM_DISPATCH_BATCH_MAX",
+    default=64,
+    min_value=1,
+    max_value=512,
+)
 _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
@@ -2246,6 +2259,9 @@ _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY = "tenants_fleet_cache_prewarm_glob
 _TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY = "tenants_fleet_cache_prewarm_events"
 _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_LOCK = Lock()
 _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_NEXT_ALLOWED_AT = 0.0
+_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE: deque[dict[str, Any]] = deque()
+_TENANTS_FLEET_PREWARM_DISPATCH_LOCK = Lock()
+_TENANTS_FLEET_PREWARM_DISPATCH_WORKER: Optional[Thread] = None
 
 
 @dataclass
@@ -2939,6 +2955,148 @@ def _queue_fleet_incremental_prewarm_event(
     _queue_fleet_global_prewarm(db)
 
 
+def _extract_incremental_prewarm_targets(
+    events: list[dict[str, Any]],
+) -> tuple[set[UUID], bool]:
+    scoped_company_ids: set[UUID] = set()
+    global_prewarm_required = False
+    for raw_event in events:
+        if not isinstance(raw_event, dict):
+            continue
+        global_prewarm_required = True
+        event_company_ids = raw_event.get("company_ids")
+        if not isinstance(event_company_ids, list):
+            continue
+        for raw_company_id in event_company_ids:
+            if isinstance(raw_company_id, UUID):
+                scoped_company_ids.add(raw_company_id)
+                continue
+            if not isinstance(raw_company_id, str):
+                continue
+            try:
+                scoped_company_ids.add(UUID(raw_company_id))
+            except (TypeError, ValueError):
+                continue
+    return scoped_company_ids, global_prewarm_required
+
+
+def _coalesce_incremental_prewarm_dispatch_batch(
+    batch: list[dict[str, Any]],
+) -> tuple[set[UUID], bool]:
+    scoped_company_ids: set[UUID] = set()
+    global_prewarm_required = False
+    for raw_item in batch:
+        if not isinstance(raw_item, dict):
+            continue
+        global_prewarm_required = global_prewarm_required or bool(raw_item.get("global_required"))
+        raw_company_ids = raw_item.get("company_ids")
+        if not isinstance(raw_company_ids, list):
+            continue
+        for raw_company_id in raw_company_ids:
+            if isinstance(raw_company_id, UUID):
+                scoped_company_ids.add(raw_company_id)
+                continue
+            if not isinstance(raw_company_id, str):
+                continue
+            try:
+                scoped_company_ids.add(UUID(raw_company_id))
+            except (TypeError, ValueError):
+                continue
+    return scoped_company_ids, global_prewarm_required
+
+
+def _drain_fleet_incremental_prewarm_dispatch_queue_once() -> bool:
+    with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        if not _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE:
+            return False
+        batch: list[dict[str, Any]] = []
+        while (
+            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE
+            and len(batch) < _TENANTS_FLEET_PREWARM_DISPATCH_BATCH_MAX
+        ):
+            batch.append(_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.popleft())
+
+    scoped_company_ids, global_prewarm_required = _coalesce_incremental_prewarm_dispatch_batch(batch)
+    if scoped_company_ids:
+        _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
+        _schedule_fleet_attention_prewarm_for_company_ids(company_ids=scoped_company_ids)
+    if global_prewarm_required:
+        _schedule_fleet_global_prewarm()
+    return True
+
+
+def _fleet_incremental_prewarm_dispatch_worker() -> None:
+    global _TENANTS_FLEET_PREWARM_DISPATCH_WORKER
+
+    try:
+        while _drain_fleet_incremental_prewarm_dispatch_queue_once():
+            continue
+    finally:
+        should_restart = False
+        with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+            _TENANTS_FLEET_PREWARM_DISPATCH_WORKER = None
+            should_restart = bool(_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE)
+        if should_restart:
+            _ensure_fleet_incremental_prewarm_dispatch_worker()
+
+
+def _ensure_fleet_incremental_prewarm_dispatch_worker() -> None:
+    global _TENANTS_FLEET_PREWARM_DISPATCH_WORKER
+
+    worker: Optional[Thread]
+    with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        current_worker = _TENANTS_FLEET_PREWARM_DISPATCH_WORKER
+        if current_worker is not None and current_worker.is_alive():
+            return
+        worker = Thread(
+            target=_fleet_incremental_prewarm_dispatch_worker,
+            daemon=True,
+            name="tenants-fleet-prewarm-dispatch",
+        )
+        _TENANTS_FLEET_PREWARM_DISPATCH_WORKER = worker
+
+    try:
+        worker.start()
+    except Exception:
+        with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+            if _TENANTS_FLEET_PREWARM_DISPATCH_WORKER is worker:
+                _TENANTS_FLEET_PREWARM_DISPATCH_WORKER = None
+
+
+def _enqueue_fleet_incremental_prewarm_dispatch(
+    *,
+    company_ids: set[UUID],
+    global_prewarm_required: bool,
+) -> None:
+    if not company_ids and not global_prewarm_required:
+        return
+
+    normalized_company_ids = [str(company_id) for company_id in sorted(company_ids, key=str)]
+    payload = {
+        "company_ids": normalized_company_ids,
+        "global_required": global_prewarm_required,
+    }
+
+    should_start_worker = False
+    with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        if len(_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE) >= _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX:
+            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
+            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(
+                {
+                    "company_ids": normalized_company_ids,
+                    "global_required": True,
+                    "reason": "dispatch_queue_overflow",
+                }
+            )
+        else:
+            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(payload)
+        worker = _TENANTS_FLEET_PREWARM_DISPATCH_WORKER
+        should_start_worker = worker is None or not worker.is_alive()
+
+    if should_start_worker:
+        _ensure_fleet_incremental_prewarm_dispatch_worker()
+
+
 def _load_global_active_client_ids(
     *,
     max_clients: int,
@@ -3162,31 +3320,16 @@ def _schedule_fleet_global_prewarm() -> None:
 def _on_console_session_after_commit(session: Session) -> None:
     raw_events = session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY, None)
     if isinstance(raw_events, list):
-        scoped_company_ids: set[UUID] = set()
-        global_prewarm_required = False
-        for raw_event in raw_events:
-            if not isinstance(raw_event, dict):
-                continue
-            event_company_ids = raw_event.get("company_ids")
-            if isinstance(event_company_ids, list):
-                for raw_company_id in event_company_ids:
-                    if not isinstance(raw_company_id, str):
-                        continue
-                    try:
-                        scoped_company_ids.add(UUID(raw_company_id))
-                    except (TypeError, ValueError):
-                        continue
-            global_prewarm_required = True
+        scoped_company_ids, global_prewarm_required = _extract_incremental_prewarm_targets(raw_events)
 
         # Clear legacy keys if event stream was present.
         session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
         session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY, None)
 
-        if scoped_company_ids:
-            _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
-            _schedule_fleet_attention_prewarm_for_company_ids(company_ids=scoped_company_ids)
-        if global_prewarm_required:
-            _schedule_fleet_global_prewarm()
+        _enqueue_fleet_incremental_prewarm_dispatch(
+            company_ids=scoped_company_ids,
+            global_prewarm_required=global_prewarm_required,
+        )
         return
 
     raw_company_ids = session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
@@ -3196,11 +3339,10 @@ def _on_console_session_after_commit(session: Session) -> None:
     if not isinstance(raw_company_ids, set):
         raw_company_ids = set()
     scoped_company_ids = {company_id for company_id in raw_company_ids if isinstance(company_id, UUID)}
-    if scoped_company_ids:
-        _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
-        _schedule_fleet_attention_prewarm_for_company_ids(company_ids=scoped_company_ids)
-    if global_prewarm_required:
-        _schedule_fleet_global_prewarm()
+    _enqueue_fleet_incremental_prewarm_dispatch(
+        company_ids=scoped_company_ids,
+        global_prewarm_required=global_prewarm_required,
+    )
 
 
 @event.listens_for(Session, "after_rollback")

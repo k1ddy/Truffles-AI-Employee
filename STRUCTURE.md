@@ -127,6 +127,7 @@
 | `console-web/src/components/TenantsOperationalKpiPanel.tsx` | Вынесенная панель операционных KPI/alert hooks/weekly snapshots для Tenants (platform_admin) | Frontend |
 | `console-web/src/app/tenants/use-tenants-scope-derived-state.ts` | Derived scope/state hook для `/tenants` (context names/maps/filter options) | Frontend |
 | `console-web/src/app/tenants/tenants-page-helpers.ts` | Shared helpers/types/formatters for Tenants page (lifecycle audit, branch patch/snapshot, scope/date labels) | Frontend |
+| `console-web/src/app/tenants/use-tenants-action-queue.ts` | Hook для action-queue orchestration и archive predicate в `/tenants` | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
 | `console-web/e2e/tenants-a11y.spec.ts` | Live Playwright + Axe evidence для Tenants (desktop/mobile) | Frontend/QA |
 | `console-web/eslint.config.js` | ESLint flat config для console-web | Frontend |
