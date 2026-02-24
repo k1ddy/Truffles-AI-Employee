@@ -660,6 +660,66 @@ def test_throttle_projection_fallback_prewarm_company_ids_respects_interval(monk
     assert third == {company_id}
 
 
+def test_maybe_enqueue_projection_fallback_prewarm_for_client_ids_enqueues_company_scopes(monkeypatch) -> None:
+    first_client_id = uuid4()
+    second_client_id = uuid4()
+    company_a = uuid4()
+    company_b = uuid4()
+    enqueue_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_ENABLED", True)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MAX_COMPANY_SCOPES", 10)
+    monkeypatch.setattr(
+        console_router,
+        "_load_company_ids_for_client_ids",
+        lambda **_kwargs: {company_a, company_b},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_throttle_projection_fallback_prewarm_company_ids",
+        lambda **_kwargs: {company_b},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueue_calls.append(kwargs),
+    )
+
+    console_router._maybe_enqueue_projection_fallback_prewarm_for_client_ids(
+        client_ids={first_client_id, second_client_id},
+    )
+
+    assert enqueue_calls == [
+        {
+            "company_ids": {company_b},
+            "global_prewarm_required": False,
+        }
+    ]
+
+
+def test_maybe_enqueue_projection_fallback_prewarm_for_client_ids_skips_without_company_map(monkeypatch) -> None:
+    client_id = uuid4()
+    enqueue_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_ENABLED", True)
+    monkeypatch.setattr(
+        console_router,
+        "_load_company_ids_for_client_ids",
+        lambda **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueue_calls.append(kwargs),
+    )
+
+    console_router._maybe_enqueue_projection_fallback_prewarm_for_client_ids(
+        client_ids={client_id},
+    )
+
+    assert enqueue_calls == []
+
+
 def test_select_reference_active_branches_filters_to_reference_subset() -> None:
     selected_id = uuid4()
     ignored_id = uuid4()
@@ -1218,7 +1278,10 @@ def test_schedule_fleet_global_prewarm_starts_summary_and_attention_tasks(monkey
     assert attention_payload["limit"] == console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT
 
 
-def test_schedule_fleet_global_prewarm_skips_when_overflow(monkeypatch) -> None:
+def test_schedule_fleet_global_prewarm_overflow_enqueues_projection_scope_prewarm(monkeypatch) -> None:
+    first_client_id = uuid4()
+    second_client_id = uuid4()
+    fallback_calls: list[set[UUID]] = []
     summary_tasks: list[dict[str, object]] = []
     attention_tasks: list[dict[str, object]] = []
 
@@ -1230,7 +1293,12 @@ def test_schedule_fleet_global_prewarm_skips_when_overflow(monkeypatch) -> None:
     monkeypatch.setattr(
         console_router,
         "_load_global_active_client_ids",
-        lambda **_kwargs: (set(), True),
+        lambda **_kwargs: ({first_client_id, second_client_id}, True),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_maybe_enqueue_projection_fallback_prewarm_for_client_ids",
+        lambda **kwargs: fallback_calls.append(kwargs.get("client_ids") or set()),
     )
     monkeypatch.setattr(
         console_router,
@@ -1245,8 +1313,33 @@ def test_schedule_fleet_global_prewarm_skips_when_overflow(monkeypatch) -> None:
 
     console_router._schedule_fleet_global_prewarm()
 
+    assert fallback_calls == [{first_client_id, second_client_id}]
     assert summary_tasks == []
     assert attention_tasks == []
+
+
+def test_schedule_fleet_global_prewarm_skips_when_overflow_without_clients(monkeypatch) -> None:
+    fallback_calls: list[set[UUID]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_reserve_fleet_global_prewarm_slot",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_load_global_active_client_ids",
+        lambda **_kwargs: (set(), True),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_maybe_enqueue_projection_fallback_prewarm_for_client_ids",
+        lambda **kwargs: fallback_calls.append(kwargs.get("client_ids") or set()),
+    )
+
+    console_router._schedule_fleet_global_prewarm()
+
+    assert fallback_calls == []
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@
 - base_ref: origin/main
 - scope: Контракт состояния Tenants + Wave3 snapshot hardening + частичное переключение Tenants на server contract (`portfolio/cockpit`)
 - done:
+  - Wave4 continuation (part 10): global prewarm overflow path no longer hard-skips; when active scope overflows max clients (or exceeds async cap), `_schedule_fleet_global_prewarm` now enqueues throttled company-scope durable prewarm from overflow client slice via `_maybe_enqueue_projection_fallback_prewarm_for_client_ids`; added contract tests for overflow enqueue and client->company prewarm mapping; checks green (`ruff`, `pytest ...` -> `107 passed`).
   - Wave4 continuation (part 9): request fallback path now enqueues throttled company-scope projection self-healing prewarm when fallback clients are not fully sync-persisted; added env controls `TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_*` and contract tests (`test_load_or_build_fleet_client_details_map_enqueues_projection_fallback_prewarm_for_unpersisted_clients`, `test_load_or_build_fleet_client_details_map_skips_projection_fallback_prewarm_when_all_fallback_clients_persisted`, `test_throttle_projection_fallback_prewarm_company_ids_respects_interval`), checks green (`ruff`, `pytest ...` -> `104 passed`).
   - Дополнен действующий TP контрактами состояния, матрицей поведения, глоссарием и acceptance сценариями.
   - Исправлен `apply context` в Tenants: источник теперь `readConsoleContextScopeFromStorage`, а не stale `meData`.
@@ -272,4 +273,4 @@
   - truffles-api/tests/test_console_tenants_list.py
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-24T10:25:08Z
+- last_updated: 2026-02-24T10:54:47Z

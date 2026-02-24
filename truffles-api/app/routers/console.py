@@ -3581,6 +3581,56 @@ def _load_active_clients_by_company(
         db.close()
 
 
+def _load_company_ids_for_client_ids(
+    *,
+    client_ids: set[UUID],
+    max_company_ids: int,
+) -> set[UUID]:
+    if not client_ids:
+        return set()
+    if max_company_ids <= 0:
+        return set()
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Client.company_id)
+            .filter(
+                Client.status == _CLIENT_STATUS_ACTIVE,
+                Client.id.in_(list(client_ids)),
+                Client.company_id.isnot(None),
+            )
+            .all()
+        )
+        company_ids: set[UUID] = set()
+        for row in rows:
+            raw_company_id: Any = None
+            if isinstance(row, tuple):
+                raw_company_id = row[0] if row else None
+            elif hasattr(row, "company_id"):
+                raw_company_id = getattr(row, "company_id")
+            else:
+                try:
+                    raw_company_id = row[0]  # type: ignore[index]
+                except Exception:
+                    raw_company_id = None
+            if isinstance(raw_company_id, UUID):
+                company_ids.add(raw_company_id)
+            elif raw_company_id:
+                try:
+                    company_ids.add(UUID(str(raw_company_id)))
+                except (TypeError, ValueError):
+                    continue
+            if len(company_ids) >= max_company_ids:
+                break
+        return company_ids
+    except Exception:
+        db.rollback()
+        return set()
+    finally:
+        db.close()
+
+
 def _schedule_fleet_summary_prewarm_for_company_ids(
     *,
     company_ids: set[UUID],
@@ -3679,9 +3729,12 @@ def _schedule_fleet_global_prewarm() -> None:
     active_client_ids, overflow = _load_global_active_client_ids(
         max_clients=_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MAX_ACTIVE_CLIENTS,
     )
-    if overflow or not active_client_ids:
+    if not active_client_ids:
         return
-    if len(active_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+    if overflow or len(active_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+        _maybe_enqueue_projection_fallback_prewarm_for_client_ids(
+            client_ids=active_client_ids,
+        )
         return
 
     active_client_ids_sorted = sorted(active_client_ids, key=str)
@@ -5859,6 +5912,55 @@ def _throttle_projection_fallback_prewarm_company_ids(
     return allowed_company_ids
 
 
+def _maybe_enqueue_projection_fallback_prewarm_for_company_ids(
+    *,
+    company_ids: list[UUID],
+) -> None:
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED:
+        return
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_ENABLED:
+        return
+    if not company_ids:
+        return
+
+    ordered_unique_company_ids: list[UUID] = []
+    seen_company_ids: set[UUID] = set()
+    for company_id in company_ids:
+        if company_id in seen_company_ids:
+            continue
+        seen_company_ids.add(company_id)
+        ordered_unique_company_ids.append(company_id)
+        if len(ordered_unique_company_ids) >= _TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MAX_COMPANY_SCOPES:
+            break
+
+    throttled_company_ids = _throttle_projection_fallback_prewarm_company_ids(
+        company_ids=ordered_unique_company_ids,
+    )
+    if not throttled_company_ids:
+        return
+    _enqueue_fleet_incremental_prewarm_dispatch(
+        company_ids=throttled_company_ids,
+        global_prewarm_required=False,
+    )
+
+
+def _maybe_enqueue_projection_fallback_prewarm_for_client_ids(
+    *,
+    client_ids: set[UUID],
+) -> None:
+    if not client_ids:
+        return
+    company_ids = _load_company_ids_for_client_ids(
+        client_ids=client_ids,
+        max_company_ids=_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MAX_COMPANY_SCOPES,
+    )
+    if not company_ids:
+        return
+    _maybe_enqueue_projection_fallback_prewarm_for_company_ids(
+        company_ids=sorted(company_ids, key=str),
+    )
+
+
 def _maybe_enqueue_projection_fallback_prewarm_for_clients(
     *,
     fallback_clients: list[Client],
@@ -5883,15 +5985,8 @@ def _maybe_enqueue_projection_fallback_prewarm_for_clients(
         raw_company_ids.append(company_id)
         if len(raw_company_ids) >= _TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MAX_COMPANY_SCOPES:
             break
-
-    throttled_company_ids = _throttle_projection_fallback_prewarm_company_ids(
+    _maybe_enqueue_projection_fallback_prewarm_for_company_ids(
         company_ids=raw_company_ids,
-    )
-    if not throttled_company_ids:
-        return
-    _enqueue_fleet_incremental_prewarm_dispatch(
-        company_ids=throttled_company_ids,
-        global_prewarm_required=False,
     )
 
 
