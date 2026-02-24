@@ -100,7 +100,37 @@ def _request_access_token(args: argparse.Namespace) -> str:
     return token
 
 
-def _call_json(url: str, *, token: str, timeout: float) -> tuple[int | None, str | None]:
+def _normalize_scope_value(raw_value: Any) -> str | None:
+    if raw_value is None:
+        return None
+    text = str(raw_value).strip()
+    if not text:
+        return None
+    return text
+
+
+def _extract_scope_from_portfolio_payload(payload: Any) -> tuple[str | None, str | None]:
+    if not isinstance(payload, dict):
+        return None, None
+    clients_section = payload.get("clients")
+    if not isinstance(clients_section, dict):
+        return None, None
+    items = clients_section.get("items")
+    if not isinstance(items, list):
+        return None, None
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        company_id = _normalize_scope_value(item.get("company_id"))
+        if not company_id:
+            continue
+        client_id = _normalize_scope_value(item.get("id"))
+        return company_id, client_id
+    return None, None
+
+
+def _call_json(url: str, *, token: str, timeout: float) -> tuple[int | None, str | None, dict[str, Any] | None]:
     req = request.Request(
         url=url,
         method="GET",
@@ -111,13 +141,21 @@ def _call_json(url: str, *, token: str, timeout: float) -> tuple[int | None, str
     )
     try:
         with request.urlopen(req, timeout=timeout) as response:
-            response.read()
-            return int(response.status), None
+            raw_body = response.read()
+            payload: dict[str, Any] | None = None
+            if raw_body:
+                try:
+                    loaded = json.loads(raw_body.decode("utf-8", errors="replace"))
+                    if isinstance(loaded, dict):
+                        payload = loaded
+                except Exception:
+                    payload = None
+            return int(response.status), None, payload
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        return exc.code, detail[:300]
+        return exc.code, detail[:300], None
     except Exception as exc:  # pragma: no cover - network/infra dependent
-        return None, f"{type(exc).__name__}: {exc}"
+        return None, f"{type(exc).__name__}: {exc}", None
 
 
 def _build_url(base_url: str, path: str, params: dict[str, Any]) -> str:
@@ -158,6 +196,9 @@ def main() -> int:
 
     stats: dict[str, Any] = {}
     sleep_seconds = max(args.sleep_ms, 0) / 1000.0
+    resolved_company_id = _normalize_scope_value(args.company_id)
+    resolved_client_id = _normalize_scope_value(args.client_id)
+    resolved_branch_id = _normalize_scope_value(args.branch_id)
 
     for _ in range(max(args.loops, 0)):
         portfolio_url = _build_url(
@@ -165,33 +206,39 @@ def main() -> int:
             "/console/v1/admin/tenants/portfolio",
             {"limit": args.portfolio_limit},
         )
-        status, detail = _call_json(portfolio_url, token=token, timeout=args.timeout)
+        status, detail, payload = _call_json(portfolio_url, token=token, timeout=args.timeout)
         _record_call(stats, "portfolio", status, detail)
+        if status == 200 and not resolved_company_id:
+            auto_company_id, auto_client_id = _extract_scope_from_portfolio_payload(payload)
+            if auto_company_id:
+                resolved_company_id = auto_company_id
+            if not resolved_client_id and auto_client_id:
+                resolved_client_id = auto_client_id
 
         company_cockpit_url = _build_url(
             args.base_url,
             "/console/v1/admin/tenants/company-cockpit",
             {
-                "company_id": args.company_id,
-                "client_id": args.client_id,
+                "company_id": resolved_company_id,
+                "client_id": resolved_client_id,
                 "include_branches": "false",
                 "client_limit": args.company_cockpit_limit,
             },
         )
-        status, detail = _call_json(company_cockpit_url, token=token, timeout=args.timeout)
+        status, detail, _ = _call_json(company_cockpit_url, token=token, timeout=args.timeout)
         _record_call(stats, "company_cockpit", status, detail)
 
         branches_url = _build_url(
             args.base_url,
             "/console/v1/admin/branches",
             {
-                "company_id": args.company_id,
-                "client_id": args.client_id,
-                "branch_id": args.branch_id,
+                "company_id": resolved_company_id,
+                "client_id": resolved_client_id,
+                "branch_id": resolved_branch_id,
                 "limit": args.branches_limit,
             },
         )
-        status, detail = _call_json(branches_url, token=token, timeout=args.timeout)
+        status, detail, _ = _call_json(branches_url, token=token, timeout=args.timeout)
         _record_call(stats, "branches", status, detail)
 
         if sleep_seconds > 0:
@@ -227,6 +274,11 @@ def main() -> int:
         "metrics_url": args.metrics_url,
         "loops": args.loops,
         "sleep_ms": args.sleep_ms,
+        "resolved_scope": {
+            "company_id": resolved_company_id,
+            "client_id": resolved_client_id,
+            "branch_id": resolved_branch_id,
+        },
         "request_stats": stats,
         "request_failures": request_failures,
         "request_failures_allowed": request_failures_allowed,

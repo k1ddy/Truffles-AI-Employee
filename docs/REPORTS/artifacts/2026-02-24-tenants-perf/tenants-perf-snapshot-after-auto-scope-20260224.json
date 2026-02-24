@@ -1,0 +1,59 @@
+{
+  "branches_get_latency": {
+    "/console/v1/admin/branches": {
+      "p50_ms": 50.0,
+      "p95_ms": 100.0,
+      "p95_slo_ms": 800.0,
+      "p95_slo_pass": true,
+      "p99_ms": 100.0,
+      "samples": 136
+    }
+  },
+  "error": null,
+  "generated_at": "2026-02-24T11:24:31.464549+00:00",
+  "metrics_url": "https://api.truffles.kz/metrics",
+  "projection_observability": {
+    "coverage_pass": true,
+    "coverage_ratio": 1.0,
+    "coverage_target_min": 0.7,
+    "fallback_pass": true,
+    "fallback_ratio": 0.0,
+    "fallback_target_max": 0.3,
+    "freshness_lag_seconds": 84.403,
+    "freshness_lag_target_max_seconds": 900.0,
+    "freshness_pass": true,
+    "required": true
+  },
+  "required_projection_gate_failed": false,
+  "required_sample_size_failed": false,
+  "required_slo_failed": false,
+  "sample_targets": {
+    "branches_min_samples": 80,
+    "company_cockpit_min_samples": 40,
+    "portfolio_min_samples": 40
+  },
+  "slo_targets_ms": {
+    "branches_get_p95": 800.0,
+    "company_cockpit_p95": 1000.0,
+    "portfolio_p95": 1200.0
+  },
+  "status": "pass",
+  "tenants_endpoint_latency": {
+    "company_cockpit": {
+      "p50_ms": 50.0,
+      "p95_ms": 100.0,
+      "p95_slo_ms": 1000.0,
+      "p95_slo_pass": true,
+      "p99_ms": 100.0,
+      "samples": 81
+    },
+    "portfolio": {
+      "p50_ms": 100.0,
+      "p95_ms": 250.0,
+      "p95_slo_ms": 1200.0,
+      "p95_slo_pass": true,
+      "p99_ms": 1000.0,
+      "samples": 82
+    }
+  }
+}
