@@ -473,3 +473,33 @@
 
 4. Interpretation.
 - Decomposition remains behavior-preserving and incremental: operator actions are unchanged while regression surface continues to shrink.
+
+## Wave 3 decomposition continuation: editor bootstrap + lifecycle + branch-change pipelines (2026-02-24, UTC)
+1. Implemented extraction from `tenants/page.tsx`.
+- Moved editor bootstrap handlers to hook:
+  - `startCompanyEdit`
+  - `startClientEdit`
+  - `startBranchEdit`
+- Moved lifecycle pipeline handlers to hook:
+  - `openClientLifecycleAction`
+  - `closeClientLifecycleDraft`
+  - `handleClientLifecycleAction`
+- Moved branch-change pipeline handlers to hook:
+  - `requiresBranchConfirmation`
+  - `handlePreviewBranchChange`
+  - `handlePublishBranchChange`
+  - `handleRollbackBranchChange`
+  - `cancelBranchEdit`
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `2214` to `1883` LOC.
+- `useTenantsActions` now owns main action orchestration (context/intent/quick-create/save/editor bootstrap/lifecycle/branch-change), while page is mostly compose + derived state.
+
+3. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`)
+- `scripts/session_check.sh` (pass)
+
+4. Interpretation.
+- Selected Wave 3 goals (`1/2/3`) are completed for this slice without behavioral regression in deterministic checks.

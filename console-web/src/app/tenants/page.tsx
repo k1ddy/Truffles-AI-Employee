@@ -24,7 +24,6 @@ import {
     adminApi,
     authApi,
     canAccessConsole,
-    confirmationsApi,
     opsApi,
     type TenantsOperationalSnapshotPayload,
     type TenantsWeeklySnapshotRecord,
@@ -190,17 +189,6 @@ type TenantsOperationalSnapshot = {
 const LIFECYCLE_AUDIT_STORAGE_KEY = "tenants:client-lifecycle-audit:v2";
 const MAX_LIFECYCLE_AUDIT_ENTRIES_PER_CLIENT = 20;
 const MAX_WEEKLY_SNAPSHOTS = 12;
-
-function stringifyOptionalJson(value: unknown): string {
-    if (!value || typeof value !== "object") {
-        return "";
-    }
-    const keys = Object.keys(value as Record<string, unknown>);
-    if (keys.length === 0) {
-        return "";
-    }
-    return JSON.stringify(value, null, 2);
-}
 
 function attentionLevelClass(level?: FleetAttentionLevel): string {
     if (level === "high") {
@@ -1228,6 +1216,17 @@ export default function TenantsPage() {
         openClientContextTarget,
         runActionQueueIntent,
         runKpiAction,
+        startCompanyEdit,
+        startClientEdit,
+        startBranchEdit,
+        openClientLifecycleAction,
+        closeClientLifecycleDraft,
+        handleClientLifecycleAction,
+        requiresBranchConfirmation,
+        handlePreviewBranchChange,
+        handlePublishBranchChange,
+        handleRollbackBranchChange,
+        cancelBranchEdit,
         handleSaveCompany,
         handleSaveClient,
         handleQuickCreateCompany,
@@ -1250,12 +1249,34 @@ export default function TenantsPage() {
         quickCreateClientId,
         setQuickCreateForm,
         setQuickCreateRunning,
+        branchEditor,
+        branchChangePreview,
+        latestPublishedBranchChange,
+        clientLifecycleDraft,
+        clientLifecyclePendingId,
+        setBranchEditor,
+        setBranchChangePreview,
+        setSavingBranch,
+        setPublishingBranchChange,
+        setRollingBackBranchChange,
+        setClientLifecycleDraft,
+        setClientLifecyclePendingId,
+        setClientLifecycleAuditById,
         companyEditor,
         clientEditor,
         setCompanyEditor,
         setClientEditor,
         setSavingCompany,
         setSavingClient,
+        role,
+        actorLabel: meData?.agent?.name ?? role,
+        lifecycleArchivedLabel: FLEET_LIFECYCLE_LABELS.archived,
+        lifecycleActiveLabel: FLEET_LIFECYCLE_LABELS.active,
+        formatLifecycleLabel: (value) => formatStateLabel(value, FLEET_LIFECYCLE_LABELS),
+        pushLifecycleAuditEntry,
+        buildBranchChangePatch,
+        applyBranchSnapshotToEditor,
+        refetchBranchChanges: () => branchChangesQuery.refetch(),
         refreshTenants,
         reportProvisioningError,
         slugInputPattern: SLUG_INPUT_PATTERN,
@@ -1374,361 +1395,12 @@ export default function TenantsPage() {
         }
     };
 
-    const startCompanyEdit = (company: components["schemas"]["ConsoleCompany"]) => {
-        if (!company.id) {
-            reportValidationError("Не удалось открыть компанию без ID");
-            return;
-        }
-        setClientLifecycleDraft(null);
-        setBranchChangePreview(null);
-        setClientEditor(null);
-        setBranchEditor(null);
-        const billingInfo = stringifyOptionalJson(company.billing_info);
-        setCompanyEditor({
-            id: company.id,
-            name: company.name ?? "",
-            billingInfo,
-            originalName: company.name ?? "",
-            originalBillingInfo: billingInfo,
-        });
-    };
-
-    const startClientEdit = (client: components["schemas"]["ConsoleClient"]) => {
-        if (!client.id) {
-            reportValidationError("Не удалось открыть клиента без ID");
-            return;
-        }
-        setClientLifecycleDraft(null);
-        setBranchChangePreview(null);
-        setCompanyEditor(null);
-        setBranchEditor(null);
-        setClientEditor({
-            id: client.id,
-            slug: client.slug ?? client.name ?? "",
-            companyId: client.company_id ?? "",
-            originalSlug: client.slug ?? client.name ?? "",
-            originalCompanyId: client.company_id ?? "",
-            totalBranches: client.total_branches ?? 0,
-        });
-    };
-
-    const startBranchEdit = (branch: components["schemas"]["ConsoleBranch"]) => {
-        if (!branch.id) {
-            reportValidationError("Не удалось открыть филиал без ID");
-            return;
-        }
-        setClientLifecycleDraft(null);
-        setBranchChangePreview(null);
-        setCompanyEditor(null);
-        setClientEditor(null);
-        setBranchEditor({
-            id: branch.id,
-            name: branch.name ?? "",
-            slug: branch.slug ?? "",
-            timezone: branch.timezone ?? "",
-            phone: branch.phone ?? "",
-            instanceId: branch.instance_id ?? "",
-            telegramChatId: branch.telegram_chat_id ?? "",
-            knowledgeTag: branch.knowledge_tag ?? "",
-            isActive: branch.is_active ?? false,
-            changeReason: "",
-            confirmReason: "",
-            rollbackReason: "",
-            original: {
-                name: branch.name ?? "",
-                slug: branch.slug ?? "",
-                timezone: branch.timezone ?? "",
-                phone: branch.phone ?? "",
-                instanceId: branch.instance_id ?? "",
-                telegramChatId: branch.telegram_chat_id ?? "",
-                knowledgeTag: branch.knowledge_tag ?? "",
-                isActive: branch.is_active ?? false,
-            },
-        });
-    };
-
     const isClientArchived = (client: components["schemas"]["ConsoleClient"]) => {
         const lifecycleValue = (client.lifecycle_state ?? "").trim().toLowerCase();
         if (lifecycleValue) {
             return lifecycleValue === "archived";
         }
         return (client.status ?? "").trim().toLowerCase() !== "active";
-    };
-
-    const openClientLifecycleAction = (
-        client: components["schemas"]["ConsoleClient"],
-        mode: ClientLifecycleMode,
-    ) => {
-        if (!client.id) {
-            reportValidationError("Не удалось выполнить действие без ID клиента");
-            return;
-        }
-        setClientLifecycleDraft({
-            clientId: client.id,
-            clientLabel: client.name ?? client.slug ?? client.id,
-            companyLabel: client.company_name ?? "—",
-            mode,
-            currentLifecycleLabel: formatStateLabel(client.lifecycle_state, FLEET_LIFECYCLE_LABELS),
-            targetLifecycleLabel: mode === "archive" ? FLEET_LIFECYCLE_LABELS.archived : FLEET_LIFECYCLE_LABELS.active,
-            activeBranches: client.active_branches ?? 0,
-            totalBranches: client.total_branches ?? 0,
-            degradedBranches: client.degraded_branches ?? 0,
-            reason: "",
-            confirmChecked: false,
-            checkClientScope: false,
-            checkImpactReview: false,
-            checkOwnerAligned: false,
-        });
-    };
-
-    const closeClientLifecycleDraft = () => {
-        if (clientLifecyclePendingId) {
-            return;
-        }
-        setClientLifecycleDraft(null);
-    };
-
-    const handleClientLifecycleAction = async () => {
-        if (!clientLifecycleDraft) {
-            reportValidationError("Сначала подготовьте действие");
-            return;
-        }
-        const lifecycleDraft = clientLifecycleDraft;
-        const clientId = lifecycleDraft.clientId;
-        if (!clientId) {
-            reportValidationError("Не удалось выполнить действие без ID клиента");
-            return;
-        }
-        const reason = clientLifecycleDraft.reason.trim();
-        if (!reason) {
-            reportValidationError("Укажите причину");
-            return;
-        }
-        if (!clientLifecycleDraft.confirmChecked) {
-            reportValidationError("Подтвердите действие");
-            return;
-        }
-        if (
-            !clientLifecycleDraft.checkClientScope
-            || !clientLifecycleDraft.checkImpactReview
-            || !clientLifecycleDraft.checkOwnerAligned
-        ) {
-            reportValidationError("Заполните checklist перед выполнением действия");
-            return;
-        }
-        const mode = lifecycleDraft.mode;
-        setClientLifecyclePendingId(clientId);
-        let lifecycleCompleted = false;
-        try {
-            if (mode === "archive") {
-                await adminApi.archiveClient(clientId, { reason });
-                toast.success("Клиент архивирован");
-            } else {
-                await adminApi.restoreClient(clientId, { reason });
-                toast.success("Клиент восстановлен");
-            }
-            lifecycleCompleted = true;
-            setClientLifecycleAuditById((prev) => pushLifecycleAuditEntry(prev, {
-                    clientId,
-                    mode,
-                    previousLifecycleLabel: lifecycleDraft.currentLifecycleLabel,
-                    targetLifecycleLabel: lifecycleDraft.targetLifecycleLabel,
-                    reason,
-                    status: "success",
-                    message: mode === "archive" ? "Архивация подтверждена API" : "Восстановление подтверждено API",
-                    actorLabel: meData?.agent?.name ?? role,
-                    happenedAt: new Date().toISOString(),
-                    source: "session",
-                }));
-            if (clientEditor?.id === clientId) {
-                setClientEditor(null);
-            }
-            refreshTenants();
-            refreshContext();
-        } catch (error) {
-            const parsed = reportProvisioningError(
-                error,
-                mode === "archive" ? "архивация клиента" : "восстановление клиента",
-                mode === "archive"
-                    ? "POST /api/proxy/admin/clients/:id/archive"
-                    : "POST /api/proxy/admin/clients/:id/restore",
-            ) as
-                | { message?: string; trace_id?: string }
-                | undefined;
-            setClientLifecycleAuditById((prev) => pushLifecycleAuditEntry(prev, {
-                    clientId,
-                    mode,
-                    previousLifecycleLabel: lifecycleDraft.currentLifecycleLabel,
-                    targetLifecycleLabel: lifecycleDraft.targetLifecycleLabel,
-                    reason,
-                    status: "error",
-                    message: parsed?.message ?? "Ошибка выполнения lifecycle-действия",
-                    traceId: parsed?.trace_id,
-                    actorLabel: meData?.agent?.name ?? role,
-                    happenedAt: new Date().toISOString(),
-                    source: "session",
-                }));
-        } finally {
-            setClientLifecyclePendingId(null);
-            if (lifecycleCompleted) {
-                setClientLifecycleDraft(null);
-            }
-        }
-    };
-
-    const requiresBranchConfirmation = (editor: BranchEditorState) => {
-        const removedInstance = editor.original.instanceId && !editor.instanceId.trim();
-        const deactivated = editor.original.isActive && !editor.isActive;
-        return removedInstance || deactivated;
-    };
-
-    const createBranchDeactivateConfirmation = async (branchId: string, reason: string) => {
-        const confirmation = await confirmationsApi.create({
-            action: "branch_deactivate",
-            target_type: "branch",
-            target_id: branchId,
-            reason,
-        });
-        return confirmation.data.confirmation_id;
-    };
-
-    const handlePreviewBranchChange = async () => {
-        if (!branchEditor) {
-            return;
-        }
-        const reason = branchEditor.changeReason.trim();
-        if (!reason) {
-            reportValidationError("Укажите причину изменения");
-            return;
-        }
-        const { patch, hasChanges, error } = buildBranchChangePatch(branchEditor);
-        if (error) {
-            reportValidationError(error);
-            return;
-        }
-        if (!hasChanges) {
-            toast("Нет изменений");
-            return;
-        }
-        setSavingBranch(true);
-        try {
-            const draftResponse = await adminApi.draftBranchChange({
-                branch_id: branchEditor.id,
-                reason,
-                patch,
-            });
-            const draftChangeId = draftResponse.data.change?.id;
-            if (!draftChangeId) {
-                reportValidationError("Не удалось создать черновик");
-                return;
-            }
-            const validateResponse = await adminApi.validateBranchChange(draftChangeId);
-            setBranchChangePreview(validateResponse.data);
-            const status = validateResponse.data.change?.status;
-            if (status === "validated") {
-                toast.success("Черновик прошел проверку. Можно применять.");
-            } else {
-                reportValidationError("Черновик не прошел проверку. Исправьте ошибки.");
-            }
-            await branchChangesQuery.refetch();
-        } catch (error) {
-            reportProvisioningError(
-                error,
-                "черновик и валидация изменения филиала",
-                "POST /api/proxy/admin/branch-changes + /validate",
-            );
-        } finally {
-            setSavingBranch(false);
-        }
-    };
-
-    const handlePublishBranchChange = async () => {
-        if (!branchEditor) {
-            return;
-        }
-        const changeId = branchChangePreview?.change?.id;
-        if (!changeId) {
-            reportValidationError("Сначала подготовьте и проверьте черновик");
-            return;
-        }
-        setPublishingBranchChange(true);
-        try {
-            let confirmationId: string | undefined;
-            if (requiresBranchConfirmation(branchEditor)) {
-                const confirmationReason = branchEditor.confirmReason.trim() || branchEditor.changeReason.trim();
-                if (!confirmationReason) {
-                    reportValidationError("Укажите причину подтверждения");
-                    return;
-                }
-                confirmationId = await createBranchDeactivateConfirmation(branchEditor.id, confirmationReason);
-            }
-            const publishResponse = await adminApi.publishBranchChange(changeId, {
-                confirmation_id: confirmationId,
-            });
-            setBranchChangePreview(publishResponse.data);
-            setBranchEditor((prev) => (prev ? applyBranchSnapshotToEditor(prev, publishResponse.data.branch) : prev));
-            toast.success("Изменение опубликовано");
-            await branchChangesQuery.refetch();
-            refreshTenants();
-            refreshContext();
-        } catch (error) {
-            reportProvisioningError(error, "публикация изменения филиала", "POST /api/proxy/admin/branch-changes/:id/publish");
-        } finally {
-            setPublishingBranchChange(false);
-        }
-    };
-
-    const handleRollbackBranchChange = async () => {
-        if (!branchEditor) {
-            return;
-        }
-        const targetChange = branchChangePreview?.change?.status === "published"
-            ? branchChangePreview.change
-            : latestPublishedBranchChange;
-        const changeId = targetChange?.id;
-        if (!changeId) {
-            reportValidationError("Нет примененного изменения для отката");
-            return;
-        }
-        const reason = branchEditor.rollbackReason.trim();
-        if (!reason) {
-            reportValidationError("Укажите причину отката");
-            return;
-        }
-
-        setRollingBackBranchChange(true);
-        try {
-            const runRollback = async (confirmationId?: string) =>
-                adminApi.rollbackBranchChange(changeId, {
-                    reason,
-                    confirmation_id: confirmationId,
-                });
-
-            let rollbackResponse;
-            try {
-                rollbackResponse = await runRollback();
-            } catch (error: unknown) {
-                const apiCode = (error as { response?: { data?: { error?: { code?: string } } } })
-                    ?.response?.data?.error?.code;
-                if (apiCode !== "CONFIRMATION_REQUIRED") {
-                    throw error;
-                }
-                const confirmationReason = branchEditor.confirmReason.trim() || reason;
-                const confirmationId = await createBranchDeactivateConfirmation(branchEditor.id, confirmationReason);
-                rollbackResponse = await runRollback(confirmationId);
-            }
-
-            setBranchChangePreview(rollbackResponse.data);
-            setBranchEditor((prev) => (prev ? applyBranchSnapshotToEditor(prev, rollbackResponse.data.branch) : prev));
-            toast.success("Откат выполнен");
-            await branchChangesQuery.refetch();
-            refreshTenants();
-            refreshContext();
-        } catch (error) {
-            reportProvisioningError(error, "откат изменения филиала", "POST /api/proxy/admin/branch-changes/:id/rollback");
-        } finally {
-            setRollingBackBranchChange(false);
-        }
     };
 
     const actionQueue = useMemo<ActionQueueItem[]>(() => {
@@ -2166,10 +1838,7 @@ export default function TenantsPage() {
                         onPreviewBranchChange={handlePreviewBranchChange}
                         onPublishBranchChange={handlePublishBranchChange}
                         onRollbackBranchChange={handleRollbackBranchChange}
-                        onCancelBranchEdit={() => {
-                            setBranchEditor(null);
-                            setBranchChangePreview(null);
-                        }}
+                        onCancelBranchEdit={cancelBranchEdit}
                         branchChangePreview={branchChangePreview}
                         previewValidationErrors={previewValidationErrors}
                         previewDiffEntries={previewDiffEntries}
