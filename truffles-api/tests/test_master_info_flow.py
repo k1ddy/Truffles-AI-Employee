@@ -226,6 +226,43 @@ def test_build_info_intent_reply_master_phrase_uses_team_listing():
     assert "master" in info_sections
 
 
+def test_build_info_intent_reply_master_long_hair_question_focuses_hair_team():
+    reply, meta = _build_info_intent_reply(
+        "master",
+        service_query=None,
+        client_slug="demo_salon",
+        message_text="У вас есть мастера, которые работают с долгими стрижками?",
+    )
+
+    text = (reply or "").casefold()
+    assert "волос" in text
+    assert "ногти" not in text
+    assert "брови" not in text
+    fact_intents = (meta or {}).get("fact_intents") or []
+    info_sections = (meta or {}).get("info_sections") or []
+    assert "master" in fact_intents
+    assert "master" in info_sections
+    assert isinstance((meta or {}).get("resolver_id"), str)
+    assert isinstance((meta or {}).get("resolver_version"), str)
+
+
+def test_build_info_intent_reply_emits_resolver_contract_meta():
+    reply, meta = _build_info_intent_reply(
+        "pricing",
+        service_query=None,
+        client_slug="demo_salon",
+        message_text="Сколько стоит маникюр?",
+    )
+
+    assert isinstance(reply, str) and reply.strip()
+    assert isinstance(meta, dict)
+    assert meta.get("resolver_id")
+    assert meta.get("resolver_version")
+    assert meta.get("intent_class")
+    assert meta.get("action_class") in {"FACT", "COLLECT"}
+    assert isinstance(meta.get("resolver_candidates"), list)
+
+
 def test_build_info_intent_reply_location_uses_truth_address():
     reply, meta = _build_info_intent_reply(
         "location",

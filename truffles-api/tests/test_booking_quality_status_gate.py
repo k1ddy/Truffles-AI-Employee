@@ -2,7 +2,10 @@ import ast
 import hashlib
 import os
 import re
+import shlex
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _load_quality_helpers():
@@ -26,6 +29,8 @@ def _load_quality_helpers():
         "LLM_QUALITY_REGEX_LEXICON_TOKENS",
         "LLM_QUALITY_REGEX_LEXICON_RESOLVER_PREFIXES",
         "LLM_QUALITY_REGEX_LEXICON_TEST_PREFIX",
+        "LLM_QUALITY_HARDCODE_CORE_PREFIXES",
+        "LLM_QUALITY_HARDCODE_ALLOW_MARKER",
         "LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE",
         "LLM_QUALITY_PROGRESS_SKIP_TAGS",
     }
@@ -52,6 +57,13 @@ def _load_quality_helpers():
         "_llm_quality_validate_scenario_artifacts",
         "_llm_quality_is_lexicon_regex_delta_file",
         "_llm_quality_build_lexicon_regex_delta_status",
+        "_llm_quality_is_hardcode_core_file",
+        "_llm_quality_line_has_phrase_branching",
+        "_llm_quality_collect_hardcode_core_violations",
+        "_llm_quality_build_hardcode_core_gate_status",
+        "_llm_quality_is_doc_only_changed_file",
+        "_llm_quality_build_run_economy_status",
+        "_llm_quality_build_replay_command",
         "_llm_quality_hq1_normalize_text",
         "_llm_quality_hq1_contains_any",
         "_llm_quality_hq1_has_hallucination_signal",
@@ -69,7 +81,13 @@ def _load_quality_helpers():
             selected_nodes.append(node)
 
     module = ast.Module(body=selected_nodes, type_ignores=[])
-    namespace = {"hashlib": hashlib, "os": os, "re": re}
+    namespace = {
+        "hashlib": hashlib,
+        "os": os,
+        "re": re,
+        "shlex": shlex,
+        "subprocess": subprocess,
+    }
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
     return namespace
 
@@ -170,6 +188,30 @@ def test_infra_status_marks_invalid_on_preflight_or_runtime_errors():
     assert status["valid"] is False
     assert "webhook_errors" in status["reasons"]
     assert "webhook_secret_preflight:secret_mismatch" in status["reasons"]
+
+
+def test_infra_status_marks_invalid_on_outbox_delivery_failures():
+    ns = _load_quality_helpers()
+    build_infra_status = ns["_llm_quality_build_infra_status"]
+
+    status = build_infra_status(
+        {
+            "webhook_errors": 0,
+            "infra_errors": 0,
+            "decision_meta_errors": 0,
+            "decision_trace_errors": 0,
+            "outbox_delivery_failed_turns": 2,
+            "outbox_delivery_timeout_turns": 1,
+        },
+        {"valid": True, "reasons": []},
+        failure_counts={"outbox_delivery_failed": 2, "outbox_delivery_timeout": 1},
+    )
+
+    assert status["valid"] is False
+    assert "outbox_delivery_failed_turns" in status["reasons"]
+    assert "outbox_delivery_timeout_turns" in status["reasons"]
+    assert "outbox_delivery_failed" in status["reasons"]
+    assert "outbox_delivery_timeout" in status["reasons"]
 
 
 def test_thresholds_include_degraded_fallback_rate_gate():
@@ -304,8 +346,187 @@ def test_weak_oracle_expectation_detects_empty_contract():
     is_weak = ns["_llm_quality_is_weak_oracle_expectation"]
 
     assert is_weak({"action": None, "info_sections": [], "reply_type": None, "state": None}) is True
-    assert is_weak({"expected_reply": True}) is False
+    assert is_weak({"expected_reply": True}) is True
     assert is_weak({"reply_type": "time"}) is False
+    assert is_weak({"expected_reply": True, "action": "collect"}) is False
+
+
+def test_run_economy_blocks_full_run_without_non_doc_delta():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    status = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        changed_files=["docs/TASK_PACKAGES/TP-test.md"],
+    )
+
+    assert status["valid"] is False
+    assert status["enforced"] is True
+    assert "full_run_without_code_delta" in status["reasons"]
+
+
+def test_run_economy_blocks_replay_without_baseline_or_reset():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    status = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file="/tmp/booking_quality/run/scenarios.json",
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+    )
+
+    assert status["valid"] is False
+    assert "replay_without_baseline_summary" in status["reasons"]
+    assert "replay_without_reset_before_dialog" in status["reasons"]
+
+
+def test_run_economy_allows_replay_with_baseline_and_reset():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    status = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file="/tmp/booking_quality/run/scenarios.json",
+        baseline_summary="/tmp/booking_quality/lock/summary.json",
+        reset_before_dialog=True,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+    )
+
+    assert status["valid"] is True
+    assert status["reasons"] == []
+
+
+def test_run_economy_blocks_replay_with_non_canonical_baseline():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    status = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file="/tmp/booking_quality/run/scenarios.json",
+        baseline_summary="/tmp/booking_quality/lock/summary.json",
+        reset_before_dialog=True,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        baseline_preflight={
+            "checked": True,
+            "canonical": False,
+            "canonical_reason": "infra_invalid",
+            "load_error": None,
+        },
+    )
+
+    assert status["valid"] is False
+    assert "replay_baseline_non_canonical" in status["reasons"]
+
+
+def test_run_economy_blocks_replay_with_unreadable_baseline_summary():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    status = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file="/tmp/booking_quality/run/scenarios.json",
+        baseline_summary="/tmp/booking_quality/lock/summary.json",
+        reset_before_dialog=True,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        baseline_preflight={
+            "checked": True,
+            "canonical": None,
+            "canonical_reason": None,
+            "load_error": "baseline_parse_failed",
+        },
+    )
+
+    assert status["valid"] is False
+    assert "replay_baseline_unreadable" in status["reasons"]
+
+
+def test_replay_command_forces_unique_jid_and_reset():
+    ns = _load_quality_helpers()
+    build_replay_command = ns["_llm_quality_build_replay_command"]
+    args = SimpleNamespace(
+        base_url="http://localhost:8000",
+        client_slug="demo_salon",
+        timeout_profile="realistic",
+        timeout=30.0,
+        poll_timeout=20.0,
+        poll_interval=0.5,
+        trace_timeout=15.0,
+        trace_interval=0.5,
+        min_wait=0.1,
+        max_wait=0.2,
+        manager_mode="simulate",
+        pending_mode="ack",
+        tool_hooks="auto",
+        branch_slug=None,
+        remote_jid=None,
+        allow_non_allowlist=False,
+        skip_outbox=False,
+        reset_before_dialog=False,
+        max_failures=0,
+    )
+
+    command = build_replay_command(args, "/tmp/booking_quality/run/scenarios.json", 10)
+    parts = shlex.split(command.replace("TEST_MODE=1 ", "", 1))
+
+    assert "--jid-mode" in parts
+    assert parts[parts.index("--jid-mode") + 1] == "unique"
+    assert "--reset-before-dialog" in parts
+    assert "--allow-non-allowlist" in parts
+
+
+def test_replay_command_skips_allow_non_allowlist_when_skip_outbox():
+    ns = _load_quality_helpers()
+    build_replay_command = ns["_llm_quality_build_replay_command"]
+    args = SimpleNamespace(
+        base_url="http://localhost:8000",
+        client_slug="demo_salon",
+        timeout_profile="realistic",
+        timeout=30.0,
+        poll_timeout=20.0,
+        poll_interval=0.5,
+        trace_timeout=15.0,
+        trace_interval=0.5,
+        min_wait=0.1,
+        max_wait=0.2,
+        manager_mode="simulate",
+        pending_mode="ack",
+        tool_hooks="auto",
+        branch_slug=None,
+        remote_jid=None,
+        allow_non_allowlist=False,
+        skip_outbox=True,
+        reset_before_dialog=True,
+        max_failures=0,
+    )
+
+    command = build_replay_command(args, "/tmp/booking_quality/run/scenarios.json", 10)
+    parts = shlex.split(command.replace("TEST_MODE=1 ", "", 1))
+
+    assert "--jid-mode" in parts
+    assert parts[parts.index("--jid-mode") + 1] == "unique"
+    assert "--reset-before-dialog" in parts
+    assert "--skip-outbox" in parts
+    assert "--allow-non-allowlist" not in parts
 
 
 def test_validate_scenario_artifacts_blocks_missing_summary_and_brief(tmp_path):
@@ -388,6 +609,69 @@ def test_lexicon_regex_delta_gate_requires_resolver_and_tests():
         ],
     )
     assert valid["valid"] is True
+
+
+def test_line_has_phrase_branching_detects_raw_message_text_branch():
+    ns = _load_quality_helpers()
+    detector = ns["_llm_quality_line_has_phrase_branching"]
+
+    assert detector('and "без записи" in _normalize_text(message_text)')
+    assert detector('if "как вас зовут" in normalized_prompt_text:')
+
+
+def test_line_has_phrase_branching_allows_resolver_or_allow_marker():
+    ns = _load_quality_helpers()
+    detector = ns["_llm_quality_line_has_phrase_branching"]
+
+    assert not detector('if get_signal_lexicon_list(client_slug, "hours_keywords"):')
+    assert not detector('if "без записи" in _normalize_text(message_text):  # hardcode-gate: allow')
+
+
+def test_hardcode_core_gate_blocks_phrase_branching_in_core_diff():
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_hardcode_core_gate_status"]
+    ns["_llm_quality_collect_hardcode_core_violations"] = (
+        lambda **_kwargs: (
+            [
+                {
+                    "path": "truffles-api/app/routers/webhook/decision.py",
+                    "source": "worktree_diff",
+                    "line": 'and "без записи" in _normalize_text(message_text)',
+                }
+            ],
+            [],
+        )
+    )
+
+    status = build_gate(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+    )
+
+    assert status["valid"] is False
+    assert status["enforced"] is True
+    assert status["reasons"] == ["core_phrase_branching_detected"]
+    assert status["core_changed_files"] == ["truffles-api/app/routers/webhook/decision.py"]
+    assert status["violations"]
+
+
+def test_hardcode_core_gate_ignores_non_core_changes():
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_hardcode_core_gate_status"]
+
+    status = build_gate(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        changed_files=["docs/REPORTS/sample.md"],
+    )
+
+    assert status["valid"] is True
+    assert status["reasons"] == []
+    assert status["core_changed_files"] == []
+    assert status["violations"] == []
 
 
 def test_hq1_classifier_detects_handoff_miss():

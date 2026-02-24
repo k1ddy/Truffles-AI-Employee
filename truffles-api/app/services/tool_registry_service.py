@@ -360,6 +360,39 @@ def _has_explicit_date_signal(value: str | None) -> bool:
     return False
 
 
+def _normalize_slot_request_tokens(
+    *,
+    date_value: str | None,
+    requested_time: str | None,
+    fallback_tz: str | None,
+    now: datetime | None,
+) -> tuple[str | None, str | None]:
+    requested_time_token = _coerce_time_token(requested_time)
+    if not isinstance(date_value, str):
+        return None, requested_time_token
+    raw_date_token = date_value.strip()
+    if not raw_date_token:
+        return None, requested_time_token
+
+    relative_date_token = _extract_relative_date_token(raw_date_token)
+    if relative_date_token:
+        return relative_date_token, requested_time_token
+
+    time_only_token = _coerce_time_token(raw_date_token)
+    if time_only_token:
+        return None, requested_time_token or time_only_token
+
+    parsed_from_token = _parse_datetime(
+        raw_date_token,
+        fallback_tz=fallback_tz,
+        now=now,
+    )
+    if parsed_from_token and _has_explicit_date_signal(raw_date_token):
+        return parsed_from_token.date().isoformat(), requested_time_token
+
+    return raw_date_token, requested_time_token
+
+
 def _looks_like_booking_verification_message(text: str | None) -> bool:
     if not text:
         return False
@@ -861,14 +894,15 @@ def _list_slots(
     now: datetime | None = None,
     contract_meta: dict[str, Any] | None = None,
 ) -> tuple[str | None, str | None]:
-    requested_date_token = (
-        date_value.strip() if isinstance(date_value, str) and date_value.strip() else None
+    requested_date_token, requested_time_token = _normalize_slot_request_tokens(
+        date_value=date_value,
+        requested_time=requested_time,
+        fallback_tz=branch.timezone if branch else None,
+        now=now,
     )
-    if _coerce_time_token(requested_date_token):
-        requested_date_token = None
     if isinstance(contract_meta, dict):
         contract_meta["requested_date"] = requested_date_token
-        contract_meta["requested_time"] = _coerce_time_token(requested_time)
+        contract_meta["requested_time"] = requested_time_token
         contract_meta["resolved_date"] = None
         contract_meta["available_slots_by_specialist"] = {}
         contract_meta["availability_claim"] = "unknown"
@@ -929,7 +963,7 @@ def _list_slots(
             key: list(value[:10]) for key, value in slots_by_specialist.items()
         }
 
-    requested_token = _coerce_time_token(requested_time)
+    requested_token = requested_time_token
     available_times = sorted(
         {
             token
@@ -1570,24 +1604,33 @@ def execute_tool_action(
             )
         appointment_time = _appointment_time_token(appointment)
         if requested_time and appointment_time and requested_time != appointment_time:
+            verification_request = _looks_like_booking_verification_message(message_text)
             mismatch_prefix = (
-                f"Записи {requested_reference} не вижу."
+                f"Проверил запись {requested_reference}: подтверждённой записи на это время не вижу."
                 if requested_reference
-                else f"На {requested_time} записи не вижу."
+                else f"Проверил: на {requested_time} подтверждённой записи не вижу."
             )
             booked_time_note = (
-                " Вижу подтвержденную запись"
-                f" на {appointment_time} (возможно на другую дату)."
+                f" Вижу подтверждённую запись на {appointment_time}."
                 if isinstance(appointment_time, str) and appointment_time.strip()
                 else ""
             )
+            if verification_request:
+                followup = "Могу подтвердить найденную запись или проверить другой слот."
+                followup_prompt = _expected_reply_prompt_from_hint(expected_reply_type)
+                if followup_prompt:
+                    followup = f"{followup} {followup_prompt}"
+                else:
+                    followup = (
+                        f"{followup} Подскажите имя или номер телефона, "
+                        "и проверю еще раз."
+                    )
+            else:
+                followup = "Хотите проверить другую дату/время или оформить новую запись?"
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
-                response_text=(
-                    f"{mismatch_prefix}{booked_time_note} "
-                    "Хотите проверить другую дату/время или оформить новую запись?"
-                ),
+                response_text=f"{mismatch_prefix}{booked_time_note} {followup}",
                 error_code="booking_time_mismatch",
                 decision_meta={
                     "tool_action": tool_action,
@@ -1595,6 +1638,7 @@ def execute_tool_action(
                     "requested_time": requested_time,
                     "requested_date": requested_date,
                     "appointment_time": appointment_time,
+                    "verification_request": verification_request,
                 },
                 trace={
                     "stage": "tool_registry",
@@ -1603,7 +1647,9 @@ def execute_tool_action(
                     "requested_time": requested_time,
                     "requested_date": requested_date,
                     "appointment_time": appointment_time,
+                    "verification_request": verification_request,
                 },
+                expected_reply_type=_normalize_expected_reply_hint(expected_reply_type),
             )
         return ToolExecutionResult(
             handled=True,

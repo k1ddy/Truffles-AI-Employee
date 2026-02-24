@@ -1097,7 +1097,14 @@ def _next_booking_prompt(
         from . import _legacy as legacy
 
         if isinstance(datetime_value, str) and datetime_value.strip():
-            prompt = f"Понял, {datetime_value.strip()}. Подскажите, пожалуйста, точное время."
+            service_value = booking.get("service")
+            if isinstance(service_value, str) and service_value.strip():
+                prompt = (
+                    f"Понял, {datetime_value.strip()} по услуге «{service_value.strip()}». "
+                    "Подскажите, пожалуйста, точное время."
+                )
+            else:
+                prompt = f"Понял, {datetime_value.strip()}. Подскажите, пожалуйста, точное время."
             return booking, prompt
         return booking, legacy.MSG_BOOKING_ASK_DATETIME
     if not booking.get("name"):
@@ -1650,7 +1657,9 @@ def _handle_booking_interrupt(
     intent_decomp_used: bool,
     intent_decomp_set: set[str],
     intent_decomp_payload: dict | None,
+    multi_intent_primary: str | None,
     info_class_intents: set[str],
+    early_domain_intent: Any | None,
     expected_reply_type: str | None,
     expected_reply_matched: bool | None,
     expected_reply_shortcircuit: bool,
@@ -2483,11 +2492,68 @@ def _handle_booking_interrupt(
                     "info_intents": list(trace_info_intents),
                     "booking_prompt": prompt,
                 }
+                prompt_text = prompt.strip() if isinstance(prompt, str) else ""
+                info_response_text = (
+                    info_decision.response.strip()
+                    if isinstance(info_decision.response, str)
+                    else ""
+                )
+                primary_intent_token = (
+                    multi_intent_primary.strip().casefold()
+                    if isinstance(multi_intent_primary, str) and multi_intent_primary.strip()
+                    else ""
+                )
+                if not primary_intent_token and isinstance(intent_decomp_payload, dict):
+                    payload_primary_intent = intent_decomp_payload.get("primary_intent")
+                    if isinstance(payload_primary_intent, str) and payload_primary_intent.strip():
+                        primary_intent_token = payload_primary_intent.strip().casefold()
+                domain_token = (
+                    early_domain_intent.value
+                    if hasattr(early_domain_intent, "value")
+                    else early_domain_intent
+                )
+                domain_out_of_domain = (
+                    isinstance(domain_token, str)
+                    and domain_token.strip().casefold() == "out_of_domain"
+                )
+                from app.services.pack_runtime_service import (
+                    has_walkin_without_booking_signal,
+                )
+
+                walkin_without_booking_signal = has_walkin_without_booking_signal(
+                    message_text,
+                    client_slug=client_slug,
+                )
+                pricing_name_followup_signal = bool(
+                    booking_wants_flow
+                    and "pricing" in set(trace_info_intents or [])
+                    and booking_expected == legacy.EXPECTED_REPLY_NAME
+                )
+                booking_prompt_kept = bool(
+                    prompt_text
+                    and (
+                        (
+                            booking_wants_flow
+                            and not booking_active
+                            and primary_intent_token == "booking"
+                        )
+                        or (
+                            info_decision.intent == "info_clarify"
+                            and booking_active
+                            and expected_reply_type == legacy.EXPECTED_REPLY_TIME
+                            and booking_expected == legacy.EXPECTED_REPLY_TIME
+                            and domain_out_of_domain
+                        )
+                        or (
+                            info_decision.intent == "info_clarify"
+                            and booking_wants_flow
+                            and walkin_without_booking_signal
+                        )
+                        or pricing_name_followup_signal
+                    )
+                )
                 booking_prompt_suppressed = bool(
-                    isinstance(prompt, str)
-                    and prompt.strip()
-                    and isinstance(info_decision.response, str)
-                    and info_decision.response.strip()
+                    prompt_text and info_response_text and not booking_prompt_kept
                 )
                 if booking_prompt_suppressed:
                     trace_payload["booking_prompt_suppressed"] = True
@@ -2566,9 +2632,14 @@ def _handle_booking_interrupt(
                     reason="booking_interrupt",
                 )
 
-                bot_response = (info_decision.response or "").strip()
+                if info_decision.intent == "info_clarify" and booking_prompt_kept:
+                    bot_response = prompt_text
+                else:
+                    bot_response = info_response_text
+                    if booking_prompt_kept and prompt_text and bot_response:
+                        bot_response = legacy._combine_sidecar(bot_response, prompt_text)
                 if not bot_response:
-                    bot_response = (prompt or "").strip()
+                    bot_response = prompt_text
                 style_reference_signal = bool(
                     message_text
                     and legacy._is_style_reference_request(message_text, has_media=has_media)

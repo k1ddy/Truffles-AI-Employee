@@ -75,6 +75,7 @@ def test_tool_registry_list_slots_contract_sets_availability_claim():
 
     assert result.handled is True
     assert result.ok is True
+    assert result.decision_meta.get("requested_date") == "2026-02-20"
     assert result.decision_meta.get("availability_claim") == "yes"
     assert result.decision_meta.get("requested_time") == "19:00"
     available = result.decision_meta.get("available_slots_by_specialist") or {}
@@ -127,6 +128,56 @@ def test_tool_registry_book_slot_conflict_without_requested_time_has_no_fabricat
     assert result.error_code == "slot_unavailable"
     assert "00:00" not in (result.response_text or "")
     assert result.decision_meta.get("requested_time") is None
+
+
+def test_execute_list_slots_datetime_start_at_normalizes_requested_date_token():
+    db = Mock()
+    specialist = SimpleNamespace(id=uuid4(), name="Айгерим")
+    specialist_query = Mock()
+    specialist_query.filter.return_value.order_by.return_value.all.return_value = [specialist]
+    service_query = Mock()
+    service_query.filter.return_value.first.return_value = None
+
+    def _query(model):
+        if model is Service:
+            return service_query
+        return specialist_query
+
+    db.query.side_effect = _query
+
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+    slot_1100 = SimpleNamespace(start=datetime(2026, 2, 20, 11, 0, tzinfo=timezone.utc), available=True)
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_filter",
+        return_value=(None, None, None),
+    ), patch.object(tool_registry_service, "SchedulingService") as scheduling_cls:
+        scheduling_cls.return_value.get_available_slots.return_value = [slot_1100]
+
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.list_slots",
+            tool_args={"start_at": "2026-02-20T18:30:00+05:00"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            message_text="Есть ли свободные слоты на эту дату?",
+            expected_reply_type="time",
+            now=datetime(2026, 2, 20, 9, 0, tzinfo=timezone.utc),
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("requested_date") == "2026-02-20"
+    assert result.decision_meta.get("requested_time") is None
+    assert result.decision_meta.get("resolved_date") == "2026-02-20"
 
 
 def test_list_slots_missing_date_does_not_emit_slot_date_resolution_miss():
@@ -276,3 +327,45 @@ def test_execute_list_slots_time_only_start_at_keeps_requested_date_empty():
     assert result.ok is True
     assert result.decision_meta.get("requested_date") is None
     assert result.decision_meta.get("requested_time") == "18:30"
+
+
+def test_tool_registry_get_booking_time_mismatch_keeps_verification_semantics():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        start_at=datetime(2026, 2, 22, 10, 0, tzinfo=timezone.utc),
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "_get_booking",
+        return_value=(appointment, None),
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.get_booking",
+            tool_args={"appointment_id": str(appointment.id)},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+            message_text="Проверьте, пожалуйста, мою запись на завтра на 18:30.",
+            expected_reply_type="name",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "booking_time_mismatch"
+    assert result.expected_reply_type == "name"
+    assert result.decision_meta.get("verification_request") is True
+    response_text = (result.response_text or "").casefold()
+    assert "проверил запись" in response_text
+    assert "18:30" in response_text
+    assert "10:00" in response_text
+    assert "подтверд" in response_text

@@ -6627,10 +6627,23 @@ def test_expected_reply_type_off_topic_keeps_contract(monkeypatch):
 def test_expected_reply_contract_bypasses_human_request():
     from app.routers.webhook import decision as decision_router
 
+    now = datetime.now(timezone.utc)
     saved_message = Mock()
     saved_message.message_metadata = {}
     conversation = SimpleNamespace(
-        context={"expected_reply_type": webhook_router.EXPECTED_REPLY_TIME},
+        context={
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "session_memory": {
+                "last_question_type": webhook_router.EXPECTED_REPLY_TIME,
+                "unanswered_questions": [
+                    webhook_router.EXPECTED_REPLY_TIME,
+                    webhook_router.EXPECTED_REPLY_NAME,
+                ],
+                "pending_slots": {"datetime": "завтра 12:00", "name": "Лена"},
+                "last_updated_at": now.isoformat(),
+                "ttl_hours": 24,
+            },
+        },
         state=ConversationState.BOT_ACTIVE.value,
     )
 
@@ -6642,7 +6655,7 @@ def test_expected_reply_contract_bypasses_human_request():
             batch_messages=["позовите менеджера"],
             context=conversation.context,
             context_manager={},
-            now=datetime.now(timezone.utc),
+            now=now,
             current_goal="booking",
             class_carryover=None,
             message_count=1,
@@ -6655,8 +6668,14 @@ def test_expected_reply_contract_bypasses_human_request():
     assert state.expected_reply_shortcircuit is False
     assert state.expected_reply_type is None
     assert conversation.context.get("expected_reply_type") is None
+    session_memory = conversation.context.get("session_memory") or {}
+    assert session_memory.get("last_question_type") is None
+    assert webhook_router.EXPECTED_REPLY_TIME not in (session_memory.get("unanswered_questions") or [])
+    pending_slots = session_memory.get("pending_slots") or {}
+    assert "datetime" not in pending_slots
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("expected_reply_bypassed") == "human_request"
+    assert meta.get("session_memory_expected_reply_cleared") is True
 
 
 def test_should_block_expected_reply_time_for_question_without_datetime():
@@ -15616,13 +15635,23 @@ def test_llm_policy_core_get_booking_ok_does_not_force_handoff(monkeypatch):
         escalated_at=None,
         branch_id=None,
         context={
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "expected_reply_reason": "booking_prompt",
             "booking": {
                 "active": True,
                 "service": "Маникюр",
                 "datetime": "2026-02-18 10:00",
                 "name": "Лена",
                 "appointment_id": "cb99d242-69ce-4154-b428-797f6e76c0cb",
-            }
+            },
+            "session_memory": {
+                "last_question_type": webhook_router.EXPECTED_REPLY_TIME,
+                "unanswered_questions": [webhook_router.EXPECTED_REPLY_TIME],
+                "pending_slots": {"datetime": "2026-02-18 10:00"},
+                "active_goal": "booking",
+                "last_updated_at": datetime.now(timezone.utc).isoformat(),
+                "ttl_hours": 24,
+            },
         },
     )
     user = SimpleNamespace(id="user-123", context={})
@@ -15749,6 +15778,14 @@ def test_llm_policy_core_get_booking_ok_does_not_force_handoff(monkeypatch):
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("tool_decision") == "ok"
     assert meta.get("action") != "escalate"
+    assert conversation.context.get("expected_reply_type") is None
+    session_memory = conversation.context.get("session_memory") or {}
+    assert session_memory.get("last_question_type") is None
+    assert webhook_router.EXPECTED_REPLY_TIME not in (session_memory.get("unanswered_questions") or [])
+    pending_slots = session_memory.get("pending_slots") or {}
+    assert "datetime" not in pending_slots
+    assert meta.get("expected_reply_contract_clear") is True
+    assert meta.get("session_memory_expected_reply_cleared") is True
 
 
 def test_booking_reschedule_missing_slot_does_not_escalate_without_manager_request(monkeypatch):
@@ -19412,6 +19449,26 @@ def test_policy_has_style_reference_hint_from_intent_or_reason():
         is True
     )
     assert _policy_has_style_reference_hint(policy_intent="booking", policy_reason="booking_flow") is False
+
+
+def test_derive_booking_followup_prompt_prefers_merged_datetime_over_stale_booking_state():
+    expected_reply, prompt = webhook_router._derive_booking_followup_prompt(
+        expected_reply_type=webhook_router.EXPECTED_REPLY_TIME,
+        booking_state={
+            "active": True,
+            "service": "Маникюр",
+            "datetime": "2026-02-18 10:00",
+        },
+        merged_slots={
+            "service": "Маникюр",
+            "datetime": "2026-02-19",
+        },
+        client_slug="demo_salon",
+    )
+
+    assert expected_reply == webhook_router.EXPECTED_REPLY_TIME
+    assert prompt is not None
+    assert "2026-02-18" not in prompt
 
 
 def test_validate_policy_check_confirm_contract_allows_valid_paths():

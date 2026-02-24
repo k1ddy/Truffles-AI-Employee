@@ -261,6 +261,7 @@ from app.routers.webhook.response import (
 )
 from app.routers.webhook.router_sla import _update_router_sla
 from app.routers.webhook.session_memory import (
+    _clear_session_memory_expected_reply,
     _get_session_memory,
     _is_session_memory_expired,
     _is_session_reset_only_message,
@@ -374,6 +375,7 @@ from app.services.pack_runtime_service import (
     get_signal_lexicon_list,
     get_system_anchor_groups,
     get_system_lexicon_list,
+    has_walkin_without_booking_signal,
     load_system_lexicons,
     load_yaml_truth,
     semantic_question_type,
@@ -778,6 +780,11 @@ def _apply_expected_reply_contract(
         and is_human_request_message(message_text)
     ):
         context = legacy._set_expected_reply_type(context, None)
+        context, memory_payload, memory_cleared = legacy._clear_session_memory_expected_reply(
+            context,
+            expected_reply_type=expected_reply_type,
+            now=now,
+        )
         legacy._set_conversation_context(conversation, context)
         legacy._record_decision_trace(
             conversation,
@@ -788,6 +795,13 @@ def _apply_expected_reply_contract(
                 "expected_reply_bypassed": "human_request",
             },
         )
+        if memory_cleared:
+            legacy._record_session_memory_update(
+                conversation,
+                saved_message,
+                memory=memory_payload,
+                reason="expected_reply_bypass",
+            )
         if saved_message:
             legacy._update_message_decision_metadata(
                 saved_message,
@@ -795,6 +809,7 @@ def _apply_expected_reply_contract(
                     "expected_reply_type": None,
                     "expected_reply_matched": False,
                     "expected_reply_bypassed": "human_request",
+                    "session_memory_expected_reply_cleared": memory_cleared,
                 },
             )
         context = legacy._get_conversation_context(conversation)
@@ -3095,6 +3110,10 @@ MSG_STYLE_REFERENCE_NEED_MEDIA = (
     "Да, конечно. Можем ориентироваться на фото/референс. Пришлите фото и кратко опишите запрос — "
     "я передам администратору для подтверждения."
 )
+MSG_STYLE_REFERENCE_NEED_MEDIA_BOOKING = (
+    "Да, конечно. Можем ориентироваться на фото/референс. "
+    "Пришлите фото и кратко опишите пожелание."
+)
 
 PENDING_SLA_PING_MINUTES = 15
 PENDING_AUTO_CLOSE_HOURS = 4
@@ -3411,8 +3430,13 @@ def _derive_booking_followup_prompt(
     if isinstance(merged_slots, dict):
         for slot_key in BOOKING_SLOT_ORDER:
             slot_value = merged_slots.get(slot_key)
-            if isinstance(slot_value, str) and slot_value.strip() and not followup_state.get(slot_key):
-                followup_state[slot_key] = slot_value.strip()
+            if not isinstance(slot_value, str) or not slot_value.strip():
+                continue
+            normalized_slot = slot_value.strip()
+            if slot_key == "datetime":
+                followup_state[slot_key] = normalized_slot
+            elif not followup_state.get(slot_key):
+                followup_state[slot_key] = normalized_slot
     followup_state, prompt = _next_booking_prompt(
         followup_state,
         client_slug=client_slug,
@@ -6861,6 +6885,56 @@ async def _handle_webhook_payload(
                     "facts": facts,
                 },
             )
+        resolver_id = decision_meta.get("resolver_id")
+        resolver_version = decision_meta.get("resolver_version")
+        resolver_confidence = decision_meta.get("resolver_confidence")
+        resolver_candidates = decision_meta.get("resolver_candidates")
+        resolver_abstain_reason = decision_meta.get("abstain_reason")
+        resolver_action_class = decision_meta.get("action_class")
+        resolver_intent_class = decision_meta.get("intent_class")
+        resolver_contract = decision_meta.get("resolver_contract")
+        resolver_observed = bool(
+            (
+                isinstance(resolver_id, str) and resolver_id.strip()
+            )
+            or (
+                isinstance(resolver_contract, dict) and resolver_contract
+            )
+            or (
+                isinstance(resolver_action_class, str) and resolver_action_class.strip()
+            )
+        )
+        if resolver_observed:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "resolver",
+                    "decision": (
+                        "abstain"
+                        if str(resolver_action_class or "").strip().upper() in {"COLLECT", "HANDOFF"}
+                        else "resolved"
+                    ),
+                    "resolver_id": resolver_id if isinstance(resolver_id, str) else None,
+                    "resolver_version": (
+                        resolver_version if isinstance(resolver_version, str) else None
+                    ),
+                    "resolver_confidence": resolver_confidence,
+                    "resolver_candidates": (
+                        resolver_candidates if isinstance(resolver_candidates, list) else None
+                    ),
+                    "abstain_reason": (
+                        resolver_abstain_reason
+                        if isinstance(resolver_abstain_reason, str)
+                        else None
+                    ),
+                    "intent_class": (
+                        resolver_intent_class if isinstance(resolver_intent_class, str) else None
+                    ),
+                    "action_class": (
+                        resolver_action_class if isinstance(resolver_action_class, str) else None
+                    ),
+                },
+            )
 
         fact_contract, fact_error = build_fact_contract(
             facts=facts,
@@ -9661,6 +9735,13 @@ async def _handle_webhook_payload(
             intent_decomp_set=intent_decomp_set,
             client_slug=payload.client_slug,
         )
+        if _looks_like_promotions_request(
+            message_text,
+            policy_type=policy_type,
+            policy_pack=policy_pack,
+            client_slug=payload.client_slug,
+        ):
+            rescue_info_intents = set(rescue_info_intents) | {"promotions"}
         degraded_guard_info_hints = [
             intent
             for intent in rescue_info_intents
@@ -9727,6 +9808,7 @@ async def _handle_webhook_payload(
         and policy_core_runtime_active
         and policy_core_mode == "degraded_fallback"
         and policy_core_timeout_degrade
+        and not pending_info_signal
     ):
         degraded_policy_core_critical = True
     if degraded_policy_core_critical:
@@ -9914,6 +9996,10 @@ async def _handle_webhook_payload(
                 )
             )
         )
+        walkin_without_booking_signal = has_walkin_without_booking_signal(
+            message_text,
+            client_slug=payload.client_slug,
+        )
         timeout_info_fallback_reply: str | None = None
         timeout_info_fallback_expected = None
         if policy_core_timeout_degrade and not timeout_needs_booking_collect and message_text:
@@ -10004,7 +10090,23 @@ async def _handle_webhook_payload(
                 conversation_id=conversation.id,
                 bot_response=bot_response,
             )
-        if policy_core_timeout_degrade and not timeout_needs_booking_collect:
+        booking_has_slot_context = bool(
+            isinstance(booking, dict)
+            and any(
+                isinstance(booking.get(slot_key), str) and booking.get(slot_key).strip()
+                for slot_key in BOOKING_SLOT_ORDER
+            )
+        )
+        if (
+            policy_core_timeout_degrade
+            and not timeout_needs_booking_collect
+            and not pending_info_signal
+            and not walkin_without_booking_signal
+            and (
+                (not booking_wants_flow and not booking_active)
+                or not booking_has_slot_context
+            )
+        ):
             _apply_policy_guard_override(
                 final_action="collect",
                 final_tool_action="collect",
@@ -10093,6 +10195,13 @@ async def _handle_webhook_payload(
         collect_prompt = MSG_FACT_GUARD_CLARIFY
         collect_action = "reply"
         collect_intent = "policy_core_guard"
+        if (
+            collect_slot is None
+            and walkin_without_booking_signal
+        ):
+            collect_prompt = MSG_BOOKING_ASK_ALL
+            collect_action = "booking_prompt"
+            collect_intent = "booking"
         if collect_slot == "service":
             collect_prompt = MSG_BOOKING_ASK_SERVICE
             collect_action = "booking_prompt"
@@ -12121,6 +12230,12 @@ async def _handle_webhook_payload(
                     slot_snapshot["datetime"] = raw_start_at.strip()
                 tool_appointment_id = _extract_tool_result_appointment_id(tool_result.decision_meta)
                 merged_slots: dict[str, str] = {}
+                slot_snapshot_override_keys: set[str] = set()
+                prefer_slot_snapshot_datetime = bool(
+                    policy_tool_action.startswith("calendar.")
+                    or policy_intent == "booking"
+                    or policy_goal == "booking"
+                )
                 context = _get_conversation_context(conversation)
                 booking_state = _get_booking_context(context)
                 if isinstance(booking_state, dict):
@@ -12129,7 +12244,12 @@ async def _handle_webhook_payload(
                         if isinstance(value, str) and value.strip():
                             merged_slots[key] = value.strip()
                 for key, value in slot_snapshot.items():
-                    if not merged_slots.get(key):
+                    if not isinstance(value, str) or not value.strip():
+                        continue
+                    if key == "datetime" and prefer_slot_snapshot_datetime:
+                        slot_snapshot_override_keys.add(key)
+                        merged_slots[key] = value
+                    elif not merged_slots.get(key):
                         merged_slots[key] = value
                 if saved_message:
                     tool_meta = {
@@ -12152,7 +12272,7 @@ async def _handle_webhook_payload(
                         booking_state["active"] = True
                         booking_state["started_at"] = now.isoformat()
                     for key, value in merged_slots.items():
-                        if not booking_state.get(key):
+                        if key in slot_snapshot_override_keys or not booking_state.get(key):
                             booking_state[key] = value
                     context = _set_booking_context(context, booking_state)
                     _set_conversation_context(conversation, context)
@@ -12216,7 +12336,28 @@ async def _handle_webhook_payload(
                 ):
                     context = _get_conversation_context(conversation)
                     context = _set_expected_reply_type(context, None)
+                    (
+                        context,
+                        cleared_memory_payload,
+                        session_memory_cleared,
+                    ) = _clear_session_memory_expected_reply(
+                        context,
+                        expected_reply_type=expected_reply_type,
+                        now=now,
+                    )
                     _set_conversation_context(conversation, context)
+                    if session_memory_cleared:
+                        _record_session_memory_update(
+                            conversation,
+                            saved_message,
+                            memory=cleared_memory_payload,
+                            reason="expected_reply_contract_clear",
+                        )
+                        if saved_message:
+                            _update_message_decision_metadata(
+                                saved_message,
+                                {"session_memory_expected_reply_cleared": True},
+                            )
                 if (
                     (policy_tool_action == "calendar.list_slots" and tool_decision in {"ok", "specialist_missing"})
                     or (policy_tool_action == "calendar.book_slot" and tool_decision == "conflict")
@@ -12266,7 +12407,7 @@ async def _handle_webhook_payload(
                     if booking_for_followup.get("active") is not True:
                         booking_for_followup["active"] = True
                     for key, value in merged_slots.items():
-                        if not booking_for_followup.get(key):
+                        if key == "datetime" or not booking_for_followup.get(key):
                             booking_for_followup[key] = value
                     booking_for_followup, _ = _next_booking_prompt(
                         booking_for_followup,
@@ -12307,7 +12448,7 @@ async def _handle_webhook_payload(
                     if booking_for_followup.get("active") is not True:
                         booking_for_followup["active"] = True
                     for key, value in merged_slots.items():
-                        if not booking_for_followup.get(key):
+                        if key == "datetime" or not booking_for_followup.get(key):
                             booking_for_followup[key] = value
                     booking_for_followup, _ = _next_booking_prompt(
                         booking_for_followup,
@@ -12700,6 +12841,28 @@ async def _handle_webhook_payload(
                         )
                 bot_response = tool_response_text or MSG_FACT_GUARD_CLARIFY
                 if style_reference_text_signal and not has_media:
+                    booking_active_context = bool(
+                        booking_wants_flow
+                        or (
+                            isinstance(booking_state, dict)
+                            and booking_state.get("active") is True
+                        )
+                        or policy_tool_action.startswith("calendar.")
+                    )
+                    booking_style_reference_context = bool(
+                        booking_active_context
+                        and booking_followup_expected
+                        in {
+                            EXPECTED_REPLY_SERVICE,
+                            EXPECTED_REPLY_TIME,
+                            EXPECTED_REPLY_NAME,
+                        }
+                    )
+                    style_reference_prompt = (
+                        MSG_STYLE_REFERENCE_NEED_MEDIA_BOOKING
+                        if booking_style_reference_context
+                        else MSG_STYLE_REFERENCE_NEED_MEDIA
+                    )
                     if policy_tool_action in {
                         "catalog.portfolio",
                         "calendar.list_slots",
@@ -12708,10 +12871,10 @@ async def _handle_webhook_payload(
                         "calendar.reschedule",
                         "calendar.cancel",
                     }:
-                        bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA
+                        bot_response = style_reference_prompt
                     else:
                         bot_response = _combine_sidecar(
-                            MSG_STYLE_REFERENCE_NEED_MEDIA,
+                            style_reference_prompt,
                             bot_response,
                         )
                 context = _get_conversation_context(conversation)
@@ -12746,7 +12909,10 @@ async def _handle_webhook_payload(
                 suppress_info_followup_prompt = bool(
                     booking_interrupt_prompt
                     and policy_tool_action in {"catalog.service_query", "catalog.location"}
-                    and not services_overview_followup
+                    and (
+                        not services_overview_followup
+                        or not booking_wants_flow
+                    )
                 )
                 if suppress_info_followup_prompt:
                     # FACT/info turns may keep expected_reply contract, but should not leak
@@ -13091,7 +13257,9 @@ async def _handle_webhook_payload(
                     intent_decomp_used=True,
                     intent_decomp_set=policy_info_set,
                     intent_decomp_payload=policy_intent_payload,
+                    multi_intent_primary=None,
                     info_class_intents=policy_info_set,
+                    early_domain_intent=early_domain_intent,
                     expected_reply_type=expected_reply_type,
                     expected_reply_matched=expected_reply_matched,
                     expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
@@ -14050,7 +14218,9 @@ async def _handle_webhook_payload(
             intent_decomp_used=intent_decomp_used,
             intent_decomp_set=intent_decomp_set,
             intent_decomp_payload=intent_decomp_payload,
+            multi_intent_primary=multi_intent_primary,
             info_class_intents=info_class_intents,
+            early_domain_intent=early_domain_intent,
             expected_reply_type=expected_reply_type,
             expected_reply_matched=expected_reply_matched,
             expected_reply_shortcircuit=expected_reply_shortcircuit_effective,

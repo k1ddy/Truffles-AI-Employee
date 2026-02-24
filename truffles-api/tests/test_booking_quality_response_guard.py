@@ -440,6 +440,7 @@ def test_missing_bot_reply_marks_outbox_failed_reason():
     )
     assert "missing_bot_reply" in reasons
     assert "outbox_delivery_failed" in reasons
+    assert "unobserved_turn" not in reasons
     assert "outbox_delivery_timeout" not in reasons
 
 
@@ -537,6 +538,22 @@ def test_duplicate_ack_does_not_infer_for_pending_actions():
         meta={"action": "booking_captured_pending"},
         meta_error=None,
         state="pending",
+    )
+
+
+def test_duplicate_ack_does_not_infer_when_outbox_failed():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_should_infer_bot_response_from_duplicate_ack"]
+    assert not fn(
+        bot_response=False,
+        expected_response=True,
+        response_payload={"message": "duplicate message_id"},
+        attempts=2,
+        meta={"action": "reply", "delivery_error_code": "CHATFLOW_BILLING_BLOCKED"},
+        meta_error=None,
+        state="bot_active",
+        outbox_payload_status="FAILED",
+        outbox_summary={"count": 1, "status": "FAILED"},
     )
 
 
