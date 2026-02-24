@@ -7995,7 +7995,10 @@ def _parse_llm_quality_args(argv):
 def _parse_llm_quality_gates_args(argv):
     parser = argparse.ArgumentParser(
         prog="ops/diagnose.py llm-quality-gates",
-        description="Run static llm-quality gates without runtime/webhook execution.",
+        description=(
+            "Run static llm-quality gates without runtime/webhook execution; "
+            "returns exit 2 on blocking gate violations."
+        ),
     )
     parser.add_argument(
         "--lexicon-regex-delta-gate",
