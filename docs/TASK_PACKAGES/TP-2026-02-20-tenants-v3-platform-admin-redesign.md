@@ -20,7 +20,7 @@
 - `2026-02-23`: Wave 4 targeted prewarm continuation — invalidation now queues affected `company_id` scopes for post-commit async summary rebuild (`after_commit` queue + prewarm worker), reducing cold-start for mutated company scopes while preserving fail-open mutation path.
 - `2026-02-23`: Wave 4 + CI hardening continuation — post-commit prewarm расширен до `global portfolio` (summary + attention default scope, rate-limited) для снижения cold-start после мутаций, `console-contract-live` исправлен на корректный schemathesis base URL, `console-e2e-live` auth setup защищён от `AggregateError` в login transition.
 - `2026-02-24`: Wave 1 contract debt continuation — `company-cockpit` получил `include_branches` (`true` by default), `/tenants` запрашивает cockpit с `include_branches=false` (branches остаются из `/admin/branches`), что убирает дублирующий branch payload/compute в company scope without breaking API compatibility.
-- `2026-02-24`: Wave 1/4 continuation — added large-scope `company-cockpit` perf-contract tests (limit/cursor/query propagation + fail-fast on oversized limits) and refreshed runtime p95/p99 snapshot artifact (`tenants-perf-snapshot-after-merge-20260224.json`) with explicit branch SLO miss evidence.
+- `2026-02-24`: Wave 1/4 continuation — added large-scope `company-cockpit` perf-contract tests (limit/cursor/query propagation + fail-fast on oversized limits), extracted operational KPI compute/rules from `tenants/page.tsx` into `console-web/src/app/tenants/operational-kpi.ts` (`2969 -> 2789` LOC), and refreshed runtime p95/p99 snapshot artifact (`tenants-perf-snapshot-after-merge-20260224.json`) with explicit branch SLO miss evidence.
 
 ## Canon refs
 - `AGENTS.md`
@@ -81,7 +81,7 @@ Impact:
 
 ### F4. Монолит страницы сохраняется (высокий regression risk)
 Evidence:
-- `console-web/src/app/tenants/page.tsx` = ~2970 LOC (после Wave 4 декомпозиции), но всё ещё оркестрационный монолит.
+- `console-web/src/app/tenants/page.tsx` = ~2789 LOC (после Wave 4 декомпозиции), но всё ещё оркестрационный монолит.
 - Внутри одной страницы: context orchestration, filters, CRUD, lifecycle modal, branch-change pipeline, KPI, snapshots, onboarding.
 Impact:
 - любое изменение цепляет много сценариев.
