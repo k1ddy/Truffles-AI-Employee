@@ -834,6 +834,90 @@ async def test_get_tenants_company_cockpit_skips_branches_when_not_requested(mon
     assert latency_calls
     assert latency_calls[0][0] == "company_cockpit"
 
+
+@pytest.mark.asyncio
+async def test_get_tenants_company_cockpit_passes_large_scope_pagination_contract(monkeypatch) -> None:
+    company_id = uuid4()
+    selected_client_id = uuid4()
+    client_cursor = "2026-02-23T00:00:00+00:00"
+    branch_cursor = "2026-02-22T00:00:00+00:00"
+    clients_response = console_router.ConsoleClientListResponse(items=[], cursor="client-next", has_more=True, summary=None)
+    branches_response = console_router.ConsoleBranchListResponse(items=[], cursor="branch-next", has_more=True)
+    captured: dict[str, dict[str, object]] = {}
+
+    async def _fake_list_clients(**kwargs):
+        captured["clients"] = kwargs
+        return clients_response
+
+    async def _fake_list_branches(**kwargs):
+        captured["branches"] = kwargs
+        return branches_response
+
+    monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
+    monkeypatch.setattr(console_router, "list_branches", _fake_list_branches)
+
+    response = await console_router.get_tenants_company_cockpit(
+        request=_build_request(),
+        company_id=str(company_id),
+        client_id=str(selected_client_id),
+        lifecycle="all",
+        client_limit=100,
+        branch_limit=100,
+        client_cursor=client_cursor,
+        branch_cursor=branch_cursor,
+        client_q="enterprise",
+        branch_q="regional",
+        db=Mock(),
+    )
+
+    assert response.company_id == company_id
+    assert response.selected_client_id == selected_client_id
+    assert captured["clients"]["limit"] == 100
+    assert captured["clients"]["cursor"] == client_cursor
+    assert captured["clients"]["q"] == "enterprise"
+    assert captured["clients"]["include_fleet"] == "true"
+    assert captured["clients"]["lifecycle"] == "all"
+    assert captured["branches"]["limit"] == 100
+    assert captured["branches"]["cursor"] == branch_cursor
+    assert captured["branches"]["q"] == "regional"
+    assert captured["branches"]["company_id"] == str(company_id)
+    assert captured["branches"]["client_id"] == str(selected_client_id)
+    assert captured["branches"]["lifecycle"] == "all"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("client_limit", "branch_limit"), [(101, 20), (20, 101)])
+async def test_get_tenants_company_cockpit_rejects_oversized_limits_before_subqueries(
+    monkeypatch,
+    client_limit: int,
+    branch_limit: int,
+) -> None:
+    called = {"clients": 0, "branches": 0}
+
+    async def _fake_list_clients(**_kwargs):
+        called["clients"] += 1
+        return console_router.ConsoleClientListResponse(items=[], cursor=None, has_more=False, summary=None)
+
+    async def _fake_list_branches(**_kwargs):
+        called["branches"] += 1
+        return console_router.ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+
+    monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
+    monkeypatch.setattr(console_router, "list_branches", _fake_list_branches)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_tenants_company_cockpit(
+            request=_build_request(),
+            company_id=str(uuid4()),
+            client_limit=client_limit,
+            branch_limit=branch_limit,
+            db=Mock(),
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert called == {"clients": 0, "branches": 0}
+
+
 @pytest.mark.asyncio
 async def test_list_clients_defaults_to_active_lifecycle(monkeypatch) -> None:
     query = _build_list_query_mock()

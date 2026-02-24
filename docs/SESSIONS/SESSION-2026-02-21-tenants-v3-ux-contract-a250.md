@@ -109,10 +109,20 @@
   - Added backend contract test `test_get_tenants_company_cockpit_skips_branches_when_not_requested` to guarantee `list_branches` is not called in `include_branches=false` mode.
   - Updated TP/STATE factual status to reflect completed cockpit payload dedupe and remaining items.
   - Validation for this continuation: `pytest -q truffles-api/tests/test_console_tenants_list.py -k "company_cockpit"` (`3 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`80 passed`), `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `python3 truffles-api/scripts/generate_openapi.py --check`.
+  - Continued on top of fresh base merge `origin/main@802af698` (merge-only, no rebase) to keep TP execution on current mainline.
+  - Closed remaining Wave1 large-scope perf-contract test debt for `company-cockpit`:
+    - `test_get_tenants_company_cockpit_passes_large_scope_pagination_contract`
+    - `test_get_tenants_company_cockpit_rejects_oversized_limits_before_subqueries`
+  - Continued Wave4 decomposition with behavior-preserving extraction of operational KPI rules/compute into `console-web/src/app/tenants/operational-kpi.ts`; `tenants/page.tsx` reduced from `2969` to `2789` LOC.
+  - Captured post-merge runtime perf snapshot artifact `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-merge-20260224.json` and synced report/TP facts:
+    - `portfolio p95=1000ms (p99=1000ms)` pass
+    - `company_cockpit p95=250ms (p99=250ms)` pass
+    - `branches p95=2500ms (p99=2500ms)` fail
+  - Validation for this continuation: `pytest -q truffles-api/tests/test_console_tenants_list.py -k "company_cockpit or oversized_limits or large_scope_pagination"` (`6 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`83 passed`), `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`.
 - next:
-  - Закрыть оставшийся Wave 1 perf-contract долг: добавить deterministic tests для крупных company scopes (cockpit/branches cursor + payload budget assertions).
-  - Продолжить Wave 4: расширить incremental precompute evidence на truly large fleet профиль (`p95/p99` under load, not probe-only snapshots).
-  - Продолжить Wave 4/F3 risk reduction: выделить remaining orchestration blocks из `tenants/page.tsx` в hooks/components для снижения regression surface.
+  - Wave4 runtime perf: разобрать `branches` p95/p99 breach (`2500ms`) на production histogram и зафиксировать targeted optimization plan для branch-list path.
+  - Wave4 perf evidence: получить follow-up snapshot с подтверждением SLO после оптимизации (или формально зафиксировать блокер/waiver с root-cause).
+  - Продолжить декомпозицию `tenants/page.tsx`: вынести следующий orchestration block в hook/component без изменения UX-контракта.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx

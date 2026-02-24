@@ -353,3 +353,19 @@
 
 5. Interpretation.
 - Wave 6 canary evidence is now complete for this rollout slice: deterministic e2e/a11y lanes are green, deployed build is verified, and runtime SLO snapshot is within thresholds.
+
+## Post-merge perf recheck (2026-02-24, UTC)
+1. Runtime tenants perf snapshot refreshed after latest merge.
+- Command:
+  - `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --pretty --output /tmp/tenants_perf_snapshot_20260224_postmerge.json`
+- Artifact:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-merge-20260224.json`
+
+2. Current p95/p99 status from Prometheus histogram.
+- `portfolio`: `p95=1000ms`, `p99=1000ms`, SLO `<1200ms` pass (`samples=2`).
+- `company_cockpit`: `p95=250ms`, `p99=250ms`, SLO `<1000ms` pass (`samples=1`).
+- `branches GET`: `p95=2500ms`, `p99=2500ms`, SLO `<800ms` fail (`samples=3`).
+- Overall script result: `status=fail`, `required_slo_failed=true`.
+
+3. Interpretation.
+- Wave 1 contract alignment is complete, but Wave 4 runtime performance work remains open because `branches` p95/p99 exceeds target in latest snapshot and requires branch-list path optimization / targeted runtime profiling.
