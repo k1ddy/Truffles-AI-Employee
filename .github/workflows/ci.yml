@@ -234,8 +234,6 @@ jobs:
         working-directory: truffles-api
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -667,6 +665,8 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -680,6 +680,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-cov ruff
+
+      - name: Static core gates (hardcode/lexicon)
+        run: |
+          BASE_REF="HEAD~1"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && [ -n "${GITHUB_BASE_REF}" ]; then
+            BASE_REF="origin/${GITHUB_BASE_REF}"
+          fi
+          python3 ../ops/diagnose.py llm-quality-gates \
+            --delta-gate-base-ref "${BASE_REF}" \
+            --hardcode-core-base-ref "${BASE_REF}" \
+            --run-economy-base-ref "${BASE_REF}" \
+            --lexicon-regex-delta-gate block \
+            --hardcode-core-gate block \
+            --run-economy-gate off
 
       - name: Tests (core)
         run: pytest -q tests/test_demo_salon_eval.py

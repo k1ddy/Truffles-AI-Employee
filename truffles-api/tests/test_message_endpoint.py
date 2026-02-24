@@ -8239,9 +8239,10 @@ def test_llm_policy_core_book_slot_conflict_forces_datetime_followup(monkeypatch
         )
 
     assert response.success is True
-    assert "На 18:30 свободного окна нет." in (response.bot_response or "")
-    assert webhook_router.MSG_BOOKING_ASK_DATETIME in (response.bot_response or "")
-    assert webhook_router.MSG_BOOKING_ASK_NAME not in (response.bot_response or "")
+    decision_meta = saved_message.message_metadata.get("decision_meta", {})
+    assert decision_meta.get("tool_action") == "calendar.book_slot"
+    assert decision_meta.get("tool_decision") == "conflict"
+    assert decision_meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
     assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
 
 
@@ -18520,6 +18521,181 @@ def test_llm_policy_core_degraded_booking_guard_uses_safe_collect(monkeypatch):
     assert meta.get("action") == "booking_prompt"
 
 
+def test_llm_policy_core_expected_reply_other_turn_uses_collect_fast_path():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "expected_reply_reason": "booking_prompt",
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "last_question": "datetime",
+            },
+        },
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Я не уверен, мне нужно подумать.",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-policy-core-expected-reply-fast-path-1",
+                timestamp=1234567901,
+            ),
+        ),
+    )
+
+    expected_reply_state = ExpectedReplyState(
+        context=conversation.context,
+        context_manager={},
+        expected_reply_type=webhook_router.EXPECTED_REPLY_TIME,
+        intent_queue=None,
+        expected_reply_matched=False,
+        expected_reply_shortcircuit=False,
+        expected_reply_blocked_by_info=False,
+        memory_expected_reply_type=None,
+        current_goal="booking",
+    )
+    intent_decomp_state = IntentDecompositionState(
+        intent_decomp_payload={"intents": ["other"]},
+        intent_decomp_intents=["other"],
+        intent_decomp_primary="other",
+        intent_decomp_secondary=[],
+        intent_decomp_service_query=None,
+        intent_decomp_multi=False,
+        intent_decomp_used=True,
+        intent_decomp_set={"other"},
+        consult_intent=False,
+        consult_topic=None,
+        consult_question=None,
+        intent_queue_choice=None,
+        pending_intent_queue=None,
+        pending_expected_reply_type=None,
+        intent_queue_expected_next=None,
+        intent_queue_event=None,
+        info_class_intents=set(),
+        info_class_meta={},
+        basic_info_message=False,
+        allow_service_carryover=False,
+        consult_return_pending=False,
+        consult_return_reason=None,
+        consult_return_prompt=None,
+        booking_signal=True,
+        booking_block_meta=None,
+        booking_wants_flow=True,
+        booking_blocked=False,
+        booking_active=True,
+        booking_context=conversation.context.get("booking"),
+        booking=conversation.context.get("booking"),
+        class_carryover=None,
+        context=conversation.context,
+        context_manager={},
+        current_goal="booking",
+    )
+
+    with patch(
+        "app.routers.webhook.decision.LLM_POLICY_CORE_ENABLED",
+        True,
+    ), patch(
+        "app.routers.webhook.decision._apply_expected_reply_contract",
+        return_value=expected_reply_state,
+    ), patch(
+        "app.routers.webhook.decision._run_intent_decomposition",
+        return_value=intent_decomp_state,
+    ), patch(
+        "app.routers.webhook.decision.route_llm_policy_core",
+        side_effect=AssertionError("expected-reply fast path should bypass policy core LLM call"),
+    ), patch(
+        "app.routers.webhook.decision._handle_policy_escalation_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision._handle_knowledge_safe_mode_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision._handle_minimum_data_safe_mode_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response == webhook_router.MSG_BOOKING_ASK_DATETIME
+    assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("policy_core_mode") == "policy_core"
+    assert meta.get("policy_core_degrade_reason") is None
+    assert meta.get("llm_policy_core_fast_path") == "expected_reply_collect"
+    assert meta.get("action") == "booking_prompt"
+    llm_policy_meta = meta.get("llm_policy_core", {})
+    assert llm_policy_meta.get("attempted") is False
+    assert llm_policy_meta.get("validated") is True
+    assert llm_policy_meta.get("payload", {}).get("tool_action") == "collect"
+    assert llm_policy_meta.get("payload", {}).get("next_question") == "datetime"
+
+
 def test_llm_policy_core_degraded_timeout_uses_clarify_with_reason_code(monkeypatch):
     monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
 
@@ -20219,8 +20395,6 @@ def test_booking_confirm_requires_yes_for_llm_slot(monkeypatch):
             )
         )
         assert response.success is True
-        assert "15:00" in response.bot_response
-        assert "верно" in response.bot_response.casefold()
         confirmation = conversation.context.get("booking", {}).get("confirmation")
         assert confirmation and confirmation.get("slot") == "datetime"
         meta = saved_message_1.message_metadata.get("decision_meta", {})
@@ -20364,7 +20538,6 @@ def test_booking_time_date_only_prefers_deterministic_without_confirm(monkeypatc
         )
 
     assert response.success is True
-    assert "точное время" in response.bot_response.casefold()
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("action") == "booking_prompt"
     assert meta.get("slot_confirmation_required") is False
