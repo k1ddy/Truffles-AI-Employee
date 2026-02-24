@@ -2728,7 +2728,11 @@ def _format_promotions(truth: dict, intent: str | None = None) -> str:
         name = promo.get("name")
         percent = promo.get("discount_percent")
         if name and percent:
-            parts.append(f"{name}: {percent}%")
+            entry = f"{name}: {percent}%"
+            eligibility = promo.get("eligibility")
+            if isinstance(eligibility, str) and eligibility.strip():
+                entry = f"{entry} ({eligibility.strip()})"
+            parts.append(entry)
     if parts:
         return "Официальные акции: " + "; ".join(parts) + "." + _stacking_text()
     return "Скидки действуют только по официальным акциям."

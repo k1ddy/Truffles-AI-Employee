@@ -29,7 +29,33 @@
   - Implemented Track B step-2 runtime enforcement in `truffles-api/app/routers/webhook/decision.py`: fail-closed on `plan->final` override with missing/invalid reason-code (`override_reason_missing`), emit guard trace (`llm_policy_plan_delta`, `policy_core_guard`), and return guarded clarify response with explicit decision meta.
   - Added regression test `test_llm_policy_core_override_without_reason_code_blocks_with_clarify` in `truffles-api/tests/test_message_endpoint.py` to prove missing reason-code cannot silently pass and must degrade to policy clarify.
   - Opened PR `#770` for runtime guard enforcement after pushing commit `6bc58ddb`.
+  - Implemented Track K governance in `ops/diagnose.py` and extended status-gate tests in `truffles-api/tests/test_booking_quality_status_gate.py` (commit `e60cf4be` in PR `#782`).
+  - Ran local validation for Track K patch: `py_compile`, `ruff`, and `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`11 passed`).
+  - Built Wave-HQ1 manual bad-turn evidence catalog: `docs/evidence/2026-02-21-hq1-bad-turn-catalog.tsv`.
+  - Added Wave-HQ1 addendum into task package: `docs/TASK_PACKAGES/TP-2026-02-19-llm-first-firebreak-program.md`.
+  - Added report `docs/REPORTS/2026-02-21-firebreak-human-quality-wave-hq1.md` with NO_GO verdict and root-cause classes.
+  - Generated canonical human blocking scenario set: `/tmp/booking_quality/blocking_scenarios_human.json` (`8 dialogs`, generated `2026-02-21T02:54:15Z`).
+  - Validated `blocking_scenarios_human.json` via dry-run quality preflight: `/tmp/booking_quality/hq1-human-scenarios-validate-a1/summary.json` (`scenario_contract_valid=true`).
+  - Executed bounded no-judge replay on latest runtime evidence path: `/tmp/booking_quality/booking-blocking-nojudge-trackk-smoke-a1/summary.json` (`infra_valid=true`, `rewrite_governance_valid=true`, `lexicon_regex_delta_gate_valid=true`, but `expected_action_mismatch=1` -> `semantic_valid=false`).
+  - Fixed runtime reschedule contract in `truffles-api/app/routers/webhook/decision.py`: `calendar.reschedule` with `tool_decision in {missing_slot, not_found, contract_invalid, verifier_blocked}` now forces `booking_verification_handoff` when the user text is a reschedule request.
+  - Added regression test `test_booking_reschedule_tool_missing_slot_escalates_to_handoff` in `truffles-api/tests/test_message_endpoint.py`.
+  - Verified reschedule slice: targeted pytest run `3 passed` (`reschedule_missing_reference`, new missing-slot escalation, legacy non-escalate list-slots case).
+  - Hardened strict explicit location/hours guard in `truffles-api/app/routers/webhook/decision.py`: weak `anchor_intents` no longer override master intent in strict mode without explicit location/hours markers.
+  - Added post-verifier recovery for `catalog.service_query` services-overview asks: on contract mismatch, runtime now returns `services_overview` FACT fallback while preserving `tool_decision=contract_invalid` and recording `tool_recovery=services_overview`.
+  - Added regression tests `test_llm_policy_core_catalog_tool_decision_mismatch_services_overview_recovery` and `test_has_explicit_location_or_hours_request_strict_mode_ignores_anchor_hours_with_master`.
+  - Fixed booking progression arbitration in `truffles-api/app/routers/webhook/decision.py` for `calendar.list_slots` and `calendar.book_slot conflict`: ignore stale tool-level `expected_reply_type` hints, derive follow-up from booking state, and force `expected_reply_type=time` with explicit prompt on conflict.
+  - Added regression tests `test_llm_policy_core_list_slots_ok_appends_derived_followup_prompt` and `test_llm_policy_core_book_slot_conflict_forces_datetime_followup`.
+  - Rebuilt and restarted latest runtime container `truffles-api-firebreak-hq1` on `:18160`; restored hash parity (`decision.py`, `tool_registry_service.py`, `ai_service.py`) and `/admin/health` readiness on fresh image.
+  - Attempted bounded HQ1 no-judge replays on fresh runtime (`booking-human-nojudge-hq1-r4-a1`, `booking-human-nojudge-hq1-r5-a1`): partial `responses.jsonl/trace_bundle.jsonl` produced, but `summary.json` still missing due llm-quality finalization hang.
+  - Fixed `ops/diagnose.py` llm-quality finalization for interrupted runs: added graceful stop control (`SIGINT`/`SIGTERM`), stop checkpoints at dialog/turn boundaries, deterministic stop propagation, and explicit `summary.interrupted` field.
+  - Verified finalization fix with real interrupted runs (`booking-human-nojudge-hq1-r6-a1`, `booking-human-nojudge-hq1-r7-a1`, `booking-human-nojudge-hq1-r8-a1`): all produced `summary.json`/`brief.md` with `stop_reason=signal_2`.
+  - Completed bounded no-judge replay on latest runtime without manual stop (`booking-human-nojudge-hq1-r11-a1`): `summary.json` generated with `infra_valid=true`, `semantic_valid=true`, `blocking_reason_count=0`, `stop_reason=null`.
+  - Captured before/after blocking set evidence: historical v7 `failure_counts={expected_reply_type_mismatch:7, judge_fail:4, expected_action_mismatch:1}` vs latest bounded replay `failure_counts={}` (`r11`, count=1).
 - next:
+  - Fix mixed `master + hours/location` arbitration so `master` remains dominant without explicit location/hours anchors.
+  - Fix non-actionable fallback in `catalog.service_query` assortment turns.
+  - Validate fixed expected-reply progression on HQ1 human blocking replay (`/tmp/booking_quality/blocking_scenarios_human.json`) and record before/after blocking set.
+  - Run `L2` `judge-mode critical` replay on `/tmp/booking_quality/blocking_scenarios_human.json` (single bounded run) after confirming acceptance dialog set.
   - Continue TP Track B runtime refactor for remaining post-tool semantic rewrites outside the current policy-core guard scope and remove lexical degrade paths where reason-coded clarify/handoff is required.
   - Execute fresh canonical lock-run (`judge-mode all`, fail-on-thresholds) on current `main` head and then replay vs this lock baseline.
   - Wire structured scenario-generation progress into llm-quality summary/warnings for faster infra triage without reading raw stderr.
@@ -81,4 +107,46 @@
   - /tmp/booking_quality/booking-replay-20260220-main-a1-mini/summary.json
   - /tmp/booking_quality/booking-replay-20260220-main-a1-mini/brief.md
   - replay mini status: `infra_valid=true`, `semantic_valid=false`, regression breach (`strict_pass_rate -0.1`, `degraded_fallback_rate +0.1`).
-- last_updated: 2026-02-20T09:16:53+05:00
+  - python3 -m py_compile ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py
+  - ruff check ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py
+  - pytest -q truffles-api/tests/test_booking_quality_status_gate.py
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18160 --client-slug demo_salon --scenarios-file /tmp/booking_quality/blocking_scenarios.json --count 2 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-blocking-nojudge-trackk-smoke-a1
+  - /tmp/booking_quality/booking-blocking-nojudge-trackk-smoke-a1/summary.json
+  - /tmp/booking_quality/booking-blocking-nojudge-trackk-smoke-a1/brief.md
+  - /tmp/booking_quality/booking-blocking-nojudge-trackk-smoke-a1/responses.jsonl
+  - /tmp/booking_quality/booking-blocking-nojudge-trackk-smoke-a1/trace_bundle.jsonl
+  - /tmp/booking_quality/blocking_scenarios_human.json
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 1 --judge-mode off --allow-judge-off --dry-run --run-id hq1-human-scenarios-validate-a1
+  - /tmp/booking_quality/hq1-human-scenarios-validate-a1/summary.json
+  - python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py
+  - ruff check truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "reschedule_missing_reference_escalates_to_handoff or booking_reschedule_tool_missing_slot_escalates_to_handoff or booking_reschedule_missing_slot_does_not_escalate_without_manager_request"
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "catalog_tool_decision_mismatch_services_overview_recovery or has_explicit_location_or_hours_request_strict_mode_ignores_anchor_hours_with_master or booking_reschedule_tool_missing_slot_escalates_to_handoff or llm_policy_core_reschedule_missing_reference_escalates_to_handoff"
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core_normalizes_action_from_tool_action or llm_policy_core_list_slots_ok_appends_derived_followup_prompt or llm_policy_core_book_slot_conflict_forces_datetime_followup or booking_reschedule_tool_missing_slot_escalates_to_handoff or llm_policy_core_catalog_tool_decision_mismatch_services_overview_recovery or has_explicit_location_or_hours_request_strict_mode_ignores_anchor_hours_with_master"
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core_list_slots or llm_policy_core_book_slot or booking_reschedule"
+  - ruff check truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py
+  - python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py
+  - bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD
+  - docker build -t truffles-api:firebreak-hq1-wt -f truffles-api/Dockerfile .
+  - docker run -d --name truffles-api-firebreak-hq1 --env-file truffles-api/.env --network truffles_internal-net -p 18160:8000 truffles-api:firebreak-hq1-wt
+  - curl -sS --max-time 10 http://127.0.0.1:18160/admin/health
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18160 --client-slug demo_salon --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 2 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-human-nojudge-hq1-r4-a1
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18160 --client-slug demo_salon --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 1 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-human-nojudge-hq1-r5-a1
+  - /tmp/booking_quality/booking-human-nojudge-hq1-r4-a1/responses.jsonl
+  - /tmp/booking_quality/booking-human-nojudge-hq1-r4-a1/trace_bundle.jsonl
+  - /tmp/booking_quality/booking-human-nojudge-hq1-r5-a1/responses.jsonl
+  - /tmp/booking_quality/booking-human-nojudge-hq1-r5-a1/trace_bundle.jsonl
+  - python3 -m py_compile ops/diagnose.py
+  - ruff check ops/diagnose.py
+  - pytest -q truffles-api/tests/test_booking_quality_status_gate.py
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18160 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-replay-20260220-postfix-a1-v7/scenarios.json --count 2 --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --run-id booking-human-nojudge-hq1-r6-a1 --output-dir /tmp/booking_quality/booking-human-nojudge-hq1-r6-a1 --allow-output-overwrite --fail-on-thresholds --max-failures 5 --manager-mode simulate --pending-mode ack
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18160 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-replay-20260220-postfix-a1-v7/scenarios.json --count 1 --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --run-id booking-human-nojudge-hq1-r7-a1 --output-dir /tmp/booking_quality/booking-human-nojudge-hq1-r7-a1 --allow-output-overwrite --fail-on-thresholds --max-failures 5 --manager-mode simulate --pending-mode ack --min-wait 0 --max-wait 0 --timeout 15 --poll-timeout 12 --trace-timeout 12 --tool-hook-wait 0.1
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18160 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-replay-20260220-postfix-a1-v7/scenarios.json --count 1 --tool-hooks auto --judge-mode off --allow-judge-off --run-id booking-human-nojudge-hq1-r11-a1 --output-dir /tmp/booking_quality/booking-human-nojudge-hq1-r11-a1 --allow-output-overwrite --fail-on-thresholds --max-failures 1 --manager-mode skip --pending-mode skip --min-wait 0 --max-wait 0 --timeout 12 --poll-timeout 10 --trace-timeout 10 --jid-mode unique --skip-outbox --allow-non-allowlist
+  - /tmp/booking_quality/booking-human-nojudge-hq1-r6-a1/summary.json
+  - /tmp/booking_quality/booking-human-nojudge-hq1-r7-a1/summary.json
+  - /tmp/booking_quality/booking-human-nojudge-hq1-r11-a1/summary.json
+  - /tmp/booking_quality/booking-human-nojudge-hq1-r11-a1/brief.md
+  - /tmp/booking_quality/booking-replay-20260220-postfix-a1-v7/summary.json
+  - docs/evidence/2026-02-21-hq1-bad-turn-catalog.tsv
+  - docs/REPORTS/2026-02-21-firebreak-human-quality-wave-hq1.md
+- last_updated: 2026-02-21T10:14:05+05:00

@@ -25,9 +25,37 @@ from app.services.appointment_reminder_service import (
 from app.services.appointment_service import AppointmentConflictError, SchedulingService
 from app.services.calendar_sync_service import enqueue_appointment_sync, get_provider_health
 from app.services.capabilities_runtime import get_runtime_capabilities
-from app.services.pack_runtime_service import format_reply_from_truth, load_yaml_truth
+from app.services.pack_runtime_service import (
+    _detect_promotion_intent,
+    _has_duration_signal,
+    _has_parking_signal,
+    _has_price_signal,
+    _match_service,
+    _normalize_text,
+    build_info_combined_reply,
+    format_reply_from_truth,
+    get_pack_adapter,
+    load_yaml_truth,
+)
 
 _TIME_TOKEN_RE = re.compile(r"\b([01]?\d|2[0-3])[:.][0-5]\d\b")
+_DAYPART_TOKEN_RE = re.compile(
+    r"\b(утром|утро|на утро|днем|днём|день|на день|после обеда|вечером|вечер|на вечер|к вечеру)\b",
+    re.IGNORECASE,
+)
+_DATE_TOKEN_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bпослезавтраш\w*|\bпослезавтра\b", re.IGNORECASE), "послезавтра"),
+    (re.compile(r"\bзавтраш\w*|\bзавтра\b", re.IGNORECASE), "завтра"),
+    (re.compile(r"\bсегодняш\w*|\bсегодня\b", re.IGNORECASE), "сегодня"),
+    (re.compile(r"\bпонедель\w*", re.IGNORECASE), "в понедельник"),
+    (re.compile(r"\bвторник\w*", re.IGNORECASE), "во вторник"),
+    (re.compile(r"\bсред\w*", re.IGNORECASE), "в среду"),
+    (re.compile(r"\bчетверг\w*", re.IGNORECASE), "в четверг"),
+    (re.compile(r"\bпятниц\w*", re.IGNORECASE), "в пятницу"),
+    (re.compile(r"\bсуббот\w*", re.IGNORECASE), "в субботу"),
+    (re.compile(r"\bвоскрес\w*", re.IGNORECASE), "в воскресенье"),
+    (re.compile(r"\bвыходн\w*", re.IGNORECASE), "в субботу"),
+)
 _BOOKING_VERIFICATION_RE = re.compile(
     r"\b(проверь|провер|подтверд|подтвержд|check|confirm|verify)\w*",
     re.IGNORECASE,
@@ -196,6 +224,36 @@ def _parse_datetime(
         except Exception:
             parsed = None
     if not parsed:
+        daypart = _extract_daypart_token(text)
+        if daypart:
+            stripped_text = _DAYPART_TOKEN_RE.sub(" ", text)
+            stripped_text = re.sub(r"\s+", " ", stripped_text).strip()
+            if stripped_text:
+                try:
+                    import dateparser
+
+                    parsed = dateparser.parse(
+                        stripped_text,
+                        languages=["ru", "kk", "en"],
+                        settings={
+                            "PREFER_DATES_FROM": "future",
+                            "RELATIVE_BASE": reference_now,
+                            "TIMEZONE": timezone_name,
+                            "TO_TIMEZONE": timezone_name,
+                            "RETURN_AS_TIMEZONE_AWARE": True,
+                        },
+                    )
+                except Exception:
+                    parsed = None
+            if parsed is not None:
+                daypart_hours = {"morning": 10, "day": 14, "evening": 18}
+                parsed = parsed.replace(
+                    hour=daypart_hours.get(daypart, parsed.hour),
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                )
+    if not parsed:
         time_only_match = re.fullmatch(r"(?P<hour>\d{1,2})[:.](?P<minute>\d{2})", text)
         if time_only_match:
             try:
@@ -243,6 +301,96 @@ def _extract_time_token(text: str | None) -> str | None:
         return None
     token = match.group(0)
     return token.replace(".", ":")
+
+
+def _coerce_time_token(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    token = value.strip().replace(".", ":")
+    match = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", token)
+    if not match:
+        return None
+    return f"{int(match.group(1)):02d}:{match.group(2)}"
+
+
+def _extract_relative_date_token(text: str | None) -> str | None:
+    if not isinstance(text, str) or not text.strip():
+        return None
+    for pattern, replacement in _DATE_TOKEN_PATTERNS:
+        if pattern.search(text):
+            return replacement
+    return None
+
+
+def _compose_requested_booking_reference(
+    *,
+    requested_date: str | None,
+    requested_time: str | None,
+) -> str | None:
+    date_token = (
+        requested_date.strip() if isinstance(requested_date, str) and requested_date.strip() else None
+    )
+    time_token = _coerce_time_token(requested_time)
+    if date_token and time_token:
+        if date_token.casefold().startswith(("в ", "во ")):
+            return f"{date_token} на {time_token}"
+        return f"на {date_token} на {time_token}"
+    if date_token:
+        if date_token.casefold().startswith(("в ", "во ")):
+            return date_token
+        return f"на {date_token}"
+    if time_token:
+        return f"на {time_token}"
+    return None
+
+
+def _has_explicit_date_signal(value: str | None) -> bool:
+    if not isinstance(value, str):
+        return False
+    token = value.strip()
+    if not token:
+        return False
+    lowered = token.casefold()
+    if _extract_relative_date_token(lowered):
+        return True
+    if re.search(r"\d{4}-\d{2}-\d{2}", token):
+        return True
+    if re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", token):
+        return True
+    return False
+
+
+def _normalize_slot_request_tokens(
+    *,
+    date_value: str | None,
+    requested_time: str | None,
+    fallback_tz: str | None,
+    now: datetime | None,
+) -> tuple[str | None, str | None]:
+    requested_time_token = _coerce_time_token(requested_time)
+    if not isinstance(date_value, str):
+        return None, requested_time_token
+    raw_date_token = date_value.strip()
+    if not raw_date_token:
+        return None, requested_time_token
+
+    relative_date_token = _extract_relative_date_token(raw_date_token)
+    if relative_date_token:
+        return relative_date_token, requested_time_token
+
+    time_only_token = _coerce_time_token(raw_date_token)
+    if time_only_token:
+        return None, requested_time_token or time_only_token
+
+    parsed_from_token = _parse_datetime(
+        raw_date_token,
+        fallback_tz=fallback_tz,
+        now=now,
+    )
+    if parsed_from_token and _has_explicit_date_signal(raw_date_token):
+        return parsed_from_token.date().isoformat(), requested_time_token
+
+    return raw_date_token, requested_time_token
 
 
 def _looks_like_booking_verification_message(text: str | None) -> bool:
@@ -307,16 +455,9 @@ def _format_services_overview_reply(
     branch: Branch,
     client_slug: str | None,
 ) -> str | None:
-    if client_slug:
-        try:
-            from app.services import demo_salon_knowledge as knowledge
-
-            slug = knowledge._normalize_client_slug(client_slug)
-            reply = knowledge.format_reply_from_truth("services_overview", client_slug=slug)
-            if isinstance(reply, str) and reply.strip():
-                return reply
-        except Exception:
-            pass
+    reply = format_reply_from_truth("services_overview", client_slug=client_slug)
+    if isinstance(reply, str) and reply.strip():
+        return reply
 
     rows = (
         db.query(Service.name)
@@ -344,6 +485,17 @@ def _format_services_overview_reply(
     return f"Мы предлагаем: {', '.join(names[:8])}. Подскажу по цене и времени любой услуги."
 
 
+def _call_pack_adapter(adapter_slug: str | None, attr_name: str, *args: Any, **kwargs: Any) -> Any:
+    adapter = get_pack_adapter(adapter_slug)
+    handler = getattr(adapter, attr_name, None)
+    if callable(handler):
+        try:
+            return handler(*args, **kwargs)
+        except Exception:
+            return None
+    return None
+
+
 def _expected_reply_prompt_from_hint(expected_reply_type: str | None) -> str | None:
     normalized = str(expected_reply_type or "").strip().casefold()
     if normalized == "name":
@@ -352,6 +504,13 @@ def _expected_reply_prompt_from_hint(expected_reply_type: str | None) -> str | N
         return "На какую дату и время вам удобно?"
     if normalized == "service_choice":
         return "На какую услугу хотите записаться?"
+    return None
+
+
+def _normalize_expected_reply_hint(expected_reply_type: str | None) -> str | None:
+    normalized = str(expected_reply_type or "").strip().casefold()
+    if normalized in {"service_choice", "time", "name"}:
+        return normalized
     return None
 
 
@@ -504,13 +663,7 @@ def validate_tool_args_contract(
 def _is_photo_offer_message(text: str | None) -> bool:
     if not isinstance(text, str) or not text.strip():
         return False
-    normalized = text.casefold()
-    try:
-        from app.services import demo_salon_knowledge as knowledge
-
-        normalized = knowledge._normalize_text(text)
-    except Exception:
-        pass
+    normalized = _normalize_text(text)
     if "фото" not in normalized and "референс" not in normalized:
         return False
     return any(
@@ -704,12 +857,25 @@ def _resolve_specialist_for_booking(
     return None, None, "specialist_not_found"
 
 
-def _format_slot_list(slots_by_specialist: dict[str, list[str]]) -> str:
+def _format_slot_list(
+    slots_by_specialist: dict[str, list[str]],
+    *,
+    focus_time: str | None = None,
+) -> str:
     parts: list[str] = []
     for specialist_name, slots in slots_by_specialist.items():
         if not slots:
             continue
-        slot_text = ", ".join(slots[:5])
+        normalized_slots = [token for token in slots if isinstance(token, str) and token]
+        visible_slots = normalized_slots[:5]
+        if (
+            focus_time
+            and focus_time in normalized_slots
+            and focus_time not in visible_slots
+        ):
+            visible_slots = normalized_slots[:4] + [focus_time]
+        dedup_visible_slots = list(dict.fromkeys(visible_slots))
+        slot_text = ", ".join(dedup_visible_slots)
         parts.append(f"{specialist_name}: {slot_text}")
     if not parts:
         return "Свободных слотов не нашлось. Могу предложить другое время."
@@ -726,7 +892,20 @@ def _list_slots(
     requested_time: str | None = None,
     requested_daypart: str | None = None,
     now: datetime | None = None,
+    contract_meta: dict[str, Any] | None = None,
 ) -> tuple[str | None, str | None]:
+    requested_date_token, requested_time_token = _normalize_slot_request_tokens(
+        date_value=date_value,
+        requested_time=requested_time,
+        fallback_tz=branch.timezone if branch else None,
+        now=now,
+    )
+    if isinstance(contract_meta, dict):
+        contract_meta["requested_date"] = requested_date_token
+        contract_meta["requested_time"] = requested_time_token
+        contract_meta["resolved_date"] = None
+        contract_meta["available_slots_by_specialist"] = {}
+        contract_meta["availability_claim"] = "unknown"
     if not date_value:
         return None, "missing_date"
     date_parsed = _parse_datetime(
@@ -735,7 +914,11 @@ def _list_slots(
         now=now,
     )
     if not date_parsed:
+        if isinstance(contract_meta, dict) and _has_explicit_date_signal(date_value):
+            contract_meta["slot_contract_error"] = "slot_date_resolution_miss"
         return None, "invalid_date"
+    if isinstance(contract_meta, dict):
+        contract_meta["resolved_date"] = date_parsed.date().isoformat()
 
     duration = duration_min or SchedulingService.DEFAULT_SLOT_DURATION
     service = SchedulingService(db)
@@ -775,8 +958,12 @@ def _list_slots(
         slots_by_specialist[specialist.name] = [
             slot.start.strftime("%H:%M") for slot in slots if slot.available
         ]
+    if isinstance(contract_meta, dict):
+        contract_meta["available_slots_by_specialist"] = {
+            key: list(value[:10]) for key, value in slots_by_specialist.items()
+        }
 
-    requested_token = requested_time.strip() if isinstance(requested_time, str) else ""
+    requested_token = requested_time_token
     available_times = sorted(
         {
             token
@@ -787,10 +974,14 @@ def _list_slots(
     )
     if requested_token:
         if requested_token in available_times:
+            if isinstance(contract_meta, dict):
+                contract_meta["availability_claim"] = "yes"
             return (
                 f"Да, на {requested_token} есть свободное окно. "
-                f"{_format_slot_list(slots_by_specialist)}"
+                f"{_format_slot_list(slots_by_specialist, focus_time=requested_token)}"
             ), None
+        if isinstance(contract_meta, dict):
+            contract_meta["availability_claim"] = "no"
         if available_times:
             return (
                 f"На {requested_token} свободного окна нет. "
@@ -806,6 +997,8 @@ def _list_slots(
             return f"На {daypart_label} доступны: {', '.join(daypart_times[:5])}.", None
         return f"На {daypart_label} свободных окон нет. Могу предложить другое время.", None
 
+    if isinstance(contract_meta, dict) and not available_times:
+        contract_meta["availability_claim"] = "no"
     return _format_slot_list(slots_by_specialist), None
 
 
@@ -1061,32 +1254,20 @@ def _catalog_location(
         )
     )
     if message_text:
-        try:
-            from app.services import demo_salon_knowledge as knowledge
-
-            slug = knowledge._normalize_client_slug(client_slug)
-            normalized = knowledge._normalize_text(message_text)
-            include_parking = bool(
-                include_parking
-                or (
-                normalized
-                and knowledge._has_parking_signal(normalized, client_slug=slug)
-                )
+        normalized = _normalize_text(message_text)
+        include_parking = bool(
+            include_parking
+            or (
+                normalized and _has_parking_signal(normalized, client_slug=client_slug)
             )
-        except Exception:
-            include_parking = include_parking
-
-    try:
-        from app.services import demo_salon_knowledge as knowledge
-
-        reply, meta = knowledge.build_info_combined_reply(
-            include_parking=include_parking,
-            client_slug=client_slug,
         )
-        if reply:
-            return reply, None, meta or {}
-    except Exception:
-        pass
+
+    reply, meta = build_info_combined_reply(
+        include_parking=include_parking,
+        client_slug=client_slug,
+    )
+    if reply:
+        return reply, None, meta or {}
 
     intent = "parking" if include_parking else "location"
     reply = format_reply_from_truth(intent, client_slug=client_slug)
@@ -1257,6 +1438,16 @@ def execute_tool_action(
             if not health.ready:
                 provider_health_reason = health.reason
         raw_date = tool_args.get("date") or tool_args.get("start_at")
+        inferred_date = _extract_relative_date_token(message_text)
+        if inferred_date:
+            raw_date_has_explicit_date = (
+                isinstance(raw_date, str)
+                and raw_date.strip()
+                and _has_explicit_date_signal(raw_date)
+            )
+            raw_date_is_time_only = bool(_coerce_time_token(raw_date))
+            if not raw_date_has_explicit_date or raw_date_is_time_only:
+                raw_date = inferred_date
         duration = tool_args.get("duration_min") or _resolve_service_duration(
             db, service_name=service_query, branch=branch
         )
@@ -1292,6 +1483,7 @@ def execute_tool_action(
             )
         requested_time = _extract_time_token(message_text)
         requested_daypart = None if requested_time else _extract_daypart_token(message_text)
+        slot_contract_meta: dict[str, Any] = {}
         response, error = _list_slots(
             db,
             branch=branch,
@@ -1301,6 +1493,7 @@ def execute_tool_action(
             requested_time=requested_time,
             requested_daypart=requested_daypart,
             now=now,
+            contract_meta=slot_contract_meta,
         )
         if error:
             missing_type = "datetime" if error in {"missing_date", "invalid_date"} else None
@@ -1323,17 +1516,23 @@ def execute_tool_action(
                     "tool_action": tool_action,
                     "tool_decision": "missing_slot",
                     "missing_slot": missing_type,
+                    **slot_contract_meta,
                 },
                 trace={
                     "stage": "tool_registry",
                     "decision": "missing_slot",
                     "tool_action": tool_action,
                     "missing_slot": missing_type,
+                    **slot_contract_meta,
                 },
                 expected_reply_type=expected_reply_type,
             )
         decision_meta, trace = _with_provider_health_meta(
-            {"tool_action": tool_action, "tool_decision": "ok"},
+            {
+                "tool_action": tool_action,
+                "tool_decision": "ok",
+                **slot_contract_meta,
+            },
             {"stage": "tool_registry", "decision": "ok", "tool_action": tool_action},
             reason=provider_health_reason,
         )
@@ -1344,12 +1543,18 @@ def execute_tool_action(
             error_code=None,
             decision_meta=decision_meta,
             trace=trace,
+            expected_reply_type=_normalize_expected_reply_hint(expected_reply_type),
         )
 
     if tool_action == "calendar.get_booking":
         appointment_id = tool_args.get("appointment_id")
         appointment_uuid = _parse_uuid(appointment_id)
         requested_time = _extract_time_token(message_text)
+        requested_date = _extract_relative_date_token(message_text)
+        requested_reference = _compose_requested_booking_reference(
+            requested_date=requested_date,
+            requested_time=requested_time,
+        )
         appointment, error = _get_booking(
             db,
             appointment_id=appointment_uuid,
@@ -1362,8 +1567,10 @@ def execute_tool_action(
                 # "На какую услугу..." that look like semantic reroute.
                 followup_prompt = None
             response_parts: list[str] = []
-            if requested_time:
-                response_parts.append(f"Проверил: пока не вижу подтверждённой записи на {requested_time}.")
+            if requested_reference:
+                response_parts.append(
+                    f"Проверил: пока не вижу подтверждённой записи {requested_reference}."
+                )
             else:
                 response_parts.append("Проверил: пока не вижу подтверждённой записи.")
             if _is_photo_offer_message(message_text):
@@ -1385,37 +1592,64 @@ def execute_tool_action(
                     "tool_action": tool_action,
                     "tool_decision": "not_found",
                     "requested_time": requested_time,
+                    "requested_date": requested_date,
                 },
                 trace={
                     "stage": "tool_registry",
                     "decision": "not_found",
                     "tool_action": tool_action,
                     "requested_time": requested_time,
+                    "requested_date": requested_date,
                 },
             )
         appointment_time = _appointment_time_token(appointment)
         if requested_time and appointment_time and requested_time != appointment_time:
+            verification_request = _looks_like_booking_verification_message(message_text)
+            mismatch_prefix = (
+                f"Проверил запись {requested_reference}: подтверждённой записи на это время не вижу."
+                if requested_reference
+                else f"Проверил: на {requested_time} подтверждённой записи не вижу."
+            )
+            booked_time_note = (
+                f" Вижу подтверждённую запись на {appointment_time} (возможно на другую дату)."
+                if isinstance(appointment_time, str) and appointment_time.strip()
+                else ""
+            )
+            if verification_request:
+                followup = "Могу подтвердить найденную запись или проверить другой слот."
+                followup_prompt = _expected_reply_prompt_from_hint(expected_reply_type)
+                if followup_prompt:
+                    followup = f"{followup} {followup_prompt}"
+                else:
+                    followup = (
+                        f"{followup} Подскажите имя или номер телефона, "
+                        "и проверю еще раз."
+                    )
+            else:
+                followup = "Хотите проверить другую дату/время или оформить новую запись?"
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
-                response_text=(
-                    f"На {requested_time} записи не вижу. "
-                    "Хотите проверить другую дату/время или оформить новую запись?"
-                ),
+                response_text=f"{mismatch_prefix}{booked_time_note} {followup}",
                 error_code="booking_time_mismatch",
                 decision_meta={
                     "tool_action": tool_action,
                     "tool_decision": "time_mismatch",
                     "requested_time": requested_time,
+                    "requested_date": requested_date,
                     "appointment_time": appointment_time,
+                    "verification_request": verification_request,
                 },
                 trace={
                     "stage": "tool_registry",
                     "decision": "time_mismatch",
                     "tool_action": tool_action,
                     "requested_time": requested_time,
+                    "requested_date": requested_date,
                     "appointment_time": appointment_time,
+                    "verification_request": verification_request,
                 },
+                expected_reply_type=_normalize_expected_reply_hint(expected_reply_type),
             )
         return ToolExecutionResult(
             handled=True,
@@ -1526,6 +1760,7 @@ def execute_tool_action(
                 conversation_id=conversation_id,
             )
         except AppointmentConflictError:
+            requested_time = _extract_time_token(message_text)
             conflict_text = "Этот слот уже занят. Могу предложить другое время."
             if _looks_like_booking_verification_message(message_text):
                 conflict_text = (
@@ -1533,9 +1768,6 @@ def execute_tool_action(
                     "Могу предложить другое время."
                 )
             else:
-                requested_time = _extract_time_token(message_text)
-                if not requested_time and isinstance(start_at, datetime):
-                    requested_time = start_at.strftime("%H:%M")
                 alternative_reply = None
                 if isinstance(start_at, datetime):
                     alternative_reply, _ = _list_slots(
@@ -1558,8 +1790,18 @@ def execute_tool_action(
                 ok=False,
                 response_text=conflict_text,
                 error_code="slot_unavailable",
-                decision_meta={"tool_action": tool_action, "tool_decision": "conflict"},
-                trace={"stage": "tool_registry", "decision": "conflict", "tool_action": tool_action},
+                decision_meta={
+                    "tool_action": tool_action,
+                    "tool_decision": "conflict",
+                    "requested_time": _coerce_time_token(requested_time),
+                },
+                trace={
+                    "stage": "tool_registry",
+                    "decision": "conflict",
+                    "tool_action": tool_action,
+                    "requested_time": _coerce_time_token(requested_time),
+                },
+                expected_reply_type=_normalize_expected_reply_hint(expected_reply_type),
             )
         if error:
             from app.routers.webhook import _legacy as legacy
@@ -1845,59 +2087,60 @@ def execute_tool_action(
                     info_sections = ["services_overview"]
                     expected_reply_type = None
             if client_slug and message_text:
-                try:
-                    from app.services import demo_salon_knowledge as knowledge
-
-                    slug = knowledge._normalize_client_slug(client_slug)
-                    normalized = knowledge._normalize_text(message_text)
-                    promo_intent = None
-                    if promo_hint:
-                        promo_intent = "promotions"
-                    else:
-                        promo_intent = knowledge._detect_promotion_intent(
-                            normalized, client_slug=slug
-                        )
-                    duration_signal = duration_hint or knowledge._has_duration_signal(
-                        normalized, message=message_text, client_slug=slug
+                normalized = _normalize_text(message_text)
+                promo_intent = "promotions" if promo_hint else _detect_promotion_intent(
+                    normalized, client_slug=client_slug
+                )
+                duration_signal = duration_hint or _has_duration_signal(
+                    normalized, raw_text=message_text, client_slug=client_slug
+                )
+                price_signal = price_hint or _has_price_signal(
+                    normalized, message_text, client_slug=client_slug
+                )
+                if promo_intent:
+                    promo_reply = format_reply_from_truth(
+                        "promotions",
+                        slots={"promotion_intent": promo_intent},
+                        client_slug=client_slug,
                     )
-                    price_signal = price_hint or knowledge._has_price_signal(
-                        normalized, message_text, client_slug=slug
+                    if promo_reply:
+                        reply = promo_reply
+                        info_sections = ["promotions"]
+                        tool_decision = "promotions"
+                        expected_reply_type = None
+                elif duration_signal and price_signal:
+                    clarify = format_reply_from_truth(
+                        "duration_or_price_clarify",
+                        client_slug=client_slug,
                     )
-                    if promo_intent:
-                        promo_reply = knowledge.format_reply_from_truth(
-                            "promotions",
-                            slots={"promotion_intent": promo_intent},
-                            client_slug=slug,
-                        )
-                        if promo_reply:
-                            reply = promo_reply
-                            info_sections = ["promotions"]
-                            tool_decision = "promotions"
-                            expected_reply_type = None
-                    elif duration_signal and price_signal:
-                        reply = (
-                            knowledge.format_reply_from_truth(
-                                "duration_or_price_clarify", client_slug=slug
-                            )
-                            or knowledge._format_service_duration_reply(
-                                None, message=message_text, client_slug=slug
-                            )
-                        )
-                        info_sections = ["duration", "pricing"]
-                    elif duration_signal:
-                        reply = knowledge._format_service_duration_reply(
-                            None, message=message_text, client_slug=slug
-                        )
-                        info_sections = ["duration"]
-                    elif price_signal:
-                        clarify = knowledge.format_reply_from_truth(
-                            "service_clarify", client_slug=slug
-                        )
-                        if clarify:
-                            reply = clarify
-                        info_sections = ["pricing"]
-                except Exception:
-                    pass
+                    duration_reply = _call_pack_adapter(
+                        client_slug,
+                        "_format_service_duration_reply",
+                        None,
+                        message=message_text,
+                        client_slug=client_slug,
+                    )
+                    if isinstance(clarify, str) and clarify.strip():
+                        reply = clarify
+                    elif isinstance(duration_reply, str) and duration_reply.strip():
+                        reply = duration_reply
+                    info_sections = ["duration", "pricing"]
+                elif duration_signal:
+                    duration_reply = _call_pack_adapter(
+                        client_slug,
+                        "_format_service_duration_reply",
+                        None,
+                        message=message_text,
+                        client_slug=client_slug,
+                    )
+                    if isinstance(duration_reply, str) and duration_reply.strip():
+                        reply = duration_reply
+                    info_sections = ["duration"]
+                elif price_signal:
+                    clarify = format_reply_from_truth("service_clarify", client_slug=client_slug)
+                    if clarify:
+                        reply = clarify
+                    info_sections = ["pricing"]
 
             decision_meta = {
                 "tool_action": tool_action,
@@ -1925,96 +2168,95 @@ def execute_tool_action(
                 expected_reply_type=expected_reply_type,
             )
         if client_slug and message_text:
-            try:
-                from app.services import demo_salon_knowledge as knowledge
-
-                slug = knowledge._normalize_client_slug(client_slug)
-                normalized = knowledge._normalize_text(message_text)
-                message_tokens = set(normalized.split()) if normalized else set()
-                inferred_price_item = knowledge._find_best_price_item(message_text, slug)
-                inferred_service_name = None
-                if isinstance(inferred_price_item, dict):
-                    candidate_name = inferred_price_item.get("name")
-                    if isinstance(candidate_name, str) and candidate_name.strip():
-                        inferred_service_name = candidate_name.strip()
-                if inferred_service_name:
-                    inferred_tokens = set(knowledge._normalize_text(inferred_service_name).split())
-                    current_tokens = (
-                        set(knowledge._normalize_text(service_query).split())
-                        if isinstance(service_query, str) and service_query.strip()
-                        else set()
+            normalized = _normalize_text(message_text)
+            message_tokens = set(normalized.split()) if normalized else set()
+            inferred_price_item = _call_pack_adapter(
+                client_slug,
+                "_find_best_price_item",
+                message_text,
+                client_slug,
+            )
+            inferred_service_name = None
+            if isinstance(inferred_price_item, dict):
+                candidate_name = inferred_price_item.get("name")
+                if isinstance(candidate_name, str) and candidate_name.strip():
+                    inferred_service_name = candidate_name.strip()
+            if inferred_service_name:
+                inferred_tokens = set(_normalize_text(inferred_service_name).split())
+                current_tokens = (
+                    set(_normalize_text(service_query).split())
+                    if isinstance(service_query, str) and service_query.strip()
+                    else set()
+                )
+                inferred_overlap = bool(inferred_tokens & message_tokens)
+                current_overlap = bool(current_tokens & message_tokens)
+                if inferred_overlap and (not current_tokens or not current_overlap):
+                    service_query = inferred_service_name
+            promo_intent = "promotions" if promo_hint else _detect_promotion_intent(
+                normalized,
+                client_slug=client_slug,
+            )
+            if promo_intent:
+                promo_reply = format_reply_from_truth(
+                    "promotions",
+                    slots={"promotion_intent": promo_intent},
+                    client_slug=client_slug,
+                )
+                if promo_reply:
+                    return ToolExecutionResult(
+                        handled=True,
+                        ok=True,
+                        response_text=promo_reply,
+                        error_code=None,
+                        decision_meta={
+                            "tool_action": tool_action,
+                            "tool_decision": "promotions",
+                            "info_sections": ["promotions"],
+                        },
+                        trace={
+                            "stage": "tool_registry",
+                            "decision": "promotions",
+                            "tool_action": tool_action,
+                            "info_sections": ["promotions"],
+                        },
                     )
-                    inferred_overlap = bool(inferred_tokens & message_tokens)
-                    current_overlap = bool(current_tokens & message_tokens)
-                    if inferred_overlap and (not current_tokens or not current_overlap):
-                        service_query = inferred_service_name
-                promo_intent = None
-                if promo_hint:
-                    promo_intent = "promotions"
-                else:
-                    promo_intent = knowledge._detect_promotion_intent(
-                        normalized, client_slug=slug
+            if duration_hint or _has_duration_signal(
+                normalized, raw_text=message_text, client_slug=client_slug
+            ):
+                service_match = (
+                    _match_service(
+                        _normalize_text(service_query),
+                        client_slug or "generic",
                     )
-                if promo_intent:
-                    promo_reply = knowledge.format_reply_from_truth(
-                        "promotions",
-                        slots={"promotion_intent": promo_intent},
-                        client_slug=slug,
+                    if service_query
+                    else None
+                )
+                duration_reply = _call_pack_adapter(
+                    client_slug,
+                    "_format_service_duration_reply",
+                    service_match,
+                    message=message_text,
+                    service_label=service_query,
+                    client_slug=client_slug,
+                )
+                if duration_reply:
+                    return ToolExecutionResult(
+                        handled=True,
+                        ok=True,
+                        response_text=duration_reply,
+                        error_code=None,
+                        decision_meta={
+                            "tool_action": tool_action,
+                            "tool_decision": "duration",
+                            "info_sections": ["duration"],
+                        },
+                        trace={
+                            "stage": "tool_registry",
+                            "decision": "duration",
+                            "tool_action": tool_action,
+                            "info_sections": ["duration"],
+                        },
                     )
-                    if promo_reply:
-                        return ToolExecutionResult(
-                            handled=True,
-                            ok=True,
-                            response_text=promo_reply,
-                            error_code=None,
-                            decision_meta={
-                                "tool_action": tool_action,
-                                "tool_decision": "promotions",
-                                "info_sections": ["promotions"],
-                            },
-                            trace={
-                                "stage": "tool_registry",
-                                "decision": "promotions",
-                                "tool_action": tool_action,
-                                "info_sections": ["promotions"],
-                            },
-                        )
-                if duration_hint or knowledge._has_duration_signal(
-                    normalized, message=message_text, client_slug=slug
-                ):
-                    service_match = (
-                        knowledge._match_service(
-                            knowledge._normalize_text(service_query), slug
-                        )
-                        if service_query
-                        else None
-                    )
-                    duration_reply = knowledge._format_service_duration_reply(
-                        service_match,
-                        message=message_text,
-                        service_label=service_query,
-                        client_slug=slug,
-                    )
-                    if duration_reply:
-                        return ToolExecutionResult(
-                            handled=True,
-                            ok=True,
-                            response_text=duration_reply,
-                            error_code=None,
-                            decision_meta={
-                                "tool_action": tool_action,
-                                "tool_decision": "duration",
-                                "info_sections": ["duration"],
-                            },
-                            trace={
-                                "stage": "tool_registry",
-                                "decision": "duration",
-                                "tool_action": tool_action,
-                                "info_sections": ["duration"],
-                            },
-                        )
-            except Exception:
-                pass
 
         reply, error = _catalog_service_query(
             db,
@@ -2022,110 +2264,119 @@ def execute_tool_action(
             service_query=service_query,
         )
         if error and client_slug:
-            try:
-                from app.services import demo_salon_knowledge as knowledge
-
-                slug = knowledge._normalize_client_slug(client_slug)
-                normalized_query = knowledge._normalize_text(service_query)
-                truth = knowledge.load_yaml_truth(slug)
-                service_match = (
-                    knowledge._match_service(normalized_query, slug) if normalized_query else None
+            normalized_query = _normalize_text(service_query)
+            truth = load_yaml_truth(client_slug)
+            service_match = _match_service(normalized_query, client_slug or "generic") if normalized_query else None
+            if isinstance(service_match, dict):
+                matched_name = service_match.get("name")
+                if isinstance(matched_name, str) and matched_name.strip():
+                    # Guard against harmful fallback where a different service is selected
+                    # without any lexical overlap with the user's explicit query.
+                    query_tokens = set(_normalize_text(service_query).split())
+                    matched_tokens = set(_normalize_text(matched_name).split())
+                    if query_tokens and matched_tokens and not (query_tokens & matched_tokens):
+                        service_match = None
+            if isinstance(service_match, dict):
+                truth_reply = _call_pack_adapter(
+                    client_slug,
+                    "_format_service_reply",
+                    service_match,
+                    truth,
+                    client_slug,
                 )
-                if isinstance(service_match, dict):
-                    matched_name = service_match.get("name")
-                    if isinstance(matched_name, str) and matched_name.strip():
-                        # Guard against harmful fallback where a different service is selected
-                        # without any lexical overlap with the user's explicit query.
-                        query_tokens = set(knowledge._normalize_text(service_query).split())
-                        matched_tokens = set(knowledge._normalize_text(matched_name).split())
-                        if query_tokens and matched_tokens and not (query_tokens & matched_tokens):
-                            service_match = None
-                if isinstance(service_match, dict):
-                    reply = knowledge._format_service_reply(service_match, truth, slug)
-                    if reply:
-                        return ToolExecutionResult(
-                            handled=True,
-                            ok=True,
-                            response_text=reply,
-                            error_code=None,
-                            decision_meta={
-                                "tool_action": tool_action,
-                                "tool_decision": "truth_fallback",
-                                "info_sections": ["pricing"],
-                            },
-                            trace={
-                                "stage": "tool_registry",
-                                "decision": "truth_fallback",
-                                "tool_action": tool_action,
-                                "info_sections": ["pricing"],
-                            },
-                        )
-                    service_name = service_match.get("name") if isinstance(service_match, dict) else None
-                    if isinstance(service_name, str) and service_name.strip():
-                        presence = knowledge._format_service_presence_reply_for_name(service_name, slug)
-                        if presence:
-                            return ToolExecutionResult(
-                                handled=True,
-                                ok=True,
-                                response_text=presence,
-                                error_code=None,
-                                decision_meta={
-                                    "tool_action": tool_action,
-                                    "tool_decision": "presence_fallback",
-                                },
-                                trace={
-                                    "stage": "tool_registry",
-                                    "decision": "presence_fallback",
-                                    "tool_action": tool_action,
-                                },
-                            )
-                price_item = knowledge._find_best_price_item(
-                    message_text or service_query or "",
-                    slug,
-                )
-                if isinstance(price_item, dict):
-                    raw_item = price_item.get("item")
-                    if isinstance(raw_item, dict):
-                        reply = knowledge._format_price_reply(raw_item)
-                        if reply:
-                            return ToolExecutionResult(
-                                handled=True,
-                                ok=True,
-                                response_text=reply,
-                                error_code=None,
-                                decision_meta={
-                                    "tool_action": tool_action,
-                                    "tool_decision": "price_item_fallback",
-                                    "info_sections": ["pricing"],
-                                },
-                                trace={
-                                    "stage": "tool_registry",
-                                    "decision": "price_item_fallback",
-                                    "tool_action": tool_action,
-                                    "info_sections": ["pricing"],
-                                },
-                            )
-                not_found = knowledge._format_service_not_found_reply(truth)
-                if not_found:
+                if truth_reply:
                     return ToolExecutionResult(
                         handled=True,
                         ok=True,
-                        response_text=not_found,
+                        response_text=truth_reply,
                         error_code=None,
                         decision_meta={
                             "tool_action": tool_action,
-                            "tool_decision": "not_found_fallback",
+                            "tool_decision": "truth_fallback",
                             "info_sections": ["pricing"],
                         },
                         trace={
                             "stage": "tool_registry",
-                            "decision": "not_found_fallback",
+                            "decision": "truth_fallback",
                             "tool_action": tool_action,
                             "info_sections": ["pricing"],
                         },
                     )
-            except Exception:
-                pass
+                service_name = service_match.get("name") if isinstance(service_match, dict) else None
+                if isinstance(service_name, str) and service_name.strip():
+                    presence = _call_pack_adapter(
+                        client_slug,
+                        "_format_service_presence_reply_for_name",
+                        service_name,
+                        client_slug,
+                    )
+                    if presence:
+                        return ToolExecutionResult(
+                            handled=True,
+                            ok=True,
+                            response_text=presence,
+                            error_code=None,
+                            decision_meta={
+                                "tool_action": tool_action,
+                                "tool_decision": "presence_fallback",
+                            },
+                            trace={
+                                "stage": "tool_registry",
+                                "decision": "presence_fallback",
+                                "tool_action": tool_action,
+                            },
+                        )
+            price_item = _call_pack_adapter(
+                client_slug,
+                "_find_best_price_item",
+                message_text or service_query or "",
+                client_slug or "generic",
+            )
+            if isinstance(price_item, dict):
+                raw_item = price_item.get("item")
+                if isinstance(raw_item, dict):
+                    price_reply = _call_pack_adapter(
+                        client_slug,
+                        "_format_price_reply",
+                        raw_item,
+                    )
+                    if price_reply:
+                        return ToolExecutionResult(
+                            handled=True,
+                            ok=True,
+                            response_text=price_reply,
+                            error_code=None,
+                            decision_meta={
+                                "tool_action": tool_action,
+                                "tool_decision": "price_item_fallback",
+                                "info_sections": ["pricing"],
+                            },
+                            trace={
+                                "stage": "tool_registry",
+                                "decision": "price_item_fallback",
+                                "tool_action": tool_action,
+                                "info_sections": ["pricing"],
+                            },
+                        )
+            not_found = _call_pack_adapter(client_slug, "_format_service_not_found_reply", truth)
+            if not_found:
+                return ToolExecutionResult(
+                    handled=True,
+                    ok=True,
+                    response_text=not_found,
+                    error_code=None,
+                    decision_meta={
+                        "tool_action": tool_action,
+                        "tool_decision": "not_found_fallback",
+                        "info_sections": ["pricing"],
+                    },
+                    trace={
+                        "stage": "tool_registry",
+                        "decision": "not_found_fallback",
+                        "tool_action": tool_action,
+                        "info_sections": ["pricing"],
+                    },
+                )
         if error:
             return ToolExecutionResult(
                 handled=True,
