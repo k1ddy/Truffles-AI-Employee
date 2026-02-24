@@ -9,6 +9,8 @@
 - zero_context_gate: off
 - scope: Контракт состояния Tenants + Wave3 snapshot hardening + частичное переключение Tenants на server contract (`portfolio/cockpit`)
 - done:
+  - Wave3 continuation (part 9): вынесен основной render/composition слой Tenants в `console-web/src/app/tenants/tenants-page-view.tsx`; `console-web/src/app/tenants/page.tsx` сокращён `1064 -> 954` LOC и оставлен как orchestration shell + prop wiring.
+  - Валидация Wave3 part 9: `corepack pnpm -C console-web run lint` (pass), `corepack pnpm -C console-web run build` (pass), `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 corepack pnpm -C console-web exec playwright test e2e/platform-admin.spec.ts --project=chromium --workers=1` (`18 passed`).
   - Wave4 continuation (part 12): projection fallback prewarm selection now rotates across overflow company scopes via `_select_projection_fallback_prewarm_company_ids` (instead of fixed first-N), preventing starvation under sustained large-scope reads.
   - Added contract tests for rotation behavior in `truffles-api/tests/test_console_tenants_list.py`: pure selector rotation and wrapper-level rotating prewarm batches.
   - Runtime perf lane rechecked after rotation: `docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-rotation-20260224.json` and snapshot companion show `status=pass`, `loops=120`, `request_failures=0`, projection `coverage=1.0`, `fallback=0.0`.
@@ -192,6 +194,7 @@
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
+  - console-web/src/app/tenants/tenants-page-view.tsx
   - console-web/src/components/TenantsQuickCreatePanel.tsx
   - console-web/src/app/tenants/use-tenants-page-filters.ts
   - console-web/src/components/TenantsTopControls.tsx

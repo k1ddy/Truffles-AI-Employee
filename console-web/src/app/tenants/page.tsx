@@ -5,19 +5,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { components } from "@/types/api.generated";
-import AccessDenied from "@/components/AccessDenied";
-import ProvisioningWizard from "@/components/ProvisioningWizard";
-import TenantsActionQueuePanel from "@/components/TenantsActionQueuePanel";
-import TenantsBranchChangeManagementPanel from "@/components/TenantsBranchChangeManagementPanel";
-import TenantsClientLifecycleModal from "@/components/TenantsClientLifecycleModal";
-import TenantsClientsPanel from "@/components/TenantsClientsPanel";
-import TenantsDecommissionPanel from "@/components/TenantsDecommissionPanel";
-import TenantsFleetAttentionPanel from "@/components/TenantsFleetAttentionPanel";
-import TenantsOperationalKpiPanel from "@/components/TenantsOperationalKpiPanel";
-import TenantsPortfolioCompaniesPanel from "@/components/TenantsPortfolioCompaniesPanel";
-import TenantsQuickCreatePanel from "@/components/TenantsQuickCreatePanel";
-import TenantsScopedErrorSummary from "@/components/TenantsScopedErrorSummary";
-import TenantsTopControls from "@/components/TenantsTopControls";
 import {
     authApi,
     canAccessConsole,
@@ -41,6 +28,7 @@ import { useTenantsOperationalModel } from "./use-tenants-operational-model";
 import { useTenantsPageOrchestration } from "./use-tenants-page-orchestration";
 import { useTenantsPageOperations } from "./use-tenants-page-operations";
 import { useTenantsPageFilters } from "./use-tenants-page-filters";
+import TenantsPageView from "./tenants-page-view";
 import {
     BRANCH_PHONE_INPUT_PATTERN,
     buildBranchChangePatch,
@@ -648,379 +636,319 @@ export default function TenantsPage() {
     const showClientsSection = showPortfolio || showDecommission;
     const decommissionFocused = effectiveWorkspaceMode === "decommission";
 
-    if (!session) {
-        return (
-            <div className="p-8 text-center text-muted-foreground">
-                Пожалуйста, войдите для просмотра вкладки «Тенанты».
-            </div>
-        );
-    }
-
-    if (meLoading) {
-        return (
-            <div className="p-8 text-center text-muted-foreground">
-                Загрузка роли...
-            </div>
-        );
-    }
-
-    if (!canReadTenants) {
-        return (
-            <AccessDenied message="Эта роль не имеет доступа к вкладке Тенанты." />
-        );
-    }
+    const refreshActionQueue = () => {
+        tenantsPortfolioQuery.refetch();
+        if (pageFilterCompanyId) {
+            tenantsCompanyCockpitQuery.refetch();
+        }
+        fleetAttentionQuery.refetch();
+        recentBranchChangesKpiQuery.refetch();
+        clientsQuery.refetch();
+    };
+    const refreshOperationalPanels = () => {
+        tenantsPortfolioQuery.refetch();
+        if (pageFilterCompanyId) {
+            tenantsCompanyCockpitQuery.refetch();
+        }
+        fleetAttentionQuery.refetch();
+        recentBranchChangesKpiQuery.refetch();
+        selectedClientAuditQuery.refetch();
+        if (pageFilterClientId) {
+            weeklySnapshotsServerQuery.refetch();
+        }
+    };
+    const refreshFleetAttention = () => {
+        tenantsPortfolioQuery.refetch();
+        fleetAttentionQuery.refetch();
+    };
 
     return (
-        <div className="max-w-5xl mx-auto p-6" data-testid="tenants-page">
-            <div className="flex flex-col gap-2 mb-6">
-                {!controlTowerEnabled ? (
-                    <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900" data-testid="tenants-control-tower-flag-banner">
-                        Включён базовый режим Tenants: доступен обзор портфеля и управление контекстом.
-                    </div>
-                ) : null}
-                <TenantsTopControls
-                    isPlatformPreset={isPlatformPreset}
-                    contextCompanyName={selectedCompanyName}
-                    contextClientName={selectedClientName}
-                    contextBranchName={selectedBranchName}
-                    contextCompanyId={selectedCompanyId}
-                    contextClientId={selectedClientId}
-                    contextBranchId={selectedBranchId}
-                    onClearBranchContext={() => setBranchContext(null)}
-                    onClearClientContext={() => {
-                        const scope = readConsoleContextScopeFromStorage();
-                        setClientContext(null, scope.companyId || null);
-                    }}
-                    onClearContext={clearContextLens}
-                    pageFilterCompanyId={pageFilterCompanyId}
-                    pageFilterClientId={pageFilterClientId}
-                    pageFilterBranchId={pageFilterBranchId}
-                    pageFilterCompanyOptions={pageFilterCompanyOptions}
-                    pageFilterClientOptions={pageFilterClientOptions}
-                    pageFilterBranchOptions={pageFilterBranchOptions}
-                    hasPageFilters={hasPageFilters}
-                    onPageFilterCompanyChange={setPageFilterCompany}
-                    onPageFilterClientChange={setPageFilterClient}
-                    onPageFilterBranchChange={setPageFilterBranch}
-                    onApplyContextToPageFilters={applyContextToPageFilters}
-                    onClearPageFilters={clearPageFilters}
-                    controlTowerEnabled={controlTowerEnabled}
-                    workspaceMode={effectiveWorkspaceMode}
-                    onWorkspaceModeChange={(value) => {
-                        if (controlTowerEnabled) {
-                            setWorkspaceMode(value);
-                        }
-                    }}
-                    viewPreset={viewPreset}
-                    onViewPresetChange={setViewPreset}
-                    canSwitchViewPreset={canSwitchViewPreset}
-                />
-                <TenantsScopedErrorSummary
-                    errors={visibleInlineErrors}
-                    scopeLabel={activeErrorScopeLabel}
-                    showScopeClear
-                    onClearScope={() => clearErrors(activeErrorScope)}
-                    onClearAll={() => clearErrors()}
-                />
-                {canWriteTenants ? (
-                    <TenantsQuickCreatePanel
-                        form={quickCreateForm}
-                        running={quickCreateRunning}
-                        companyId={quickCreateCompanyId}
-                        clientId={quickCreateClientId}
-                        onChange={(patch) => setQuickCreateForm((prev) => ({ ...prev, ...patch }))}
-                        onCreateCompany={() => void handleQuickCreateCompany()}
-                        onCreateClient={() => void handleQuickCreateClient()}
-                        onCreateBranch={() => void handleQuickCreateBranch()}
-                        onOpenWorkspace={() => router.push("/company-workspace")}
-                    />
-                ) : null}
-                {controlTowerEnabled ? (
-                    <TenantsActionQueuePanel
-                        items={actionQueue}
-                        refreshing={
-                            tenantsPortfolioQuery.isFetching
-                            || tenantsCompanyCockpitQuery.isFetching
-                            || fleetAttentionQuery.isFetching
-                            || recentBranchChangesKpiQuery.isFetching
-                            || clientsQuery.isFetching
-                        }
-                        onRefresh={() => {
-                            tenantsPortfolioQuery.refetch();
-                            if (pageFilterCompanyId) {
-                                tenantsCompanyCockpitQuery.refetch();
-                            }
-                            fleetAttentionQuery.refetch();
-                            recentBranchChangesKpiQuery.refetch();
-                            clientsQuery.refetch();
-                        }}
-                        onRunIntent={runActionQueueIntent}
-                        onSetClientContext={setClientContextAndPageFilters}
-                    />
-                ) : null}
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <span className="text-xs text-muted-foreground">Режим списка:</span>
-                    <button
-                        className={tenantLifecycle === "active" ? "btn-primary" : "btn-ghost"}
-                        onClick={() => setTenantLifecycle("active")}
-                    >
-                        Активные
-                    </button>
-                    <button
-                        className={tenantLifecycle === "archived" ? "btn-primary" : "btn-ghost"}
-                        onClick={() => setTenantLifecycle("archived")}
-                    >
-                        Архив
-                    </button>
-                    <button
-                        className={tenantLifecycle === "all" ? "btn-primary" : "btn-ghost"}
-                        onClick={() => setTenantLifecycle("all")}
-                    >
-                        Все
-                    </button>
-                </div>
-            </div>
-
-            <div className="grid gap-6">
-                {controlTowerEnabled && showPortfolio && tenantLifecycle === "active" ? (
-                    <TenantsOperationalKpiPanel
-                        isRefreshing={
-                            tenantsPortfolioQuery.isFetching
-                            || tenantsCompanyCockpitQuery.isFetching
-                            || fleetAttentionQuery.isFetching
-                            || recentBranchChangesKpiQuery.isFetching
-                        }
-                        onRefresh={() => {
-                            tenantsPortfolioQuery.refetch();
-                            if (pageFilterCompanyId) {
-                                tenantsCompanyCockpitQuery.refetch();
-                            }
-                            fleetAttentionQuery.refetch();
-                            recentBranchChangesKpiQuery.refetch();
-                            selectedClientAuditQuery.refetch();
-                            if (pageFilterClientId) {
-                                weeklySnapshotsServerQuery.refetch();
-                            }
-                        }}
-                        onExportJson={() => exportOperationalReport("json")}
-                        onExportCsv={() => exportOperationalReport("csv")}
-                        onSaveWeeklySnapshot={saveWeeklySnapshot}
-                        canSaveWeeklySnapshot={Boolean(pageFilterClientId)}
-                        operationalKpi={operationalKpi}
-                        criticalKpiCount={criticalKpiCount}
-                        warnKpiCount={warnKpiCount}
-                        kpiStatuses={{
-                            onboardingCoverage: operationalKpiById.get("onboardingCoverage")?.status ?? "ok",
-                            goLiveReadiness: operationalKpiById.get("goLiveReadiness")?.status ?? "ok",
-                            serviceStability: operationalKpiById.get("serviceStability")?.status ?? "ok",
-                            decommissionShare: operationalKpiById.get("decommissionShare")?.status ?? "ok",
-                            changeFailure: operationalKpiById.get("changeFailure")?.status ?? "ok",
-                            rollbackShare: operationalKpiById.get("rollbackShare")?.status ?? "ok",
-                            blockedSignals: operationalKpiById.get("blockedSignals")?.status ?? "ok",
-                        }}
-                        kpiDrilldown={operationalKpiDrilldown}
-                        onRunKpiAction={runKpiAction}
-                        onboardingThroughput={onboardingThroughput}
-                        formatOptionalHours={formatOptionalHours}
-                        formatOptionalPercent={formatOptionalPercent}
-                        alertSeverity={alertHookPayload.severity}
-                        alertBreachesCount={alertHookPayload.breaches.length}
-                        onCopyAlertPayload={copyAlertHookPayload}
-                        onRunMetricsSnapshot={runMetricsSnapshotHook}
-                        runningMetricsSnapshotMode={runningMetricsSnapshotMode}
-                        lastMetricsSnapshotJob={lastMetricsSnapshotJob}
-                        pageFilterClientId={pageFilterClientId}
-                        weeklySnapshotsFetching={weeklySnapshotsServerQuery.isFetching}
-                        weeklySnapshots={weeklySnapshots}
-                        formatDateTimeLabel={formatDateTimeLabel}
-                    />
-                ) : null}
-
-                {controlTowerEnabled && showPortfolio && tenantLifecycle === "active" ? (
-                    <TenantsFleetAttentionPanel
-                        fleetAttention={fleetAttention}
-                        loading={fleetAttentionLoading}
-                        errored={fleetAttentionErrored}
-                        refreshing={tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching}
-                        onRefresh={() => {
-                            tenantsPortfolioQuery.refetch();
-                            fleetAttentionQuery.refetch();
-                        }}
-                        attentionLevelClass={attentionLevelClass}
-                        formatLifecycleLabel={(value) => formatStateLabel(value, FLEET_LIFECYCLE_LABELS)}
-                        formatServiceLabel={(value) => formatStateLabel(value, FLEET_SERVICE_LABELS)}
-                        formatReferenceScopeReason={formatReferenceScopeReason}
-                        onSetClientContext={setClientContextAndPageFilters}
-                        onOpenIntegrations={(clientId, companyId) => openClientContextTarget("/integrations", clientId, companyId)}
-                        onOpenCases={(clientId, companyId) => openClientContextTarget("/", clientId, companyId)}
-                    />
-                ) : null}
-
-                {showPortfolio ? (
-                    <TenantsPortfolioCompaniesPanel
-                        companies={companies}
-                        loading={companiesQuery.isLoading}
-                        errored={companiesQuery.isError}
-                        query={companyQuery}
-                        onQueryChange={setCompanyQuery}
-                        isPlatformPreset={isPlatformPreset}
-                        canWriteTenants={canWriteTenants}
-                        selectedCompanyId={selectedCompanyId}
-                        companyEditor={companyEditor}
-                        savingCompany={savingCompany}
-                        hasNextPage={Boolean(companiesQuery.hasNextPage)}
-                        isFetchingNextPage={companiesQuery.isFetchingNextPage}
-                        onFetchNextPage={() => companiesQuery.fetchNextPage()}
-                        onStartEdit={startCompanyEdit}
-                        onSetContext={setCompanyContext}
-                        onCancelEdit={() => setCompanyEditor(null)}
-                        onSaveEdit={handleSaveCompany}
-                        onChangeEditorName={(value) => {
-                            setCompanyEditor((prev) => (prev ? { ...prev, name: value } : prev));
-                        }}
-                        onChangeEditorBillingInfo={(value) => {
-                            setCompanyEditor((prev) => (prev ? { ...prev, billingInfo: value } : prev));
-                        }}
-                    />
-                ) : null}
-
-                {showDecommission ? (
-                    <TenantsDecommissionPanel
-                        tenantLifecycle={tenantLifecycle}
-                        onTenantLifecycleChange={setTenantLifecycle}
-                    />
-                ) : null}
-
-                {showClientsSection ? (
-                    <TenantsClientsPanel
-                        decommissionFocused={decommissionFocused}
-                        clientsLoading={clientsLoading}
-                        clientsErrored={clientsErrored}
-                        clients={clients}
-                        clientsSummary={clientsSummary}
-                        pageFilterCompanyId={pageFilterCompanyId}
-                        clientQuery={clientQuery}
-                        onClientQueryChange={setClientQuery}
-                        fleetLifecycleFilter={fleetLifecycleFilter}
-                        onFleetLifecycleFilterChange={setFleetLifecycleFilter}
-                        fleetPaymentFilter={fleetPaymentFilter}
-                        onFleetPaymentFilterChange={setFleetPaymentFilter}
-                        fleetServiceFilter={fleetServiceFilter}
-                        onFleetServiceFilterChange={setFleetServiceFilter}
-                        isPlatformPreset={isPlatformPreset}
-                        canWriteTenants={canWriteTenants}
-                        selectedClientId={selectedClientId}
-                        pageFilterClientId={pageFilterClientId}
-                        clientEditor={clientEditor}
-                        savingClient={savingClient}
-                        knownCompanies={knownCompanies}
-                        clientLifecyclePendingId={clientLifecyclePendingId}
-                        clientLifecycleAuditFilterById={clientLifecycleAuditFilterById}
-                        clientLifecycleAuditById={clientLifecycleAuditById}
-                        selectedClientApiAuditEntries={selectedClientApiAuditEntries}
-                        selectedClientAuditIsFetching={selectedClientAuditQuery.isFetching}
-                        onRefreshSelectedClientAudit={() => selectedClientAuditQuery.refetch()}
-                        onSetClientLifecycleAuditFilter={(clientId, filter) => {
-                            setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientId]: filter }));
-                        }}
-                        mergeLifecycleAuditEntries={mergeLifecycleAuditEntries}
-                        formatLifecycleLabel={(value) => formatStateLabel(value, FLEET_LIFECYCLE_LABELS)}
-                        formatPaymentLabel={(value) => formatStateLabel(value, FLEET_PAYMENT_LABELS)}
-                        formatServiceLabel={(value) => formatStateLabel(value, FLEET_SERVICE_LABELS)}
-                        formatReferenceScopeReason={formatReferenceScopeReason}
-                        formatDateTimeLabel={formatDateTimeLabel}
-                        isClientArchived={isClientArchived}
-                        onStartClientEdit={startClientEdit}
-                        onOpenClientLifecycleAction={openClientLifecycleAction}
-                        onSetClientContext={setClientContextAndPageFilters}
-                        onClientEditorSlugChange={(value) => {
-                            setClientEditor((prev) => (prev ? { ...prev, slug: value } : prev));
-                        }}
-                        onClientEditorCompanyChange={(value) => {
-                            setClientEditor((prev) => (prev ? { ...prev, companyId: value } : prev));
-                        }}
-                        onSaveClientEdit={handleSaveClient}
-                        onCancelClientEdit={() => setClientEditor(null)}
-                        clientsUsingServerContract={clientsUsingServerContract}
-                        clientsHasNextPage={Boolean(clientsQuery.hasNextPage)}
-                        clientsFetchingNextPage={clientsQuery.isFetchingNextPage}
-                        onFetchNextClientsPage={() => clientsQuery.fetchNextPage()}
-                    />
-                ) : null}
-
-                {showChangeManagement ? (
-                    <TenantsBranchChangeManagementPanel
-                        branchesLoading={branchesLoading}
-                        branchesErrored={branchesErrored}
-                        branches={branches}
-                        pageFilterClientId={pageFilterClientId}
-                        selectedClientName={selectedClientName}
-                        branchQuery={branchQuery}
-                        onBranchQueryChange={setBranchQuery}
-                        isPlatformPreset={isPlatformPreset}
-                        canWriteTenants={canWriteTenants}
-                        selectedBranchId={selectedBranchId}
-                        contextScope={effectiveWorkspaceMode}
-                        onAuditSensitiveAccess={auditSensitiveAccess}
-                        onStartBranchEdit={startBranchEdit}
-                        onSetBranchContext={(branch) =>
-                            setBranchContextAndPageFilters({
-                                branchId: branch.id,
-                                clientId: branch.id ? (branchClientIdById.get(branch.id) ?? null) : null,
-                                companyId: branch.id ? (branchCompanyIdById.get(branch.id) ?? null) : null,
-                            })
-                        }
-                        branchEditor={branchEditor}
-                        onPatchBranchEditor={(patch) => {
-                            setBranchEditor((prev) => (prev ? { ...prev, ...patch } : prev));
-                        }}
-                        requiresBranchConfirmation={requiresBranchConfirmation}
-                        savingBranch={savingBranch}
-                        publishingBranchChange={publishingBranchChange}
-                        rollingBackBranchChange={rollingBackBranchChange}
-                        onPreviewBranchChange={handlePreviewBranchChange}
-                        onPublishBranchChange={handlePublishBranchChange}
-                        onRollbackBranchChange={handleRollbackBranchChange}
-                        onCancelBranchEdit={cancelBranchEdit}
-                        branchChangePreview={branchChangePreview}
-                        previewValidationErrors={previewValidationErrors}
-                        previewDiffEntries={previewDiffEntries}
-                        hasPublishedBranchChange={Boolean(latestPublishedBranchChange)}
-                        branchChangesLoading={branchChangesQuery.isLoading}
-                        branchChangesItems={branchChangesQuery.data?.items ?? []}
-                        formatBranchChangeStatus={(value) => formatStateLabel(value, BRANCH_CHANGE_STATUS_LABELS)}
-                        branchesHasNextPage={Boolean(branchesQuery.hasNextPage)}
-                        branchesFetchingNextPage={branchesQuery.isFetchingNextPage}
-                        onFetchNextBranchesPage={() => branchesQuery.fetchNextPage()}
-                    />
-                ) : null}
-            </div>
-
-            <TenantsClientLifecycleModal
-                draft={clientLifecycleDraft}
-                pending={Boolean(clientLifecyclePendingId)}
-                onClose={closeClientLifecycleDraft}
-                onSubmit={handleClientLifecycleAction}
-                onPatchDraft={(patch) => {
+        <TenantsPageView
+            session={session}
+            meLoading={meLoading}
+            canReadTenants={canReadTenants}
+            canWriteTenants={canWriteTenants}
+            controlTowerEnabled={controlTowerEnabled}
+            tenantLifecycle={tenantLifecycle}
+            onTenantLifecycleChange={setTenantLifecycle}
+            topControlsProps={{
+                isPlatformPreset,
+                contextCompanyName: selectedCompanyName,
+                contextClientName: selectedClientName,
+                contextBranchName: selectedBranchName,
+                contextCompanyId: selectedCompanyId,
+                contextClientId: selectedClientId,
+                contextBranchId: selectedBranchId,
+                onClearBranchContext: () => setBranchContext(null),
+                onClearClientContext: () => {
+                    const scope = readConsoleContextScopeFromStorage();
+                    setClientContext(null, scope.companyId || null);
+                },
+                onClearContext: clearContextLens,
+                pageFilterCompanyId,
+                pageFilterClientId,
+                pageFilterBranchId,
+                pageFilterCompanyOptions,
+                pageFilterClientOptions,
+                pageFilterBranchOptions,
+                hasPageFilters,
+                onPageFilterCompanyChange: setPageFilterCompany,
+                onPageFilterClientChange: setPageFilterClient,
+                onPageFilterBranchChange: setPageFilterBranch,
+                onApplyContextToPageFilters: applyContextToPageFilters,
+                onClearPageFilters: clearPageFilters,
+                controlTowerEnabled,
+                workspaceMode: effectiveWorkspaceMode,
+                onWorkspaceModeChange: (value) => {
+                    if (controlTowerEnabled) {
+                        setWorkspaceMode(value);
+                    }
+                },
+                viewPreset,
+                onViewPresetChange: setViewPreset,
+                canSwitchViewPreset,
+            }}
+            scopedErrorSummaryProps={{
+                errors: visibleInlineErrors,
+                scopeLabel: activeErrorScopeLabel,
+                showScopeClear: true,
+                onClearScope: () => clearErrors(activeErrorScope),
+                onClearAll: () => clearErrors(),
+            }}
+            quickCreatePanelProps={{
+                form: quickCreateForm,
+                running: quickCreateRunning,
+                companyId: quickCreateCompanyId,
+                clientId: quickCreateClientId,
+                onChange: (patch) => setQuickCreateForm((prev) => ({ ...prev, ...patch })),
+                onCreateCompany: () => void handleQuickCreateCompany(),
+                onCreateClient: () => void handleQuickCreateClient(),
+                onCreateBranch: () => void handleQuickCreateBranch(),
+                onOpenWorkspace: () => router.push("/company-workspace"),
+            }}
+            actionQueue={{
+                show: controlTowerEnabled,
+                items: actionQueue,
+                refreshing: (
+                    tenantsPortfolioQuery.isFetching
+                    || tenantsCompanyCockpitQuery.isFetching
+                    || fleetAttentionQuery.isFetching
+                    || recentBranchChangesKpiQuery.isFetching
+                    || clientsQuery.isFetching
+                ),
+                onRefresh: refreshActionQueue,
+                onRunIntent: runActionQueueIntent,
+                onSetClientContext: setClientContextAndPageFilters,
+            }}
+            operationalKpiPanel={{
+                show: controlTowerEnabled && showPortfolio && tenantLifecycle === "active",
+                props: {
+                    isRefreshing: (
+                        tenantsPortfolioQuery.isFetching
+                        || tenantsCompanyCockpitQuery.isFetching
+                        || fleetAttentionQuery.isFetching
+                        || recentBranchChangesKpiQuery.isFetching
+                    ),
+                    onRefresh: refreshOperationalPanels,
+                    onExportJson: () => exportOperationalReport("json"),
+                    onExportCsv: () => exportOperationalReport("csv"),
+                    onSaveWeeklySnapshot: saveWeeklySnapshot,
+                    canSaveWeeklySnapshot: Boolean(pageFilterClientId),
+                    operationalKpi,
+                    criticalKpiCount,
+                    warnKpiCount,
+                    kpiStatuses: {
+                        onboardingCoverage: operationalKpiById.get("onboardingCoverage")?.status ?? "ok",
+                        goLiveReadiness: operationalKpiById.get("goLiveReadiness")?.status ?? "ok",
+                        serviceStability: operationalKpiById.get("serviceStability")?.status ?? "ok",
+                        decommissionShare: operationalKpiById.get("decommissionShare")?.status ?? "ok",
+                        changeFailure: operationalKpiById.get("changeFailure")?.status ?? "ok",
+                        rollbackShare: operationalKpiById.get("rollbackShare")?.status ?? "ok",
+                        blockedSignals: operationalKpiById.get("blockedSignals")?.status ?? "ok",
+                    },
+                    kpiDrilldown: operationalKpiDrilldown,
+                    onRunKpiAction: runKpiAction,
+                    onboardingThroughput,
+                    formatOptionalHours,
+                    formatOptionalPercent,
+                    alertSeverity: alertHookPayload.severity,
+                    alertBreachesCount: alertHookPayload.breaches.length,
+                    onCopyAlertPayload: copyAlertHookPayload,
+                    onRunMetricsSnapshot: runMetricsSnapshotHook,
+                    runningMetricsSnapshotMode,
+                    lastMetricsSnapshotJob,
+                    pageFilterClientId,
+                    weeklySnapshotsFetching: weeklySnapshotsServerQuery.isFetching,
+                    weeklySnapshots,
+                    formatDateTimeLabel,
+                },
+            }}
+            fleetAttentionPanel={{
+                show: controlTowerEnabled && showPortfolio && tenantLifecycle === "active",
+                props: {
+                    fleetAttention,
+                    loading: fleetAttentionLoading,
+                    errored: fleetAttentionErrored,
+                    refreshing: tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching,
+                    onRefresh: refreshFleetAttention,
+                    attentionLevelClass,
+                    formatLifecycleLabel: (value) => formatStateLabel(value, FLEET_LIFECYCLE_LABELS),
+                    formatServiceLabel: (value) => formatStateLabel(value, FLEET_SERVICE_LABELS),
+                    formatReferenceScopeReason,
+                    onSetClientContext: setClientContextAndPageFilters,
+                    onOpenIntegrations: (clientId, companyId) => openClientContextTarget("/integrations", clientId, companyId),
+                    onOpenCases: (clientId, companyId) => openClientContextTarget("/", clientId, companyId),
+                },
+            }}
+            portfolioCompaniesPanel={{
+                show: showPortfolio,
+                props: {
+                    companies,
+                    loading: companiesQuery.isLoading,
+                    errored: companiesQuery.isError,
+                    query: companyQuery,
+                    onQueryChange: setCompanyQuery,
+                    isPlatformPreset,
+                    canWriteTenants,
+                    selectedCompanyId,
+                    companyEditor,
+                    savingCompany,
+                    hasNextPage: Boolean(companiesQuery.hasNextPage),
+                    isFetchingNextPage: companiesQuery.isFetchingNextPage,
+                    onFetchNextPage: () => companiesQuery.fetchNextPage(),
+                    onStartEdit: startCompanyEdit,
+                    onSetContext: setCompanyContext,
+                    onCancelEdit: () => setCompanyEditor(null),
+                    onSaveEdit: handleSaveCompany,
+                    onChangeEditorName: (value) => {
+                        setCompanyEditor((prev) => (prev ? { ...prev, name: value } : prev));
+                    },
+                    onChangeEditorBillingInfo: (value) => {
+                        setCompanyEditor((prev) => (prev ? { ...prev, billingInfo: value } : prev));
+                    },
+                },
+            }}
+            decommissionPanel={{
+                show: showDecommission,
+                props: {
+                    tenantLifecycle,
+                    onTenantLifecycleChange: setTenantLifecycle,
+                },
+            }}
+            clientsPanel={{
+                show: showClientsSection,
+                props: {
+                    decommissionFocused,
+                    clientsLoading,
+                    clientsErrored,
+                    clients,
+                    clientsSummary,
+                    pageFilterCompanyId,
+                    clientQuery,
+                    onClientQueryChange: setClientQuery,
+                    fleetLifecycleFilter,
+                    onFleetLifecycleFilterChange: setFleetLifecycleFilter,
+                    fleetPaymentFilter,
+                    onFleetPaymentFilterChange: setFleetPaymentFilter,
+                    fleetServiceFilter,
+                    onFleetServiceFilterChange: setFleetServiceFilter,
+                    isPlatformPreset,
+                    canWriteTenants,
+                    selectedClientId,
+                    pageFilterClientId,
+                    clientEditor,
+                    savingClient,
+                    knownCompanies,
+                    clientLifecyclePendingId,
+                    clientLifecycleAuditFilterById,
+                    clientLifecycleAuditById,
+                    selectedClientApiAuditEntries,
+                    selectedClientAuditIsFetching: selectedClientAuditQuery.isFetching,
+                    onRefreshSelectedClientAudit: () => selectedClientAuditQuery.refetch(),
+                    onSetClientLifecycleAuditFilter: (clientId, filter) => {
+                        setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientId]: filter }));
+                    },
+                    mergeLifecycleAuditEntries,
+                    formatLifecycleLabel: (value) => formatStateLabel(value, FLEET_LIFECYCLE_LABELS),
+                    formatPaymentLabel: (value) => formatStateLabel(value, FLEET_PAYMENT_LABELS),
+                    formatServiceLabel: (value) => formatStateLabel(value, FLEET_SERVICE_LABELS),
+                    formatReferenceScopeReason,
+                    formatDateTimeLabel,
+                    isClientArchived,
+                    onStartClientEdit: startClientEdit,
+                    onOpenClientLifecycleAction: openClientLifecycleAction,
+                    onSetClientContext: setClientContextAndPageFilters,
+                    onClientEditorSlugChange: (value) => {
+                        setClientEditor((prev) => (prev ? { ...prev, slug: value } : prev));
+                    },
+                    onClientEditorCompanyChange: (value) => {
+                        setClientEditor((prev) => (prev ? { ...prev, companyId: value } : prev));
+                    },
+                    onSaveClientEdit: handleSaveClient,
+                    onCancelClientEdit: () => setClientEditor(null),
+                    clientsUsingServerContract,
+                    clientsHasNextPage: Boolean(clientsQuery.hasNextPage),
+                    clientsFetchingNextPage: clientsQuery.isFetchingNextPage,
+                    onFetchNextClientsPage: () => clientsQuery.fetchNextPage(),
+                },
+            }}
+            branchChangePanel={{
+                show: showChangeManagement,
+                props: {
+                    branchesLoading,
+                    branchesErrored,
+                    branches,
+                    pageFilterClientId,
+                    selectedClientName,
+                    branchQuery,
+                    onBranchQueryChange: setBranchQuery,
+                    isPlatformPreset,
+                    canWriteTenants,
+                    selectedBranchId,
+                    contextScope: effectiveWorkspaceMode,
+                    onAuditSensitiveAccess: auditSensitiveAccess,
+                    onStartBranchEdit: startBranchEdit,
+                    onSetBranchContext: (branch) =>
+                        setBranchContextAndPageFilters({
+                            branchId: branch.id,
+                            clientId: branch.id ? (branchClientIdById.get(branch.id) ?? null) : null,
+                            companyId: branch.id ? (branchCompanyIdById.get(branch.id) ?? null) : null,
+                        }),
+                    branchEditor,
+                    onPatchBranchEditor: (patch) => {
+                        setBranchEditor((prev) => (prev ? { ...prev, ...patch } : prev));
+                    },
+                    requiresBranchConfirmation,
+                    savingBranch,
+                    publishingBranchChange,
+                    rollingBackBranchChange,
+                    onPreviewBranchChange: handlePreviewBranchChange,
+                    onPublishBranchChange: handlePublishBranchChange,
+                    onRollbackBranchChange: handleRollbackBranchChange,
+                    onCancelBranchEdit: cancelBranchEdit,
+                    branchChangePreview,
+                    previewValidationErrors,
+                    previewDiffEntries,
+                    hasPublishedBranchChange: Boolean(latestPublishedBranchChange),
+                    branchChangesLoading: branchChangesQuery.isLoading,
+                    branchChangesItems: branchChangesQuery.data?.items ?? [],
+                    formatBranchChangeStatus: (value) => formatStateLabel(value, BRANCH_CHANGE_STATUS_LABELS),
+                    branchesHasNextPage: Boolean(branchesQuery.hasNextPage),
+                    branchesFetchingNextPage: branchesQuery.isFetchingNextPage,
+                    onFetchNextBranchesPage: () => branchesQuery.fetchNextPage(),
+                },
+            }}
+            lifecycleModalProps={{
+                draft: clientLifecycleDraft,
+                pending: Boolean(clientLifecyclePendingId),
+                onClose: closeClientLifecycleDraft,
+                onSubmit: handleClientLifecycleAction,
+                onPatchDraft: (patch) => {
                     setClientLifecycleDraft((prev) => (prev ? { ...prev, ...patch } : prev));
-                }}
-            />
-
-            {showOnboarding ? (
-                <div className="mt-10" data-testid="tenants-onboarding-section">
-                    <div className="mb-3 rounded-lg border border-blue-300/60 bg-blue-50 p-3 text-xs text-blue-900">
-                        Канонический execution-flow: выполняйте remediation и go-live в `Company Workspace`.
-                        <button
-                            className="btn-ghost ml-2"
-                            onClick={() => router.push("/company-workspace")}
-                            data-testid="tenants-open-workspace-from-onboarding"
-                        >
-                            Открыть Workspace
-                        </button>
-                    </div>
-                    <ProvisioningWizard session={session} accessSection="tenants" />
-                </div>
-            ) : null}
-        </div>
+                },
+            }}
+            showOnboarding={showOnboarding}
+            onOpenWorkspaceFromOnboarding={() => router.push("/company-workspace")}
+        />
     );
 }
