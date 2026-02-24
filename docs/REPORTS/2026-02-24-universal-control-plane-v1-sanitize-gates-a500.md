@@ -14,6 +14,11 @@ Date
 - `scripts/zero_context_gate.sh` существовал, но запускался вручную и не был привязан к session metadata.
 - Требование изоляции: параллельные треки не должны блокироваться нашим gate-ужесточением.
 
+## FACT pre-check evidence (before changes)
+- `bash -n scripts/session_check.sh && bash -n scripts/zero_context_gate.sh` -> pass
+- `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md --report docs/REPORTS/2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md --graph docs/BLOCK_GRAPH.yaml` -> pass (`zero_context_gate: OK`)
+- `scripts/session_check.sh` -> baseline pass (до включения session-scoped zero-context enforcement)
+
 ## Contract delta
 - Добавлен session-scoped opt-in для zero-context gate:
   - `zero_context_gate: required` включает проверку.
@@ -41,6 +46,15 @@ Date
 - `docs/SESSIONS/SESSION-2026-02-22-universal-control-plane-v1-a500.md`
 - `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md`
 - `docs/runbooks/EXECUTION_CYCLE.md`
+
+## Canon/doc sync updates
+- `Updated docs/specs`:
+  - `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md`
+  - `docs/runbooks/EXECUTION_CYCLE.md`
+  - `docs/TASK_PACKAGES/TP_TEMPLATE_ZERO_CONTEXT.md`
+  - `docs/REPORTS/REPORT_TEMPLATE_ZERO_CONTEXT.md`
+- `Drift resolved`: `yes`
+- `If no`: n/a
 
 ## Residual GAP / Risks
 - Исторические phase-артефакты остаются в старом формате и требуют миграции при следующих блоках.

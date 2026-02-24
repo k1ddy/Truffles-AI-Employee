@@ -18,13 +18,18 @@
 1. Прочитать в порядке:
    - `AGENTS.md` -> `STATE.md` (NOW) -> `STRUCTURE.md` -> профильные `SPECS/*`.
 2. Выбрать ровно одну проблему из `STATE.md` (или сначала оформить GAP).
-3. Подготовить `Task Package` (invariant/scope/touch-list/plan/DoD/checks/evidence/rollback/no-go).
-4. Запустить сессию:
+3. Подготовить `Task Package` (invariant/scope/touch-list/plan/DoD/checks/evidence/rollback/no-go + FACT pre-check + doc sync plan).
+4. Выполнить FACT pre-check до первой правки:
+   - проверить актуальный код/контракты/тесты по touch-list,
+   - запустить baseline команды,
+   - зафиксировать findings в report (`Input baseline (FACT)` + `FACT pre-check evidence`).
+5. Запустить сессию:
    - `SESSION_AGENT=<agent> scripts/session_start.sh --session-id ... --task-package ...`
    - `scripts/install_hooks.sh`
-5. Выполнить one-issue flow:
+   - `session_start` автоматически проверяет sync `main` с `origin/main` и блокирует дубли активного `BLOCK_ID` (если TP содержит block identity).
+6. Выполнить one-issue flow:
    - 1 проблема -> 1 правка -> 1 проверка -> 1 запись evidence.
-6. Закрыть сессию:
+7. Закрыть сессию:
    - обновить `docs/SESSIONS/*` + `docs/SESSION_INDEX.md` + `STATE.md`,
    - `scripts/session_check.sh`,
    - commit.
@@ -34,6 +39,18 @@
 - это не затрагивает параллельные сессии, где флаг не включен.
 
 ## 3) Что делать после каждого прогона
+
+### 3.0 FACT pre-check (до первой правки блока)
+
+Перед любыми изменениями обязательно:
+1. Сверить `touch-list` с реальным кодом и контрактами.
+2. Выполнить baseline-команды по затрагиваемому блоку (минимум один тест/проверка из planned checks).
+3. Зафиксировать baseline как FACT в report:
+   - `Input baseline (FACT)`,
+   - `FACT pre-check evidence` (команда -> результат + file refs).
+4. Если найден drift между docs и кодом:
+   - зафиксировать в TP/report,
+   - добавить doc sync в scope текущего блока или явный GAP/follow-up.
 
 ### 3.1 Local deterministic run (pytest/lint/typecheck)
 
@@ -80,7 +97,9 @@
    - `done`, `next`, `evidence`.
 3. Обновить `STATE.md`:
    - `FACT` только с evidence, иначе `PLAN`/`GAP`.
-4. Обновить phase/master report.
+4. Обновить phase/master report:
+   - `Canon/doc sync updates` заполнен,
+   - drift закрыт (или вынесен в явный GAP с owner/follow-up block).
 5. Запустить `scripts/session_check.sh`.
 6. Только после этого commit/push.
 
@@ -91,17 +110,22 @@
    - contract delta,
    - что проверили,
    - residual risks/GAP.
-3. Обновить master report (execution status + next phase).
-4. Подготовить следующий Task Package до начала следующей кодовой волны.
+3. Закрыть doc/code drift по фазе:
+   - обновить канон/спеки/аудит-доки по фактическому поведению,
+   - либо зафиксировать explicit drift GAP (owner + follow-up block).
+4. Обновить master report (execution status + next phase).
+5. Подготовить следующий Task Package до начала следующей кодовой волны.
 
 ## 6) Единый артефактный минимум (Definition of Evidence)
 
 Для каждой завершённой задачи должны существовать:
 1. Task Package (`docs/TASK_PACKAGES/TP-...md`).
 2. Report (`docs/REPORTS/...md`).
-3. Проверки (команды + фактический результат).
-4. Session log (`docs/SESSIONS/SESSION-...md` + индекс).
-5. `STATE.md` запись с FACT/GAP.
+3. FACT pre-check evidence (команды + результаты + file refs до правок).
+4. Проверки (команды + фактический результат).
+5. Session log (`docs/SESSIONS/SESSION-...md` + индекс).
+6. `STATE.md` запись с FACT/GAP.
+7. Doc/code drift closeout (`Canon/doc sync updates` или explicit GAP).
 
 Если любой пункт отсутствует, задача не считается закрытой.
 

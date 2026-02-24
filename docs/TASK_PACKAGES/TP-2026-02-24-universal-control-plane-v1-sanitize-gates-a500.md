@@ -15,6 +15,20 @@
 - `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md`
 - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
 
+## FACT pre-check (before implementation)
+- `Impacted code/contracts/tests`:
+  - `scripts/session_check.sh`
+  - `scripts/zero_context_gate.sh`
+  - `docs/BLOCK_GRAPH.yaml`
+- `Baseline commands`:
+  - `bash -n scripts/session_check.sh && bash -n scripts/zero_context_gate.sh`
+  - `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md --report docs/REPORTS/2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md --graph docs/BLOCK_GRAPH.yaml`
+- `FACT findings`:
+  - zero-context gate существует и проверяет обязательные секции TP/Report.
+  - enforcement был ручным и не привязан к metadata текущей session.
+  - параллельные треки не должны быть затронуты обязательными gate-ужесточениями.
+- `Detected drift (docs vs code)`: `none`
+
 ## Invariant
 - Параллельные worktree/ветки не блокируются нашими контрольно-качественными правилами.
 - `truffles-main/main` не используется как рабочая директория.
@@ -63,6 +77,16 @@
 - `docs/BLOCK_GRAPH.yaml` с новым `BLOCK_ID`.
 - Session metadata в `docs/SESSIONS/SESSION-2026-02-22-universal-control-plane-v1-a500.md`.
 - Report с командами и результатами.
+
+## Doc sync plan (after implementation)
+- `Docs/specs to update in same block`:
+  - `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md`
+  - `docs/runbooks/EXECUTION_CYCLE.md`
+  - `docs/TASK_PACKAGES/TP_TEMPLATE_ZERO_CONTEXT.md`
+  - `docs/REPORTS/REPORT_TEMPLATE_ZERO_CONTEXT.md`
+- `Drift closeout rule`:
+  - если gate-контракт меняется, шаблоны и runbook синхронизируются в том же блоке;
+  - несинхронность считается блокирующим GAP и не переносится молча.
 
 ## Rollback
 - Revert commit этого блока.

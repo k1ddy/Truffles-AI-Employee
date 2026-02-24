@@ -39,12 +39,15 @@ If context compaction happens: run `scripts/session_resume.sh --agent $SESSION_A
 2) Produce a Task Package BEFORE session start. If Task Package is missing/ambiguous: STOP and write the missing pieces.
    - Do NOT run `scripts/session_start.sh` until the Task Package is ready.
 3) Create session log + worktree: `scripts/session_start.sh --session-id YYYY-MM-DD-<slug>-<agent> --task-package docs/TASK_PACKAGES/TP-....md`, then `scripts/install_hooks.sh`; run `scripts/session_check.sh` before commit/push. Doc-only changes push directly to `main` (fast-forward), no PR.
+   - `session_start` must pass sync gate (`local main == origin/main`) and duplicate block gate (no active session with same `BLOCK_ID` when TP defines it).
    - Doc-only в `main` требует `docs/SESSIONS/*` + `docs/SESSION_INDEX.md` в том же коммите.
    - Статус `done` ставится в финальном коммите работы; отдельный commit/PR ради закрытия запрещён.
 4) Run Question Gate (per `AGENTS.md`): check docs/code/env before asking questions. If debugging message flow, start with `ops/diagnose.py explain` (Fast Debug SOP) before logs/SQL.
-5) Implement with one-issue flow: smallest change that satisfies the invariant + DoD.
-6) Verify: tests/CI/live-check/evidence + запись в `STATE.md` (Brain или Top Architect, до merge для core/поведенческих изменений). No evidence => PLAN/GAP.
-7) Hand-off summary for Brain: what changed, how verified, evidence pointers, remaining risks (summary must match actual diff).
+5) Before first code change in the block, run FACT pre-check against live code/contracts/tests and capture baseline evidence in report (`Input baseline (FACT)` + commands/results).
+6) Implement with one-issue flow: smallest change that satisfies the invariant + DoD.
+7) Verify: tests/CI/live-check/evidence + запись в `STATE.md` (Brain или Top Architect, до merge для core/поведенческих изменений). No evidence => PLAN/GAP.
+8) Close doc/code drift in the same block (or record explicit GAP owner/follow-up) and include this in report.
+9) Hand-off summary for Brain: what changed, how verified, evidence pointers, remaining risks (summary must match actual diff).
 
 ---
 

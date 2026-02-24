@@ -14,6 +14,14 @@
 - `STATE.md`
 - <owner docs/specs>
 
+## FACT pre-check (before implementation)
+- `Impacted code/contracts/tests`: <list>
+- `Baseline commands`:
+  - `<command>`
+- `FACT findings`:
+  - <what is implemented now; with file refs>
+- `Detected drift (docs vs code)`: `none` | <list>
+
 ## Invariant
 - <что защищаем>
 
@@ -38,6 +46,12 @@
 
 ## Evidence
 - <какие артефакты и где>
+
+## Doc sync plan (after implementation)
+- `Docs/specs to update in same block`:
+  - `<file/path>`
+- `Drift closeout rule`:
+  - update docs in this block; if impossible, record explicit `GAP` with owner + next block
 
 ## Rollback
 - <как откатить>

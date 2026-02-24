@@ -12,6 +12,10 @@ Date
 ## Input baseline (FACT)
 - <что было до правки>
 
+## FACT pre-check evidence (before changes)
+- `<command>` -> <result>
+- `<file/path:line>` -> <fact>
+
 ## Contract delta
 - <какой контракт изменился>
 
@@ -23,6 +27,12 @@ Date
 
 ## Evidence
 - `<path/url>`
+
+## Canon/doc sync updates
+- `Updated docs/specs`:
+  - `<file/path>`
+- `Drift resolved`: `yes` | `no`
+- `If no`: <explicit GAP + owner + follow-up block>
 
 ## Residual GAP / Risks
 - <что осталось>

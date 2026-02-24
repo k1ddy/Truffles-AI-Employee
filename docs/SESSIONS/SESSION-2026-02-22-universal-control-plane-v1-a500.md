@@ -32,6 +32,8 @@
   - Zero-context block delivery contract delivered: `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` + templates `docs/TASK_PACKAGES/TP_TEMPLATE_ZERO_CONTEXT.md`, `docs/REPORTS/REPORT_TEMPLATE_ZERO_CONTEXT.md` + gate script `scripts/zero_context_gate.sh` + dependency registry `docs/BLOCK_GRAPH.yaml`.
   - Sanitary gate isolation block initialized: `UCPV1-GATES-SANITARY` with dedicated TP/report and session-scoped `zero_context_gate` metadata.
   - Sanitary gate isolation checks passed: `zero_context_gate` + `session_check` green with session-scoped enforcement only for this program track.
+  - FACT pre-check + drift closeout contract promoted to required sections in zero-context templates/runbooks and enforced by `scripts/zero_context_gate.sh`.
+  - `scripts/session_start.sh` now enforces `origin/main` sync gate and blocks duplicate active `BLOCK_ID` sessions (when TP defines block identity).
 - next:
   - Execute Phase 2 slice 2 implementation wave 2 (remaining `/admin/*` role-boundary normalization).
   - Continue phase execution according to master program.
@@ -47,6 +49,7 @@
   - `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md`
   - `docs/TASK_PACKAGES/TP_TEMPLATE_ZERO_CONTEXT.md`
   - `docs/REPORTS/REPORT_TEMPLATE_ZERO_CONTEXT.md`
+  - `scripts/session_start.sh`
   - `docs/BLOCK_GRAPH.yaml`
   - `docs/TASK_PACKAGES/TP-2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md`
   - `docs/REPORTS/2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md`
