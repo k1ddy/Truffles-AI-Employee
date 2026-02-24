@@ -358,11 +358,10 @@ export default function TenantsClientsPanel({
                                                                 причина: {entry.reason}
                                                             </div>
                                                             <div className="text-muted-foreground">
-                                                                источник: {entry.source}
+                                                                источник: {entry.source === "api" ? "журнал системы" : "текущая сессия"}
                                                             </div>
                                                             <div className={entry.status === "success" ? "text-emerald-700" : "text-red-700"}>
                                                                 {entry.status === "success" ? "Успех" : "Ошибка"}: {entry.message}
-                                                                {isPlatformPreset && entry.traceId ? ` (trace_id: ${entry.traceId})` : ""}
                                                             </div>
                                                         </div>
                                                     ))

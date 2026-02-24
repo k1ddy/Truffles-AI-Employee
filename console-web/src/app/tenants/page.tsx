@@ -24,7 +24,6 @@ import {
     adminApi,
     authApi,
     canAccessConsole,
-    opsApi,
     type TenantsWeeklySnapshotRecord,
 } from "@/lib/api-client";
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
@@ -42,6 +41,7 @@ import { useTenantsDataQueries } from "./use-tenants-data-queries";
 import { useTenantsActions } from "./use-tenants-actions";
 import { useTenantsActionQueue } from "./use-tenants-action-queue";
 import { useTenantsOperationalModel } from "./use-tenants-operational-model";
+import { useTenantsPageOperations } from "./use-tenants-page-operations";
 import { useTenantsPageFilters } from "./use-tenants-page-filters";
 import {
     BRANCH_PHONE_INPUT_PATTERN,
@@ -241,14 +241,6 @@ function mapWeeklySnapshotRecordToViewModel(
     };
 }
 
-function toCsvCell(value: string | number): string {
-    const raw = String(value);
-    if (raw.includes(",") || raw.includes("\"") || raw.includes("\n")) {
-        return `"${raw.replaceAll("\"", "\"\"")}"`;
-    }
-    return raw;
-}
-
 export default function TenantsPage() {
     const { data: session } = useSession();
     const router = useRouter();
@@ -294,9 +286,6 @@ export default function TenantsPage() {
     const [clientLifecycleDraft, setClientLifecycleDraft] = useState<ClientLifecycleDraftState | null>(null);
     const [clientLifecycleAuditById, setClientLifecycleAuditById] = useState<ClientLifecycleAuditMap>({});
     const [clientLifecycleAuditFilterById, setClientLifecycleAuditFilterById] = useState<Record<string, ClientLifecycleAuditFilter>>({});
-    const [weeklySnapshots, setWeeklySnapshots] = useState<TenantsOperationalSnapshot[]>([]);
-    const [runningMetricsSnapshotMode, setRunningMetricsSnapshotMode] = useState<"dry_run" | "execute" | null>(null);
-    const [lastMetricsSnapshotJob, setLastMetricsSnapshotJob] = useState<components["schemas"]["ConsoleOpsJobRecord"] | null>(null);
     const [quickCreateForm, setQuickCreateForm] = useState<QuickCreateFormState>({
         companyName: "",
         clientSlug: "",
@@ -399,16 +388,6 @@ export default function TenantsPage() {
         maxWeeklySnapshots: MAX_WEEKLY_SNAPSHOTS,
         mapWeeklySnapshotRecordToViewModel,
     });
-    useEffect(() => {
-        if (!pageFilterClientId) {
-            setWeeklySnapshots([]);
-            return;
-        }
-        if (!weeklySnapshotsServerQuery.data) {
-            return;
-        }
-        setWeeklySnapshots(weeklySnapshotsServerQuery.data);
-    }, [pageFilterClientId, weeklySnapshotsServerQuery.data]);
 
     const companies = useMemo(
         () => companiesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
@@ -664,116 +643,34 @@ export default function TenantsPage() {
         isValidTimezoneName,
     });
 
-    const exportOperationalReport = (format: "json" | "csv") => {
-        const timestamp = new Date().toISOString().replaceAll(":", "-");
-        if (format === "json") {
-            const content = JSON.stringify(
-                {
-                    report: operationalReport,
-                    alert_payload: alertHookPayload,
-                },
-                null,
-                2,
-            );
-            const blob = new Blob([content], { type: "application/json;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = `tenants-operational-report-${timestamp}.json`;
-            link.click();
-            URL.revokeObjectURL(url);
-            toast.success("Отчёт JSON выгружен");
-            return;
-        }
-        const rows = [
-            ["metric", "value", "status", "reason"],
-            ...operationalKpiDrilldown.map((item) => [
-                item.id,
-                item.displayValue,
-                item.status,
-                item.reason,
-            ]),
-        ];
-        const csvContent = rows.map((row) => row.map((cell) => toCsvCell(cell)).join(",")).join("\n");
-        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `tenants-operational-report-${timestamp}.csv`;
-        link.click();
-        URL.revokeObjectURL(url);
-        toast.success("Отчёт CSV выгружен");
-    };
-
-    const saveWeeklySnapshot = async () => {
-        if (!pageFilterClientId) {
-            reportValidationError("Сначала выберите клиента в фильтрах страницы", "VALIDATION_ERROR", "portfolio");
-            return;
-        }
-        const now = new Date().toISOString();
-        const weekKey = toIsoWeekKey(now);
-        const localSnapshot: TenantsOperationalSnapshot = {
-            id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-                ? crypto.randomUUID()
-                : `${Date.now()}`,
+    const {
+        weeklySnapshots,
+        runningMetricsSnapshotMode,
+        lastMetricsSnapshotJob,
+        exportOperationalReport,
+        saveWeeklySnapshot,
+        copyAlertHookPayload,
+        runMetricsSnapshotHook,
+    } = useTenantsPageOperations<TenantsOperationalSnapshot>({
+        pageFilterClientId,
+        operationalReport,
+        alertHookPayload,
+        operationalKpiDrilldown,
+        queryClient,
+        weeklySnapshotsServerData: weeklySnapshotsServerQuery.data,
+        mapWeeklySnapshotRecordToViewModel,
+        buildLocalSnapshot: ({ id, createdAt, weekKey, report }) => ({
+            id,
+            createdAt,
             weekKey,
-            createdAt: now,
-            report: operationalReport,
-        };
-        const applySnapshot = (snapshot: TenantsOperationalSnapshot) => {
-            setWeeklySnapshots((previous) => {
-                const withoutWeek = previous.filter((item) => item.weekKey !== snapshot.weekKey);
-                return [snapshot, ...withoutWeek].slice(0, MAX_WEEKLY_SNAPSHOTS);
-            });
-        };
-        try {
-            const response = await adminApi.saveTenantsWeeklySnapshot({
-                client_id: pageFilterClientId,
-                week_key: weekKey,
-                snapshot: operationalReport,
-            });
-            const mappedSnapshot = mapWeeklySnapshotRecordToViewModel(response.data.item);
-            applySnapshot(mappedSnapshot ?? localSnapshot);
-                queryClient.invalidateQueries({
-                    queryKey: ["tenants-weekly-snapshots", pageFilterClientId],
-                });
-            toast.success(`Недельный снимок сохранён (${weekKey})`);
-        } catch (error) {
-            reportError(error, { scope: "portfolio" });
-            toast.error(`Не удалось сохранить недельный снимок (${weekKey})`);
-        }
-    };
-
-    const copyAlertHookPayload = async () => {
-        const serialized = JSON.stringify(alertHookPayload, null, 2);
-        try {
-            await navigator.clipboard.writeText(serialized);
-            toast.success("Данные уведомления скопированы");
-        } catch {
-            reportValidationError("Не удалось скопировать данные уведомления");
-        }
-    };
-
-    const runMetricsSnapshotHook = async (mode: "dry_run" | "execute") => {
-        if (!pageFilterClientId) {
-            reportValidationError("Сначала выберите клиента в фильтрах страницы");
-            return;
-        }
-        setRunningMetricsSnapshotMode(mode);
-        try {
-            const response = await opsApi.runJob({
-                job_type: "metrics_snapshot",
-                mode,
-                params: ({ days: 7 } as unknown as Record<string, never>),
-            });
-            setLastMetricsSnapshotJob(response.data.job);
-            toast.success(mode === "dry_run" ? "Пробный снимок метрик выполнен" : "Снимок метрик выполнен");
-        } catch (error) {
-            reportError(error, { scope: resolveErrorScopeFromWorkspace(effectiveWorkspaceMode) });
-        } finally {
-            setRunningMetricsSnapshotMode(null);
-        }
-    };
+            report,
+        }),
+        buildWeekKey: toIsoWeekKey,
+        maxWeeklySnapshots: MAX_WEEKLY_SNAPSHOTS,
+        reportValidationError,
+        reportError,
+        activeErrorScope,
+    });
 
     const { actionQueue, isClientArchived } = useTenantsActionQueue({
         tenantLifecycle,
@@ -816,7 +713,7 @@ export default function TenantsPage() {
             <div className="flex flex-col gap-2 mb-6">
                 {!controlTowerEnabled ? (
                     <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900" data-testid="tenants-control-tower-flag-banner">
-                        `TENANTS_V3_CONTROL_TOWER=0`: включён базовый режим Tenants без расширенной control-tower панели.
+                        Включён базовый режим Tenants: доступен обзор портфеля и управление контекстом.
                     </div>
                 ) : null}
                 <TenantsTopControls

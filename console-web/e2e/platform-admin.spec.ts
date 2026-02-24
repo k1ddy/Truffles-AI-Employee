@@ -1050,6 +1050,15 @@ test.describe('Platform Admin Tenants', () => {
         expect(counters.cockpitCalls).toBeGreaterThan(0);
     });
 
+    test('should keep tenants copy business-oriented without raw technical markers @smoke', async ({ page }) => {
+        await openTenants(page);
+        const body = page.locator('body');
+        await expect(body).not.toContainText('TENANTS_V3_CONTROL_TOWER');
+        await expect(body).not.toContainText('trace_id:');
+        await expect(body).not.toContainText('slug =');
+        await expect(body).not.toContainText('telegram_chat_id');
+    });
+
     test('should audit instance_id reveal and copy actions on Tenants @smoke', async ({ page }) => {
         const auditRequests: Array<Record<string, unknown>> = [];
         await page.route('**/api/proxy/admin/tenants/sensitive-access', async (route) => {

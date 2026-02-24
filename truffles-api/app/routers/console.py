@@ -52,6 +52,7 @@ from app.models import (
     OutboxMessage,
     ReferencePack,
     TenantsFleetCache,
+    TenantsFleetClientProjection,
     TenantsFleetPrewarmJob,
     TenantsWeeklySnapshot,
     User,
@@ -2142,6 +2143,24 @@ _FLEET_LIFECYCLE_STATES = {
 }
 _FLEET_PAYMENT_STATES = {"pending", "confirmed", "rejected", "unknown"}
 _FLEET_SERVICE_STATES = {"ok", "degraded", "attention"}
+_FLEET_COMMERCIAL_STATES = {
+    "payment_confirmed",
+    "payment_pending",
+    "payment_rejected",
+    "contract_missing",
+}
+_FLEET_NEXT_ACTION_STATES = {
+    "qualify_and_collect_contract",
+    "collect_signed_contract_and_payment",
+    "complete_onboarding_steps",
+    "confirm_payment_and_approve_go_live",
+    "approve_go_live",
+    "resolve_payment_or_service_blocker",
+    "archived_no_action",
+    "run_integration_recovery",
+    "resolve_attention_items",
+    "monitor_sla_and_quality",
+}
 _FLEET_LIFECYCLE_ORDER = [
     "lead",
     "contracting",
@@ -2256,6 +2275,7 @@ _OUTREACH_AUTO_CASE_ACTIVE_STATUSES = {"pending", "active"}
 _TENANTS_WEEKLY_SNAPSHOT_EVENT_TYPE = "tenants_weekly_snapshot_saved"
 _TENANTS_WEEKLY_SNAPSHOT_ENTITY_TYPE = "tenant_snapshot"
 _TENANTS_WEEKLY_SNAPSHOT_TABLE_NAME = "tenants_weekly_snapshots"
+_TENANTS_FLEET_CLIENT_PROJECTION_TABLE_NAME = "tenants_fleet_client_projection"
 _TENANTS_WEEKLY_SNAPSHOT_WEEK_KEY_PATTERN = re.compile(r"^\d{4}-W\d{2}$")
 _TENANTS_SENSITIVE_ACCESS_EVENT_TYPE = "tenants_sensitive_id_accessed"
 _TENANTS_SENSITIVE_FIELDS = {"instance_id"}
@@ -2273,6 +2293,22 @@ _TENANTS_FLEET_PREWARM_DISPATCH_WORKER: Optional[Thread] = None
 _TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING = "pending"
 _TENANTS_FLEET_PREWARM_JOB_STATUS_PROCESSING = "processing"
 _TENANTS_FLEET_PREWARM_JOB_STATUS_DONE = "done"
+_TENANTS_FLEET_CLIENT_PROJECTION_ENABLED = _parse_env_bool(
+    "TENANTS_FLEET_CLIENT_PROJECTION_ENABLED",
+    default=True,
+)
+_TENANTS_FLEET_CLIENT_PROJECTION_MAX_SYNC_CLIENTS = _parse_env_int(
+    "TENANTS_FLEET_CLIENT_PROJECTION_MAX_SYNC_CLIENTS",
+    default=8000,
+    min_value=100,
+    max_value=100000,
+)
+_TENANTS_FLEET_CLIENT_PROJECTION_COMPACTION_MAX_CLIENTS = _parse_env_int(
+    "TENANTS_FLEET_CLIENT_PROJECTION_COMPACTION_MAX_CLIENTS",
+    default=4000,
+    min_value=100,
+    max_value=100000,
+)
 
 
 @dataclass
@@ -2477,6 +2513,14 @@ def _is_tenants_fleet_prewarm_job_table_missing_error(exc: ProgrammingError) -> 
     message = str(exc.orig if getattr(exc, "orig", None) is not None else exc).lower()
     return (
         _TENANTS_FLEET_PREWARM_JOB_TABLE_NAME in message
+        and "does not exist" in message
+    )
+
+
+def _is_tenants_fleet_client_projection_table_missing_error(exc: ProgrammingError) -> bool:
+    message = str(exc.orig if getattr(exc, "orig", None) is not None else exc).lower()
+    return (
+        _TENANTS_FLEET_CLIENT_PROJECTION_TABLE_NAME in message
         and "does not exist" in message
     )
 
@@ -2833,6 +2877,57 @@ def _refresh_fleet_summary_cache_worker(task: dict[str, Any]) -> None:
                 cursor_cutoff=cursor_cutoff,
             )
 
+        materialize_projection = (
+            _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED
+            and lifecycle_mode == "active"
+            and query_value is None
+            and fleet_lifecycle_filter is None
+            and payment_status_filter is None
+            and service_state_filter is None
+        )
+        materialize_processed_clients = 0
+        materialize_truncated = False
+        materialized_company_client_ids: set[UUID] = set()
+        materialize_now = datetime.now(timezone.utc)
+
+        def _on_batch_details(batch_clients: list[Client], details_map: dict[UUID, _FleetClientDetails]) -> None:
+            nonlocal materialize_projection
+            nonlocal materialize_processed_clients
+            nonlocal materialize_truncated
+            if not materialize_projection:
+                return
+            if materialize_processed_clients >= _TENANTS_FLEET_CLIENT_PROJECTION_MAX_SYNC_CLIENTS:
+                materialize_truncated = True
+                return
+            remaining = _TENANTS_FLEET_CLIENT_PROJECTION_MAX_SYNC_CLIENTS - materialize_processed_clients
+            selected_clients = batch_clients[:remaining]
+            if not selected_clients:
+                return
+            selected_details: dict[UUID, _FleetClientDetails] = {}
+            company_id_by_client: dict[UUID, Optional[UUID]] = {}
+            for client in selected_clients:
+                details = details_map.get(client.id)
+                if not details:
+                    continue
+                selected_details[client.id] = details
+                company_id_by_client[client.id] = client.company_id
+                if company_uuid and client.company_id == company_uuid:
+                    materialized_company_client_ids.add(client.id)
+            if not selected_details:
+                return
+            persisted = _upsert_materialized_fleet_client_details(
+                db,
+                details_by_client_id=selected_details,
+                company_id_by_client_id=company_id_by_client,
+                now=materialize_now,
+            )
+            if not persisted:
+                materialize_projection = False
+                return
+            materialize_processed_clients += len(selected_details)
+            if len(batch_clients) > remaining:
+                materialize_truncated = True
+
         summary = _build_fleet_summary_for_scope(
             db,
             build_client_query=_build_query,
@@ -2840,12 +2935,23 @@ def _refresh_fleet_summary_cache_worker(task: dict[str, Any]) -> None:
             payment_status=payment_status_filter,
             service_state=service_state_filter,
             batch_size=batch_size,
+            on_batch_details=_on_batch_details,
         )
+        if (
+            materialize_projection
+            and company_uuid is not None
+            and not materialize_truncated
+        ):
+            _compact_materialized_fleet_client_scope(
+                db,
+                company_id=company_uuid,
+                keep_client_ids=materialized_company_client_ids,
+            )
         _store_cached_fleet_summary(
             db,
             scope_key=scope_key,
             scope_company_id=company_uuid,
-            now=datetime.now(timezone.utc),
+            now=materialize_now,
             summary=summary,
         )
     except Exception:
@@ -3609,7 +3715,7 @@ def _build_fleet_attention_response_for_clients(
     limit: int,
     now: datetime,
 ) -> ConsoleFleetAttentionResponse:
-    fleet_details_map = _build_fleet_client_details_map(
+    fleet_details_map = _load_or_build_fleet_client_details_map(
         db,
         clients=active_clients,
         companies_by_id=companies_by_id,
@@ -5411,6 +5517,217 @@ def _build_fleet_client_details_map(
     return details
 
 
+def _parse_projection_reference_branch_ids(raw_value: Any) -> tuple[UUID, ...]:
+    if not isinstance(raw_value, list):
+        return tuple()
+    normalized: list[UUID] = []
+    for item in raw_value:
+        if isinstance(item, UUID):
+            normalized.append(item)
+            continue
+        if not isinstance(item, str):
+            continue
+        try:
+            normalized.append(UUID(item))
+        except (TypeError, ValueError):
+            continue
+    return tuple(normalized)
+
+
+def _build_fleet_client_details_from_projection(
+    row: TenantsFleetClientProjection,
+) -> Optional[_FleetClientDetails]:
+    lifecycle_state = (row.lifecycle_state or "").strip().lower()
+    payment_status = (row.payment_status or "").strip().lower()
+    commercial_state = (row.commercial_state or "").strip().lower()
+    service_state = (row.service_state or "").strip().lower()
+    next_action = (row.next_action or "").strip().lower()
+    if lifecycle_state not in _FLEET_LIFECYCLE_STATES:
+        return None
+    if payment_status not in _FLEET_PAYMENT_STATES:
+        return None
+    if commercial_state not in _FLEET_COMMERCIAL_STATES:
+        return None
+    if service_state not in _FLEET_SERVICE_STATES:
+        return None
+    if next_action not in _FLEET_NEXT_ACTION_STATES:
+        return None
+    return _FleetClientDetails(
+        lifecycle_state=lifecycle_state,
+        payment_status=payment_status,
+        commercial_state=commercial_state,
+        service_state=service_state,
+        owner_name=_normalize_optional_text(row.owner_name),
+        next_action=next_action,
+        total_branches=max(int(row.total_branches or 0), 0),
+        active_branches=max(int(row.active_branches or 0), 0),
+        degraded_branches=max(int(row.degraded_branches or 0), 0),
+        go_live_ready_branches=max(int(row.go_live_ready_branches or 0), 0),
+        reference_branch_ids=_parse_projection_reference_branch_ids(row.reference_branch_ids),
+        reference_branch_reason=(row.reference_branch_reason or "no_active_branches").strip() or "no_active_branches",
+    )
+
+
+def _load_materialized_fleet_client_details_map(
+    db: Session,
+    *,
+    client_ids: set[UUID],
+) -> dict[UUID, _FleetClientDetails]:
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED:
+        return {}
+    if not client_ids:
+        return {}
+    try:
+        rows = (
+            db.query(TenantsFleetClientProjection)
+            .filter(TenantsFleetClientProjection.client_id.in_(list(client_ids)))
+            .all()
+        )
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_client_projection_table_missing_error(exc):
+            return {}
+        return {}
+    except Exception:
+        db.rollback()
+        return {}
+
+    details_map: dict[UUID, _FleetClientDetails] = {}
+    for row in rows:
+        details = _build_fleet_client_details_from_projection(row)
+        if not details:
+            continue
+        details_map[row.client_id] = details
+    return details_map
+
+
+def _upsert_materialized_fleet_client_details(
+    db: Session,
+    *,
+    details_by_client_id: dict[UUID, _FleetClientDetails],
+    company_id_by_client_id: dict[UUID, Optional[UUID]],
+    now: datetime,
+) -> bool:
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED:
+        return False
+    if not details_by_client_id:
+        return False
+    client_ids = list(details_by_client_id.keys())
+    try:
+        rows = (
+            db.query(TenantsFleetClientProjection)
+            .filter(TenantsFleetClientProjection.client_id.in_(client_ids))
+            .all()
+        )
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_client_projection_table_missing_error(exc):
+            return False
+        return False
+    except Exception:
+        db.rollback()
+        return False
+
+    row_by_client_id = {row.client_id: row for row in rows}
+    for client_id, details in details_by_client_id.items():
+        row = row_by_client_id.get(client_id)
+        if row is None:
+            row = TenantsFleetClientProjection(
+                client_id=client_id,
+                created_at=now,
+            )
+            db.add(row)
+        row.company_id = company_id_by_client_id.get(client_id)
+        row.lifecycle_state = details.lifecycle_state
+        row.payment_status = details.payment_status
+        row.commercial_state = details.commercial_state
+        row.service_state = details.service_state
+        row.owner_name = details.owner_name
+        row.next_action = details.next_action
+        row.total_branches = details.total_branches
+        row.active_branches = details.active_branches
+        row.degraded_branches = details.degraded_branches
+        row.go_live_ready_branches = details.go_live_ready_branches
+        row.reference_branch_ids = [str(branch_id) for branch_id in details.reference_branch_ids]
+        row.reference_branch_reason = details.reference_branch_reason
+        row.refreshed_at = now
+        row.updated_at = now
+    return True
+
+
+def _compact_materialized_fleet_client_scope(
+    db: Session,
+    *,
+    company_id: UUID,
+    keep_client_ids: set[UUID],
+) -> None:
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED:
+        return
+    if len(keep_client_ids) > _TENANTS_FLEET_CLIENT_PROJECTION_COMPACTION_MAX_CLIENTS:
+        return
+    try:
+        delete_query = db.query(TenantsFleetClientProjection).filter(
+            TenantsFleetClientProjection.company_id == company_id,
+        )
+        if keep_client_ids:
+            delete_query = delete_query.filter(
+                TenantsFleetClientProjection.client_id.notin_(list(keep_client_ids))
+            )
+        delete_query.delete(synchronize_session=False)
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_client_projection_table_missing_error(exc):
+            return
+    except Exception:
+        db.rollback()
+        return
+
+
+def _load_or_build_fleet_client_details_map(
+    db: Session,
+    *,
+    clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    persist_missing: bool = False,
+) -> dict[UUID, _FleetClientDetails]:
+    if not clients:
+        return {}
+    client_ids = {client.id for client in clients}
+    details_by_client = _load_materialized_fleet_client_details_map(
+        db,
+        client_ids=client_ids,
+    )
+    missing_clients = [client for client in clients if client.id not in details_by_client]
+    if not missing_clients:
+        return details_by_client
+
+    missing_companies_by_id = dict(companies_by_id)
+    missing_company_ids = {
+        client.company_id
+        for client in missing_clients
+        if client.company_id and client.company_id not in missing_companies_by_id
+    }
+    if missing_company_ids:
+        extra_companies = db.query(Company).filter(Company.id.in_(list(missing_company_ids))).all()
+        for company in extra_companies:
+            missing_companies_by_id[company.id] = company
+    computed_details = _build_fleet_client_details_map(
+        db,
+        clients=missing_clients,
+        companies_by_id=missing_companies_by_id,
+    )
+    details_by_client.update(computed_details)
+    if computed_details and persist_missing:
+        now = datetime.now(timezone.utc)
+        _upsert_materialized_fleet_client_details(
+            db,
+            details_by_client_id=computed_details,
+            company_id_by_client_id={client.id: client.company_id for client in missing_clients},
+            now=now,
+        )
+    return details_by_client
+
+
 def _fleet_client_matches_filters(
     details: _FleetClientDetails,
     *,
@@ -5605,6 +5922,7 @@ def _build_fleet_summary_for_scope(
     payment_status: Optional[str],
     service_state: Optional[str],
     batch_size: int = 200,
+    on_batch_details: Optional[Callable[[list[Client], dict[UUID, _FleetClientDetails]], None]] = None,
 ) -> ConsoleFleetSummary:
     lifecycle_counts = {state: 0 for state in _FLEET_LIFECYCLE_ORDER}
     payment_counts = {state: 0 for state in _FLEET_PAYMENT_ORDER}
@@ -5630,11 +5948,13 @@ def _build_fleet_summary_for_scope(
             batch_companies = db.query(Company).filter(Company.id.in_(batch_company_ids)).all()
             batch_companies_by_id = {company.id: company for company in batch_companies}
 
-        batch_details = _build_fleet_client_details_map(
+        batch_details = _load_or_build_fleet_client_details_map(
             db,
             clients=batch,
             companies_by_id=batch_companies_by_id,
         )
+        if on_batch_details is not None:
+            on_batch_details(batch, batch_details)
 
         for client in batch:
             details = batch_details.get(client.id)
@@ -15094,7 +15414,7 @@ async def list_clients(
             if batch_company_ids:
                 batch_companies = db.query(Company).filter(Company.id.in_(batch_company_ids)).all()
                 batch_companies_by_id = {company.id: company for company in batch_companies}
-            batch_details = _build_fleet_client_details_map(
+            batch_details = _load_or_build_fleet_client_details_map(
                 db,
                 clients=batch,
                 companies_by_id=batch_companies_by_id,
@@ -15144,7 +15464,7 @@ async def list_clients(
 
     fleet_details_map: dict[UUID, _FleetClientDetails] = {}
     if include_fleet_mode:
-        fleet_details_map = _build_fleet_client_details_map(
+        fleet_details_map = _load_or_build_fleet_client_details_map(
             db,
             clients=clients,
             companies_by_id=companies_by_id,

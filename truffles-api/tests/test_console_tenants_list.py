@@ -91,6 +91,133 @@ def test_parse_fleet_params_reject_invalid_values() -> None:
         console_router._parse_fleet_service_param("bad")
 
 
+def test_build_fleet_client_details_from_projection_accepts_valid_row() -> None:
+    branch_id = uuid4()
+    row = SimpleNamespace(
+        lifecycle_state="active",
+        payment_status="confirmed",
+        commercial_state="payment_confirmed",
+        service_state="ok",
+        owner_name="Owner",
+        next_action="monitor_sla_and_quality",
+        total_branches=3,
+        active_branches=3,
+        degraded_branches=0,
+        go_live_ready_branches=2,
+        reference_branch_ids=[str(branch_id)],
+        reference_branch_reason="selected_active_branch",
+    )
+
+    details = console_router._build_fleet_client_details_from_projection(row)
+
+    assert details is not None
+    assert details.lifecycle_state == "active"
+    assert details.payment_status == "confirmed"
+    assert details.reference_branch_ids == (branch_id,)
+
+
+def test_load_or_build_fleet_client_details_map_uses_materialized_when_complete(monkeypatch) -> None:
+    client_id = uuid4()
+    company_id = uuid4()
+    client = SimpleNamespace(id=client_id, company_id=company_id)
+    company = SimpleNamespace(id=company_id, name="Acme")
+    expected = console_router._FleetClientDetails(
+        lifecycle_state="active",
+        payment_status="confirmed",
+        commercial_state="payment_confirmed",
+        service_state="ok",
+        owner_name="Owner",
+        next_action="monitor_sla_and_quality",
+        total_branches=1,
+        active_branches=1,
+        degraded_branches=0,
+        go_live_ready_branches=1,
+    )
+    db = Mock()
+
+    monkeypatch.setattr(
+        console_router,
+        "_load_materialized_fleet_client_details_map",
+        lambda *_args, **_kwargs: {client_id: expected},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_client_details_map",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not rebuild details on full materialized hit")),
+    )
+
+    result = console_router._load_or_build_fleet_client_details_map(
+        db,
+        clients=[client],
+        companies_by_id={company_id: company},
+    )
+
+    assert result == {client_id: expected}
+
+
+def test_load_or_build_fleet_client_details_map_rebuilds_missing_and_upserts(monkeypatch) -> None:
+    hit_client_id = uuid4()
+    miss_client_id = uuid4()
+    company_id = uuid4()
+    hit_client = SimpleNamespace(id=hit_client_id, company_id=company_id)
+    miss_client = SimpleNamespace(id=miss_client_id, company_id=company_id)
+    company = SimpleNamespace(id=company_id, name="Acme")
+    materialized_hit = console_router._FleetClientDetails(
+        lifecycle_state="active",
+        payment_status="confirmed",
+        commercial_state="payment_confirmed",
+        service_state="ok",
+        owner_name="Owner",
+        next_action="monitor_sla_and_quality",
+        total_branches=1,
+        active_branches=1,
+        degraded_branches=0,
+        go_live_ready_branches=1,
+    )
+    rebuilt_miss = console_router._FleetClientDetails(
+        lifecycle_state="onboarding",
+        payment_status="pending",
+        commercial_state="payment_pending",
+        service_state="attention",
+        owner_name=None,
+        next_action="complete_onboarding_steps",
+        total_branches=2,
+        active_branches=1,
+        degraded_branches=1,
+        go_live_ready_branches=0,
+    )
+    upsert_calls: list[dict[str, object]] = []
+    db = Mock()
+
+    monkeypatch.setattr(
+        console_router,
+        "_load_materialized_fleet_client_details_map",
+        lambda *_args, **_kwargs: {hit_client_id: materialized_hit},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_client_details_map",
+        lambda *_args, **_kwargs: {miss_client_id: rebuilt_miss},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_upsert_materialized_fleet_client_details",
+        lambda _db, **kwargs: upsert_calls.append(kwargs) or True,
+    )
+
+    result = console_router._load_or_build_fleet_client_details_map(
+        db,
+        clients=[hit_client, miss_client],
+        companies_by_id={company_id: company},
+        persist_missing=True,
+    )
+
+    assert result[hit_client_id] == materialized_hit
+    assert result[miss_client_id] == rebuilt_miss
+    assert len(upsert_calls) == 1
+    assert upsert_calls[0]["details_by_client_id"] == {miss_client_id: rebuilt_miss}
+
+
 def test_select_reference_active_branches_filters_to_reference_subset() -> None:
     selected_id = uuid4()
     ignored_id = uuid4()
@@ -1313,7 +1440,7 @@ async def test_list_clients_include_fleet_enriches_items_and_summary(monkeypatch
     )
     monkeypatch.setattr(
         console_router,
-        "_build_fleet_client_details_map",
+        "_load_or_build_fleet_client_details_map",
         lambda *_args, **_kwargs: {
             client_id: console_router._FleetClientDetails(
                 lifecycle_state="active",
@@ -1432,7 +1559,7 @@ async def test_list_clients_filters_by_fleet_payment(monkeypatch) -> None:
         }
         return {client.id: base_map[client.id] for client in clients}
 
-    monkeypatch.setattr(console_router, "_build_fleet_client_details_map", _details_map)
+    monkeypatch.setattr(console_router, "_load_or_build_fleet_client_details_map", _details_map)
 
     response = await console_router.list_clients(
         request=request,
