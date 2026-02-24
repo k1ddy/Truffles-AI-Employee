@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal, get_db
 from app.logging_config import (
     record_tenants_endpoint_latency,
+    record_tenants_fleet_projection_compaction,
     record_tenants_fleet_projection_observation,
 )
 from app.models import (
@@ -2312,6 +2313,30 @@ _TENANTS_FLEET_CLIENT_PROJECTION_COMPACTION_MAX_CLIENTS = _parse_env_int(
     min_value=100,
     max_value=100000,
 )
+_TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_ENABLED = _parse_env_bool(
+    "TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_ENABLED",
+    default=True,
+)
+_TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_INTERVAL_SECONDS = _parse_env_int(
+    "TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_INTERVAL_SECONDS",
+    default=300,
+    min_value=10,
+    max_value=86400,
+)
+_TENANTS_FLEET_CLIENT_PROJECTION_STALE_AFTER_SECONDS = _parse_env_int(
+    "TENANTS_FLEET_CLIENT_PROJECTION_STALE_AFTER_SECONDS",
+    default=86400 * 7,
+    min_value=300,
+    max_value=86400 * 365,
+)
+_TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_MAX_DELETE = _parse_env_int(
+    "TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_MAX_DELETE",
+    default=2000,
+    min_value=50,
+    max_value=100000,
+)
+_TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_LOCK = Lock()
+_TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_NEXT_ALLOWED_AT = 0.0
 
 
 @dataclass
@@ -2961,6 +2986,7 @@ def _refresh_fleet_summary_cache_worker(task: dict[str, Any]) -> None:
         db.rollback()
     finally:
         db.close()
+        _maybe_run_fleet_projection_maintenance()
         _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, scope_key)
 
 
@@ -3399,8 +3425,11 @@ def _fleet_incremental_prewarm_dispatch_worker() -> None:
     global _TENANTS_FLEET_PREWARM_DISPATCH_WORKER
 
     try:
-        while _drain_fleet_incremental_prewarm_dispatch_queue_once():
-            continue
+        while True:
+            drained = _drain_fleet_incremental_prewarm_dispatch_queue_once()
+            _maybe_run_fleet_projection_maintenance()
+            if not drained:
+                break
     finally:
         should_restart = False
         with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
@@ -3955,6 +3984,7 @@ def _refresh_fleet_attention_cache_worker(task: dict[str, Any]) -> None:
         db.rollback()
     finally:
         db.close()
+        _maybe_run_fleet_projection_maintenance()
         _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key)
 
 
@@ -5692,6 +5722,69 @@ def _compact_materialized_fleet_client_scope(
     except Exception:
         db.rollback()
         return
+
+
+def _compact_stale_materialized_fleet_projection_rows() -> int:
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED:
+        return 0
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_ENABLED:
+        return 0
+    db = SessionLocal()
+    stale_before = datetime.now(timezone.utc) - timedelta(seconds=_TENANTS_FLEET_CLIENT_PROJECTION_STALE_AFTER_SECONDS)
+    try:
+        stale_rows = (
+            db.query(TenantsFleetClientProjection.id)
+            .filter(TenantsFleetClientProjection.refreshed_at < stale_before)
+            .order_by(TenantsFleetClientProjection.refreshed_at.asc(), TenantsFleetClientProjection.id.asc())
+            .limit(_TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_MAX_DELETE)
+            .all()
+        )
+        stale_ids = [
+            row[0]
+            for row in stale_rows
+            if row and row[0] is not None
+        ]
+        if not stale_ids:
+            record_tenants_fleet_projection_compaction(outcome="noop", deleted_rows=0)
+            return 0
+        deleted_rows = (
+            db.query(TenantsFleetClientProjection)
+            .filter(TenantsFleetClientProjection.id.in_(stale_ids))
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+        deleted_count = max(int(deleted_rows or 0), 0)
+        record_tenants_fleet_projection_compaction(outcome="success", deleted_rows=deleted_count)
+        return deleted_count
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_client_projection_table_missing_error(exc):
+            record_tenants_fleet_projection_compaction(outcome="table_missing", deleted_rows=0)
+            return 0
+        record_tenants_fleet_projection_compaction(outcome="error", deleted_rows=0)
+        return 0
+    except Exception:
+        db.rollback()
+        record_tenants_fleet_projection_compaction(outcome="error", deleted_rows=0)
+        return 0
+    finally:
+        db.close()
+
+
+def _maybe_run_fleet_projection_maintenance(*, now_mono: Optional[float] = None) -> None:
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_ENABLED:
+        return
+    if not _TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_ENABLED:
+        return
+    current_mono = monotonic() if now_mono is None else now_mono
+    global _TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_NEXT_ALLOWED_AT
+    with _TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_LOCK:
+        if current_mono < _TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_NEXT_ALLOWED_AT:
+            return
+        _TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_NEXT_ALLOWED_AT = (
+            current_mono + _TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_INTERVAL_SECONDS
+        )
+    _compact_stale_materialized_fleet_projection_rows()
 
 
 def _load_or_build_fleet_client_details_map(
