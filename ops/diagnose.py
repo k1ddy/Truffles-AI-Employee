@@ -7992,6 +7992,91 @@ def _parse_llm_quality_args(argv):
     return _llm_quality_apply_timeout_profile(args)
 
 
+def _parse_llm_quality_gates_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py llm-quality-gates",
+        description="Run static llm-quality gates without runtime/webhook execution.",
+    )
+    parser.add_argument(
+        "--lexicon-regex-delta-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_LEXICON_REGEX_DELTA_GATE", "block"),
+        help="Static guard for lexicon/regex deltas without resolver+test updates.",
+    )
+    parser.add_argument(
+        "--delta-gate-base-ref",
+        default=os.environ.get("LLM_QUALITY_DELTA_GATE_BASE_REF", "origin/main"),
+        help="Base ref used for lexicon/regex delta scan.",
+    )
+    parser.add_argument(
+        "--hardcode-core-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_HARDCODE_CORE_GATE", "block"),
+        help="Static guard for phrase/regex branching in webhook core files.",
+    )
+    parser.add_argument(
+        "--hardcode-core-base-ref",
+        default=os.environ.get("LLM_QUALITY_HARDCODE_CORE_BASE_REF", "origin/main"),
+        help="Base ref used for hardcode-core scan.",
+    )
+    parser.add_argument(
+        "--run-economy-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_RUN_ECONOMY_GATE", "block"),
+        help="Budget guard for replay/full run contracts.",
+    )
+    parser.add_argument(
+        "--run-economy-base-ref",
+        default=os.environ.get("LLM_QUALITY_RUN_ECONOMY_BASE_REF", "origin/main"),
+        help="Base ref used for run-economy changed-files scan.",
+    )
+    parser.add_argument(
+        "--scenarios-file",
+        default=None,
+        help="Replay scenarios path; enables replay branch of run-economy gate.",
+    )
+    parser.add_argument(
+        "--baseline-summary",
+        default=None,
+        help="Baseline summary.json path used for replay canonicality checks.",
+    )
+    parser.add_argument(
+        "--reset-before-dialog",
+        action="store_true",
+        help="Mark replay as isolated; required by replay run-economy policy.",
+    )
+    parser.add_argument(
+        "--jid-mode",
+        choices=["auto", "round_robin", "random", "unique"],
+        default="auto",
+        help="JID mode fed into run-economy replay contract checks.",
+    )
+    parser.add_argument(
+        "--runtime-commit",
+        default=None,
+        help="Runtime commit token for replay fingerprint checks.",
+    )
+    parser.add_argument(
+        "--judge-mode",
+        choices=["off", "sample", "all", "critical"],
+        default="off",
+        help="Judge mode token for replay fingerprint checks.",
+    )
+    parser.add_argument(
+        "--previous-replay-fingerprint",
+        default=None,
+        help="Previous replay fingerprint to block unchanged reruns.",
+    )
+    parser.add_argument(
+        "--allow-no-code-delta",
+        action="store_true",
+        help="Allow empty/doc-only diff for full-run run-economy check.",
+    )
+    parser.add_argument("--output", default=None, help="Optional JSON output file path.")
+    parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+    return parser.parse_args(argv)
+
+
 def _parse_llm_quality_matrix_args(argv):
     parser = argparse.ArgumentParser(
         prog="ops/diagnose.py llm-quality-matrix",
@@ -13070,6 +13155,104 @@ def _run_llm_quality_entry(argv):
             error_message=f"{exc.__class__.__name__}:{exc}",
         )
         raise
+
+
+def _run_llm_quality_gates(args):
+    repo_root = _llm_quality_repo_root()
+    generated_at = datetime.now(timezone.utc).isoformat()
+    changed_cache = {}
+
+    def _collect_changed_files(base_ref):
+        normalized_ref = str(base_ref or "").strip() or "origin/main"
+        cached = changed_cache.get(normalized_ref)
+        if cached is None:
+            cached = _llm_quality_collect_git_changed_files(repo_root, normalized_ref)
+            changed_cache[normalized_ref] = cached
+        return cached
+
+    def _merge_scan_warnings(status, extra_warnings):
+        merged = list(status.get("scan_warnings") or [])
+        merged.extend(extra_warnings or [])
+        status["scan_warnings"] = sorted({str(item) for item in merged if str(item).strip()})
+        return status
+
+    lexicon_changed, lexicon_scan_warnings = _collect_changed_files(args.delta_gate_base_ref)
+    lexicon_regex_delta_gate = _llm_quality_build_lexicon_regex_delta_status(
+        mode=args.lexicon_regex_delta_gate,
+        repo_root=repo_root,
+        base_ref=args.delta_gate_base_ref,
+        changed_files=lexicon_changed,
+    )
+    _merge_scan_warnings(lexicon_regex_delta_gate, lexicon_scan_warnings)
+
+    hardcode_changed, hardcode_scan_warnings = _collect_changed_files(args.hardcode_core_base_ref)
+    hardcode_core_gate = _llm_quality_build_hardcode_core_gate_status(
+        mode=args.hardcode_core_gate,
+        repo_root=repo_root,
+        base_ref=args.hardcode_core_base_ref,
+        changed_files=hardcode_changed,
+    )
+    _merge_scan_warnings(hardcode_core_gate, hardcode_scan_warnings)
+
+    run_economy_changed, run_economy_scan_warnings = _collect_changed_files(
+        args.run_economy_base_ref
+    )
+    baseline_preflight = _llm_quality_preflight_baseline_summary(args.baseline_summary)
+    run_economy_gate = _llm_quality_build_run_economy_status(
+        mode=args.run_economy_gate,
+        repo_root=repo_root,
+        base_ref=args.run_economy_base_ref,
+        scenarios_file=args.scenarios_file,
+        baseline_summary=args.baseline_summary,
+        reset_before_dialog=bool(args.reset_before_dialog),
+        allow_no_code_delta=bool(args.allow_no_code_delta),
+        jid_mode=args.jid_mode,
+        runtime_commit=args.runtime_commit,
+        judge_mode=args.judge_mode,
+        previous_replay_fingerprint=args.previous_replay_fingerprint,
+        changed_files=run_economy_changed,
+        baseline_preflight=baseline_preflight,
+    )
+    _merge_scan_warnings(run_economy_gate, run_economy_scan_warnings)
+
+    gate_statuses = {
+        "lexicon_regex_delta_gate": lexicon_regex_delta_gate,
+        "hardcode_core_gate": hardcode_core_gate,
+        "run_economy_gate": run_economy_gate,
+    }
+    blocking_reasons = []
+    warn_reasons = []
+    for gate_name, status in gate_statuses.items():
+        reasons = [str(reason) for reason in (status.get("reasons") or []) if str(reason).strip()]
+        if status.get("enforced") and not status.get("valid", True):
+            blocking_reasons.extend(f"{gate_name}:{reason}" for reason in reasons)
+        elif str(status.get("mode") or "").strip().casefold() == "warn":
+            warn_reasons.extend(f"{gate_name}:{reason}" for reason in reasons)
+
+    payload = {
+        "command": "llm-quality-gates",
+        "generated_at": generated_at,
+        "repo_root": repo_root,
+        "quality_status": {
+            "valid": not blocking_reasons,
+            "blocking_reason_count": len(blocking_reasons),
+            "blocking_reasons": blocking_reasons,
+            "warn_reason_count": len(warn_reasons),
+            "warn_reasons": warn_reasons,
+        },
+        "baseline_preflight": baseline_preflight,
+        "gates": gate_statuses,
+    }
+    output = json.dumps(payload, ensure_ascii=False, indent=2 if args.pretty else None)
+    if isinstance(args.output, str) and args.output.strip():
+        output_path = os.path.abspath(os.path.expanduser(args.output))
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write(output + "\n")
+    print(output)
+    return 0 if not blocking_reasons else 2
 
 
 def _run_llm_quality_matrix(args):
@@ -20164,6 +20347,8 @@ if len(sys.argv) > 1 and sys.argv[1] == "chaos-sim":
 if len(sys.argv) > 1 and sys.argv[1] == "llm-quality":
     _run_llm_quality_entry(sys.argv[2:])
     raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-gates":
+    raise SystemExit(_run_llm_quality_gates(_parse_llm_quality_gates_args(sys.argv[2:])))
 if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-matrix":
     _run_llm_quality_matrix(_parse_llm_quality_matrix_args(sys.argv[2:]))
     raise SystemExit(0)

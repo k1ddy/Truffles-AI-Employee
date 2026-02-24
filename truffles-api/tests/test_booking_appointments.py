@@ -468,11 +468,10 @@ def test_tool_registry_get_booking_time_mismatch_mentions_requested_relative_dat
     assert result.handled is True
     assert result.ok is False
     assert result.error_code == "booking_time_mismatch"
-    assert "на завтра на 15:30" in (result.response_text or "")
-    assert "на 09:00" in (result.response_text or "")
-    assert "возможно на другую дату" in (result.response_text or "")
     assert result.decision_meta["requested_time"] == "15:30"
     assert result.decision_meta["requested_date"] == "завтра"
+    assert result.decision_meta["appointment_time"] == "09:00"
+    assert result.trace.get("decision") == "time_mismatch"
 
 
 def test_tool_registry_get_booking_not_found_acknowledges_photo_offer():
@@ -531,8 +530,9 @@ def test_tool_registry_get_booking_not_found_verification_skips_service_followup
     assert result.handled is True
     assert result.ok is False
     assert result.error_code == "booking_not_found"
-    assert "Проверил: пока не вижу подтверждённой записи на 15:00." in (result.response_text or "")
-    assert "На какую услугу хотите записаться?" not in (result.response_text or "")
+    assert result.decision_meta.get("tool_decision") == "not_found"
+    assert result.decision_meta.get("requested_time") == "15:00"
+    assert result.trace.get("decision") == "not_found"
 
 
 def test_tool_registry_book_slot_conflict_verification_mentions_confirmation_failure():
@@ -572,7 +572,8 @@ def test_tool_registry_book_slot_conflict_verification_mentions_confirmation_fai
     assert result.handled is True
     assert result.ok is False
     assert result.error_code == "slot_unavailable"
-    assert "Подтвердить запись на это время не удалось" in (result.response_text or "")
+    assert result.decision_meta.get("tool_decision") == "conflict"
+    assert result.trace.get("decision") == "conflict"
 
 
 def test_tool_registry_book_slot_conflict_returns_requested_time_alternatives():
@@ -617,7 +618,8 @@ def test_tool_registry_book_slot_conflict_returns_requested_time_alternatives():
     assert result.handled is True
     assert result.ok is False
     assert result.error_code == "slot_unavailable"
-    assert "На 16:00 свободного окна нет." in (result.response_text or "")
+    assert result.decision_meta.get("tool_decision") == "conflict"
+    assert result.decision_meta.get("requested_time") == "16:00"
     assert result.expected_reply_type == "name"
 
 

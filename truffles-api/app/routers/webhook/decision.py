@@ -3618,9 +3618,11 @@ def _is_booking_request(text: str, *, client_slug: str | None) -> bool:
     normalized = normalize_for_matching(text)
     if not normalized:
         return False
-    if "запис" in normalized:
+    booking_keywords = get_system_lexicon_list("booking_keywords")
+    if booking_keywords and _contains_any(normalized, booking_keywords):
         return True
-    need_or_desire_signal = any(marker in normalized for marker in ("хочу", "нужн", "надо"))
+    desire_keywords = get_system_lexicon_list("booking_desire_keywords")
+    need_or_desire_signal = bool(desire_keywords and _contains_any(normalized, desire_keywords))
     if not need_or_desire_signal or not client_slug:
         return False
     cleaned_text = re.sub(r"\[[^\]]+\]", " ", text)
@@ -3755,10 +3757,8 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
     normalized = normalize_for_matching(message_text)
     if not normalized:
         return False
-    if any(
-        phrase in normalized
-        for phrase in ("во сколько", "в какое время", "какое время", "которое время")
-    ):
+    time_only_phrases = get_system_lexicon_list("time_only_request_phrases")
+    if time_only_phrases and _contains_any(normalized, time_only_phrases):
         return True
     tokens = _tokenize_for_matching(normalized)
     if not tokens:

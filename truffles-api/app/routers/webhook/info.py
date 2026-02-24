@@ -213,48 +213,53 @@ def _detect_info_class_intents(
         location_signal = True
     hours_phrases = _signal_phrase_list(client_slug, "hours_keywords")
     hours_signal = bool(hours_phrases) and any(phrase in normalized for phrase in hours_phrases)
+    hours_stems = _signal_phrase_list(client_slug, "info_hours_stems")
+    time_markers = _signal_phrase_list(client_slug, "info_time_markers")
     if not hours_signal and question_like:
-        has_work_schedule_signal = any(stem in normalized for stem in ("работ", "рабоч")) and any(
-            marker in normalized for marker in ("врем", "час")
+        has_work_schedule_signal = bool(
+            hours_stems
+            and time_markers
+            and any(stem in normalized for stem in hours_stems)
+            and any(marker in normalized for marker in time_markers)
         )
         if has_work_schedule_signal:
             hours_signal = True
     pricing_signal = _has_price_signal(normalized, message_text, client_slug=client_slug)
     duration_signal = _has_duration_signal(normalized, message_text, client_slug=client_slug)
+    duration_fallback_verbs = _signal_phrase_list(client_slug, "info_duration_fallback_verbs")
+    duration_fallback_questions = _signal_phrase_list(
+        client_slug, "info_duration_fallback_question_markers"
+    )
     if not duration_signal:
         duration_signal = bool(
-            ("займет" in normalized or "занимает" in normalized)
-            and ("врем" in normalized or "сколько" in normalized)
+            duration_fallback_verbs
+            and duration_fallback_questions
+            and any(marker in normalized for marker in duration_fallback_verbs)
+            and any(marker in normalized for marker in duration_fallback_questions)
         )
-    service_duration_context = any(
-        marker in normalized
-        for marker in ("процедур", "услуг", "сеанс", "маникюр", "педикюр", "стриж", "окраш", "массаж")
+    service_duration_markers = _signal_phrase_list(client_slug, "info_duration_service_context_markers")
+    service_duration_context = bool(
+        service_duration_markers
+        and any(marker in normalized for marker in service_duration_markers)
     )
-    if duration_signal and any(stem in normalized for stem in ("работ", "рабоч")) and not service_duration_context:
+    if duration_signal and any(stem in normalized for stem in hours_stems) and not service_duration_context:
         duration_signal = False
         hours_signal = True
+    master_keywords = _signal_phrase_list(client_slug, "info_master_keywords")
+    master_person_keywords = _signal_phrase_list(client_slug, "info_master_person_keywords")
+    master_action_keywords = _signal_phrase_list(client_slug, "info_master_action_keywords")
+    master_service_keywords = _signal_phrase_list(client_slug, "info_master_service_keywords")
     master_signal = False
-    if normalized and any(
-        keyword in normalized
-        for keyword in (
-            "мастер",
-            "специалист",
-            "кто делает",
-            "кто будет делать",
-            "кто будет проводить",
-            "кто будет дела",
-            "кто выполняет",
-            "шебер",
-            "маман",
-            "ким жасайд",
-        )
-    ):
+    if normalized and master_keywords and any(keyword in normalized for keyword in master_keywords):
         master_signal = True
     if (
         not master_signal
-        and "кто" in normalized
-        and ("дела" in normalized or "провод" in normalized)
-        and any(token in normalized for token in ("процедур", "услуг", "сеанс", "маникюр", "стриж"))
+        and master_person_keywords
+        and master_action_keywords
+        and master_service_keywords
+        and any(token in normalized for token in master_person_keywords)
+        and any(token in normalized for token in master_action_keywords)
+        and any(token in normalized for token in master_service_keywords)
     ):
         master_signal = True
     if not master_signal and message_text and client_slug:
@@ -301,7 +306,11 @@ def _detect_info_class_intents(
         intents.add(question_type.kind)
         meta["question_type"] = question_type.kind
         meta["question_type_score"] = question_type.score
-    work_schedule_phrase = any(stem in normalized for stem in ("работ", "рабоч")) and not service_duration_context
+    work_schedule_phrase = bool(
+        hours_stems
+        and any(stem in normalized for stem in hours_stems)
+        and not service_duration_context
+    )
     if work_schedule_phrase and "duration" in intents:
         intents.discard("duration")
         intents.add("hours")

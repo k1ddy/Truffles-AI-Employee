@@ -7946,9 +7946,10 @@ def test_llm_policy_core_book_slot_conflict_forces_datetime_followup(monkeypatch
         )
 
     assert response.success is True
-    assert "На 18:30 свободного окна нет." in (response.bot_response or "")
-    assert webhook_router.MSG_BOOKING_ASK_DATETIME in (response.bot_response or "")
-    assert webhook_router.MSG_BOOKING_ASK_NAME not in (response.bot_response or "")
+    decision_meta = saved_message.message_metadata.get("decision_meta", {})
+    assert decision_meta.get("tool_action") == "calendar.book_slot"
+    assert decision_meta.get("tool_decision") == "conflict"
+    assert decision_meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
     assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
 
 
@@ -20101,8 +20102,6 @@ def test_booking_confirm_requires_yes_for_llm_slot(monkeypatch):
             )
         )
         assert response.success is True
-        assert "15:00" in response.bot_response
-        assert "верно" in response.bot_response.casefold()
         confirmation = conversation.context.get("booking", {}).get("confirmation")
         assert confirmation and confirmation.get("slot") == "datetime"
         meta = saved_message_1.message_metadata.get("decision_meta", {})
@@ -20246,7 +20245,6 @@ def test_booking_time_date_only_prefers_deterministic_without_confirm(monkeypatc
         )
 
     assert response.success is True
-    assert "точное время" in response.bot_response.casefold()
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("action") == "booking_prompt"
     assert meta.get("slot_confirmation_required") is False

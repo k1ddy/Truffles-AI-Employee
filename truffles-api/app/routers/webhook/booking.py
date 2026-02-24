@@ -20,6 +20,7 @@ from sqlalchemy import func
 from app.schemas.webhook import WebhookResponse
 from app.services.appointment_service import SchedulingService
 from app.services.capabilities_runtime import get_runtime_capabilities
+from app.services.pack_runtime_service import get_system_lexicon_list
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -1127,9 +1128,17 @@ def _should_collect_booking_details(message_text: str | None) -> bool:
     normalized = legacy.normalize_for_matching(message_text)
     if not normalized:
         return False
-    if "без запис" in normalized or "сроч" in normalized:
+    detail_markers = get_system_lexicon_list("booking_collect_detail_markers")
+    if detail_markers and any(marker in normalized for marker in detail_markers):
         return True
-    if "через" in normalized and ("час" in normalized or "мин" in normalized):
+    relative_markers = get_system_lexicon_list("booking_collect_detail_relative_markers")
+    duration_units = get_system_lexicon_list("booking_collect_detail_duration_units")
+    if (
+        relative_markers
+        and duration_units
+        and any(marker in normalized for marker in relative_markers)
+        and any(unit in normalized for unit in duration_units)
+    ):
         return True
     return False
 
