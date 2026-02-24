@@ -39,6 +39,7 @@
 - `2026-02-24`: Wave 4 continuation (part 9) — added fallback-triggered projection self-healing prewarm (`TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_*`): when request path falls back to compute and not all clients are persisted synchronously, company scopes are enqueued to durable incremental prewarm dispatch with per-company throttle, reducing repeated fallback on sustained large-scope reads.
 - `2026-02-24`: Wave 4 continuation (part 10) — added overflow-aware global prewarm fallback: when global prewarm scope overflows max active clients (or exceeds async scope cap), system no longer drops prewarm entirely and now enqueues throttled company-scope durable prewarm derived from overflow client slice (`_maybe_enqueue_projection_fallback_prewarm_for_client_ids`), reducing large-scope cold windows.
 - `2026-02-24`: Wave 4 continuation (part 11) — projection maintenance compaction now self-heals affected scopes: after stale row delete, compaction enqueues throttled company-scope durable prewarm for deleted rows' `company_id`s, reducing fallback spikes caused by stale cleanup windows.
+- `2026-02-24`: Wave 4 perf-lane contract continuation — `ops/console_tenants_perf_long_run.py` now auto-resolves `company_id/client_id` from `/admin/tenants/portfolio` when explicit scope is absent, removing synthetic `company-cockpit=422` runs and restoring valid runtime gate evidence (`docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-auto-scope-20260224.json`, `status=pass`).
 
 ## Canon refs
 - `AGENTS.md`
@@ -126,6 +127,7 @@ Evidence:
 - Perf gate расширен в `ops/console_tenants_perf_snapshot.py`: теперь контролируются не только latency/sample-size, но и projection gates (min coverage, max fallback, max freshness lag), с прокидкой в long-run lane (`ops/console_tenants_perf_long_run.py`).
 - Perf snapshot gate усилен minimum sample-size контрактом (`portfolio >= 20`, `company_cockpit >= 20`, `branches >= 50/80` по run параметрам): low-sample snapshots больше не считаются валидными для SLO вывода.
 - Добавлен reproducible long-run authenticated lane `ops/console_tenants_perf_long_run.py` (load profile + snapshot gate) с runtime evidence `tenants-perf-long-run-20260224.json` (`status=pass`, samples `portfolio=112`, `company_cockpit=111`, `branches=144`).
+- Long-run lane hardened against scope-contract drift: when no explicit `TENANTS_PERF_COMPANY_ID/client_id` is provided, runner derives first valid scope from portfolio payload (`clients.items[*].company_id/id`) and reuses it for `company-cockpit` + `branches`; evidence: `docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-auto-scope-20260224.json` (`status=pass`, `request_failures=0`, `company_cockpit: 200 x80`).
 Impact:
 - request-time нагрузка снижена за счёт cache-hit path.
 - stale-window после admin мутаций снижен (invalidate сразу после write path), при этом нагрузка на другие company scopes снижена за счёт scope-aware delete.
