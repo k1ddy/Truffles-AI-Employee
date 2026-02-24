@@ -6,8 +6,12 @@
 - branch: feat/2026-02-21-tenants-v3-ux-contract-a250
 - worktree: /home/zhan/worktrees/2026-02-21-tenants-v3-ux-contract-a250
 - base_ref: origin/main
+- zero_context_gate: off
 - scope: Контракт состояния Tenants + Wave3 snapshot hardening + частичное переключение Tenants на server contract (`portfolio/cockpit`)
 - done:
+  - Wave4 continuation (part 12): projection fallback prewarm selection now rotates across overflow company scopes via `_select_projection_fallback_prewarm_company_ids` (instead of fixed first-N), preventing starvation under sustained large-scope reads.
+  - Added contract tests for rotation behavior in `truffles-api/tests/test_console_tenants_list.py`: pure selector rotation and wrapper-level rotating prewarm batches.
+  - Runtime perf lane rechecked after rotation: `docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-rotation-20260224.json` and snapshot companion show `status=pass`, `loops=120`, `request_failures=0`, projection `coverage=1.0`, `fallback=0.0`.
   - Wave4 perf-lane contract continuation: `ops/console_tenants_perf_long_run.py` now auto-resolves `company_id/client_id` from portfolio payload when explicit scope is absent, eliminating synthetic `company-cockpit=422` failures in long-run lane.
   - Added unit coverage `truffles-api/tests/test_console_tenants_perf_long_run.py` for scope extraction behavior and non-dict/no-scope payload guards (`pytest ... -> 3 passed`).
   - Captured runtime evidence after fix: `docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-auto-scope-20260224.json` and `docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-snapshot-after-auto-scope-20260224.json` (`status=pass`, `request_failures=0`, `company_cockpit=200 x80`, projection gates pass).

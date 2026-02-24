@@ -40,6 +40,7 @@
 - `2026-02-24`: Wave 4 continuation (part 10) — added overflow-aware global prewarm fallback: when global prewarm scope overflows max active clients (or exceeds async scope cap), system no longer drops prewarm entirely and now enqueues throttled company-scope durable prewarm derived from overflow client slice (`_maybe_enqueue_projection_fallback_prewarm_for_client_ids`), reducing large-scope cold windows.
 - `2026-02-24`: Wave 4 continuation (part 11) — projection maintenance compaction now self-heals affected scopes: after stale row delete, compaction enqueues throttled company-scope durable prewarm for deleted rows' `company_id`s, reducing fallback spikes caused by stale cleanup windows.
 - `2026-02-24`: Wave 4 perf-lane contract continuation — `ops/console_tenants_perf_long_run.py` now auto-resolves `company_id/client_id` from `/admin/tenants/portfolio` when explicit scope is absent, removing synthetic `company-cockpit=422` runs and restoring valid runtime gate evidence (`docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-auto-scope-20260224.json`, `status=pass`).
+- `2026-02-24`: Wave 4 continuation (part 12) — fallback prewarm company-scope selection now rotates across overflow scopes (instead of always taking the first `N` companies), preventing starvation under sustained large-scope reads; runtime lane rechecked with authenticated 120-loop run (`docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-rotation-20260224.json`, `status=pass`).
 
 ## Canon refs
 - `AGENTS.md`
@@ -128,6 +129,7 @@ Evidence:
 - Perf snapshot gate усилен minimum sample-size контрактом (`portfolio >= 20`, `company_cockpit >= 20`, `branches >= 50/80` по run параметрам): low-sample snapshots больше не считаются валидными для SLO вывода.
 - Добавлен reproducible long-run authenticated lane `ops/console_tenants_perf_long_run.py` (load profile + snapshot gate) с runtime evidence `tenants-perf-long-run-20260224.json` (`status=pass`, samples `portfolio=112`, `company_cockpit=111`, `branches=144`).
 - Long-run lane hardened against scope-contract drift: when no explicit `TENANTS_PERF_COMPANY_ID/client_id` is provided, runner derives first valid scope from portfolio payload (`clients.items[*].company_id/id`) and reuses it for `company-cockpit` + `branches`; evidence: `docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-auto-scope-20260224.json` (`status=pass`, `request_failures=0`, `company_cockpit: 200 x80`).
+- Overflow fallback prewarm selection now uses rotation over unique company scopes (`_select_projection_fallback_prewarm_company_ids`) so repeated large-scope reads do not starve tail companies; evidence: `docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-rotation-20260224.json` (`status=pass`, `loops=120`, `request_failures=0`, projection `fallback_ratio=0.0`).
 Impact:
 - request-time нагрузка снижена за счёт cache-hit path.
 - stale-window после admin мутаций снижен (invalidate сразу после write path), при этом нагрузка на другие company scopes снижена за счёт scope-aware delete.

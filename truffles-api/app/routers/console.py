@@ -2365,6 +2365,8 @@ _TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_LOCK = Lock()
 _TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_NEXT_ALLOWED_AT = 0.0
 _TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_LOCK = Lock()
 _TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_NEXT_ALLOWED_BY_COMPANY: dict[UUID, float] = {}
+_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_SELECTION_LOCK = Lock()
+_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_SELECTION_OFFSET = 0
 
 
 @dataclass
@@ -5906,6 +5908,40 @@ def _maybe_run_fleet_projection_maintenance(*, now_mono: Optional[float] = None)
     _compact_stale_materialized_fleet_projection_rows()
 
 
+def _select_projection_fallback_prewarm_company_ids(
+    *,
+    company_ids: list[UUID],
+    max_company_scopes: int,
+    rotation_offset: int = 0,
+) -> tuple[list[UUID], int]:
+    if max_company_scopes <= 0:
+        return [], rotation_offset
+    if not company_ids:
+        return [], rotation_offset
+
+    ordered_unique_company_ids: list[UUID] = []
+    seen_company_ids: set[UUID] = set()
+    for company_id in company_ids:
+        if company_id in seen_company_ids:
+            continue
+        seen_company_ids.add(company_id)
+        ordered_unique_company_ids.append(company_id)
+
+    total_company_scopes = len(ordered_unique_company_ids)
+    if total_company_scopes <= max_company_scopes:
+        return ordered_unique_company_ids, rotation_offset
+
+    start_index = rotation_offset % total_company_scopes
+    selected_company_ids: list[UUID] = []
+    current_index = start_index
+    for _ in range(max_company_scopes):
+        selected_company_ids.append(ordered_unique_company_ids[current_index])
+        current_index = (current_index + 1) % total_company_scopes
+
+    next_offset = (start_index + max_company_scopes) % total_company_scopes
+    return selected_company_ids, next_offset
+
+
 def _throttle_projection_fallback_prewarm_company_ids(
     *,
     company_ids: list[UUID],
@@ -5954,18 +5990,17 @@ def _maybe_enqueue_projection_fallback_prewarm_for_company_ids(
     if not company_ids:
         return
 
-    ordered_unique_company_ids: list[UUID] = []
-    seen_company_ids: set[UUID] = set()
-    for company_id in company_ids:
-        if company_id in seen_company_ids:
-            continue
-        seen_company_ids.add(company_id)
-        ordered_unique_company_ids.append(company_id)
-        if len(ordered_unique_company_ids) >= _TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MAX_COMPANY_SCOPES:
-            break
+    global _TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_SELECTION_OFFSET
+    with _TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_SELECTION_LOCK:
+        selected_company_ids, next_offset = _select_projection_fallback_prewarm_company_ids(
+            company_ids=company_ids,
+            max_company_scopes=_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MAX_COMPANY_SCOPES,
+            rotation_offset=_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_SELECTION_OFFSET,
+        )
+        _TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_SELECTION_OFFSET = next_offset
 
     throttled_company_ids = _throttle_projection_fallback_prewarm_company_ids(
-        company_ids=ordered_unique_company_ids,
+        company_ids=selected_company_ids,
     )
     if not throttled_company_ids:
         return

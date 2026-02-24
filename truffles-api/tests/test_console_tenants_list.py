@@ -713,6 +713,77 @@ def test_throttle_projection_fallback_prewarm_company_ids_respects_interval(monk
     assert third == {company_id}
 
 
+def test_select_projection_fallback_prewarm_company_ids_rotates_overflow_scope() -> None:
+    company_a = uuid4()
+    company_b = uuid4()
+    company_c = uuid4()
+    company_d = uuid4()
+    company_e = uuid4()
+
+    first_batch, first_offset = console_router._select_projection_fallback_prewarm_company_ids(
+        company_ids=[company_a, company_b, company_c, company_d, company_e],
+        max_company_scopes=2,
+        rotation_offset=0,
+    )
+    second_batch, second_offset = console_router._select_projection_fallback_prewarm_company_ids(
+        company_ids=[company_a, company_b, company_c, company_d, company_e],
+        max_company_scopes=2,
+        rotation_offset=first_offset,
+    )
+    third_batch, third_offset = console_router._select_projection_fallback_prewarm_company_ids(
+        company_ids=[company_a, company_b, company_c, company_d, company_e],
+        max_company_scopes=2,
+        rotation_offset=second_offset,
+    )
+
+    assert first_batch == [company_a, company_b]
+    assert second_batch == [company_c, company_d]
+    assert third_batch == [company_e, company_a]
+    assert first_offset == 2
+    assert second_offset == 4
+    assert third_offset == 1
+
+
+def test_maybe_enqueue_projection_fallback_prewarm_for_company_ids_rotates_batches(monkeypatch) -> None:
+    company_a = uuid4()
+    company_b = uuid4()
+    company_c = uuid4()
+    company_d = uuid4()
+    throttled_batches: list[list[UUID]] = []
+    enqueue_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_ENABLED", True)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_ENABLED", True)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MAX_COMPANY_SCOPES", 2)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_SELECTION_OFFSET", 0)
+
+    def _record_throttle(**kwargs):
+        company_ids = list(kwargs["company_ids"])
+        throttled_batches.append(company_ids)
+        return set(company_ids)
+
+    monkeypatch.setattr(
+        console_router,
+        "_throttle_projection_fallback_prewarm_company_ids",
+        _record_throttle,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueue_calls.append(kwargs),
+    )
+
+    company_scope = [company_a, company_b, company_c, company_d]
+    console_router._maybe_enqueue_projection_fallback_prewarm_for_company_ids(company_ids=company_scope)
+    console_router._maybe_enqueue_projection_fallback_prewarm_for_company_ids(company_ids=company_scope)
+
+    assert throttled_batches == [[company_a, company_b], [company_c, company_d]]
+    assert enqueue_calls == [
+        {"company_ids": {company_a, company_b}, "global_prewarm_required": False},
+        {"company_ids": {company_c, company_d}, "global_prewarm_required": False},
+    ]
+
+
 def test_maybe_enqueue_projection_fallback_prewarm_for_client_ids_enqueues_company_scopes(monkeypatch) -> None:
     first_client_id = uuid4()
     second_client_id = uuid4()
