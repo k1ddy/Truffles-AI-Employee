@@ -359,6 +359,12 @@ def test_drain_fleet_incremental_prewarm_dispatch_queue_once_schedules_coalesced
     attention_calls: list[set[UUID]] = []
     global_calls: list[bool] = []
 
+    monkeypatch.setattr(
+        console_router,
+        "_claim_fleet_incremental_prewarm_dispatch_batch",
+        lambda: [],
+    )
+
     with console_router._TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
         console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
         console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(
@@ -409,6 +415,11 @@ def test_enqueue_fleet_incremental_prewarm_dispatch_overflow_collapses_to_global
         console_router._TENANTS_FLEET_PREWARM_DISPATCH_WORKER = None
 
     monkeypatch.setattr(console_router, "_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX", 1)
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch_durable",
+        lambda **_kwargs: False,
+    )
     monkeypatch.setattr(console_router, "_ensure_fleet_incremental_prewarm_dispatch_worker", lambda: None)
 
     console_router._enqueue_fleet_incremental_prewarm_dispatch(
@@ -427,6 +438,114 @@ def test_enqueue_fleet_incremental_prewarm_dispatch_overflow_collapses_to_global
         assert payload["company_ids"] == [str(second_company_id)]
         console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
         console_router._TENANTS_FLEET_PREWARM_DISPATCH_WORKER = None
+
+
+def test_enqueue_fleet_incremental_prewarm_dispatch_durable_persists_job(monkeypatch) -> None:
+    company_id = uuid4()
+    db = Mock()
+    count_query = Mock()
+    count_query.filter.return_value = count_query
+    count_query.scalar.return_value = 0
+    db.query.return_value = count_query
+    captured_jobs: list[object] = []
+    db.add.side_effect = lambda job: captured_jobs.append(job)
+
+    monkeypatch.setattr(console_router, "SessionLocal", lambda: db)
+
+    persisted = console_router._enqueue_fleet_incremental_prewarm_dispatch_durable(
+        company_ids={company_id},
+        global_prewarm_required=False,
+    )
+
+    assert persisted is True
+    assert len(captured_jobs) == 1
+    job = captured_jobs[0]
+    assert job.company_ids == [str(company_id)]
+    assert job.global_required is False
+    db.commit.assert_called_once()
+    db.close.assert_called_once()
+
+
+def test_claim_fleet_incremental_prewarm_dispatch_batch_marks_rows_processing(monkeypatch) -> None:
+    company_id = uuid4()
+    job_id = uuid4()
+    row = SimpleNamespace(
+        id=job_id,
+        company_ids=[str(company_id)],
+        global_required=True,
+        status=console_router._TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING,
+        locked_at=None,
+        updated_at=None,
+        attempt_count=0,
+    )
+    stale_query = Mock()
+    stale_query.filter.return_value = stale_query
+    pending_query = Mock()
+    pending_query.filter.return_value = pending_query
+    pending_query.order_by.return_value = pending_query
+    pending_query.with_for_update.return_value = pending_query
+    pending_query.limit.return_value = pending_query
+    pending_query.all.return_value = [row]
+    db = Mock()
+    db.query.side_effect = [stale_query, pending_query]
+
+    monkeypatch.setattr(console_router, "SessionLocal", lambda: db)
+
+    batch = console_router._claim_fleet_incremental_prewarm_dispatch_batch()
+
+    assert batch == [
+        {
+            "job_id": str(job_id),
+            "company_ids": [str(company_id)],
+            "global_required": True,
+        }
+    ]
+    assert row.status == console_router._TENANTS_FLEET_PREWARM_JOB_STATUS_PROCESSING
+    assert row.attempt_count == 1
+    db.commit.assert_called()
+    db.close.assert_called_once()
+
+
+def test_drain_fleet_incremental_prewarm_dispatch_queue_once_marks_retry_on_scheduler_error(monkeypatch) -> None:
+    company_id = uuid4()
+    job_id = uuid4()
+    retry_calls: list[tuple[set[UUID], str]] = []
+    completed_calls: list[set[UUID]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_claim_fleet_incremental_prewarm_dispatch_batch",
+        lambda: [
+            {
+                "job_id": str(job_id),
+                "company_ids": [str(company_id)],
+                "global_required": False,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_summary_prewarm_for_company_ids",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_mark_fleet_incremental_prewarm_dispatch_jobs_completed",
+        lambda job_ids: completed_calls.append(job_ids),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_mark_fleet_incremental_prewarm_dispatch_jobs_retry",
+        lambda job_ids, error_message: retry_calls.append((job_ids, error_message)),
+    )
+
+    drained = console_router._drain_fleet_incremental_prewarm_dispatch_queue_once()
+
+    assert drained is True
+    assert completed_calls == []
+    assert retry_calls
+    assert retry_calls[0][0] == {job_id}
+    assert "boom" in retry_calls[0][1]
 
 
 def test_schedule_fleet_summary_prewarm_for_company_ids_starts_refresh_task(monkeypatch) -> None:

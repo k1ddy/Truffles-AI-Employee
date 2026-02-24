@@ -100,6 +100,7 @@
 | `truffles-api/app/models/marketing_consent.py` | Marketing consent state (`opt_in/opt_out`) | Backend |
 | `truffles-api/app/models/marketing_suppression.py` | Manual/automatic suppression registry | Backend |
 | `truffles-api/app/models/outbox_status_event.py` | DB model for outbox status events (analytics) | Backend |
+| `truffles-api/app/models/tenants_fleet_prewarm_job.py` | Durable prewarm dispatch queue model for tenants fleet cache rebuild | Backend |
 | `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
 | `truffles-api/app/provider_gateway_app.py` | Отдельный app для Provider Gateway | Backend |
 | `truffles-api/app/inbox_service_app.py` | Отдельный app для Inbox Service | Backend |
@@ -117,6 +118,7 @@
 | `truffles-api/migrations/021_add_outbox_status_events.sql` | Migration: outbox_status_events (status history) | Backend/OPS |
 | `truffles-api/migrations/022_add_alert_events.sql` | Migration: alert_events (no_response, etc.) | Backend/OPS |
 | `truffles-api/migrations/034_marketing_pro_v1.sql` | Migration: Marketing Pro v1 schema (campaign state + audience/suppression/delivery events) | Backend/OPS |
+| `truffles-api/migrations/041_add_tenants_fleet_prewarm_jobs.sql` | Migration: durable tenants fleet prewarm dispatch queue | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/src/app/insights/page.tsx` | Insights/Analytics page (read-only daily metrics) | Frontend |
@@ -128,6 +130,7 @@
 | `console-web/src/app/tenants/use-tenants-scope-derived-state.ts` | Derived scope/state hook для `/tenants` (context names/maps/filter options) | Frontend |
 | `console-web/src/app/tenants/tenants-page-helpers.ts` | Shared helpers/types/formatters for Tenants page (lifecycle audit, branch patch/snapshot, scope/date labels) | Frontend |
 | `console-web/src/app/tenants/use-tenants-action-queue.ts` | Hook для action-queue orchestration и archive predicate в `/tenants` | Frontend |
+| `console-web/src/app/tenants/use-tenants-operational-model.ts` | Hook для вычисления Tenants operational KPI/drilldown/alert/report модели | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
 | `console-web/e2e/tenants-a11y.spec.ts` | Live Playwright + Axe evidence для Tenants (desktop/mobile) | Frontend/QA |
 | `console-web/eslint.config.js` | ESLint flat config для console-web | Frontend |
@@ -142,6 +145,7 @@
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
 | `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` | Booking confirm verification runbook | QA/OPS/Brain |
+| `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |
 | `docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md` | Weekly control-loop runbook для Platform Admin (snapshot -> backlog -> checks) | Brain/Architect |
 | `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md` | Post-merge control-loop runbook для Owner/Admin (`T+0/T+24`) | Brain/Architect |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
