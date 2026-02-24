@@ -209,6 +209,74 @@ def test_maybe_run_fleet_projection_maintenance_respects_interval(monkeypatch) -
     assert len(calls) == 2
 
 
+def test_build_fleet_attention_response_requests_projection_persist(monkeypatch) -> None:
+    client_id = uuid4()
+    company_id = uuid4()
+    now = datetime.now(timezone.utc)
+    active_client = SimpleNamespace(
+        id=client_id,
+        name="alpha",
+        company_id=company_id,
+    )
+    details = console_router._FleetClientDetails(
+        lifecycle_state="active",
+        payment_status="confirmed",
+        commercial_state="payment_confirmed",
+        service_state="ok",
+        owner_name=None,
+        next_action="monitor_sla_and_quality",
+        total_branches=1,
+        active_branches=1,
+        degraded_branches=0,
+        go_live_ready_branches=1,
+    )
+    captured_load_calls: list[dict[str, object]] = []
+
+    def _load_details(*_args, **kwargs):
+        captured_load_calls.append(kwargs)
+        return {client_id: details}
+
+    empty_query = Mock()
+    empty_query.filter.return_value = empty_query
+    empty_query.all.return_value = []
+    db = Mock()
+    db.query.return_value = empty_query
+
+    monkeypatch.setattr(console_router, "_load_or_build_fleet_client_details_map", _load_details)
+    monkeypatch.setattr(
+        console_router,
+        "_load_latest_branch_inbound_observations_for_clients",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_query_outbox_failed_24h_map",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_query_pending_handovers_map",
+        lambda *_args, **_kwargs: {},
+    )
+
+    response = console_router._build_fleet_attention_response_for_clients(
+        db,
+        active_clients=[active_client],
+        companies_by_id={},
+        stale_after_minutes=120,
+        include_low_mode=True,
+        limit=20,
+        now=now,
+    )
+
+    assert response.summary.active_clients_total == 1
+    assert len(captured_load_calls) == 1
+    assert captured_load_calls[0]["persist_missing"] is True
+    assert captured_load_calls[0]["persist_missing_max_clients"] == (
+        console_router._TENANTS_FLEET_CLIENT_PROJECTION_REQUEST_PERSIST_MAX_CLIENTS
+    )
+
+
 def test_load_or_build_fleet_client_details_map_uses_materialized_when_complete(monkeypatch) -> None:
     client_id = uuid4()
     company_id = uuid4()
@@ -337,6 +405,319 @@ def test_load_or_build_fleet_client_details_map_rebuilds_missing_and_upserts(mon
             "max_freshness_lag_seconds": 75.0,
         }
     ]
+
+
+def test_load_or_build_fleet_client_details_map_respects_persist_limit(monkeypatch) -> None:
+    company_id = uuid4()
+    clients = [
+        SimpleNamespace(id=uuid4(), company_id=company_id),
+        SimpleNamespace(id=uuid4(), company_id=company_id),
+        SimpleNamespace(id=uuid4(), company_id=company_id),
+    ]
+    rebuilt_details = {
+        clients[0].id: console_router._FleetClientDetails(
+            lifecycle_state="active",
+            payment_status="confirmed",
+            commercial_state="payment_confirmed",
+            service_state="ok",
+            owner_name=None,
+            next_action="monitor_sla_and_quality",
+            total_branches=1,
+            active_branches=1,
+            degraded_branches=0,
+            go_live_ready_branches=1,
+        ),
+        clients[1].id: console_router._FleetClientDetails(
+            lifecycle_state="onboarding",
+            payment_status="pending",
+            commercial_state="payment_pending",
+            service_state="attention",
+            owner_name=None,
+            next_action="confirm_payment_and_approve_go_live",
+            total_branches=2,
+            active_branches=1,
+            degraded_branches=0,
+            go_live_ready_branches=1,
+        ),
+        clients[2].id: console_router._FleetClientDetails(
+            lifecycle_state="active",
+            payment_status="confirmed",
+            commercial_state="payment_confirmed",
+            service_state="degraded",
+            owner_name=None,
+            next_action="resolve_service_degradation",
+            total_branches=3,
+            active_branches=2,
+            degraded_branches=1,
+            go_live_ready_branches=2,
+        ),
+    }
+    upsert_calls: list[dict[str, object]] = []
+    observation_calls: list[dict[str, object]] = []
+    db = Mock()
+
+    monkeypatch.setattr(
+        console_router,
+        "_load_materialized_fleet_client_details_map",
+        lambda *_args, **_kwargs: ({}, None),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_client_details_map",
+        lambda *_args, **_kwargs: rebuilt_details,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_upsert_materialized_fleet_client_details",
+        lambda _db, **kwargs: upsert_calls.append(kwargs) or True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_fleet_projection_observation",
+        lambda **kwargs: observation_calls.append(kwargs),
+    )
+
+    result = console_router._load_or_build_fleet_client_details_map(
+        db,
+        clients=clients,
+        companies_by_id={company_id: SimpleNamespace(id=company_id)},
+        persist_missing=True,
+        persist_missing_max_clients=2,
+    )
+
+    assert result == rebuilt_details
+    assert len(upsert_calls) == 1
+    persisted_details = upsert_calls[0]["details_by_client_id"]
+    assert isinstance(persisted_details, dict)
+    assert list(persisted_details.keys()) == [clients[0].id, clients[1].id]
+    assert observation_calls == [
+        {
+            "total_clients": 3,
+            "materialized_clients": 0,
+            "fallback_clients": 3,
+            "max_freshness_lag_seconds": None,
+        }
+    ]
+
+
+def test_load_or_build_fleet_client_details_map_enqueues_projection_fallback_prewarm_for_unpersisted_clients(
+    monkeypatch,
+) -> None:
+    company_a = uuid4()
+    company_b = uuid4()
+    clients = [
+        SimpleNamespace(id=uuid4(), company_id=company_a),
+        SimpleNamespace(id=uuid4(), company_id=company_a),
+        SimpleNamespace(id=uuid4(), company_id=company_b),
+    ]
+    rebuilt_details = {
+        client.id: console_router._FleetClientDetails(
+            lifecycle_state="active",
+            payment_status="confirmed",
+            commercial_state="payment_confirmed",
+            service_state="ok",
+            owner_name=None,
+            next_action="monitor_sla_and_quality",
+            total_branches=1,
+            active_branches=1,
+            degraded_branches=0,
+            go_live_ready_branches=1,
+        )
+        for client in clients
+    }
+    enqueue_calls: list[dict[str, object]] = []
+    db = Mock()
+
+    monkeypatch.setattr(
+        console_router,
+        "_load_materialized_fleet_client_details_map",
+        lambda *_args, **_kwargs: ({}, None),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_client_details_map",
+        lambda *_args, **_kwargs: rebuilt_details,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_upsert_materialized_fleet_client_details",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueue_calls.append(kwargs),
+    )
+    monkeypatch.setattr(console_router, "record_tenants_fleet_projection_observation", lambda **_kwargs: None)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_ENABLED", True)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MAX_COMPANY_SCOPES", 10)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MIN_INTERVAL_SECONDS", 0)
+
+    result = console_router._load_or_build_fleet_client_details_map(
+        db,
+        clients=clients,
+        companies_by_id={
+            company_a: SimpleNamespace(id=company_a),
+            company_b: SimpleNamespace(id=company_b),
+        },
+        persist_missing=True,
+        persist_missing_max_clients=1,
+    )
+
+    assert result == rebuilt_details
+    assert len(enqueue_calls) == 1
+    assert enqueue_calls[0]["company_ids"] == {company_a, company_b}
+    assert enqueue_calls[0]["global_prewarm_required"] is False
+
+
+def test_load_or_build_fleet_client_details_map_skips_projection_fallback_prewarm_when_all_fallback_clients_persisted(
+    monkeypatch,
+) -> None:
+    company_id = uuid4()
+    clients = [
+        SimpleNamespace(id=uuid4(), company_id=company_id),
+        SimpleNamespace(id=uuid4(), company_id=company_id),
+    ]
+    rebuilt_details = {
+        client.id: console_router._FleetClientDetails(
+            lifecycle_state="active",
+            payment_status="confirmed",
+            commercial_state="payment_confirmed",
+            service_state="ok",
+            owner_name=None,
+            next_action="monitor_sla_and_quality",
+            total_branches=1,
+            active_branches=1,
+            degraded_branches=0,
+            go_live_ready_branches=1,
+        )
+        for client in clients
+    }
+    enqueue_calls: list[dict[str, object]] = []
+    db = Mock()
+
+    monkeypatch.setattr(
+        console_router,
+        "_load_materialized_fleet_client_details_map",
+        lambda *_args, **_kwargs: ({}, None),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_client_details_map",
+        lambda *_args, **_kwargs: rebuilt_details,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_upsert_materialized_fleet_client_details",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueue_calls.append(kwargs),
+    )
+    monkeypatch.setattr(console_router, "record_tenants_fleet_projection_observation", lambda **_kwargs: None)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_ENABLED", True)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MAX_COMPANY_SCOPES", 10)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MIN_INTERVAL_SECONDS", 0)
+
+    result = console_router._load_or_build_fleet_client_details_map(
+        db,
+        clients=clients,
+        companies_by_id={company_id: SimpleNamespace(id=company_id)},
+        persist_missing=True,
+        persist_missing_max_clients=10,
+    )
+
+    assert result == rebuilt_details
+    assert enqueue_calls == []
+
+
+def test_throttle_projection_fallback_prewarm_company_ids_respects_interval(monkeypatch) -> None:
+    company_id = uuid4()
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MIN_INTERVAL_SECONDS", 60)
+    monkeypatch.setattr(
+        console_router,
+        "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_NEXT_ALLOWED_BY_COMPANY",
+        {},
+    )
+
+    first = console_router._throttle_projection_fallback_prewarm_company_ids(
+        company_ids=[company_id],
+        now_mono=100.0,
+    )
+    second = console_router._throttle_projection_fallback_prewarm_company_ids(
+        company_ids=[company_id],
+        now_mono=120.0,
+    )
+    third = console_router._throttle_projection_fallback_prewarm_company_ids(
+        company_ids=[company_id],
+        now_mono=161.0,
+    )
+
+    assert first == {company_id}
+    assert second == set()
+    assert third == {company_id}
+
+
+def test_maybe_enqueue_projection_fallback_prewarm_for_client_ids_enqueues_company_scopes(monkeypatch) -> None:
+    first_client_id = uuid4()
+    second_client_id = uuid4()
+    company_a = uuid4()
+    company_b = uuid4()
+    enqueue_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_ENABLED", True)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_MAX_COMPANY_SCOPES", 10)
+    monkeypatch.setattr(
+        console_router,
+        "_load_company_ids_for_client_ids",
+        lambda **_kwargs: {company_a, company_b},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_throttle_projection_fallback_prewarm_company_ids",
+        lambda **_kwargs: {company_b},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueue_calls.append(kwargs),
+    )
+
+    console_router._maybe_enqueue_projection_fallback_prewarm_for_client_ids(
+        client_ids={first_client_id, second_client_id},
+    )
+
+    assert enqueue_calls == [
+        {
+            "company_ids": {company_b},
+            "global_prewarm_required": False,
+        }
+    ]
+
+
+def test_maybe_enqueue_projection_fallback_prewarm_for_client_ids_skips_without_company_map(monkeypatch) -> None:
+    client_id = uuid4()
+    enqueue_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_ENABLED", True)
+    monkeypatch.setattr(
+        console_router,
+        "_load_company_ids_for_client_ids",
+        lambda **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueue_calls.append(kwargs),
+    )
+
+    console_router._maybe_enqueue_projection_fallback_prewarm_for_client_ids(
+        client_ids={client_id},
+    )
+
+    assert enqueue_calls == []
 
 
 def test_select_reference_active_branches_filters_to_reference_subset() -> None:
@@ -897,7 +1278,10 @@ def test_schedule_fleet_global_prewarm_starts_summary_and_attention_tasks(monkey
     assert attention_payload["limit"] == console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT
 
 
-def test_schedule_fleet_global_prewarm_skips_when_overflow(monkeypatch) -> None:
+def test_schedule_fleet_global_prewarm_overflow_enqueues_projection_scope_prewarm(monkeypatch) -> None:
+    first_client_id = uuid4()
+    second_client_id = uuid4()
+    fallback_calls: list[set[UUID]] = []
     summary_tasks: list[dict[str, object]] = []
     attention_tasks: list[dict[str, object]] = []
 
@@ -909,7 +1293,12 @@ def test_schedule_fleet_global_prewarm_skips_when_overflow(monkeypatch) -> None:
     monkeypatch.setattr(
         console_router,
         "_load_global_active_client_ids",
-        lambda **_kwargs: (set(), True),
+        lambda **_kwargs: ({first_client_id, second_client_id}, True),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_maybe_enqueue_projection_fallback_prewarm_for_client_ids",
+        lambda **kwargs: fallback_calls.append(kwargs.get("client_ids") or set()),
     )
     monkeypatch.setattr(
         console_router,
@@ -924,8 +1313,33 @@ def test_schedule_fleet_global_prewarm_skips_when_overflow(monkeypatch) -> None:
 
     console_router._schedule_fleet_global_prewarm()
 
+    assert fallback_calls == [{first_client_id, second_client_id}]
     assert summary_tasks == []
     assert attention_tasks == []
+
+
+def test_schedule_fleet_global_prewarm_skips_when_overflow_without_clients(monkeypatch) -> None:
+    fallback_calls: list[set[UUID]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_reserve_fleet_global_prewarm_slot",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_load_global_active_client_ids",
+        lambda **_kwargs: (set(), True),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_maybe_enqueue_projection_fallback_prewarm_for_client_ids",
+        lambda **kwargs: fallback_calls.append(kwargs.get("client_ids") or set()),
+    )
+
+    console_router._schedule_fleet_global_prewarm()
+
+    assert fallback_calls == []
 
 
 @pytest.mark.asyncio
@@ -966,6 +1380,7 @@ async def test_list_clients_stores_summary_in_cache_after_miss(monkeypatch) -> N
     db = Mock()
     db.query.return_value = _build_list_query_mock()
     store_calls: list[dict[str, object]] = []
+    build_calls: list[dict[str, object]] = []
 
     monkeypatch.setattr(
         console_router,
@@ -977,7 +1392,11 @@ async def test_list_clients_stores_summary_in_cache_after_miss(monkeypatch) -> N
         ),
     )
     monkeypatch.setattr(console_router, "_load_cached_fleet_summary", lambda *_, **__: None)
-    monkeypatch.setattr(console_router, "_build_fleet_summary_for_scope", lambda *_, **__: computed_summary)
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_summary_for_scope",
+        lambda *_, **kwargs: build_calls.append(kwargs) or computed_summary,
+    )
     monkeypatch.setattr(
         console_router,
         "_store_cached_fleet_summary",
@@ -991,6 +1410,11 @@ async def test_list_clients_stores_summary_in_cache_after_miss(monkeypatch) -> N
     )
 
     assert response.summary == computed_summary
+    assert len(build_calls) == 1
+    assert build_calls[0]["persist_projection_missing"] is True
+    assert build_calls[0]["persist_projection_missing_max_clients"] == (
+        console_router._TENANTS_FLEET_CLIENT_PROJECTION_REQUEST_PERSIST_MAX_CLIENTS
+    )
     assert len(store_calls) == 1
     assert store_calls[0]["summary"] == computed_summary
 
@@ -1650,8 +2074,10 @@ async def test_list_clients_filters_by_fleet_payment(monkeypatch) -> None:
         "get_console_context",
         lambda *_args, **_kwargs: SimpleNamespace(role="platform_admin"),
     )
+    captured_load_calls: list[dict[str, object]] = []
 
     def _details_map(_db, *, clients, **_kwargs):
+        captured_load_calls.append(_kwargs)
         base_map = {
             client_a.id: console_router._FleetClientDetails(
                 lifecycle_state="active",
@@ -1691,6 +2117,11 @@ async def test_list_clients_filters_by_fleet_payment(monkeypatch) -> None:
     assert len(response.items) == 1
     assert response.items[0].id == client_a.id
     assert response.items[0].payment_status == "confirmed"
+    assert len(captured_load_calls) >= 1
+    assert captured_load_calls[0]["persist_missing"] is True
+    assert captured_load_calls[0]["persist_missing_max_clients"] == (
+        console_router._TENANTS_FLEET_CLIENT_PROJECTION_REQUEST_PERSIST_MAX_CLIENTS
+    )
 
 
 @pytest.mark.asyncio
