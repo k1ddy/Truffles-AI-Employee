@@ -2238,8 +2238,8 @@ def _handle_ai_response_action(
             direct_info_intent = None
             preferred_info_order = (
                 "hours",
-                "location",
                 "parking",
+                "location",
                 "contact",
                 "master",
                 "promotions",
@@ -2272,15 +2272,12 @@ def _handle_ai_response_action(
             if direct_info_intent == "promo":
                 direct_info_intent = "promotions"
             if direct_info_intent:
-                try:
-                    from app.services import demo_salon_knowledge as knowledge
+                from app.services.pack_runtime_service import format_reply_from_truth
 
-                    info_reply = knowledge.format_reply_from_truth(
-                        direct_info_intent,
-                        client_slug=client_slug,
-                    )
-                except Exception:
-                    info_reply = None
+                info_reply = format_reply_from_truth(
+                    direct_info_intent,
+                    client_slug=client_slug,
+                )
                 if isinstance(info_reply, str) and info_reply.strip():
                     bot_response = info_reply.strip()
                     legacy._reset_low_confidence_retry(conversation)
@@ -2672,7 +2669,10 @@ def _handle_ai_response_action(
                     load_yaml_truth,
                 )
 
-                reply = _format_service_not_found_reply(load_yaml_truth(client_slug))
+                reply = _format_service_not_found_reply(
+                    load_yaml_truth(client_slug),
+                    client_slug=client_slug,
+                )
                 if reply:
                     bot_response = reply
                     legacy._reset_low_confidence_retry(conversation)

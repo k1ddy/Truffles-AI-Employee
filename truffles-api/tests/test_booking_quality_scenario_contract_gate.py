@@ -46,16 +46,28 @@ def test_scenario_contract_accepts_booking_with_check_confirm_sequence():
     fn = _load_scenario_contract_helper()
     result = fn(
         dialogs=[
-            {
-                "turns": [
-                    {"text": "Хочу записаться", "tags": ["booking"]},
-                    {"text": "Проверьте мою запись", "tags": ["check_booking"]},
-                    {"text": "Да, подтверждаю", "tags": ["confirm"]},
-                ]
-            }
-        ],
-        scenario_coverage="booking,info,interrupt",
-    )
+                {
+                    "turns": [
+                        {
+                            "text": "Хочу записаться",
+                            "tags": ["booking"],
+                            "expect": {"reply_type": "time"},
+                        },
+                        {
+                            "text": "Проверьте мою запись",
+                            "tags": ["check_booking"],
+                            "expect": {"action": "reply"},
+                        },
+                        {
+                            "text": "Да, подтверждаю",
+                            "tags": ["confirm"],
+                            "expect": {"action": "reply"},
+                        },
+                    ]
+                }
+            ],
+            scenario_coverage="booking,info,interrupt",
+        )
 
     assert result["valid"] is True
     assert result["reasons"] == []

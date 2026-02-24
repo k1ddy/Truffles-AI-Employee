@@ -437,6 +437,44 @@ def test_tool_registry_get_booking_reports_time_mismatch():
     assert result.decision_meta["appointment_time"] == "09:00"
 
 
+def test_tool_registry_get_booking_time_mismatch_mentions_requested_relative_date():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        start_at=datetime(2026, 2, 14, 9, 0, tzinfo=timezone.utc),
+        specialist_id=None,
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service, "_get_booking", return_value=(appointment, None)
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.get_booking",
+            tool_args={"appointment_id": ""},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+            message_text="Проверьте, пожалуйста, мою запись на завтра на 15:30.",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "booking_time_mismatch"
+    assert "на завтра на 15:30" in (result.response_text or "")
+    assert "на 09:00" in (result.response_text or "")
+    assert "возможно на другую дату" in (result.response_text or "")
+    assert result.decision_meta["requested_time"] == "15:30"
+    assert result.decision_meta["requested_date"] == "завтра"
+
+
 def test_tool_registry_get_booking_not_found_acknowledges_photo_offer():
     db = Mock()
     branch = SimpleNamespace(
@@ -573,12 +611,14 @@ def test_tool_registry_book_slot_conflict_returns_requested_time_alternatives():
             client_slug="demo_salon",
             service_query="Маникюр",
             message_text="Я не могу в 15:00, можно на 16:00?",
+            expected_reply_type="name",
         )
 
     assert result.handled is True
     assert result.ok is False
     assert result.error_code == "slot_unavailable"
     assert "На 16:00 свободного окна нет." in (result.response_text or "")
+    assert result.expected_reply_type == "name"
 
 
 def test_tool_registry_reschedule_not_found_echoes_requested_time():
@@ -799,12 +839,14 @@ def test_tool_registry_list_slots_reports_requested_time_unavailable_explicitly(
             client_slug="demo_salon",
             service_query="Стрижка",
             message_text="Можно на 18:30?",
+            expected_reply_type="name",
         )
 
     assert result.handled is True
     assert result.ok is True
     assert "На 18:30 свободного окна нет." in (result.response_text or "")
     assert "Доступны: 17:45, 18:00, 19:00." in (result.response_text or "")
+    assert result.expected_reply_type == "name"
 
 
 def test_tool_registry_list_slots_reports_requested_time_available_explicitly():
@@ -847,12 +889,14 @@ def test_tool_registry_list_slots_reports_requested_time_available_explicitly():
             client_slug="demo_salon",
             service_query="Стрижка",
             message_text="Можно на 17:45?",
+            expected_reply_type="name",
         )
 
     assert result.handled is True
     assert result.ok is True
     assert "Да, на 17:45 есть свободное окно." in (result.response_text or "")
     assert "Свободные слоты:" in (result.response_text or "")
+    assert result.expected_reply_type == "name"
 
 
 def test_tool_registry_list_slots_evening_request_returns_evening_windows():

@@ -1,8 +1,10 @@
 """Admin API endpoints for managing bot configuration."""
 
 import os
+import subprocess
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -112,6 +114,56 @@ def _coerce_metric_value(value: object):
     if isinstance(value, Decimal):
         return float(value)
     return value
+
+
+def _clean_git_commit(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip().strip('"').strip("'")
+    if not cleaned:
+        return None
+    if cleaned.casefold() in {"unknown", "none", "null", "n/a", "na"}:
+        return None
+    return cleaned
+
+
+@lru_cache(maxsize=1)
+def _resolve_repo_git_commit() -> Optional[str]:
+    # The app can run from repo root worktrees and from /app inside containers.
+    candidates = (
+        Path(__file__).resolve().parents[3],
+        Path(__file__).resolve().parents[2],
+        Path.cwd(),
+    )
+    seen: set[str] = set()
+    for candidate in candidates:
+        root = str(candidate)
+        if root in seen:
+            continue
+        seen.add(root)
+        try:
+            result = subprocess.run(
+                ["git", "-C", root, "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                check=False,
+            )
+        except Exception:
+            continue
+        if result.returncode != 0:
+            continue
+        commit = _clean_git_commit(result.stdout)
+        if commit:
+            return commit
+    return None
+
+
+def _resolve_git_commit() -> Optional[str]:
+    env_commit = _clean_git_commit(os.environ.get("GIT_COMMIT"))
+    if env_commit:
+        return env_commit
+    return _resolve_repo_git_commit()
 
 
 # === PROMPT ENDPOINTS ===
@@ -731,6 +783,6 @@ async def get_version():
     """Return build metadata for diagnostics."""
     return VersionResponse(
         version=os.environ.get("APP_VERSION", "unknown"),
-        git_commit=os.environ.get("GIT_COMMIT"),
+        git_commit=_resolve_git_commit(),
         build_time=os.environ.get("BUILD_TIME"),
     )

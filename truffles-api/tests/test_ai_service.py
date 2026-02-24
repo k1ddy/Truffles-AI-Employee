@@ -599,7 +599,8 @@ class TestDetectMultiIntentTimeoutResilience:
         assert isinstance(result, dict)
         assert "hours" not in (result.get("intents") or [])
         assert "location" not in (result.get("intents") or [])
-        assert result.get("primary_intent") in {"other", "booking", "pricing", "duration"}
+        assert result.get("primary_intent") == "other"
+        assert result.get("intents") == ["other"]
 
 
 class TestOpenAIKeyResolution:
