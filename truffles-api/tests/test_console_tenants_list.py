@@ -152,6 +152,63 @@ def test_load_materialized_fleet_client_details_map_returns_max_freshness_lag() 
     assert freshness_lag >= 30.0
 
 
+def test_compact_stale_materialized_fleet_projection_rows_deletes_stale_ids(monkeypatch) -> None:
+    stale_one = uuid4()
+    stale_two = uuid4()
+    stale_rows_query = Mock()
+    stale_rows_query.filter.return_value = stale_rows_query
+    stale_rows_query.order_by.return_value = stale_rows_query
+    stale_rows_query.limit.return_value = stale_rows_query
+    stale_rows_query.all.return_value = [(stale_one,), (stale_two,)]
+    delete_query = Mock()
+    delete_query.filter.return_value = delete_query
+    delete_query.delete.return_value = 2
+    db = Mock()
+    query_calls = {"count": 0}
+
+    def _query_side_effect(_model):
+        query_calls["count"] += 1
+        if query_calls["count"] == 1:
+            return stale_rows_query
+        return delete_query
+
+    db.query.side_effect = _query_side_effect
+    compaction_events: list[dict[str, object]] = []
+
+    monkeypatch.setattr(console_router, "SessionLocal", lambda: db)
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_fleet_projection_compaction",
+        lambda **kwargs: compaction_events.append(kwargs),
+    )
+
+    deleted = console_router._compact_stale_materialized_fleet_projection_rows()
+
+    assert deleted == 2
+    assert db.commit.call_count == 1
+    assert db.close.call_count == 1
+    assert compaction_events == [{"outcome": "success", "deleted_rows": 2}]
+
+
+def test_maybe_run_fleet_projection_maintenance_respects_interval(monkeypatch) -> None:
+    calls: list[int] = []
+    monkeypatch.setattr(
+        console_router,
+        "_compact_stale_materialized_fleet_projection_rows",
+        lambda: calls.append(1) or 0,
+    )
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_ENABLED", True)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_ENABLED", True)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_INTERVAL_SECONDS", 60)
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_CLIENT_PROJECTION_MAINTENANCE_NEXT_ALLOWED_AT", 0.0)
+
+    console_router._maybe_run_fleet_projection_maintenance(now_mono=100.0)
+    console_router._maybe_run_fleet_projection_maintenance(now_mono=120.0)
+    console_router._maybe_run_fleet_projection_maintenance(now_mono=161.0)
+
+    assert len(calls) == 2
+
+
 def test_load_or_build_fleet_client_details_map_uses_materialized_when_complete(monkeypatch) -> None:
     client_id = uuid4()
     company_id = uuid4()

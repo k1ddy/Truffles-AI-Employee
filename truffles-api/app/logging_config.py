@@ -230,6 +230,24 @@ TENANTS_FLEET_PROJECTION_LAST_FRESHNESS_LAG_SECONDS = _get_or_create_metric(
     "Maximum projection row freshness lag (seconds) for the latest load pass.",
     (),
 )
+TENANTS_FLEET_PROJECTION_COMPACTION_RUNS_TOTAL = _get_or_create_metric(
+    Counter,
+    "console_tenants_fleet_projection_compaction_runs_total",
+    "Projection compaction runs by outcome.",
+    ("outcome",),
+)
+TENANTS_FLEET_PROJECTION_COMPACTION_ROWS_TOTAL = _get_or_create_metric(
+    Counter,
+    "console_tenants_fleet_projection_compaction_rows_total",
+    "Total projection rows deleted by compaction.",
+    (),
+)
+TENANTS_FLEET_PROJECTION_LAST_COMPACTION_DELETED_ROWS = _get_or_create_metric(
+    Gauge,
+    "console_tenants_fleet_projection_last_compaction_deleted_rows",
+    "Rows deleted in the latest projection compaction run.",
+    (),
+)
 
 
 def _normalize_client_slug(client_slug: str | None) -> str:
@@ -479,6 +497,22 @@ def record_tenants_fleet_projection_observation(
             TENANTS_FLEET_PROJECTION_CLIENTS_TOTAL.labels(source="fallback").inc(safe_fallback)
         if safe_unresolved > 0:
             TENANTS_FLEET_PROJECTION_CLIENTS_TOTAL.labels(source="unresolved").inc(safe_unresolved)
+
+
+def record_tenants_fleet_projection_compaction(
+    *,
+    outcome: str,
+    deleted_rows: int,
+) -> None:
+    """Record projection compaction outcome and deleted-row counts."""
+    normalized_outcome = (outcome or "unknown").strip().lower() or "unknown"
+    safe_deleted = max(int(deleted_rows), 0)
+    if TENANTS_FLEET_PROJECTION_COMPACTION_RUNS_TOTAL is not None:
+        TENANTS_FLEET_PROJECTION_COMPACTION_RUNS_TOTAL.labels(outcome=normalized_outcome).inc()
+    if TENANTS_FLEET_PROJECTION_LAST_COMPACTION_DELETED_ROWS is not None:
+        TENANTS_FLEET_PROJECTION_LAST_COMPACTION_DELETED_ROWS.set(safe_deleted)
+    if TENANTS_FLEET_PROJECTION_COMPACTION_ROWS_TOTAL is not None and safe_deleted > 0:
+        TENANTS_FLEET_PROJECTION_COMPACTION_ROWS_TOTAL.inc(safe_deleted)
 
 
 def http_in_progress_inc(method: str) -> None:
