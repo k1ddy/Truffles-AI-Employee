@@ -437,3 +437,21 @@
 
 4. Interpretation.
 - Decomposition is progressing without contract loss; operator control remains unchanged while architectural blast radius is reduced step-by-step.
+
+## Wave 3 decomposition continuation: quick-create handlers (2026-02-24, UTC)
+1. Implemented extraction from `tenants/page.tsx`.
+- `handleQuickCreateCompany`, `handleQuickCreateClient`, and `handleQuickCreateBranch` moved into `console-web/src/app/tenants/use-tenants-actions.ts`.
+- `console-web/src/app/tenants/page.tsx` now only consumes these handlers from hook output and keeps the same `TenantsQuickCreatePanel` contract (`onCreateCompany/onCreateClient/onCreateBranch`).
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `2422` to `2301` LOC.
+- Query/context/intent/quick-create orchestration is now centralized in hooks; remaining page-heavy pipelines are CRUD/lifecycle/branch-change.
+
+3. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`)
+- `scripts/session_check.sh` (pass)
+
+4. Interpretation.
+- Decomposition remains behavior-preserving: operator control surface is unchanged while orchestration blast radius continues to shrink.

@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback } from "react";
+import { type Dispatch, type SetStateAction, useCallback } from "react";
+import toast from "react-hot-toast";
+import { adminApi } from "@/lib/api-client";
 import {
     readConsoleContextScopeFromStorage,
     setConsoleContextScope,
@@ -43,6 +45,29 @@ type UseTenantsActionsParams = {
     setWorkspaceMode: (mode: TenantsWorkspaceMode) => void;
     setTenantLifecycle: (mode: TenantLifecycleMode) => void;
     navigateTo: (target: ClientTargetPath) => void;
+    quickCreateForm: QuickCreateFormState;
+    quickCreateCompanyId: string;
+    quickCreateClientId: string;
+    setQuickCreateForm: Dispatch<SetStateAction<QuickCreateFormState>>;
+    setQuickCreateRunning: Dispatch<SetStateAction<QuickCreateRunning>>;
+    refreshTenants: () => void;
+    reportProvisioningError: (error: unknown, operation: string, endpoint: string) => void;
+    slugInputPattern: RegExp;
+    branchPhoneInputPattern: RegExp;
+    isValidTimezoneName: (value: string) => boolean;
+};
+
+type QuickCreateRunning = "company" | "client" | "branch" | null;
+type QuickCreateFormState = {
+    companyName: string;
+    clientSlug: string;
+    branchName: string;
+    branchSlug: string;
+    branchTimezone: string;
+    branchPhone: string;
+    branchInstanceId: string;
+    companyId: string;
+    clientId: string;
 };
 
 function normalizeOptionalId(value: string | null | undefined): string | null {
@@ -62,6 +87,16 @@ export function useTenantsActions({
     setWorkspaceMode,
     setTenantLifecycle,
     navigateTo,
+    quickCreateForm,
+    quickCreateCompanyId,
+    quickCreateClientId,
+    setQuickCreateForm,
+    setQuickCreateRunning,
+    refreshTenants,
+    reportProvisioningError,
+    slugInputPattern,
+    branchPhoneInputPattern,
+    isValidTimezoneName,
 }: UseTenantsActionsParams) {
     const completeContextScope = useCallback((scope: ScopeValue) => {
         const normalizedBranchId = normalizeOptionalId(scope.branchId);
@@ -276,6 +311,174 @@ export function useTenantsActions({
         }, 120);
     }, [setTenantLifecycle, setWorkspaceMode]);
 
+    const handleQuickCreateCompany = useCallback(async () => {
+        const companyName = quickCreateForm.companyName.trim();
+        if (!companyName) {
+            reportValidationError("Укажите название компании");
+            return;
+        }
+        setQuickCreateRunning("company");
+        try {
+            const response = await adminApi.createCompany({ name: companyName });
+            const companyId = response.data.company?.id;
+            if (!companyId) {
+                reportValidationError("Компания создана, но company_id не вернулся");
+                return;
+            }
+            setQuickCreateForm((prev) => ({
+                ...prev,
+                companyId,
+                companyName,
+            }));
+            setCompanyContext(companyId);
+            refreshTenants();
+            toast.success("Компания создана");
+        } catch (error) {
+            reportProvisioningError(error, "создание компании", "POST /api/proxy/admin/companies");
+        } finally {
+            setQuickCreateRunning(null);
+        }
+    }, [
+        quickCreateForm.companyName,
+        refreshTenants,
+        reportProvisioningError,
+        reportValidationError,
+        setCompanyContext,
+        setQuickCreateForm,
+        setQuickCreateRunning,
+    ]);
+
+    const handleQuickCreateClient = useCallback(async () => {
+        const slug = quickCreateForm.clientSlug.trim().toLowerCase();
+        const companyId = quickCreateCompanyId;
+        if (!companyId) {
+            reportValidationError("Сначала выберите или создайте компанию");
+            return;
+        }
+        if (!slug) {
+            reportValidationError("Укажите slug клиента");
+            return;
+        }
+        if (!slugInputPattern.test(slug)) {
+            reportValidationError("slug: [a-z0-9_-], без пробелов");
+            return;
+        }
+        setQuickCreateRunning("client");
+        try {
+            const response = await adminApi.createClient({
+                slug,
+                company_id: companyId,
+                status: null,
+            });
+            const clientId = response.data.client?.id;
+            if (!clientId) {
+                reportValidationError("Клиент создан, но client_id не вернулся");
+                return;
+            }
+            setQuickCreateForm((prev) => ({
+                ...prev,
+                clientSlug: slug,
+                companyId,
+                clientId,
+            }));
+            setClientContextAndPageFilters(clientId, companyId);
+            refreshTenants();
+            toast.success("Клиент создан");
+        } catch (error) {
+            reportProvisioningError(error, "создание клиента", "POST /api/proxy/admin/clients");
+        } finally {
+            setQuickCreateRunning(null);
+        }
+    }, [
+        quickCreateCompanyId,
+        quickCreateForm.clientSlug,
+        refreshTenants,
+        reportProvisioningError,
+        reportValidationError,
+        setClientContextAndPageFilters,
+        setQuickCreateForm,
+        setQuickCreateRunning,
+        slugInputPattern,
+    ]);
+
+    const handleQuickCreateBranch = useCallback(async () => {
+        const clientId = quickCreateClientId;
+        const branchName = quickCreateForm.branchName.trim();
+        const branchSlug = quickCreateForm.branchSlug.trim().toLowerCase();
+        const timezone = quickCreateForm.branchTimezone.trim();
+        const phone = quickCreateForm.branchPhone.trim();
+        const instanceId = quickCreateForm.branchInstanceId.trim();
+        if (!clientId) {
+            reportValidationError("Сначала выберите или создайте клиента");
+            return;
+        }
+        if (!branchName || !branchSlug) {
+            reportValidationError("Укажите название и slug филиала");
+            return;
+        }
+        if (!slugInputPattern.test(branchSlug)) {
+            reportValidationError("branch slug: [a-z0-9_-], без пробелов");
+            return;
+        }
+        if (timezone && !isValidTimezoneName(timezone)) {
+            reportValidationError("timezone должен быть в формате IANA, например Asia/Almaty");
+            return;
+        }
+        if (phone && !branchPhoneInputPattern.test(phone)) {
+            reportValidationError("phone: 7-15 цифр (допускаются +, пробелы, скобки и -)");
+            return;
+        }
+        if (instanceId && !phone) {
+            reportValidationError("Для instance_id укажите phone филиала");
+            return;
+        }
+        setQuickCreateRunning("branch");
+        try {
+            const response = await adminApi.createBranch({
+                client_id: clientId,
+                name: branchName,
+                slug: branchSlug,
+                timezone: timezone || undefined,
+                phone: phone || undefined,
+                instance_id: instanceId || undefined,
+                is_active: Boolean(phone && instanceId),
+                bootstrap_accounts: [],
+            });
+            const branchId = response.data.branch?.id;
+            if (!branchId) {
+                reportValidationError("Филиал создан, но branch_id не вернулся");
+                return;
+            }
+            setBranchContextAndPageFilters({
+                branchId,
+                clientId,
+                companyId: quickCreateCompanyId,
+            });
+            refreshTenants();
+            toast.success("Филиал создан и выбран в контексте");
+        } catch (error) {
+            reportProvisioningError(error, "создание филиала", "POST /api/proxy/admin/branches");
+        } finally {
+            setQuickCreateRunning(null);
+        }
+    }, [
+        branchPhoneInputPattern,
+        isValidTimezoneName,
+        quickCreateClientId,
+        quickCreateCompanyId,
+        quickCreateForm.branchInstanceId,
+        quickCreateForm.branchName,
+        quickCreateForm.branchPhone,
+        quickCreateForm.branchSlug,
+        quickCreateForm.branchTimezone,
+        refreshTenants,
+        reportProvisioningError,
+        reportValidationError,
+        setBranchContextAndPageFilters,
+        setQuickCreateRunning,
+        slugInputPattern,
+    ]);
+
     return {
         setCompanyContext,
         setClientContext,
@@ -287,5 +490,8 @@ export function useTenantsActions({
         openClientContextTarget,
         runActionQueueIntent,
         runKpiAction,
+        handleQuickCreateCompany,
+        handleQuickCreateClient,
+        handleQuickCreateBranch,
     };
 }

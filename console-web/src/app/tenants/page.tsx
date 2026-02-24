@@ -1240,6 +1240,9 @@ export default function TenantsPage() {
         openClientContextTarget,
         runActionQueueIntent,
         runKpiAction,
+        handleQuickCreateCompany,
+        handleQuickCreateClient,
+        handleQuickCreateBranch,
     } = useTenantsActions({
         clientCompanyIdById,
         branchClientIdById,
@@ -1252,141 +1255,17 @@ export default function TenantsPage() {
         setWorkspaceMode,
         setTenantLifecycle,
         navigateTo: (target) => router.push(target),
+        quickCreateForm,
+        quickCreateCompanyId,
+        quickCreateClientId,
+        setQuickCreateForm,
+        setQuickCreateRunning,
+        refreshTenants,
+        reportProvisioningError,
+        slugInputPattern: SLUG_INPUT_PATTERN,
+        branchPhoneInputPattern: BRANCH_PHONE_INPUT_PATTERN,
+        isValidTimezoneName,
     });
-
-    const handleQuickCreateCompany = async () => {
-        const companyName = quickCreateForm.companyName.trim();
-        if (!companyName) {
-            reportValidationError("Укажите название компании");
-            return;
-        }
-        setQuickCreateRunning("company");
-        try {
-            const response = await adminApi.createCompany({ name: companyName });
-            const companyId = response.data.company?.id;
-            if (!companyId) {
-                reportValidationError("Компания создана, но company_id не вернулся");
-                return;
-            }
-            setQuickCreateForm((prev) => ({
-                ...prev,
-                companyId,
-                companyName,
-            }));
-            setCompanyContext(companyId);
-            refreshTenants();
-            toast.success("Компания создана");
-        } catch (error) {
-            reportProvisioningError(error, "создание компании", "POST /api/proxy/admin/companies");
-        } finally {
-            setQuickCreateRunning(null);
-        }
-    };
-
-    const handleQuickCreateClient = async () => {
-        const slug = quickCreateForm.clientSlug.trim().toLowerCase();
-        const companyId = quickCreateCompanyId;
-        if (!companyId) {
-            reportValidationError("Сначала выберите или создайте компанию");
-            return;
-        }
-        if (!slug) {
-            reportValidationError("Укажите slug клиента");
-            return;
-        }
-        if (!SLUG_INPUT_PATTERN.test(slug)) {
-            reportValidationError("slug: [a-z0-9_-], без пробелов");
-            return;
-        }
-        setQuickCreateRunning("client");
-        try {
-            const response = await adminApi.createClient({
-                slug,
-                company_id: companyId,
-                status: null,
-            });
-            const clientId = response.data.client?.id;
-            if (!clientId) {
-                reportValidationError("Клиент создан, но client_id не вернулся");
-                return;
-            }
-            setQuickCreateForm((prev) => ({
-                ...prev,
-                clientSlug: slug,
-                companyId,
-                clientId,
-            }));
-            setClientContextAndPageFilters(clientId, companyId);
-            refreshTenants();
-            toast.success("Клиент создан");
-        } catch (error) {
-            reportProvisioningError(error, "создание клиента", "POST /api/proxy/admin/clients");
-        } finally {
-            setQuickCreateRunning(null);
-        }
-    };
-
-    const handleQuickCreateBranch = async () => {
-        const clientId = quickCreateClientId;
-        const branchName = quickCreateForm.branchName.trim();
-        const branchSlug = quickCreateForm.branchSlug.trim().toLowerCase();
-        const timezone = quickCreateForm.branchTimezone.trim();
-        const phone = quickCreateForm.branchPhone.trim();
-        const instanceId = quickCreateForm.branchInstanceId.trim();
-        if (!clientId) {
-            reportValidationError("Сначала выберите или создайте клиента");
-            return;
-        }
-        if (!branchName || !branchSlug) {
-            reportValidationError("Укажите название и slug филиала");
-            return;
-        }
-        if (!SLUG_INPUT_PATTERN.test(branchSlug)) {
-            reportValidationError("branch slug: [a-z0-9_-], без пробелов");
-            return;
-        }
-        if (timezone && !isValidTimezoneName(timezone)) {
-            reportValidationError("timezone должен быть в формате IANA, например Asia/Almaty");
-            return;
-        }
-        if (phone && !BRANCH_PHONE_INPUT_PATTERN.test(phone)) {
-            reportValidationError("phone: 7-15 цифр (допускаются +, пробелы, скобки и -)");
-            return;
-        }
-        if (instanceId && !phone) {
-            reportValidationError("Для instance_id укажите phone филиала");
-            return;
-        }
-        setQuickCreateRunning("branch");
-        try {
-            const response = await adminApi.createBranch({
-                client_id: clientId,
-                name: branchName,
-                slug: branchSlug,
-                timezone: timezone || undefined,
-                phone: phone || undefined,
-                instance_id: instanceId || undefined,
-                is_active: Boolean(phone && instanceId),
-                bootstrap_accounts: [],
-            });
-            const branchId = response.data.branch?.id;
-            if (!branchId) {
-                reportValidationError("Филиал создан, но branch_id не вернулся");
-                return;
-            }
-            setBranchContextAndPageFilters({
-                branchId,
-                clientId,
-                companyId: quickCreateCompanyId,
-            });
-            refreshTenants();
-            toast.success("Филиал создан и выбран в контексте");
-        } catch (error) {
-            reportProvisioningError(error, "создание филиала", "POST /api/proxy/admin/branches");
-        } finally {
-            setQuickCreateRunning(null);
-        }
-    };
 
     const exportOperationalReport = (format: "json" | "csv") => {
         const timestamp = new Date().toISOString().replaceAll(":", "-");

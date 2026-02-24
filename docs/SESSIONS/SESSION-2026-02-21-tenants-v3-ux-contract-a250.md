@@ -131,6 +131,8 @@
   - `tenants/page.tsx` reduced from `2789` to `2487` LOC; data/query wiring moved to `console-web/src/app/tenants/use-tenants-data-queries.ts`, context synchronization moved to `console-web/src/app/tenants/use-tenants-actions.ts`.
   - Wave3 decomposition continuation part 2 delivered: moved `runActionQueueIntent`, `runKpiAction`, and client target navigation handlers from `tenants/page.tsx` into `useTenantsActions`.
   - `tenants/page.tsx` reduced further from `2487` to `2422` LOC while preserving current UI behavior and panel wiring.
+  - Wave3 decomposition continuation part 3 delivered: moved quick-create handlers (`handleQuickCreateCompany`, `handleQuickCreateClient`, `handleQuickCreateBranch`) from `tenants/page.tsx` into `useTenantsActions`.
+  - `tenants/page.tsx` reduced from `2422` to `2301` LOC while keeping `TenantsQuickCreatePanel` behavior and action contracts unchanged.
   - Updated canon docs for factual status and semantics: TP clarifies that `orchestration-only` is architectural isolation (not loss of control), and report captures the decomposition continuation with checks/evidence.
   - Validation for decomposition continuation: `corepack pnpm -C console-web run lint` (pass), `corepack pnpm -C console-web run build` (pass), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`), `scripts/session_check.sh`.
 - next:
@@ -214,4 +216,4 @@
   - truffles-api/tests/test_console_tenants_list.py
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-24T02:32:03Z
+- last_updated: 2026-02-24T02:39:27Z
