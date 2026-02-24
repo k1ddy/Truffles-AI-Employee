@@ -587,3 +587,60 @@
 6. Interpretation.
 - Wave 3 decomposition and Wave 4 event-driven scheduling moved forward with contract tests and no deterministic regressions.
 - Remaining Wave 4 backlog remains unchanged: durable incremental precompute worker strategy + long-run reproducible perf evidence for very large fleets.
+
+## Wave 3/4 continuation: action queue hook + dispatch queue + sample-size perf gate (2026-02-24, UTC)
+1. Implemented decomposition continuation for action queue orchestration.
+- Added `console-web/src/app/tenants/use-tenants-action-queue.ts`.
+- Moved out of `tenants/page.tsx`:
+  - archive predicate (`isClientArchived`)
+  - full action queue compute/prioritization (`lifecycle-mode tip`, `attention`, `handoff`, `publish`, `go-live`, `decommission`, `healthy`)
+- `tenants/page.tsx` now consumes `useTenantsActionQueue` output only.
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `1376` to `1268` LOC.
+- Page remains orchestration/composition for operator workflows; queue logic is now isolated and easier to regression-test.
+
+3. Implemented Wave 4 dispatch/coalescing continuation for incremental prewarm.
+- Added dispatch queue controls:
+  - `_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX`
+  - `_TENANTS_FLEET_PREWARM_DISPATCH_BATCH_MAX`
+- Added queue/worker flow:
+  - enqueue in `after_commit`
+  - coalesce batched `company_ids + global_prewarm_required`
+  - schedule summary/attention/global prewarm from coalesced batch
+- Added overflow safety: queue overflow collapses to global prewarm item.
+
+4. Strengthened runtime perf gate with sample-size validity.
+- Updated `ops/console_tenants_perf_snapshot.py` with minimum sample thresholds:
+  - `--portfolio-min-samples`
+  - `--company-cockpit-min-samples`
+  - `--branches-min-samples`
+- Snapshot now fails when sample-size validity is not met, even if raw p95 buckets look green.
+
+5. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py ops/console_tenants_perf_snapshot.py` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py -k "prewarm or invalidate_tenants_fleet_cache_scope or on_console_session_after_commit or on_console_session_after_rollback or dispatch"` (`13 passed`)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`90 passed`)
+- `python3 truffles-api/scripts/generate_openapi.py --check` (pass)
+
+6. Runtime evidence refresh (controlled authenticated load + sample-size gate).
+- Controlled load run executed for:
+  - `GET /console/v1/admin/tenants/portfolio`
+  - `GET /console/v1/admin/tenants/company-cockpit`
+  - `GET /console/v1/admin/branches`
+- Snapshot command:
+  - `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --portfolio-min-samples 20 --company-cockpit-min-samples 20 --branches-min-samples 80 --fail-on-breach --pretty --output /tmp/tenants_perf_snapshot_20260224_dispatch_queue_after_load.json`
+- Artifact:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-dispatch-load-20260224.json`
+- Snapshot status:
+  - `portfolio p95=500ms` (`samples=44`) pass
+  - `company_cockpit p95=500ms` (`samples=42`) pass
+  - `branches p95=100ms` (`samples=111`) pass
+  - `required_sample_size_failed=false`, overall `status=pass`.
+
+7. Interpretation.
+- Wave 3 decomposition progressed with no operator-flow regression.
+- Wave 4 moved from direct post-commit scheduling to batched dispatch strategy, reducing burst scheduling churn.
+- Remaining backlog is now narrower: persistent/durable queue semantics (cross-process durability) plus repeatable long-run perf regimen for very large fleets.

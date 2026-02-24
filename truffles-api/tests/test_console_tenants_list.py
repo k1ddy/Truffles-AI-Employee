@@ -259,10 +259,9 @@ def test_invalidate_tenants_fleet_cache_scope_records_incremental_event(monkeypa
     ]
 
 
-def test_on_console_session_after_commit_schedules_company_prewarm(monkeypatch) -> None:
+def test_on_console_session_after_commit_enqueues_company_prewarm(monkeypatch) -> None:
     company_id = uuid4()
-    captured_summary: list[set[UUID]] = []
-    captured_attention: list[set[UUID]] = []
+    enqueued: list[tuple[set[UUID], bool]] = []
     session = SimpleNamespace(
         info={
             console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY: {company_id},
@@ -271,27 +270,21 @@ def test_on_console_session_after_commit_schedules_company_prewarm(monkeypatch) 
 
     monkeypatch.setattr(
         console_router,
-        "_schedule_fleet_summary_prewarm_for_company_ids",
-        lambda **kwargs: captured_summary.append(kwargs.get("company_ids") or set()),
-    )
-    monkeypatch.setattr(
-        console_router,
-        "_schedule_fleet_attention_prewarm_for_company_ids",
-        lambda **kwargs: captured_attention.append(kwargs.get("company_ids") or set()),
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueued.append(
+            (kwargs.get("company_ids") or set(), bool(kwargs.get("global_prewarm_required")))
+        ),
     )
 
     console_router._on_console_session_after_commit(session)
 
-    assert captured_summary == [{company_id}]
-    assert captured_attention == [{company_id}]
+    assert enqueued == [({company_id}, False)]
     assert console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY not in session.info
 
 
-def test_on_console_session_after_commit_schedules_from_incremental_events(monkeypatch) -> None:
+def test_on_console_session_after_commit_enqueues_from_incremental_events(monkeypatch) -> None:
     company_id = uuid4()
-    captured_summary: list[set[UUID]] = []
-    captured_attention: list[set[UUID]] = []
-    global_calls: list[bool] = []
+    enqueued: list[tuple[set[UUID], bool]] = []
     session = SimpleNamespace(
         info={
             console_router._TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY: [
@@ -307,47 +300,39 @@ def test_on_console_session_after_commit_schedules_from_incremental_events(monke
 
     monkeypatch.setattr(
         console_router,
-        "_schedule_fleet_summary_prewarm_for_company_ids",
-        lambda **kwargs: captured_summary.append(kwargs.get("company_ids") or set()),
-    )
-    monkeypatch.setattr(
-        console_router,
-        "_schedule_fleet_attention_prewarm_for_company_ids",
-        lambda **kwargs: captured_attention.append(kwargs.get("company_ids") or set()),
-    )
-    monkeypatch.setattr(
-        console_router,
-        "_schedule_fleet_global_prewarm",
-        lambda: global_calls.append(True),
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueued.append(
+            (kwargs.get("company_ids") or set(), bool(kwargs.get("global_prewarm_required")))
+        ),
     )
 
     console_router._on_console_session_after_commit(session)
 
-    assert captured_summary == [{company_id}]
-    assert captured_attention == [{company_id}]
-    assert global_calls == [True]
+    assert enqueued == [({company_id}, True)]
     assert console_router._TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY not in session.info
     assert console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY not in session.info
     assert console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY not in session.info
 
 
-def test_on_console_session_after_commit_schedules_global_prewarm(monkeypatch) -> None:
+def test_on_console_session_after_commit_enqueues_global_prewarm(monkeypatch) -> None:
     session = SimpleNamespace(
         info={
             console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY: True,
         }
     )
-    calls: list[bool] = []
+    enqueued: list[tuple[set[UUID], bool]] = []
 
     monkeypatch.setattr(
         console_router,
-        "_schedule_fleet_global_prewarm",
-        lambda: calls.append(True),
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueued.append(
+            (kwargs.get("company_ids") or set(), bool(kwargs.get("global_prewarm_required")))
+        ),
     )
 
     console_router._on_console_session_after_commit(session)
 
-    assert calls == [True]
+    assert enqueued == [(set(), True)]
     assert console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY not in session.info
 
 
@@ -365,6 +350,83 @@ def test_on_console_session_after_rollback_clears_incremental_events() -> None:
     console_router._on_console_session_after_rollback(session)
 
     assert session.info == {}
+
+
+def test_drain_fleet_incremental_prewarm_dispatch_queue_once_schedules_coalesced_batch(monkeypatch) -> None:
+    first_company_id = uuid4()
+    second_company_id = uuid4()
+    summary_calls: list[set[UUID]] = []
+    attention_calls: list[set[UUID]] = []
+    global_calls: list[bool] = []
+
+    with console_router._TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(
+            {
+                "company_ids": [str(first_company_id)],
+                "global_required": False,
+            }
+        )
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(
+            {
+                "company_ids": [str(second_company_id)],
+                "global_required": True,
+            }
+        )
+
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_summary_prewarm_for_company_ids",
+        lambda **kwargs: summary_calls.append(kwargs.get("company_ids") or set()),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_attention_prewarm_for_company_ids",
+        lambda **kwargs: attention_calls.append(kwargs.get("company_ids") or set()),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_global_prewarm",
+        lambda: global_calls.append(True),
+    )
+
+    drained = console_router._drain_fleet_incremental_prewarm_dispatch_queue_once()
+
+    assert drained is True
+    assert summary_calls == [{first_company_id, second_company_id}]
+    assert attention_calls == [{first_company_id, second_company_id}]
+    assert global_calls == [True]
+    with console_router._TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        assert not console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE
+
+
+def test_enqueue_fleet_incremental_prewarm_dispatch_overflow_collapses_to_global(monkeypatch) -> None:
+    first_company_id = uuid4()
+    second_company_id = uuid4()
+
+    with console_router._TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_WORKER = None
+
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX", 1)
+    monkeypatch.setattr(console_router, "_ensure_fleet_incremental_prewarm_dispatch_worker", lambda: None)
+
+    console_router._enqueue_fleet_incremental_prewarm_dispatch(
+        company_ids={first_company_id},
+        global_prewarm_required=False,
+    )
+    console_router._enqueue_fleet_incremental_prewarm_dispatch(
+        company_ids={second_company_id},
+        global_prewarm_required=False,
+    )
+
+    with console_router._TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        assert len(console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE) == 1
+        payload = console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE[0]
+        assert payload["global_required"] is True
+        assert payload["company_ids"] == [str(second_company_id)]
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_WORKER = None
 
 
 def test_schedule_fleet_summary_prewarm_for_company_ids_starts_refresh_task(monkeypatch) -> None:

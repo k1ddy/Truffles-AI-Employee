@@ -39,6 +39,24 @@ def parse_args() -> argparse.Namespace:
         help="SLO threshold for company cockpit p95.",
     )
     parser.add_argument("--branches-p95-ms", type=float, default=800.0, help="SLO threshold for branches list p95.")
+    parser.add_argument(
+        "--portfolio-min-samples",
+        type=int,
+        default=20,
+        help="Minimum required sample count for portfolio histogram.",
+    )
+    parser.add_argument(
+        "--company-cockpit-min-samples",
+        type=int,
+        default=20,
+        help="Minimum required sample count for company_cockpit histogram.",
+    )
+    parser.add_argument(
+        "--branches-min-samples",
+        type=int,
+        default=50,
+        help="Minimum required sample count for branches GET histogram.",
+    )
     parser.add_argument("--branch-path", default=DEFAULT_BRANCH_PATH, help="Normalized HTTP path for branches latency.")
     parser.add_argument(
         "--fail-on-breach",
@@ -213,6 +231,41 @@ def _required_slo_failed(report: dict[str, Any]) -> bool:
     return False
 
 
+def _required_sample_size_failed(
+    report: dict[str, Any],
+    *,
+    portfolio_min_samples: int,
+    company_cockpit_min_samples: int,
+    branches_min_samples: int,
+) -> bool:
+    tenants = report.get("tenants_endpoint_latency") if isinstance(report, dict) else None
+    if not isinstance(tenants, dict):
+        return True
+
+    portfolio = tenants.get("portfolio")
+    company_cockpit = tenants.get("company_cockpit")
+    if not isinstance(portfolio, dict) or not isinstance(company_cockpit, dict):
+        return True
+
+    portfolio_samples = portfolio.get("samples")
+    company_cockpit_samples = company_cockpit.get("samples")
+    if not isinstance(portfolio_samples, int) or portfolio_samples < portfolio_min_samples:
+        return True
+    if not isinstance(company_cockpit_samples, int) or company_cockpit_samples < company_cockpit_min_samples:
+        return True
+
+    branches = report.get("branches_get_latency")
+    if not isinstance(branches, dict) or not branches:
+        return True
+    branch_metrics = next(iter(branches.values()))
+    if not isinstance(branch_metrics, dict):
+        return True
+    branch_samples = branch_metrics.get("samples")
+    if not isinstance(branch_samples, int) or branch_samples < branches_min_samples:
+        return True
+    return False
+
+
 def main() -> int:
     args = parse_args()
     metrics_text, error_text = fetch_metrics_text(args.metrics_url, timeout=args.timeout)
@@ -228,6 +281,11 @@ def main() -> int:
             "portfolio_p95": args.portfolio_p95_ms,
             "company_cockpit_p95": args.company_cockpit_p95_ms,
             "branches_get_p95": args.branches_p95_ms,
+        },
+        "sample_targets": {
+            "portfolio_min_samples": args.portfolio_min_samples,
+            "company_cockpit_min_samples": args.company_cockpit_min_samples,
+            "branches_min_samples": args.branches_min_samples,
         },
     }
 
@@ -266,12 +324,18 @@ def main() -> int:
         )
 
     report["required_slo_failed"] = _required_slo_failed(report)
-    report["status"] = "fail" if report["required_slo_failed"] else "pass"
+    report["required_sample_size_failed"] = _required_sample_size_failed(
+        report,
+        portfolio_min_samples=args.portfolio_min_samples,
+        company_cockpit_min_samples=args.company_cockpit_min_samples,
+        branches_min_samples=args.branches_min_samples,
+    )
+    report["status"] = "fail" if (report["required_slo_failed"] or report["required_sample_size_failed"]) else "pass"
 
     _write_report(report, args.output, pretty=args.pretty)
     print(json.dumps(report, ensure_ascii=True, indent=2 if args.pretty else None, sort_keys=args.pretty))
 
-    if args.fail_on_breach and report["required_slo_failed"]:
+    if args.fail_on_breach and (report["required_slo_failed"] or report["required_sample_size_failed"]):
         return 1
     return 0
 
