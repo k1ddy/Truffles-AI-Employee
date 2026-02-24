@@ -4,7 +4,10 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
-| 2026-02-21-tenants-v3-ux-contract-a250 | active | feat/2026-02-21-tenants-v3-ux-contract-a250 | /home/zhan/worktrees/2026-02-21-tenants-v3-ux-contract-a250 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md | 2026-02-22T08:54:23Z |
+| 2026-02-22-marketing-ux-fixes-a1 | done | feat/2026-02-22-marketing-ux-fixes-a1 | /home/zhan/worktrees/2026-02-22-marketing-ux-fixes-a1 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-22 |
+| 2026-02-22-marketing-owner-first-v2-a1 | done | feat/2026-02-22-marketing-owner-first-v2-a1 | /home/zhan/worktrees/2026-02-22-marketing-owner-first-v2-a1 | docs/TASK_PACKAGES/TP-2026-02-22-marketing-owner-first-v2-a1.md | 2026-02-22 |
+| 2026-02-22-deploy-clone-retry-a1 | active | feat/2026-02-22-deploy-clone-retry-a1 | /home/zhan/worktrees/2026-02-22-deploy-clone-retry-a1 | docs/TASK_PACKAGES/TP-2026-02-22-deploy-clone-retry-a1.md | 2026-02-22 |
+| 2026-02-21-tenants-v3-ux-contract-a250 | active | feat/2026-02-21-tenants-v3-ux-contract-a250 | /home/zhan/worktrees/2026-02-21-tenants-v3-ux-contract-a250 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md | 2026-02-24T08:12:00Z |
 | 2026-02-21-marketing-pro-v1-a300 | done | feat/2026-02-21-marketing-pro-v1-a300 | /home/zhan/worktrees/2026-02-21-marketing-pro-v1-a300 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-21 |
 | 2026-02-21-marketing-p1p3-a1 | active | feat/2026-02-21-marketing-p1p3-a1 | /home/zhan/worktrees/2026-02-21-marketing-p1p3-a1 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-21 |
 | 2026-02-21-inbox-pause-bot-a1 | active | feat/2026-02-21-inbox-human-lock-v2-a1 | /home/zhan/worktrees/2026-02-21-inbox-pause-bot-a1 | docs/TASK_PACKAGES/TP-2026-02-21-inbox-human-lock-v2-a1.md | 2026-02-21 |
@@ -16,7 +19,7 @@
 | 2026-02-20-tenants-create-company-audit-contract-a133 | done | feat/2026-02-20-tenants-create-company-audit-contract-a133 | /home/zhan/worktrees/2026-02-20-tenants-create-company-audit-contract-a133 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-create-company-audit-contract-a133.md | 2026-02-20 |
 | 2026-02-20-provisioning-server-error-guidance-a134 | done | feat/2026-02-20-provisioning-server-error-guidance-a134 | /home/zhan/worktrees/2026-02-20-provisioning-server-error-guidance-a134 | docs/TASK_PACKAGES/TP-2026-02-20-provisioning-server-error-guidance-a134.md | 2026-02-20 |
 | 2026-02-20-outreach-inbox-ux-a200 | active | fix/2026-02-20-outreach-inbox-ux-a200 | /home/zhan/worktrees/2026-02-20-outreach-inbox-ux-a200 | docs/TASK_PACKAGES/TP-2026-02-20-outreach-inbox-ux-a200.md | 2026-02-20 |
-| 2026-02-20-outreach-human-lock-a200 | active | feat/2026-02-20-outreach-human-lock-a200 | /home/zhan/worktrees/2026-02-20-outreach-human-lock-a200 | docs/TASK_PACKAGES/TP-2026-02-20-outreach-human-lock-a200.md | 2026-02-22T16:28:00Z |
+| 2026-02-20-outreach-human-lock-a200 | active | feat/2026-02-20-outreach-human-lock-a200 | /home/zhan/worktrees/2026-02-20-outreach-human-lock-a200 | docs/TASK_PACKAGES/TP-2026-02-20-outreach-human-lock-a200.md | 2026-02-22 |
 | 2026-02-20-onboarding-wave678-a132 | done | feat/2026-02-20-onboarding-wave678-a132 | /home/zhan/worktrees/2026-02-20-onboarding-wave678-a132 | docs/TASK_PACKAGES/TP-2026-02-20-onboarding-wave678-a132.md | 2026-02-20 |
 | 2026-02-20-onboarding-followup123-a131 | active | feat/2026-02-20-onboarding-followup123-a131 | /home/zhan/worktrees/2026-02-20-onboarding-followup123-a131 | docs/TASK_PACKAGES/TP-2026-02-20-onboarding-followup123-a131.md | 2026-02-20 |
 | 2026-02-19-wave3-marketing-full-a140 | done | feat/2026-02-19-wave3-marketing-full-a140 | /home/zhan/worktrees/2026-02-19-wave-canon-context-marketing-mvp-a140 | docs/TASK_PACKAGES/TP-2026-02-19-wave3-marketing-full-a140.md | 2026-02-19 |
@@ -28,7 +31,7 @@
 | 2026-02-19-onboarding-any-niche-step123-a131 | done | feat/2026-02-19-onboarding-any-niche-step123-a131 | /home/zhan/worktrees/2026-02-19-onboarding-any-niche-step123-a131 | docs/TASK_PACKAGES/TP-2026-02-19-onboarding-reference-branch-normalization-step3-a131.md | 2026-02-19 |
 | 2026-02-19-onboarding-any-niche-acceptance-a131 | done | feat/2026-02-19-onboarding-any-niche-acceptance-a131 | /home/zhan/worktrees/2026-02-19-onboarding-any-niche-acceptance-a131 | docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-acceptance-a131.md | 2026-02-19 |
 | 2026-02-19-marketing-postmerge-livecheck-a140 | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-19-marketing-postmerge-livecheck-a140.md | 2026-02-19 |
-| 2026-02-19-llm-first-firebreak-a1 | active | fix/llm-first-firebreak-2026-02-19 | /home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19 | docs/TASK_PACKAGES/TP-2026-02-19-llm-first-firebreak-program.md | 2026-02-20T09:16:53+05:00 |
+| 2026-02-19-llm-first-firebreak-a1 | active | fix/llm-first-firebreak-2026-02-19 | /home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19 | docs/TASK_PACKAGES/TP-2026-02-19-llm-first-firebreak-program.md | 2026-02-24T07:32:16+05:00 |
 | 2026-02-19-console-context-banner-dedupe-a130 | active | feat/2026-02-19-console-context-banner-dedupe-a130 | /home/zhan/worktrees/2026-02-19-console-context-banner-dedupe-a130 | docs/TASK_PACKAGES/TP-2026-02-19-console-context-banner-dedupe-a130.md | 2026-02-19 |
 | 2026-02-19-booking-routing-transition-a120 | done | feat/2026-02-19-booking-routing-transition-a120 | /home/zhan/worktrees/2026-02-19-booking-routing-transition-a120 | docs/TASK_PACKAGES/TP-2026-02-19-booking-routing-transition-a120.md | 2026-02-19 |
 | 2026-02-19-booking-name-progression-a120 | active | feat/2026-02-19-booking-name-progression-a120 | /home/zhan/worktrees/2026-02-19-booking-name-progression-a120 | docs/TASK_PACKAGES/TP-2026-02-19-booking-name-progression-a120.md | 2026-02-19 |

@@ -159,10 +159,10 @@ test.describe('Marketing Page', () => {
         await expect(page).toHaveURL(urlPathPattern('/marketing'));
         await expect(page.getByRole('heading', { name: 'Маркетинг' })).toBeVisible();
         await expect(page.getByText('Понятный поток для владельца')).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Preview аудитории' })).toBeVisible();
-        await expect(page.getByText('Preflight')).toBeVisible();
-        await expect(page.getByText('Audience')).toBeVisible();
-        await expect(page.getByText('Diagnostics')).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Проверить аудиторию' })).toBeVisible();
+        await expect(page.getByText('Готовность к отправке')).toBeVisible();
+        await expect(page.getByText('Клиенты для рассылки')).toBeVisible();
+        await expect(page.getByText('Результаты отправки')).toBeVisible();
     });
 });
 
@@ -194,14 +194,14 @@ test.describe('Marketing lifecycle @mutating', () => {
         await expect(campaignButton).toBeVisible({ timeout: 15000 });
         await campaignButton.click();
 
-        await page.getByRole('button', { name: 'Preview аудитории' }).click();
+        await page.getByRole('button', { name: 'Проверить аудиторию' }).click();
         await page.getByRole('button', { name: 'На ревью' }).click();
 
         const approveButton = page.getByRole('button', { name: 'Подтвердить' });
         await expect(approveButton).toBeEnabled({ timeout: 10000 });
         await approveButton.click();
 
-        await page.getByRole('button', { name: 'Обновить preflight' }).click();
+        await page.getByRole('button', { name: 'Проверить готовность' }).click();
         const executeModalButton = page.getByRole('button', { name: 'Проверить и отправить' });
         await expect(executeModalButton).toBeVisible();
         await executeModalButton.click();

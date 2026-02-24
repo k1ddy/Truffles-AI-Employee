@@ -63,3 +63,18 @@ def test_reply_type_fallback_allows_media_portfolio_reply_during_booking():
         {"state": "bot_active"},
         [],
     )
+
+
+def test_reply_type_fallback_allows_services_overview_without_reply_contract():
+    fn = _load_reply_type_fallback()
+    assert fn(
+        "service_choice",
+        None,
+        {
+            "intent": "catalog.service_query",
+            "tool_decision": "services_overview",
+            "info_sections": ["services_overview"],
+        },
+        {"state": "bot_active"},
+        [],
+    )

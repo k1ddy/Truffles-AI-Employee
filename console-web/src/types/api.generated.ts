@@ -984,6 +984,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/admin/tenants/portfolio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Tenants Portfolio */
+        get: operations["get_tenants_portfolio_console_v1_admin_tenants_portfolio_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/tenants/company-cockpit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Tenants Company Cockpit */
+        get: operations["get_tenants_company_cockpit_console_v1_admin_tenants_company_cockpit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/admin/tenants/weekly-snapshots": {
         parameters: {
             query?: never;
@@ -1037,6 +1071,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/admin/marketing/campaigns/{campaign_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Marketing Campaign */
+        patch: operations["update_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__patch"];
+        trace?: never;
+    };
     "/console/v1/admin/marketing/campaigns/{campaign_id}/preview": {
         parameters: {
             query?: never;
@@ -1048,6 +1099,108 @@ export interface paths {
         put?: never;
         /** Preview Marketing Campaign */
         post: operations["preview_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/marketing/campaigns/{campaign_id}/audience": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Marketing Campaign Audience */
+        get: operations["get_marketing_campaign_audience_console_v1_admin_marketing_campaigns__campaign_id__audience_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/marketing/campaigns/{campaign_id}/request-approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Marketing Campaign Approval */
+        post: operations["request_marketing_campaign_approval_console_v1_admin_marketing_campaigns__campaign_id__request_approval_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/marketing/campaigns/{campaign_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Marketing Campaign */
+        post: operations["approve_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/marketing/campaigns/{campaign_id}/preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Marketing Campaign Preflight */
+        get: operations["get_marketing_campaign_preflight_console_v1_admin_marketing_campaigns__campaign_id__preflight_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/marketing/campaigns/{campaign_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Marketing Campaign */
+        post: operations["pause_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/marketing/campaigns/{campaign_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Marketing Campaign */
+        post: operations["resume_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__resume_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2362,6 +2515,10 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Client Id */
+            client_id?: string | null;
+            /** Company Id */
+            company_id?: string | null;
             /** Slug */
             slug: string;
             /** Name */
@@ -3843,6 +4000,41 @@ export interface components {
             success: boolean;
             message: components["schemas"]["ConsoleMessage"];
         };
+        /** ConsoleMarketingAudienceFunnel */
+        ConsoleMarketingAudienceFunnel: {
+            /**
+             * Candidate Count
+             * @default 0
+             */
+            candidate_count: number;
+            /**
+             * Matched Count
+             * @default 0
+             */
+            matched_count: number;
+            /**
+             * Segment Excluded Count
+             * @default 0
+             */
+            segment_excluded_count: number;
+            /**
+             * Eligible Count
+             * @default 0
+             */
+            eligible_count: number;
+            /**
+             * Suppressed Count
+             * @default 0
+             */
+            suppressed_count: number;
+            /**
+             * Suppression Reason Counts
+             * @default {}
+             */
+            suppression_reason_counts: {
+                [key: string]: number;
+            };
+        };
         /** ConsoleMarketingCampaign */
         ConsoleMarketingCampaign: {
             /**
@@ -3868,7 +4060,19 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "draft" | "ready" | "executed" | "paused";
+            status: "draft" | "ready" | "executed" | "paused" | "in_review" | "approved" | "scheduled" | "running" | "completed" | "cancelled" | "failed";
+            /**
+             * Status V2
+             * @default draft
+             * @enum {string}
+             */
+            status_v2: "draft" | "in_review" | "approved" | "scheduled" | "running" | "paused" | "completed" | "cancelled" | "failed";
+            /**
+             * Segment Code
+             * @default reactivation_30_120
+             * @enum {string}
+             */
+            segment_code: "reactivation_30_120" | "no_show_recovery_14d" | "engaged_no_booking_7d";
             /**
              * Audience Mode
              * @constant
@@ -3879,6 +4083,23 @@ export interface components {
              * @default 0
              */
             preview_total: number;
+            /**
+             * Preflight Valid
+             * @default false
+             */
+            preflight_valid: boolean;
+            /** Preflight Snapshot */
+            preflight_snapshot?: Record<string, never> | null;
+            /** Approved By */
+            approved_by?: string | null;
+            /** Approved At */
+            approved_at?: string | null;
+            /** Requested Review At */
+            requested_review_at?: string | null;
+            /** Run Started At */
+            run_started_at?: string | null;
+            /** Run Completed At */
+            run_completed_at?: string | null;
             /** Last Preview At */
             last_preview_at?: string | null;
             /** Executed At */
@@ -3887,6 +4108,22 @@ export interface components {
             created_at?: string | null;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /** ConsoleMarketingCampaignAudienceResponse */
+        ConsoleMarketingCampaignAudienceResponse: {
+            /**
+             * Campaign Id
+             * Format: uuid
+             */
+            campaign_id: string;
+            /** Total Count */
+            total_count: number;
+            /** Eligible Count */
+            eligible_count: number;
+            /** Suppressed Count */
+            suppressed_count: number;
+            /** Items */
+            items: components["schemas"]["ConsoleMarketingCampaignRecipient"][];
         };
         /** ConsoleMarketingCampaignCreateRequest */
         ConsoleMarketingCampaignCreateRequest: {
@@ -3899,6 +4136,12 @@ export interface components {
             name: string;
             /** Message Text */
             message_text: string;
+            /**
+             * Segment Code
+             * @default reactivation_30_120
+             * @enum {string}
+             */
+            segment_code: "reactivation_30_120" | "no_show_recovery_14d" | "engaged_no_booking_7d";
             /**
              * Audience Mode
              * @default branch_active_conversations
@@ -3927,6 +4170,23 @@ export interface components {
             replied_count: number;
             /** Total Count */
             total_count: number;
+            /**
+             * Failure Classes
+             * @default {}
+             */
+            failure_classes: {
+                [key: string]: number;
+            };
+            /**
+             * Retryable Failed Count
+             * @default 0
+             */
+            retryable_failed_count: number;
+            /**
+             * Permanent Failed Count
+             * @default 0
+             */
+            permanent_failed_count: number;
             /** Sample Failed */
             sample_failed: components["schemas"]["ConsoleMarketingDeliverySample"][];
         };
@@ -3954,10 +4214,82 @@ export interface components {
              */
             status: "queued" | "skipped";
         };
+        /** ConsoleMarketingCampaignLifecycleActionRequest */
+        ConsoleMarketingCampaignLifecycleActionRequest: {
+            /** Reason */
+            reason?: string | null;
+        };
         /** ConsoleMarketingCampaignListResponse */
         ConsoleMarketingCampaignListResponse: {
             /** Items */
             items: components["schemas"]["ConsoleMarketingCampaign"][];
+        };
+        /** ConsoleMarketingCampaignPreflightResponse */
+        ConsoleMarketingCampaignPreflightResponse: {
+            /**
+             * Campaign Id
+             * Format: uuid
+             */
+            campaign_id: string;
+            /** Generated At */
+            generated_at: string;
+            /** Preflight Valid */
+            preflight_valid: boolean;
+            /**
+             * Blocked Reasons
+             * @default []
+             */
+            blocked_reasons: string[];
+            /** Outbox Health Status */
+            outbox_health_status: string;
+            /**
+             * Outbox Pending
+             * @default 0
+             */
+            outbox_pending: number;
+            /**
+             * Outbox Failed 24H
+             * @default 0
+             */
+            outbox_failed_24h: number;
+            /**
+             * Provider Billing Blocked
+             * @default false
+             */
+            provider_billing_blocked: boolean;
+            /**
+             * Provider Billing Blocked Count
+             * @default 0
+             */
+            provider_billing_blocked_count: number;
+            /**
+             * Audience Total
+             * @default 0
+             */
+            audience_total: number;
+            /**
+             * Eligible Count
+             * @default 0
+             */
+            eligible_count: number;
+            /**
+             * Suppressed Count
+             * @default 0
+             */
+            suppressed_count: number;
+            preview_stats?: components["schemas"]["ConsoleMarketingAudienceFunnel"] | null;
+            /**
+             * Template Gate Enabled
+             * @default false
+             */
+            template_gate_enabled: boolean;
+            /** Template State */
+            template_state?: string | null;
+            /**
+             * Template Ok
+             * @default true
+             */
+            template_ok: boolean;
         };
         /** ConsoleMarketingCampaignPreviewRequest */
         ConsoleMarketingCampaignPreviewRequest: {
@@ -3986,10 +4318,62 @@ export interface components {
             audience_mode: "branch_active_conversations";
             /** Estimated Recipients */
             estimated_recipients: number;
+            /**
+             * Eligible Count
+             * @default 0
+             */
+            eligible_count: number;
+            /**
+             * Suppressed Count
+             * @default 0
+             */
+            suppressed_count: number;
             /** Sample Conversation Ids */
             sample_conversation_ids: string[];
             /** Sample Recipient Jids */
             sample_recipient_jids: string[];
+            funnel: components["schemas"]["ConsoleMarketingAudienceFunnel"];
+        };
+        /** ConsoleMarketingCampaignRecipient */
+        ConsoleMarketingCampaignRecipient: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Campaign Id
+             * Format: uuid
+             */
+            campaign_id: string;
+            /** Recipient Jid */
+            recipient_jid: string;
+            /** User Id */
+            user_id?: string | null;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /**
+             * Segment Code
+             * @enum {string}
+             */
+            segment_code: "reactivation_30_120" | "no_show_recovery_14d" | "engaged_no_booking_7d";
+            /**
+             * Reason Codes
+             * @default []
+             */
+            reason_codes: string[];
+            /**
+             * Suppressed
+             * @default false
+             */
+            suppressed: boolean;
+            /**
+             * Suppression Reasons
+             * @default []
+             */
+            suppression_reasons: string[];
+            /** Updated At */
+            updated_at?: string | null;
         };
         /** ConsoleMarketingCampaignRetryRequest */
         ConsoleMarketingCampaignRetryRequest: {
@@ -4012,6 +4396,22 @@ export interface components {
             retried_count: number;
             /** Skipped Count */
             skipped_count: number;
+            /**
+             * Skipped Permanent
+             * @default 0
+             */
+            skipped_permanent: number;
+        };
+        /** ConsoleMarketingCampaignUpdateRequest */
+        ConsoleMarketingCampaignUpdateRequest: {
+            /** Name */
+            name?: string | null;
+            /** Message Text */
+            message_text?: string | null;
+            /** Segment Code */
+            segment_code?: ("reactivation_30_120" | "no_show_recovery_14d" | "engaged_no_booking_7d") | null;
+            /** Reason */
+            reason?: string | null;
         };
         /** ConsoleMarketingDeliverySample */
         ConsoleMarketingDeliverySample: {
@@ -4020,11 +4420,8 @@ export interface components {
              * Format: uuid
              */
             delivery_id: string;
-            /**
-             * Conversation Id
-             * Format: uuid
-             */
-            conversation_id?: string;
+            /** Conversation Id */
+            conversation_id?: string | null;
             /** Recipient Jid */
             recipient_jid?: string | null;
             /**
@@ -5143,7 +5540,7 @@ export interface components {
             /** Content */
             content: string;
             /** Conversation Id */
-            conversation_id: string | null;
+            conversation_id?: string | null;
             /** Branch Id */
             branch_id?: string | null;
             /**
@@ -6081,6 +6478,27 @@ export interface components {
             /** Error Message */
             error_message?: string | null;
         };
+        /** ConsoleTenantsCompanyCockpitResponse */
+        ConsoleTenantsCompanyCockpitResponse: {
+            /** Generated At */
+            generated_at: string;
+            /**
+             * Company Id
+             * Format: uuid
+             */
+            company_id: string;
+            /** Selected Client Id */
+            selected_client_id?: string | null;
+            clients: components["schemas"]["ConsoleClientListResponse"];
+            branches: components["schemas"]["ConsoleBranchListResponse"];
+        };
+        /** ConsoleTenantsPortfolioResponse */
+        ConsoleTenantsPortfolioResponse: {
+            /** Generated At */
+            generated_at: string;
+            clients: components["schemas"]["ConsoleClientListResponse"];
+            fleet_attention: components["schemas"]["ConsoleFleetAttentionResponse"];
+        };
         /** ConsoleTenantsSensitiveAccessAuditRequest */
         ConsoleTenantsSensitiveAccessAuditRequest: {
             /**
@@ -6111,6 +6529,19 @@ export interface components {
              */
             audit_id: string;
         };
+        /** ConsoleTenantsWeeklySnapshotAttentionSummary */
+        ConsoleTenantsWeeklySnapshotAttentionSummary: {
+            /** Activeclientstotal */
+            activeClientsTotal: number;
+            /** Highriskclients */
+            highRiskClients: number;
+            /** Mediumriskclients */
+            mediumRiskClients: number;
+            /** Outboxfailed24Htotal */
+            outboxFailed24hTotal: number;
+            /** Pendinghandoverstotal */
+            pendingHandoversTotal: number;
+        };
         /** ConsoleTenantsWeeklySnapshotCreateRequest */
         ConsoleTenantsWeeklySnapshotCreateRequest: {
             /**
@@ -6120,12 +6551,45 @@ export interface components {
             client_id: string;
             /** Week Key */
             week_key: string;
-            /** Snapshot */
-            snapshot: Record<string, never>;
+            snapshot: components["schemas"]["ConsoleTenantsWeeklySnapshotPayload"];
         };
         /** ConsoleTenantsWeeklySnapshotCreateResponse */
         ConsoleTenantsWeeklySnapshotCreateResponse: {
             item: components["schemas"]["ConsoleTenantsWeeklySnapshotRecord"];
+        };
+        /** ConsoleTenantsWeeklySnapshotDrilldownItem */
+        ConsoleTenantsWeeklySnapshotDrilldownItem: {
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "onboardingCoverage" | "goLiveReadiness" | "serviceStability" | "decommissionShare" | "changeFailure" | "rollbackShare" | "blockedSignals";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "warn" | "critical";
+            /** Value */
+            value: number;
+            /** Reason */
+            reason: string;
+        };
+        /** ConsoleTenantsWeeklySnapshotKpi */
+        ConsoleTenantsWeeklySnapshotKpi: {
+            /** Onboardingcoverage */
+            onboardingCoverage: number;
+            /** Golivereadiness */
+            goLiveReadiness: number;
+            /** Servicestability */
+            serviceStability: number;
+            /** Decommissionshare */
+            decommissionShare: number;
+            /** Changefailure */
+            changeFailure: number;
+            /** Rollbackshare */
+            rollbackShare: number;
+            /** Blockedsignals */
+            blockedSignals: number;
         };
         /** ConsoleTenantsWeeklySnapshotListResponse */
         ConsoleTenantsWeeklySnapshotListResponse: {
@@ -6135,6 +6599,37 @@ export interface components {
             cursor?: string | null;
             /** Has More */
             has_more: boolean;
+            /**
+             * Storage Mode
+             * @default table
+             * @enum {string}
+             */
+            storage_mode: "table" | "audit_fallback";
+            /** Schema Versions */
+            schema_versions?: {
+                [key: string]: number;
+            };
+        };
+        /** ConsoleTenantsWeeklySnapshotPayload */
+        ConsoleTenantsWeeklySnapshotPayload: {
+            /** Generatedat */
+            generatedAt: string;
+            /** Sourcewindow */
+            sourceWindow: number;
+            /**
+             * Workspacemode
+             * @enum {string}
+             */
+            workspaceMode: "portfolio" | "onboarding" | "changes" | "decommission";
+            /**
+             * Lifecyclemode
+             * @enum {string}
+             */
+            lifecycleMode: "active" | "archived" | "all";
+            kpi: components["schemas"]["ConsoleTenantsWeeklySnapshotKpi"];
+            /** Drilldown */
+            drilldown: components["schemas"]["ConsoleTenantsWeeklySnapshotDrilldownItem"][];
+            attentionSummary: components["schemas"]["ConsoleTenantsWeeklySnapshotAttentionSummary"];
         };
         /** ConsoleTenantsWeeklySnapshotRecord */
         ConsoleTenantsWeeklySnapshotRecord: {
@@ -6152,8 +6647,12 @@ export interface components {
             client_id: string;
             /** Week Key */
             week_key: string;
-            /** Snapshot */
-            snapshot: Record<string, never>;
+            snapshot: components["schemas"]["ConsoleTenantsWeeklySnapshotPayload"];
+            /**
+             * Snapshot Schema Version
+             * @default v1
+             */
+            snapshot_schema_version: string;
             /** Actor Name */
             actor_name?: string | null;
         };
@@ -6335,113 +6834,6 @@ export interface components {
             /** Error Type */
             type: string;
         };
-        Agent: components["schemas"]["ConsoleAgent"];
-        AgentCreateRequest: components["schemas"]["ConsoleAgentCreateRequest"];
-        AgentCreateResponse: components["schemas"]["ConsoleAgentCreateResponse"];
-        AgentIdentity: components["schemas"]["ConsoleAgentIdentity"];
-        AgentLifecycleActionRequest: components["schemas"]["ConsoleAgentLifecycleActionRequest"];
-        AgentListResponse: components["schemas"]["ConsoleAgentListResponse"];
-        AgentMembership: components["schemas"]["ConsoleAgentMembership"];
-        AgentOidcRebindRequest: components["schemas"]["ConsoleAgentOidcRebindRequest"];
-        AgentOidcRebindResponse: components["schemas"]["ConsoleAgentOidcRebindResponse"];
-        AgentWithIdentities: components["schemas"]["ConsoleAgentWithIdentities"];
-        AuditEvent: components["schemas"]["ConsoleAuditEvent"];
-        AuditListResponse: components["schemas"]["ConsoleAuditListResponse"];
-        Branch: components["schemas"]["ConsoleBranch"];
-        BranchBootstrapAccountTemplate: components["schemas"]["ConsoleBranchBootstrapAccountTemplate"];
-        BranchChangeDraftRequest: components["schemas"]["ConsoleBranchChangeDraftRequest"];
-        BranchChangeListResponse: components["schemas"]["ConsoleBranchChangeListResponse"];
-        BranchChangePatch: components["schemas"]["ConsoleBranchChangePatch"];
-        BranchChangePublishRequest: components["schemas"]["ConsoleBranchChangePublishRequest"];
-        BranchChangeRecord: components["schemas"]["ConsoleBranchChangeRecord"];
-        BranchChangeResponse: components["schemas"]["ConsoleBranchChangeResponse"];
-        BranchChangeRollbackRequest: components["schemas"]["ConsoleBranchChangeRollbackRequest"];
-        BranchCreateRequest: components["schemas"]["ConsoleBranchCreateRequest"];
-        BranchCreateResponse: components["schemas"]["ConsoleBranchCreateResponse"];
-        BranchIntegrationStatus: components["schemas"]["ConsoleBranchIntegrationStatus"];
-        BranchListResponse: components["schemas"]["ConsoleBranchListResponse"];
-        BranchUpdateRequest: components["schemas"]["ConsoleBranchUpdateRequest"];
-        CapabilitiesPatchRequest: components["schemas"]["ConsoleCapabilitiesPatchRequest"];
-        CapabilitiesRecord: components["schemas"]["ConsoleCapabilitiesRecord"];
-        CapabilitiesResponse: components["schemas"]["ConsoleCapabilitiesResponse"];
-        Case: components["schemas"]["ConsoleCase"];
-        CaseActionResponse: components["schemas"]["ConsoleCaseActionResponse"];
-        CaseListResponse: components["schemas"]["ConsoleCaseListResponse"];
-        Client: components["schemas"]["ConsoleClient"];
-        ClientCreateRequest: components["schemas"]["ConsoleClientCreateRequest"];
-        ClientCreateResponse: components["schemas"]["ConsoleClientCreateResponse"];
-        ClientLifecycleActionRequest: components["schemas"]["ConsoleClientLifecycleActionRequest"];
-        ClientListResponse: components["schemas"]["ConsoleClientListResponse"];
-        ClientUpdateRequest: components["schemas"]["ConsoleClientUpdateRequest"];
-        Company: components["schemas"]["ConsoleCompany"];
-        CompanyCreateRequest: components["schemas"]["ConsoleCompanyCreateRequest"];
-        CompanyCreateResponse: components["schemas"]["ConsoleCompanyCreateResponse"];
-        CompanyListResponse: components["schemas"]["ConsoleCompanyListResponse"];
-        CompanyUpdateRequest: components["schemas"]["ConsoleCompanyUpdateRequest"];
-        ConfirmationCreateRequest: components["schemas"]["ConsoleConfirmationCreateRequest"];
-        ConfirmationResponse: components["schemas"]["ConsoleConfirmationResponse"];
-        Error: components["schemas"]["ConsoleError"];
-        ErrorResponse: components["schemas"]["ConsoleErrorResponse"];
-        FleetAttentionItem: components["schemas"]["ConsoleFleetAttentionItem"];
-        FleetAttentionResponse: components["schemas"]["ConsoleFleetAttentionResponse"];
-        HealthResponse: components["schemas"]["ConsoleHealthResponse"];
-        InboxMacro: components["schemas"]["ConsoleMacro"];
-        InboxMacroCreateRequest: components["schemas"]["ConsoleMacroCreateRequest"];
-        InboxMacroCreateResponse: components["schemas"]["ConsoleMacroCreateResponse"];
-        InboxMacroListResponse: components["schemas"]["ConsoleMacroListResponse"];
-        InboxMacroUpdateRequest: components["schemas"]["ConsoleMacroUpdateRequest"];
-        IntegrationBranchActionRequest: components["schemas"]["ConsoleIntegrationBranchActionRequest"];
-        IntegrationBranchActionResponse: components["schemas"]["ConsoleIntegrationBranchActionResponse"];
-        IntegrationsListResponse: components["schemas"]["ConsoleIntegrationsListResponse"];
-        LearningCandidate: components["schemas"]["ConsoleLearningCandidate"];
-        LearningCandidateActionResponse: components["schemas"]["ConsoleLearningCandidateActionResponse"];
-        LearningCandidateListResponse: components["schemas"]["ConsoleLearningCandidateListResponse"];
-        MeResponse: components["schemas"]["ConsoleMeResponse"];
-        MembershipCreateRequest: components["schemas"]["ConsoleMembershipCreateRequest"];
-        MembershipListResponse: components["schemas"]["ConsoleMembershipListResponse"];
-        MembershipUpdateRequest: components["schemas"]["ConsoleMembershipUpdateRequest"];
-        Message: components["schemas"]["ConsoleMessage"];
-        MessageListResponse: components["schemas"]["ConsoleMessageListResponse"];
-        MetricsDailyResponse: components["schemas"]["ConsoleMetricsDailyResponse"];
-        OnboardingAdvanceRequest: components["schemas"]["ConsoleOnboardingAdvanceRequest"];
-        OnboardingAutopilotRequest: components["schemas"]["ConsoleOnboardingAutopilotRequest"];
-        OnboardingAutopilotResponse: components["schemas"]["ConsoleOnboardingAutopilotResponse"];
-        OnboardingContractPatchRequest: components["schemas"]["ConsoleOnboardingContractPatchRequest"];
-        OnboardingContractPayload: components["schemas"]["OnboardingContractPayload-Input"];
-        OnboardingContractRecord: components["schemas"]["ConsoleOnboardingContractRecord"];
-        OnboardingContractResponse: components["schemas"]["ConsoleOnboardingContractResponse"];
-        OnboardingDocumentIngestion: components["schemas"]["ConsoleOnboardingDocumentIngestion"];
-        OnboardingIntakeFieldState: components["schemas"]["ConsoleOnboardingIntakeFieldState"];
-        OnboardingIntakeQualityDimension: components["schemas"]["ConsoleOnboardingIntakeQualityDimension"];
-        OnboardingIntakeQuestion: components["schemas"]["ConsoleOnboardingIntakeQuestion"];
-        OnboardingPurchasedService: NonNullable<components["schemas"]["ConsoleOnboardingAutopilotRequest"]["purchased_services"]>[number];
-        OnboardingScorecardCheck: components["schemas"]["ConsoleOnboardingScorecardCheck"];
-        OnboardingScorecardResponse: components["schemas"]["ConsoleOnboardingScorecardResponse"];
-        OnboardingStatusResponse: components["schemas"]["ConsoleOnboardingStatusResponse"];
-        OnboardingStepStatus: components["schemas"]["ConsoleOnboardingStepStatus"];
-        OpsJobCatalogResponse: components["schemas"]["ConsoleOpsJobCatalogResponse"];
-        OpsJobDefinition: components["schemas"]["ConsoleOpsJobDefinition"];
-        OpsJobListResponse: components["schemas"]["ConsoleOpsJobListResponse"];
-        OpsJobRecord: components["schemas"]["ConsoleOpsJobRecord"];
-        OpsJobRunRequest: components["schemas"]["ConsoleOpsJobRunRequest"];
-        OpsJobRunResponse: components["schemas"]["ConsoleOpsJobRunResponse"];
-        ProviderLifecycleItem: components["schemas"]["ConsoleProviderLifecycleItem"];
-        ProviderLifecycleListResponse: components["schemas"]["ConsoleProviderLifecycleListResponse"];
-        ProviderOpsAction: components["schemas"]["ConsoleIntegrationBranchActionRequest"]["action"];
-        ProviderOpsQueueItem: components["schemas"]["ConsoleProviderOpsQueueItem"];
-        ReferencePack: components["schemas"]["ConsoleReferencePack"];
-        ReferencePackListResponse: components["schemas"]["ConsoleReferencePackListResponse"];
-        ReferencePackUpsertRequest: components["schemas"]["ConsoleReferencePackUpsertRequest"];
-        SendMessageResponse: components["schemas"]["ConsoleManagerMessageResponse"];
-        SettingsResponse: components["schemas"]["ConsoleSettingsResponse"];
-        SettingsUpdateRequest: components["schemas"]["ConsoleSettingsUpdateRequest"];
-        SettingsUpdateResponse: components["schemas"]["ConsoleSettingsUpdateResponse"];
-        TelegramLinkResponse: components["schemas"]["ConsoleTelegramLinkResponse"];
-        TelegramTestRequest: components["schemas"]["ConsoleTelegramTestRequest"];
-        TelegramTestResponse: components["schemas"]["ConsoleTelegramTestResponse"];
-        TelegramVerifyRequest: components["schemas"]["ConsoleTelegramVerifyRequest"];
-        TelegramVerifyResponse: components["schemas"]["ConsoleTelegramVerifyResponse"];
-        WebhookSecretResponse: components["schemas"]["ConsoleWebhookSecretResponse"];
     };
     responses: never;
     parameters: never;
@@ -9143,6 +9535,7 @@ export interface operations {
                 cursor?: string | null;
                 limit?: number;
                 q?: string | null;
+                company_id?: string | null;
                 client_id?: string | null;
                 lifecycle?: string | null;
             };
@@ -9223,6 +9616,119 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tenants_portfolio_console_v1_admin_tenants_portfolio_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+                q?: string | null;
+                company_id?: string | null;
+                lifecycle?: string | null;
+                attention_limit?: number;
+                stale_after_minutes?: number;
+                include_low?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleTenantsPortfolioResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tenants_company_cockpit_console_v1_admin_tenants_company_cockpit_get: {
+        parameters: {
+            query: {
+                company_id: string;
+                client_id?: string | null;
+                lifecycle?: string | null;
+                client_limit?: number;
+                branch_limit?: number;
+                client_cursor?: string | null;
+                branch_cursor?: string | null;
+                client_q?: string | null;
+                branch_q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleTenantsCompanyCockpitResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9496,6 +10002,59 @@ export interface operations {
             };
         };
     };
+    update_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMarketingCampaignUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignCreateResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     preview_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__preview_post: {
         parameters: {
             query?: never;
@@ -9518,6 +10077,319 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleMarketingCampaignPreviewResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_marketing_campaign_audience_console_v1_admin_marketing_campaigns__campaign_id__audience_get: {
+        parameters: {
+            query?: {
+                include_suppressed?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignAudienceResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_marketing_campaign_approval_console_v1_admin_marketing_campaigns__campaign_id__request_approval_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMarketingCampaignLifecycleActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignCreateResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMarketingCampaignLifecycleActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignCreateResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_marketing_campaign_preflight_console_v1_admin_marketing_campaigns__campaign_id__preflight_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignPreflightResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMarketingCampaignLifecycleActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignCreateResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMarketingCampaignLifecycleActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignCreateResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -11983,18 +12855,4 @@ export interface operations {
             };
         };
     };
-    listAdminBranchChanges: operations["list_branch_changes_console_v1_admin_branch_changes_get"];
-    listAdminBranches: operations["list_branches_console_v1_admin_branches_get"];
-    listAdminClients: operations["list_clients_console_v1_admin_clients_get"];
-    listAdminCompanies: operations["list_companies_console_v1_admin_companies_get"];
-    listAdminIntegrations: operations["list_integrations_console_v1_admin_integrations_get"];
-    listAdminMemberships: operations["list_memberships_console_v1_admin_memberships_get"];
-    listAdminProviderLifecycle: operations["list_provider_lifecycle_console_v1_admin_provider_lifecycle_get"];
-    listAdminReferencePacks: operations["list_reference_packs_console_v1_admin_reference_packs_get"];
-    listAuditEvents: operations["list_audit_events_console_v1_audit_get"];
-    listCases: operations["list_cases_console_v1_cases_get"];
-    listFleetAttention: operations["list_fleet_attention_console_v1_admin_fleet_attention_get"];
-    listInboxMacros: operations["list_inbox_macros_console_v1_inbox_macros_get"];
-    listLearningCandidates: operations["list_learning_candidates_console_v1_learning_candidates_get"];
-    listOpsJobs: operations["list_ops_jobs_console_v1_ops_jobs_get"];
 }

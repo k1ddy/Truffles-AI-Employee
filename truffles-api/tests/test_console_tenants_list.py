@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -90,6 +91,197 @@ def test_parse_fleet_params_reject_invalid_values() -> None:
         console_router._parse_fleet_service_param("bad")
 
 
+def test_build_fleet_client_details_from_projection_accepts_valid_row() -> None:
+    branch_id = uuid4()
+    row = SimpleNamespace(
+        lifecycle_state="active",
+        payment_status="confirmed",
+        commercial_state="payment_confirmed",
+        service_state="ok",
+        owner_name="Owner",
+        next_action="monitor_sla_and_quality",
+        total_branches=3,
+        active_branches=3,
+        degraded_branches=0,
+        go_live_ready_branches=2,
+        reference_branch_ids=[str(branch_id)],
+        reference_branch_reason="selected_active_branch",
+    )
+
+    details = console_router._build_fleet_client_details_from_projection(row)
+
+    assert details is not None
+    assert details.lifecycle_state == "active"
+    assert details.payment_status == "confirmed"
+    assert details.reference_branch_ids == (branch_id,)
+
+
+def test_load_materialized_fleet_client_details_map_returns_max_freshness_lag() -> None:
+    client_id = uuid4()
+    now = datetime.now(timezone.utc)
+    row = SimpleNamespace(
+        client_id=client_id,
+        lifecycle_state="active",
+        payment_status="confirmed",
+        commercial_state="payment_confirmed",
+        service_state="ok",
+        owner_name="Owner",
+        next_action="monitor_sla_and_quality",
+        total_branches=3,
+        active_branches=2,
+        degraded_branches=1,
+        go_live_ready_branches=1,
+        reference_branch_ids=[],
+        reference_branch_reason="selected_active_branch",
+        refreshed_at=now - timedelta(seconds=90),
+    )
+    query_result = Mock()
+    query_result.all.return_value = [row]
+    query = Mock()
+    query.filter.return_value = query_result
+    db = Mock()
+    db.query.return_value = query
+
+    details_map, freshness_lag = console_router._load_materialized_fleet_client_details_map(
+        db,
+        client_ids={client_id},
+    )
+
+    assert client_id in details_map
+    assert freshness_lag is not None
+    assert freshness_lag >= 30.0
+
+
+def test_load_or_build_fleet_client_details_map_uses_materialized_when_complete(monkeypatch) -> None:
+    client_id = uuid4()
+    company_id = uuid4()
+    client = SimpleNamespace(id=client_id, company_id=company_id)
+    company = SimpleNamespace(id=company_id, name="Acme")
+    expected = console_router._FleetClientDetails(
+        lifecycle_state="active",
+        payment_status="confirmed",
+        commercial_state="payment_confirmed",
+        service_state="ok",
+        owner_name="Owner",
+        next_action="monitor_sla_and_quality",
+        total_branches=1,
+        active_branches=1,
+        degraded_branches=0,
+        go_live_ready_branches=1,
+    )
+    db = Mock()
+    observation_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_load_materialized_fleet_client_details_map",
+        lambda *_args, **_kwargs: ({client_id: expected}, 42.0),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_client_details_map",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not rebuild details on full materialized hit")),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_fleet_projection_observation",
+        lambda **kwargs: observation_calls.append(kwargs),
+    )
+
+    result = console_router._load_or_build_fleet_client_details_map(
+        db,
+        clients=[client],
+        companies_by_id={company_id: company},
+    )
+
+    assert result == {client_id: expected}
+    assert observation_calls == [
+        {
+            "total_clients": 1,
+            "materialized_clients": 1,
+            "fallback_clients": 0,
+            "max_freshness_lag_seconds": 42.0,
+        }
+    ]
+
+
+def test_load_or_build_fleet_client_details_map_rebuilds_missing_and_upserts(monkeypatch) -> None:
+    hit_client_id = uuid4()
+    miss_client_id = uuid4()
+    company_id = uuid4()
+    hit_client = SimpleNamespace(id=hit_client_id, company_id=company_id)
+    miss_client = SimpleNamespace(id=miss_client_id, company_id=company_id)
+    company = SimpleNamespace(id=company_id, name="Acme")
+    materialized_hit = console_router._FleetClientDetails(
+        lifecycle_state="active",
+        payment_status="confirmed",
+        commercial_state="payment_confirmed",
+        service_state="ok",
+        owner_name="Owner",
+        next_action="monitor_sla_and_quality",
+        total_branches=1,
+        active_branches=1,
+        degraded_branches=0,
+        go_live_ready_branches=1,
+    )
+    rebuilt_miss = console_router._FleetClientDetails(
+        lifecycle_state="onboarding",
+        payment_status="pending",
+        commercial_state="payment_pending",
+        service_state="attention",
+        owner_name=None,
+        next_action="complete_onboarding_steps",
+        total_branches=2,
+        active_branches=1,
+        degraded_branches=1,
+        go_live_ready_branches=0,
+    )
+    upsert_calls: list[dict[str, object]] = []
+    db = Mock()
+    observation_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_load_materialized_fleet_client_details_map",
+        lambda *_args, **_kwargs: ({hit_client_id: materialized_hit}, 75.0),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_client_details_map",
+        lambda *_args, **_kwargs: {miss_client_id: rebuilt_miss},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_upsert_materialized_fleet_client_details",
+        lambda _db, **kwargs: upsert_calls.append(kwargs) or True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_fleet_projection_observation",
+        lambda **kwargs: observation_calls.append(kwargs),
+    )
+
+    result = console_router._load_or_build_fleet_client_details_map(
+        db,
+        clients=[hit_client, miss_client],
+        companies_by_id={company_id: company},
+        persist_missing=True,
+    )
+
+    assert result[hit_client_id] == materialized_hit
+    assert result[miss_client_id] == rebuilt_miss
+    assert len(upsert_calls) == 1
+    assert upsert_calls[0]["details_by_client_id"] == {miss_client_id: rebuilt_miss}
+    assert observation_calls == [
+        {
+            "total_clients": 2,
+            "materialized_clients": 1,
+            "fallback_clients": 1,
+            "max_freshness_lag_seconds": 75.0,
+        }
+    ]
+
+
 def test_select_reference_active_branches_filters_to_reference_subset() -> None:
     selected_id = uuid4()
     ignored_id = uuid4()
@@ -126,11 +318,19 @@ def test_select_reference_active_branches_falls_back_to_all_active() -> None:
 
 def _build_list_query_mock() -> Mock:
     query = Mock()
+    query.join.return_value = query
     query.filter.return_value = query
     query.order_by.return_value = query
     query.limit.return_value = query
     query.all.return_value = []
     return query
+
+
+def _collect_filter_predicates(query: Mock) -> list[str]:
+    predicates: list[str] = []
+    for call in query.filter.call_args_list:
+        predicates.extend(str(predicate) for predicate in call.args)
+    return predicates
 
 
 def _build_request(query: str = "") -> Request:
@@ -149,6 +349,33 @@ def _build_request(query: str = "") -> Request:
     )
 
 
+def _build_fleet_summary() -> console_router.ConsoleFleetSummary:
+    return console_router.ConsoleFleetSummary(
+        total_companies=1,
+        total_clients=1,
+        active_clients=1,
+        onboarding_clients=0,
+        archived_clients=0,
+        paused_clients=0,
+        go_live_ready_clients=0,
+        degraded_clients=0,
+        payment_pending_clients=0,
+        payment_confirmed_clients=1,
+        lifecycle_counts={
+            "lead": 0,
+            "contracting": 0,
+            "onboarding": 0,
+            "go_live_ready": 0,
+            "active": 1,
+            "paused": 0,
+            "archived": 0,
+        },
+        payment_counts={"pending": 0, "confirmed": 1, "rejected": 0, "unknown": 0},
+        service_counts={"ok": 1, "degraded": 0, "attention": 0},
+        onboarding_throughput=None,
+    )
+
+
 def test_request_with_query_params_rewrites_query_string() -> None:
     request = _build_request("foo=bar")
 
@@ -158,6 +385,728 @@ def test_request_with_query_params_rewrites_query_string() -> None:
     )
 
     assert dict(derived.query_params) == {"limit": "10", "lifecycle": "active"}
+
+
+def test_invalidate_tenants_fleet_cache_scope_queues_company_prewarm(monkeypatch) -> None:
+    company_id = uuid4()
+    db = Mock()
+    db.begin_nested.return_value = nullcontext()
+    db.info = {}
+    queued_company_ids: list[set[UUID]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_queue_fleet_summary_prewarm_company_ids",
+        lambda *_args, **kwargs: queued_company_ids.append(kwargs.get("company_ids") or set()),
+    )
+
+    console_router._invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="test_invalidate",
+        company_ids={company_id},
+    )
+
+    assert queued_company_ids == [{company_id}]
+    db.execute.assert_called_once()
+    assert db.info[console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY] is True
+
+
+def test_invalidate_tenants_fleet_cache_scope_marks_global_prewarm(monkeypatch) -> None:
+    db = Mock()
+    db.begin_nested.return_value = nullcontext()
+    db.info = {}
+
+    monkeypatch.setattr(console_router, "_queue_fleet_summary_prewarm_company_ids", lambda *_args, **_kwargs: None)
+
+    console_router._invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="test_invalidate_global",
+        company_ids=None,
+    )
+
+    assert db.info[console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY] is True
+
+
+def test_invalidate_tenants_fleet_cache_scope_records_incremental_event(monkeypatch) -> None:
+    company_id = uuid4()
+    db = Mock()
+    db.begin_nested.return_value = nullcontext()
+    db.info = {}
+
+    monkeypatch.setattr(console_router, "_queue_fleet_summary_prewarm_company_ids", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_queue_fleet_global_prewarm", lambda *_args, **_kwargs: None)
+
+    console_router._invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="integration_reconcile.execute",
+        company_ids={company_id},
+    )
+
+    assert db.info[console_router._TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY] == [
+        {
+            "reason": "integration_reconcile.execute",
+            "company_ids": [str(company_id)],
+        }
+    ]
+
+
+def test_on_console_session_after_commit_enqueues_company_prewarm(monkeypatch) -> None:
+    company_id = uuid4()
+    enqueued: list[tuple[set[UUID], bool]] = []
+    session = SimpleNamespace(
+        info={
+            console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY: {company_id},
+        }
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueued.append(
+            (kwargs.get("company_ids") or set(), bool(kwargs.get("global_prewarm_required")))
+        ),
+    )
+
+    console_router._on_console_session_after_commit(session)
+
+    assert enqueued == [({company_id}, False)]
+    assert console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY not in session.info
+
+
+def test_on_console_session_after_commit_enqueues_from_incremental_events(monkeypatch) -> None:
+    company_id = uuid4()
+    enqueued: list[tuple[set[UUID], bool]] = []
+    session = SimpleNamespace(
+        info={
+            console_router._TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY: [
+                {
+                    "reason": "update_client",
+                    "company_ids": [str(company_id)],
+                }
+            ],
+            console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY: {company_id},
+            console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY: True,
+        }
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueued.append(
+            (kwargs.get("company_ids") or set(), bool(kwargs.get("global_prewarm_required")))
+        ),
+    )
+
+    console_router._on_console_session_after_commit(session)
+
+    assert enqueued == [({company_id}, True)]
+    assert console_router._TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY not in session.info
+    assert console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY not in session.info
+    assert console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY not in session.info
+
+
+def test_on_console_session_after_commit_enqueues_global_prewarm(monkeypatch) -> None:
+    session = SimpleNamespace(
+        info={
+            console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY: True,
+        }
+    )
+    enqueued: list[tuple[set[UUID], bool]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch",
+        lambda **kwargs: enqueued.append(
+            (kwargs.get("company_ids") or set(), bool(kwargs.get("global_prewarm_required")))
+        ),
+    )
+
+    console_router._on_console_session_after_commit(session)
+
+    assert enqueued == [(set(), True)]
+    assert console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY not in session.info
+
+
+def test_on_console_session_after_rollback_clears_incremental_events() -> None:
+    session = SimpleNamespace(
+        info={
+            console_router._TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY: [
+                {"reason": "x", "company_ids": []}
+            ],
+            console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY: {uuid4()},
+            console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY: True,
+        }
+    )
+
+    console_router._on_console_session_after_rollback(session)
+
+    assert session.info == {}
+
+
+def test_drain_fleet_incremental_prewarm_dispatch_queue_once_schedules_coalesced_batch(monkeypatch) -> None:
+    first_company_id = uuid4()
+    second_company_id = uuid4()
+    summary_calls: list[set[UUID]] = []
+    attention_calls: list[set[UUID]] = []
+    global_calls: list[bool] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_claim_fleet_incremental_prewarm_dispatch_batch",
+        lambda: [],
+    )
+
+    with console_router._TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(
+            {
+                "company_ids": [str(first_company_id)],
+                "global_required": False,
+            }
+        )
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(
+            {
+                "company_ids": [str(second_company_id)],
+                "global_required": True,
+            }
+        )
+
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_summary_prewarm_for_company_ids",
+        lambda **kwargs: summary_calls.append(kwargs.get("company_ids") or set()),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_attention_prewarm_for_company_ids",
+        lambda **kwargs: attention_calls.append(kwargs.get("company_ids") or set()),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_global_prewarm",
+        lambda: global_calls.append(True),
+    )
+
+    drained = console_router._drain_fleet_incremental_prewarm_dispatch_queue_once()
+
+    assert drained is True
+    assert summary_calls == [{first_company_id, second_company_id}]
+    assert attention_calls == [{first_company_id, second_company_id}]
+    assert global_calls == [True]
+    with console_router._TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        assert not console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE
+
+
+def test_enqueue_fleet_incremental_prewarm_dispatch_overflow_collapses_to_global(monkeypatch) -> None:
+    first_company_id = uuid4()
+    second_company_id = uuid4()
+
+    with console_router._TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_WORKER = None
+
+    monkeypatch.setattr(console_router, "_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX", 1)
+    monkeypatch.setattr(
+        console_router,
+        "_enqueue_fleet_incremental_prewarm_dispatch_durable",
+        lambda **_kwargs: False,
+    )
+    monkeypatch.setattr(console_router, "_ensure_fleet_incremental_prewarm_dispatch_worker", lambda: None)
+
+    console_router._enqueue_fleet_incremental_prewarm_dispatch(
+        company_ids={first_company_id},
+        global_prewarm_required=False,
+    )
+    console_router._enqueue_fleet_incremental_prewarm_dispatch(
+        company_ids={second_company_id},
+        global_prewarm_required=False,
+    )
+
+    with console_router._TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        assert len(console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE) == 1
+        payload = console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE[0]
+        assert payload["global_required"] is True
+        assert payload["company_ids"] == [str(second_company_id)]
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
+        console_router._TENANTS_FLEET_PREWARM_DISPATCH_WORKER = None
+
+
+def test_enqueue_fleet_incremental_prewarm_dispatch_durable_persists_job(monkeypatch) -> None:
+    company_id = uuid4()
+    db = Mock()
+    count_query = Mock()
+    count_query.filter.return_value = count_query
+    count_query.scalar.return_value = 0
+    db.query.return_value = count_query
+    captured_jobs: list[object] = []
+    db.add.side_effect = lambda job: captured_jobs.append(job)
+
+    monkeypatch.setattr(console_router, "SessionLocal", lambda: db)
+
+    persisted = console_router._enqueue_fleet_incremental_prewarm_dispatch_durable(
+        company_ids={company_id},
+        global_prewarm_required=False,
+    )
+
+    assert persisted is True
+    assert len(captured_jobs) == 1
+    job = captured_jobs[0]
+    assert job.company_ids == [str(company_id)]
+    assert job.global_required is False
+    db.commit.assert_called_once()
+    db.close.assert_called_once()
+
+
+def test_claim_fleet_incremental_prewarm_dispatch_batch_marks_rows_processing(monkeypatch) -> None:
+    company_id = uuid4()
+    job_id = uuid4()
+    row = SimpleNamespace(
+        id=job_id,
+        company_ids=[str(company_id)],
+        global_required=True,
+        status=console_router._TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING,
+        locked_at=None,
+        updated_at=None,
+        attempt_count=0,
+    )
+    stale_query = Mock()
+    stale_query.filter.return_value = stale_query
+    pending_query = Mock()
+    pending_query.filter.return_value = pending_query
+    pending_query.order_by.return_value = pending_query
+    pending_query.with_for_update.return_value = pending_query
+    pending_query.limit.return_value = pending_query
+    pending_query.all.return_value = [row]
+    db = Mock()
+    db.query.side_effect = [stale_query, pending_query]
+
+    monkeypatch.setattr(console_router, "SessionLocal", lambda: db)
+
+    batch = console_router._claim_fleet_incremental_prewarm_dispatch_batch()
+
+    assert batch == [
+        {
+            "job_id": str(job_id),
+            "company_ids": [str(company_id)],
+            "global_required": True,
+        }
+    ]
+    assert row.status == console_router._TENANTS_FLEET_PREWARM_JOB_STATUS_PROCESSING
+    assert row.attempt_count == 1
+    db.commit.assert_called()
+    db.close.assert_called_once()
+
+
+def test_drain_fleet_incremental_prewarm_dispatch_queue_once_marks_retry_on_scheduler_error(monkeypatch) -> None:
+    company_id = uuid4()
+    job_id = uuid4()
+    retry_calls: list[tuple[set[UUID], str]] = []
+    completed_calls: list[set[UUID]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_claim_fleet_incremental_prewarm_dispatch_batch",
+        lambda: [
+            {
+                "job_id": str(job_id),
+                "company_ids": [str(company_id)],
+                "global_required": False,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_summary_prewarm_for_company_ids",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_mark_fleet_incremental_prewarm_dispatch_jobs_completed",
+        lambda job_ids: completed_calls.append(job_ids),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_mark_fleet_incremental_prewarm_dispatch_jobs_retry",
+        lambda job_ids, error_message: retry_calls.append((job_ids, error_message)),
+    )
+
+    drained = console_router._drain_fleet_incremental_prewarm_dispatch_queue_once()
+
+    assert drained is True
+    assert completed_calls == []
+    assert retry_calls
+    assert retry_calls[0][0] == {job_id}
+    assert "boom" in retry_calls[0][1]
+
+
+def test_schedule_fleet_summary_prewarm_for_company_ids_starts_refresh_task(monkeypatch) -> None:
+    company_id = uuid4()
+    first_client_id = uuid4()
+    second_client_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.all.return_value = [
+        (first_client_id, company_id),
+        (second_client_id, company_id),
+    ]
+    started_tasks: list[dict[str, object]] = []
+
+    monkeypatch.setattr(console_router, "SessionLocal", lambda: db)
+    monkeypatch.setattr(console_router, "_try_claim_fleet_cache_refresh", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_summary_refresh_task",
+        lambda **kwargs: started_tasks.append(kwargs),
+    )
+
+    console_router._schedule_fleet_summary_prewarm_for_company_ids(company_ids={company_id})
+
+    assert len(started_tasks) == 1
+    task_payload = started_tasks[0]["task"]
+    assert task_payload["company_id"] == str(company_id)
+    assert task_payload["lifecycle_mode"] == "active"
+    assert set(task_payload["accessible_client_ids"]) == {str(first_client_id), str(second_client_id)}
+    db.close.assert_called_once()
+
+
+def test_schedule_fleet_attention_prewarm_for_company_ids_starts_refresh_task(monkeypatch) -> None:
+    company_id = uuid4()
+    first_client_id = uuid4()
+    second_client_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.all.return_value = [
+        (first_client_id, company_id),
+        (second_client_id, company_id),
+    ]
+    started_tasks: list[dict[str, object]] = []
+
+    monkeypatch.setattr(console_router, "SessionLocal", lambda: db)
+    monkeypatch.setattr(console_router, "_try_claim_fleet_cache_refresh", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_attention_refresh_task",
+        lambda **kwargs: started_tasks.append(kwargs),
+    )
+
+    console_router._schedule_fleet_attention_prewarm_for_company_ids(company_ids={company_id})
+
+    assert len(started_tasks) == 1
+    task_payload = started_tasks[0]["task"]
+    assert set(task_payload["active_client_ids"]) == {str(first_client_id), str(second_client_id)}
+    assert task_payload["stale_after_minutes"] == console_router._INTEGRATION_DEFAULT_STALE_MINUTES
+    assert task_payload["limit"] == console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT
+    db.close.assert_called_once()
+
+
+def test_schedule_fleet_global_prewarm_starts_summary_and_attention_tasks(monkeypatch) -> None:
+    first_client_id = uuid4()
+    second_client_id = uuid4()
+    summary_tasks: list[dict[str, object]] = []
+    attention_tasks: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_reserve_fleet_global_prewarm_slot",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_load_global_active_client_ids",
+        lambda **_kwargs: ({first_client_id, second_client_id}, False),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_try_claim_fleet_cache_refresh",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_summary_refresh_task",
+        lambda **kwargs: summary_tasks.append(kwargs),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_attention_refresh_task",
+        lambda **kwargs: attention_tasks.append(kwargs),
+    )
+
+    console_router._schedule_fleet_global_prewarm()
+
+    assert len(summary_tasks) == 1
+    assert len(attention_tasks) == 1
+    summary_payload = summary_tasks[0]["task"]
+    attention_payload = attention_tasks[0]["task"]
+    assert set(summary_payload["accessible_client_ids"]) == {str(first_client_id), str(second_client_id)}
+    assert set(attention_payload["active_client_ids"]) == {str(first_client_id), str(second_client_id)}
+    assert attention_payload["limit"] == console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT
+
+
+def test_schedule_fleet_global_prewarm_skips_when_overflow(monkeypatch) -> None:
+    summary_tasks: list[dict[str, object]] = []
+    attention_tasks: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_reserve_fleet_global_prewarm_slot",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_load_global_active_client_ids",
+        lambda **_kwargs: (set(), True),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_summary_refresh_task",
+        lambda **kwargs: summary_tasks.append(kwargs),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_attention_refresh_task",
+        lambda **kwargs: attention_tasks.append(kwargs),
+    )
+
+    console_router._schedule_fleet_global_prewarm()
+
+    assert summary_tasks == []
+    assert attention_tasks == []
+
+
+@pytest.mark.asyncio
+async def test_list_clients_uses_cached_summary_when_available(monkeypatch) -> None:
+    cached_summary = _build_fleet_summary()
+    db = Mock()
+    db.query.return_value = _build_list_query_mock()
+    build_summary_mock = Mock(side_effect=AssertionError("summary builder must not be called on cache hit"))
+    store_summary_mock = Mock(side_effect=AssertionError("summary cache write must not happen on cache hit"))
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            accessible_clients=[],
+            client=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "_load_cached_fleet_summary", lambda *_, **__: cached_summary)
+    monkeypatch.setattr(console_router, "_build_fleet_summary_for_scope", build_summary_mock)
+    monkeypatch.setattr(console_router, "_store_cached_fleet_summary", store_summary_mock)
+
+    response = await console_router.list_clients(
+        request=_build_request(),
+        include_summary="true",
+        db=db,
+    )
+
+    assert response.summary == cached_summary
+    assert build_summary_mock.call_count == 0
+    assert store_summary_mock.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_list_clients_stores_summary_in_cache_after_miss(monkeypatch) -> None:
+    computed_summary = _build_fleet_summary()
+    db = Mock()
+    db.query.return_value = _build_list_query_mock()
+    store_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            accessible_clients=[],
+            client=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "_load_cached_fleet_summary", lambda *_, **__: None)
+    monkeypatch.setattr(console_router, "_build_fleet_summary_for_scope", lambda *_, **__: computed_summary)
+    monkeypatch.setattr(
+        console_router,
+        "_store_cached_fleet_summary",
+        lambda *_, **kwargs: store_calls.append(kwargs),
+    )
+
+    response = await console_router.list_clients(
+        request=_build_request(),
+        include_summary="true",
+        db=db,
+    )
+
+    assert response.summary == computed_summary
+    assert len(store_calls) == 1
+    assert store_calls[0]["summary"] == computed_summary
+
+
+@pytest.mark.asyncio
+async def test_list_clients_cache_hit_schedules_async_refresh(monkeypatch) -> None:
+    cached_summary = _build_fleet_summary()
+    accessible_client_id = uuid4()
+    db = Mock()
+    db.query.return_value = _build_list_query_mock()
+    schedule_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=accessible_client_id, status="active", company_id=None)],
+            client=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "_load_cached_fleet_summary", lambda *_, **__: cached_summary)
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_summary_for_scope",
+        lambda *_, **__: (_ for _ in ()).throw(AssertionError("cache hit should not rebuild summary in request path")),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_store_cached_fleet_summary",
+        lambda *_, **__: (_ for _ in ()).throw(AssertionError("cache hit should not write summary in request path")),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_summary_async_refresh",
+        lambda *_, **kwargs: schedule_calls.append(kwargs),
+    )
+
+    response = await console_router.list_clients(
+        request=_build_request(),
+        include_summary="true",
+        db=db,
+    )
+
+    assert response.summary == cached_summary
+    assert len(schedule_calls) == 1
+    assert schedule_calls[0]["accessible_client_ids"] == {accessible_client_id}
+
+
+@pytest.mark.asyncio
+async def test_list_fleet_attention_returns_cached_response(monkeypatch) -> None:
+    cached_response = console_router.ConsoleFleetAttentionResponse(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        stale_after_minutes=120,
+        summary=console_router.ConsoleFleetAttentionSummary(
+            active_clients_total=1,
+            clients_with_attention=1,
+            high_risk_clients=1,
+            medium_risk_clients=0,
+            low_risk_clients=0,
+            stale_branches_total=1,
+            integration_error_branches_total=1,
+            integration_warn_branches_total=0,
+            outbox_failed_24h_total=2,
+            pending_handovers_total=1,
+        ),
+        items=[
+            console_router.ConsoleFleetAttentionItem(
+                client_id=uuid4(),
+                client_slug="cached-client",
+                client_name="Cached Client",
+                company_id=None,
+                company_name=None,
+                lifecycle_state="active",
+                payment_status="confirmed",
+                commercial_state="payment_confirmed",
+                service_state="degraded",
+                owner_name="Owner",
+                next_action="run_integration_recovery",
+                total_branches=2,
+                active_branches=2,
+                degraded_branches=1,
+                go_live_ready_branches=2,
+                reference_branch_ids=[],
+                reference_branch_reason="scored",
+                stale_branches=1,
+                integration_error_branches=1,
+                integration_warn_branches=0,
+                outbox_failed_24h=2,
+                pending_handovers=1,
+                attention_score=80,
+                attention_level="high",
+                reasons=["integration_error"],
+                suggested_actions=["open_integrations_registry_and_fix_bindings"],
+            )
+        ],
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=uuid4(), status="active", company_id=None)],
+            companies=[],
+            client=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "_load_cached_fleet_attention", lambda *_, **__: cached_response)
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_attention_response_for_clients",
+        lambda *_, **__: (_ for _ in ()).throw(AssertionError("cache hit should short-circuit heavy path")),
+    )
+
+    response = await console_router.list_fleet_attention(
+        request=_build_request(),
+        stale_after_minutes=120,
+        db=Mock(),
+    )
+
+    assert response == cached_response
+
+
+@pytest.mark.asyncio
+async def test_list_fleet_attention_cache_hit_schedules_async_refresh(monkeypatch) -> None:
+    active_client_id = uuid4()
+    cached_response = console_router.ConsoleFleetAttentionResponse(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        stale_after_minutes=120,
+        summary=console_router.ConsoleFleetAttentionSummary(
+            active_clients_total=1,
+            clients_with_attention=0,
+            high_risk_clients=0,
+            medium_risk_clients=0,
+            low_risk_clients=0,
+            stale_branches_total=0,
+            integration_error_branches_total=0,
+            integration_warn_branches_total=0,
+            outbox_failed_24h_total=0,
+            pending_handovers_total=0,
+        ),
+        items=[],
+    )
+    schedule_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=active_client_id, status="active", company_id=None)],
+            companies=[],
+            client=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "_load_cached_fleet_attention", lambda *_, **__: cached_response)
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_attention_async_refresh",
+        lambda *_, **kwargs: schedule_calls.append(kwargs),
+    )
+
+    response = await console_router.list_fleet_attention(
+        request=_build_request(),
+        stale_after_minutes=120,
+        db=Mock(),
+    )
+
+    assert response == cached_response
+    assert len(schedule_calls) == 1
+    assert schedule_calls[0]["active_client_ids"] == {active_client_id}
+    assert schedule_calls[0]["limit"] == 20
 
 
 @pytest.mark.asyncio
@@ -181,6 +1130,7 @@ async def test_get_tenants_portfolio_composes_clients_and_attention(monkeypatch)
         items=[],
     )
     captured: dict[str, dict[str, object]] = {}
+    latency_calls: list[tuple[str, float | None]] = []
 
     async def _fake_list_clients(**kwargs):
         captured["clients"] = kwargs
@@ -192,6 +1142,11 @@ async def test_get_tenants_portfolio_composes_clients_and_attention(monkeypatch)
 
     monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
     monkeypatch.setattr(console_router, "list_fleet_attention", _fake_list_fleet_attention)
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_endpoint_latency",
+        lambda endpoint, elapsed_ms: latency_calls.append((endpoint, elapsed_ms)),
+    )
 
     response = await console_router.get_tenants_portfolio(
         request=_build_request(),
@@ -207,10 +1162,14 @@ async def test_get_tenants_portfolio_composes_clients_and_attention(monkeypatch)
     assert captured["clients"]["include_fleet"] == "true"
     assert captured["clients"]["include_summary"] == "true"
     assert captured["attention"]["limit"] == 3
+    assert latency_calls
+    assert latency_calls[0][0] == "portfolio"
+    assert latency_calls[0][1] is not None
+    assert latency_calls[0][1] >= 0
 
 
 @pytest.mark.asyncio
-async def test_get_tenants_company_cockpit_uses_selected_or_first_client(monkeypatch) -> None:
+async def test_get_tenants_company_cockpit_uses_company_scope_when_client_not_selected(monkeypatch) -> None:
     company_id = uuid4()
     first_client_id = uuid4()
     clients_response = console_router.ConsoleClientListResponse(
@@ -239,6 +1198,63 @@ async def test_get_tenants_company_cockpit_uses_selected_or_first_client(monkeyp
         has_more=False,
     )
     captured: dict[str, dict[str, object]] = {}
+    latency_calls: list[tuple[str, float | None]] = []
+
+    async def _fake_list_clients(**kwargs):
+        captured["clients"] = kwargs
+        return clients_response
+
+    async def _fake_list_branches(**kwargs):
+        captured["branches"] = kwargs
+        return branches_response
+
+    monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
+    monkeypatch.setattr(console_router, "list_branches", _fake_list_branches)
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_endpoint_latency",
+        lambda endpoint, elapsed_ms: latency_calls.append((endpoint, elapsed_ms)),
+    )
+
+    response = await console_router.get_tenants_company_cockpit(
+        request=_build_request(),
+        company_id=str(company_id),
+        lifecycle="active",
+        db=Mock(),
+    )
+
+    assert response.company_id == company_id
+    assert response.selected_client_id is None
+    assert response.clients == clients_response
+    assert response.branches == branches_response
+    assert captured["clients"]["company_id"] == str(company_id)
+    assert captured["branches"]["company_id"] == str(company_id)
+    assert captured["branches"]["client_id"] is None
+    assert latency_calls
+    assert latency_calls[0][0] == "company_cockpit"
+    assert latency_calls[0][1] is not None
+    assert latency_calls[0][1] >= 0
+
+
+@pytest.mark.asyncio
+async def test_get_tenants_company_cockpit_uses_selected_client_scope_when_requested(monkeypatch) -> None:
+    company_id = uuid4()
+    selected_client_id = uuid4()
+    clients_response = console_router.ConsoleClientListResponse(
+        items=[
+            console_router.ConsoleClient(
+                id=selected_client_id,
+                slug="alpha",
+                status="active",
+                company_id=company_id,
+            )
+        ],
+        cursor=None,
+        has_more=False,
+        summary=None,
+    )
+    branches_response = console_router.ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+    captured: dict[str, dict[str, object]] = {}
 
     async def _fake_list_clients(**kwargs):
         captured["clients"] = kwargs
@@ -254,16 +1270,152 @@ async def test_get_tenants_company_cockpit_uses_selected_or_first_client(monkeyp
     response = await console_router.get_tenants_company_cockpit(
         request=_build_request(),
         company_id=str(company_id),
+        client_id=str(selected_client_id),
         lifecycle="active",
         db=Mock(),
     )
 
-    assert response.company_id == company_id
-    assert response.selected_client_id == first_client_id
+    assert response.selected_client_id == selected_client_id
+    assert captured["branches"]["company_id"] == str(company_id)
+    assert captured["branches"]["client_id"] == str(selected_client_id)
+
+
+@pytest.mark.asyncio
+async def test_get_tenants_company_cockpit_skips_branches_when_not_requested(monkeypatch) -> None:
+    company_id = uuid4()
+    selected_client_id = uuid4()
+    clients_response = console_router.ConsoleClientListResponse(
+        items=[
+            console_router.ConsoleClient(
+                id=selected_client_id,
+                slug="alpha",
+                status="active",
+                company_id=company_id,
+            )
+        ],
+        cursor=None,
+        has_more=False,
+        summary=None,
+    )
+    captured: dict[str, dict[str, object]] = {}
+    latency_calls: list[tuple[str, float | None]] = []
+
+    async def _fake_list_clients(**kwargs):
+        captured["clients"] = kwargs
+        return clients_response
+
+    async def _fake_list_branches(**kwargs):  # pragma: no cover - must not be called
+        raise AssertionError("list_branches should not be called when include_branches=false")
+
+    monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
+    monkeypatch.setattr(console_router, "list_branches", _fake_list_branches)
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_endpoint_latency",
+        lambda endpoint, elapsed_ms: latency_calls.append((endpoint, elapsed_ms)),
+    )
+
+    response = await console_router.get_tenants_company_cockpit(
+        request=_build_request(),
+        company_id=str(company_id),
+        client_id=str(selected_client_id),
+        include_branches="false",
+        lifecycle="active",
+        db=Mock(),
+    )
+
+    assert response.selected_client_id == selected_client_id
     assert response.clients == clients_response
-    assert response.branches == branches_response
-    assert captured["clients"]["company_id"] == str(company_id)
-    assert captured["branches"]["client_id"] == str(first_client_id)
+    assert response.branches.items == []
+    assert response.branches.cursor is None
+    assert response.branches.has_more is False
+    assert "clients" in captured
+    assert latency_calls
+    assert latency_calls[0][0] == "company_cockpit"
+
+
+@pytest.mark.asyncio
+async def test_get_tenants_company_cockpit_passes_large_scope_pagination_contract(monkeypatch) -> None:
+    company_id = uuid4()
+    selected_client_id = uuid4()
+    client_cursor = "2026-02-23T00:00:00+00:00"
+    branch_cursor = "2026-02-22T00:00:00+00:00"
+    clients_response = console_router.ConsoleClientListResponse(items=[], cursor="client-next", has_more=True, summary=None)
+    branches_response = console_router.ConsoleBranchListResponse(items=[], cursor="branch-next", has_more=True)
+    captured: dict[str, dict[str, object]] = {}
+
+    async def _fake_list_clients(**kwargs):
+        captured["clients"] = kwargs
+        return clients_response
+
+    async def _fake_list_branches(**kwargs):
+        captured["branches"] = kwargs
+        return branches_response
+
+    monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
+    monkeypatch.setattr(console_router, "list_branches", _fake_list_branches)
+
+    response = await console_router.get_tenants_company_cockpit(
+        request=_build_request(),
+        company_id=str(company_id),
+        client_id=str(selected_client_id),
+        lifecycle="all",
+        client_limit=100,
+        branch_limit=100,
+        client_cursor=client_cursor,
+        branch_cursor=branch_cursor,
+        client_q="enterprise",
+        branch_q="regional",
+        db=Mock(),
+    )
+
+    assert response.company_id == company_id
+    assert response.selected_client_id == selected_client_id
+    assert captured["clients"]["limit"] == 100
+    assert captured["clients"]["cursor"] == client_cursor
+    assert captured["clients"]["q"] == "enterprise"
+    assert captured["clients"]["include_fleet"] == "true"
+    assert captured["clients"]["lifecycle"] == "all"
+    assert captured["branches"]["limit"] == 100
+    assert captured["branches"]["cursor"] == branch_cursor
+    assert captured["branches"]["q"] == "regional"
+    assert captured["branches"]["company_id"] == str(company_id)
+    assert captured["branches"]["client_id"] == str(selected_client_id)
+    assert captured["branches"]["lifecycle"] == "all"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("client_limit", "branch_limit"), [(101, 20), (20, 101)])
+async def test_get_tenants_company_cockpit_rejects_oversized_limits_before_subqueries(
+    monkeypatch,
+    client_limit: int,
+    branch_limit: int,
+) -> None:
+    called = {"clients": 0, "branches": 0}
+
+    async def _fake_list_clients(**_kwargs):
+        called["clients"] += 1
+        return console_router.ConsoleClientListResponse(items=[], cursor=None, has_more=False, summary=None)
+
+    async def _fake_list_branches(**_kwargs):
+        called["branches"] += 1
+        return console_router.ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+
+    monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
+    monkeypatch.setattr(console_router, "list_branches", _fake_list_branches)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_tenants_company_cockpit(
+            request=_build_request(),
+            company_id=str(uuid4()),
+            client_limit=client_limit,
+            branch_limit=branch_limit,
+            db=Mock(),
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert called == {"clients": 0, "branches": 0}
+
 
 @pytest.mark.asyncio
 async def test_list_clients_defaults_to_active_lifecycle(monkeypatch) -> None:
@@ -352,7 +1504,7 @@ async def test_list_clients_include_fleet_enriches_items_and_summary(monkeypatch
     )
     monkeypatch.setattr(
         console_router,
-        "_build_fleet_client_details_map",
+        "_load_or_build_fleet_client_details_map",
         lambda *_args, **_kwargs: {
             client_id: console_router._FleetClientDetails(
                 lifecycle_state="active",
@@ -471,7 +1623,7 @@ async def test_list_clients_filters_by_fleet_payment(monkeypatch) -> None:
         }
         return {client.id: base_map[client.id] for client in clients}
 
-    monkeypatch.setattr(console_router, "_build_fleet_client_details_map", _details_map)
+    monkeypatch.setattr(console_router, "_load_or_build_fleet_client_details_map", _details_map)
 
     response = await console_router.list_clients(
         request=request,
@@ -494,7 +1646,11 @@ async def test_list_branches_defaults_to_active_lifecycle(monkeypatch) -> None:
 
     def _fake_context(_request, _db, **kwargs):
         captured.update(kwargs)
-        return SimpleNamespace(role="platform_admin")
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[SimpleNamespace(id=uuid4(), company_id=uuid4())],
+        )
 
     monkeypatch.setattr(console_router, "get_console_context", _fake_context)
 
@@ -504,8 +1660,9 @@ async def test_list_branches_defaults_to_active_lifecycle(monkeypatch) -> None:
     )
 
     assert captured["include_inactive_tenants"] is False
-    first_filter = query.filter.call_args_list[0].args[0]
-    assert str(first_filter) == "branches.is_active IS true"
+    filters = _collect_filter_predicates(query)
+    assert "clients.status = :status_1" in filters
+    assert "branches.is_active IS true" in filters
 
 
 @pytest.mark.asyncio
@@ -518,7 +1675,11 @@ async def test_list_branches_archived_lifecycle_filters_inactive(monkeypatch) ->
 
     def _fake_context(_request, _db, **kwargs):
         captured.update(kwargs)
-        return SimpleNamespace(role="platform_admin")
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[SimpleNamespace(id=uuid4(), company_id=uuid4())],
+        )
 
     monkeypatch.setattr(console_router, "get_console_context", _fake_context)
 
@@ -529,8 +1690,193 @@ async def test_list_branches_archived_lifecycle_filters_inactive(monkeypatch) ->
     )
 
     assert captured["include_inactive_tenants"] is True
-    first_filter = query.filter.call_args_list[0].args[0]
-    assert str(first_filter) == "branches.is_active IS false"
+    filters = _collect_filter_predicates(query)
+    assert "branches.is_active IS false" in filters
+
+
+@pytest.mark.asyncio
+async def test_list_branches_company_scope_filters_on_clients_company_id(monkeypatch) -> None:
+    query = _build_list_query_mock()
+    db = Mock()
+    db.query.return_value = query
+    request = SimpleNamespace(query_params={})
+    company_id = uuid4()
+    scoped_client_id = uuid4()
+
+    def _fake_context(_request, _db, **_kwargs):
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[SimpleNamespace(id=scoped_client_id, company_id=company_id)],
+        )
+
+    monkeypatch.setattr(console_router, "get_console_context", _fake_context)
+
+    await console_router.list_branches(
+        request=request,
+        company_id=str(company_id),
+        db=db,
+    )
+
+    filters = _collect_filter_predicates(query)
+    assert "clients.company_id = :company_id_1" in filters
+    assert "clients.status = :status_1" in filters
+    assert "branches.is_active IS true" in filters
+
+
+@pytest.mark.asyncio
+async def test_list_branches_rejects_client_from_other_company(monkeypatch) -> None:
+    query = _build_list_query_mock()
+    db = Mock()
+    db.query.return_value = query
+    request = SimpleNamespace(query_params={})
+
+    company_id = uuid4()
+    company_client_id = uuid4()
+    foreign_client_id = uuid4()
+
+    def _fake_context(_request, _db, **_kwargs):
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[
+                SimpleNamespace(id=company_client_id, company_id=company_id),
+                SimpleNamespace(id=foreign_client_id, company_id=uuid4()),
+            ],
+        )
+
+    monkeypatch.setattr(console_router, "get_console_context", _fake_context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_branches(
+            request=request,
+            company_id=str(company_id),
+            client_id=str(foreign_client_id),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_list_branches_accepts_branch_id_filter(monkeypatch) -> None:
+    branch_id = uuid4()
+    client_id = uuid4()
+    query = _build_list_query_mock()
+    branch_lookup_query = Mock()
+    branch_lookup_query.join.return_value = branch_lookup_query
+    branch_lookup_query.filter.return_value = branch_lookup_query
+    branch_lookup_query.first.return_value = SimpleNamespace(
+        id=branch_id,
+        client_id=client_id,
+        company_id=uuid4(),
+    )
+    db = Mock()
+    db.query.side_effect = [query, branch_lookup_query]
+    request = SimpleNamespace(query_params={})
+
+    def _fake_context(_request, _db, **_kwargs):
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=uuid4())],
+        )
+
+    monkeypatch.setattr(console_router, "get_console_context", _fake_context)
+
+    await console_router.list_branches(
+        request=request,
+        client_id=str(client_id),
+        branch_id=str(branch_id),
+        db=db,
+    )
+
+    filters = _collect_filter_predicates(query)
+    assert any("branches.id =" in item for item in filters)
+
+
+@pytest.mark.asyncio
+async def test_list_branches_rejects_branch_from_other_client(monkeypatch) -> None:
+    branch_id = uuid4()
+    selected_client_id = uuid4()
+    foreign_client_id = uuid4()
+    query = _build_list_query_mock()
+    branch_lookup_query = Mock()
+    branch_lookup_query.join.return_value = branch_lookup_query
+    branch_lookup_query.filter.return_value = branch_lookup_query
+    branch_lookup_query.first.return_value = SimpleNamespace(
+        id=branch_id,
+        client_id=foreign_client_id,
+        company_id=uuid4(),
+    )
+    db = Mock()
+    db.query.side_effect = [query, branch_lookup_query]
+    request = SimpleNamespace(query_params={})
+
+    def _fake_context(_request, _db, **_kwargs):
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[
+                SimpleNamespace(id=selected_client_id, company_id=uuid4()),
+                SimpleNamespace(id=foreign_client_id, company_id=uuid4()),
+            ],
+        )
+
+    monkeypatch.setattr(console_router, "get_console_context", _fake_context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_branches(
+            request=request,
+            client_id=str(selected_client_id),
+            branch_id=str(branch_id),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_list_branches_rejects_branch_from_other_company(monkeypatch) -> None:
+    branch_id = uuid4()
+    scoped_company_id = uuid4()
+    scoped_client_id = uuid4()
+    foreign_company_id = uuid4()
+    foreign_client_id = uuid4()
+    query = _build_list_query_mock()
+    branch_lookup_query = Mock()
+    branch_lookup_query.join.return_value = branch_lookup_query
+    branch_lookup_query.filter.return_value = branch_lookup_query
+    branch_lookup_query.first.return_value = SimpleNamespace(
+        id=branch_id,
+        client_id=foreign_client_id,
+        company_id=foreign_company_id,
+    )
+    db = Mock()
+    db.query.side_effect = [query, branch_lookup_query]
+    request = SimpleNamespace(query_params={})
+
+    def _fake_context(_request, _db, **_kwargs):
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[
+                SimpleNamespace(id=scoped_client_id, company_id=scoped_company_id),
+                SimpleNamespace(id=foreign_client_id, company_id=foreign_company_id),
+            ],
+        )
+
+    monkeypatch.setattr(console_router, "get_console_context", _fake_context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_branches(
+            request=request,
+            company_id=str(scoped_company_id),
+            branch_id=str(branch_id),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
 
 
 class _RowsQuery:

@@ -29,8 +29,8 @@ function getSelectedBranchId(): string | undefined {
 // ═══════════════════════════════════════════════════════════════════
 
 /** API Error from server */
-export type ApiError = components["schemas"]["Error"];
-export type ApiErrorResponse = components["schemas"]["ErrorResponse"];
+export type ApiError = components["schemas"]["ConsoleError"];
+export type ApiErrorResponse = components["schemas"]["ConsoleErrorResponse"];
 
 /** Error codes as const for type safety */
 export const ErrorCodes = {
@@ -493,11 +493,11 @@ const apiClient = createApiClient();
 // ═══════════════════════════════════════════════════════════════════
 
 // Schemas
-export type Case = components["schemas"]["Case"];
-export type CaseListResponse = components["schemas"]["CaseListResponse"];
-export type CaseActionResponse = components["schemas"]["CaseActionResponse"];
-export type Message = components["schemas"]["Message"];
-export type MessageListResponse = components["schemas"]["MessageListResponse"];
+export type Case = components["schemas"]["ConsoleCase"];
+export type CaseListResponse = components["schemas"]["ConsoleCaseListResponse"];
+export type CaseActionResponse = components["schemas"]["ConsoleCaseActionResponse"];
+export type Message = components["schemas"]["ConsoleMessage"];
+export type MessageListResponse = components["schemas"]["ConsoleMessageListResponse"];
 export type OutreachDeliveryStatus = "queued" | "delivered" | "failed";
 export type OutreachMessageRequest = {
     destination: string;
@@ -535,17 +535,17 @@ export type HumanLockStatusResponse = {
     success: boolean;
     status: HumanLockStatus;
 };
-export type InboxMacro = components["schemas"]["InboxMacro"];
-export type InboxMacroListResponse = components["schemas"]["InboxMacroListResponse"];
-export type InboxMacroCreateRequest = components["schemas"]["InboxMacroCreateRequest"];
-export type InboxMacroCreateResponse = components["schemas"]["InboxMacroCreateResponse"];
-export type InboxMacroUpdateRequest = components["schemas"]["InboxMacroUpdateRequest"];
-export type Client = components["schemas"]["Client"];
-export type MeResponse = components["schemas"]["MeResponse"];
-export type Agent = components["schemas"]["Agent"];
-export type Branch = components["schemas"]["Branch"];
-export type HealthResponse = components["schemas"]["HealthResponse"];
-export type MetricsDailyResponse = components["schemas"]["MetricsDailyResponse"];
+export type InboxMacro = components["schemas"]["ConsoleMacro"];
+export type InboxMacroListResponse = components["schemas"]["ConsoleMacroListResponse"];
+export type InboxMacroCreateRequest = components["schemas"]["ConsoleMacroCreateRequest"];
+export type InboxMacroCreateResponse = components["schemas"]["ConsoleMacroCreateResponse"];
+export type InboxMacroUpdateRequest = components["schemas"]["ConsoleMacroUpdateRequest"];
+export type Client = components["schemas"]["ConsoleClient"];
+export type MeResponse = components["schemas"]["ConsoleMeResponse"];
+export type Agent = components["schemas"]["ConsoleAgent"];
+export type Branch = components["schemas"]["ConsoleBranch"];
+export type HealthResponse = components["schemas"]["ConsoleHealthResponse"];
+export type MetricsDailyResponse = components["schemas"]["ConsoleMetricsDailyResponse"];
 export type BusinessSummaryAction = {
     id: string;
     title: string;
@@ -803,27 +803,27 @@ export type OwnerOperationImpactResponse = {
     metrics: Record<string, OwnerOperationMetricDelta>;
     metric_meta: Record<string, MetricFactMeta>;
 };
-export type SettingsResponse = components["schemas"]["SettingsResponse"];
-export type AuditEvent = components["schemas"]["AuditEvent"];
-export type AuditListResponse = components["schemas"]["AuditListResponse"];
-export type AgentListResponse = components["schemas"]["AgentListResponse"];
-export type BranchIntegrationStatus = components["schemas"]["BranchIntegrationStatus"];
-export type IntegrationsListResponse = components["schemas"]["IntegrationsListResponse"];
-export type IntegrationBranchActionRequest = components["schemas"]["IntegrationBranchActionRequest"];
-export type IntegrationBranchActionResponse = components["schemas"]["IntegrationBranchActionResponse"];
-export type ProviderOpsAction = components["schemas"]["ProviderOpsAction"];
-export type ProviderOpsQueueItem = components["schemas"]["ProviderOpsQueueItem"];
-export type OpsJobDefinition = components["schemas"]["OpsJobDefinition"];
-export type OpsJobCatalogResponse = components["schemas"]["OpsJobCatalogResponse"];
-export type OpsJobRunRequest = components["schemas"]["OpsJobRunRequest"];
-export type OpsJobRecord = components["schemas"]["OpsJobRecord"];
-export type OpsJobRunResponse = components["schemas"]["OpsJobRunResponse"];
-export type OpsJobListResponse = components["schemas"]["OpsJobListResponse"];
-export type TelegramVerifyRequest = components["schemas"]["TelegramVerifyRequest"];
-export type TelegramVerifyResponse = components["schemas"]["TelegramVerifyResponse"];
-export type TelegramTestRequest = components["schemas"]["TelegramTestRequest"];
-export type TelegramTestResponse = components["schemas"]["TelegramTestResponse"];
-export type TelegramLinkResponse = components["schemas"]["TelegramLinkResponse"];
+export type SettingsResponse = components["schemas"]["ConsoleSettingsResponse"];
+export type AuditEvent = components["schemas"]["ConsoleAuditEvent"];
+export type AuditListResponse = components["schemas"]["ConsoleAuditListResponse"];
+export type AgentListResponse = components["schemas"]["ConsoleAgentListResponse"];
+export type BranchIntegrationStatus = components["schemas"]["ConsoleBranchIntegrationStatus"];
+export type IntegrationsListResponse = components["schemas"]["ConsoleIntegrationsListResponse"];
+export type IntegrationBranchActionRequest = components["schemas"]["ConsoleIntegrationBranchActionRequest"];
+export type IntegrationBranchActionResponse = components["schemas"]["ConsoleIntegrationBranchActionResponse"];
+export type ProviderOpsAction = components["schemas"]["ConsoleProviderOpsQueueItem"]["recommended_action"];
+export type ProviderOpsQueueItem = components["schemas"]["ConsoleProviderOpsQueueItem"];
+export type OpsJobDefinition = components["schemas"]["ConsoleOpsJobDefinition"];
+export type OpsJobCatalogResponse = components["schemas"]["ConsoleOpsJobCatalogResponse"];
+export type OpsJobRunRequest = components["schemas"]["ConsoleOpsJobRunRequest"];
+export type OpsJobRecord = components["schemas"]["ConsoleOpsJobRecord"];
+export type OpsJobRunResponse = components["schemas"]["ConsoleOpsJobRunResponse"];
+export type OpsJobListResponse = components["schemas"]["ConsoleOpsJobListResponse"];
+export type TelegramVerifyRequest = components["schemas"]["ConsoleTelegramVerifyRequest"];
+export type TelegramVerifyResponse = components["schemas"]["ConsoleTelegramVerifyResponse"];
+export type TelegramTestRequest = components["schemas"]["ConsoleTelegramTestRequest"];
+export type TelegramTestResponse = components["schemas"]["ConsoleTelegramTestResponse"];
+export type TelegramLinkResponse = components["schemas"]["ConsoleTelegramLinkResponse"];
 export type KnowledgeCurrentResponse = {
     version_id?: string | null;
     payload?: unknown;
@@ -855,9 +855,9 @@ export type KnowledgeRollbackResponse = {
     success?: boolean;
     version_id?: string | null;
 };
-export type LearningCandidate = components["schemas"]["LearningCandidate"];
-export type LearningCandidateListResponse = components["schemas"]["LearningCandidateListResponse"];
-export type LearningCandidateActionResponse = components["schemas"]["LearningCandidateActionResponse"];
+export type LearningCandidate = components["schemas"]["ConsoleLearningCandidate"];
+export type LearningCandidateListResponse = components["schemas"]["ConsoleLearningCandidateListResponse"];
+export type LearningCandidateActionResponse = components["schemas"]["ConsoleLearningCandidateActionResponse"];
 export type MarketingCampaignStatus =
     | "draft"
     | "ready"
@@ -1119,12 +1119,13 @@ export type GetTenantsPortfolioParams = {
 };
 export type TenantsPortfolioResponse = {
     generated_at: string;
-    clients: components["schemas"]["ClientListResponse"];
-    fleet_attention: components["schemas"]["FleetAttentionResponse"];
+    clients: components["schemas"]["ConsoleClientListResponse"];
+    fleet_attention: components["schemas"]["ConsoleFleetAttentionResponse"];
 };
 export type GetTenantsCompanyCockpitParams = {
     company_id: string;
     client_id?: string;
+    include_branches?: "true" | "false";
     lifecycle?: "active" | "archived" | "all";
     client_limit?: number;
     branch_limit?: number;
@@ -1137,8 +1138,8 @@ export type TenantsCompanyCockpitResponse = {
     generated_at: string;
     company_id: string;
     selected_client_id?: string | null;
-    clients: components["schemas"]["ClientListResponse"];
-    branches: components["schemas"]["BranchListResponse"];
+    clients: components["schemas"]["ConsoleClientListResponse"];
+    branches: components["schemas"]["ConsoleBranchListResponse"];
 };
 export type AuditTenantsSensitiveAccessRequest = {
     branch_id: string;
@@ -1152,27 +1153,29 @@ export type AuditTenantsSensitiveAccessResponse = {
 };
 
 // Query params
-export type ListCasesParams = operations["listCases"]["parameters"]["query"];
-export type ListInboxMacrosParams = operations["listInboxMacros"]["parameters"]["query"];
-export type ListAuditParams = operations["listAuditEvents"]["parameters"]["query"];
-export type ListLearningCandidatesParams = operations["listLearningCandidates"]["parameters"]["query"];
-export type ListCompaniesParams = operations["listAdminCompanies"]["parameters"]["query"];
-export type ListClientsParams = operations["listAdminClients"]["parameters"]["query"];
-export type ListBranchesParams = operations["listAdminBranches"]["parameters"]["query"];
+export type ListCasesParams = operations["list_cases_console_v1_cases_get"]["parameters"]["query"];
+export type ListInboxMacrosParams = operations["list_inbox_macros_console_v1_inbox_macros_get"]["parameters"]["query"];
+export type ListAuditParams = operations["list_audit_events_console_v1_audit_get"]["parameters"]["query"];
+export type ListLearningCandidatesParams = operations["list_learning_candidates_console_v1_learning_candidates_get"]["parameters"]["query"];
+export type ListCompaniesParams = operations["list_companies_console_v1_admin_companies_get"]["parameters"]["query"];
+export type ListClientsParams = operations["list_clients_console_v1_admin_clients_get"]["parameters"]["query"];
+export type ListBranchesParams = operations["list_branches_console_v1_admin_branches_get"]["parameters"]["query"] & {
+    branch_id?: string;
+};
 export type ListTenantsWeeklySnapshotsParams = {
     client_id: string;
     week_key?: string;
     cursor?: string;
     limit?: number;
 };
-export type ListFleetAttentionParams = operations["listFleetAttention"]["parameters"]["query"];
-export type ListIntegrationsParams = operations["listAdminIntegrations"]["parameters"]["query"];
-export type ListProviderLifecycleParams = operations["listAdminProviderLifecycle"]["parameters"]["query"];
-export type ListMembershipsParams = operations["listAdminMemberships"]["parameters"]["query"];
-export type ListReferencePacksParams = operations["listAdminReferencePacks"]["parameters"]["query"];
+export type ListFleetAttentionParams = operations["list_fleet_attention_console_v1_admin_fleet_attention_get"]["parameters"]["query"];
+export type ListIntegrationsParams = operations["list_integrations_console_v1_admin_integrations_get"]["parameters"]["query"];
+export type ListProviderLifecycleParams = operations["list_provider_lifecycle_console_v1_admin_provider_lifecycle_get"]["parameters"]["query"];
+export type ListMembershipsParams = operations["list_memberships_console_v1_admin_memberships_get"]["parameters"]["query"];
+export type ListReferencePacksParams = operations["list_reference_packs_console_v1_admin_reference_packs_get"]["parameters"]["query"];
 export type ListOnboardingBlueprintsParams = { domain_slug?: string };
-export type ListOpsJobsParams = operations["listOpsJobs"]["parameters"]["query"];
-export type ListBranchChangesParams = operations["listAdminBranchChanges"]["parameters"]["query"];
+export type ListOpsJobsParams = operations["list_ops_jobs_console_v1_ops_jobs_get"]["parameters"]["query"];
+export type ListBranchChangesParams = operations["list_branch_changes_console_v1_admin_branch_changes_get"]["parameters"]["query"];
 export type ListMarketingCampaignsParams = { branch_id?: string; status?: MarketingCampaignStatus };
 export type BranchGoLiveDecisionRequest = { reason: string };
 export type BranchGoLiveWaiverRequest = { reason: string; ttl_hours: number };
@@ -1250,7 +1253,7 @@ export const inboxApi = {
 /** Message endpoints */
 export const messagesApi = {
     send: (conversationId: string, content: string, idempotencyKey?: string) =>
-        apiClient.post<components["schemas"]["SendMessageResponse"]>(
+        apiClient.post<components["schemas"]["ConsoleManagerMessageResponse"]>(
             `/conversations/${conversationId}/messages`,
             { content },
             idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined
@@ -1321,8 +1324,8 @@ export const agentsApi = {
 /** Settings endpoints */
 export const settingsApi = {
     get: () => apiClient.get<SettingsResponse>("/settings"),
-    update: (data: components["schemas"]["SettingsUpdateRequest"]) =>
-        apiClient.patch<components["schemas"]["SettingsUpdateResponse"]>("/settings", data),
+    update: (data: components["schemas"]["ConsoleSettingsUpdateRequest"]) =>
+        apiClient.patch<components["schemas"]["ConsoleSettingsUpdateResponse"]>("/settings", data),
 };
 
 function buildClientHeader(clientId?: string): Record<string, string> | undefined {
@@ -1335,11 +1338,11 @@ function buildClientHeader(clientId?: string): Record<string, string> | undefine
 /** Admin provisioning endpoints */
 export const adminApi = {
     listCompanies: (params?: ListCompaniesParams) =>
-        apiClient.get<components["schemas"]["CompanyListResponse"]>("/admin/companies", { params }),
+        apiClient.get<components["schemas"]["ConsoleCompanyListResponse"]>("/admin/companies", { params }),
     listClients: (params?: ListClientsParams) =>
-        apiClient.get<components["schemas"]["ClientListResponse"]>("/admin/clients", { params }),
+        apiClient.get<components["schemas"]["ConsoleClientListResponse"]>("/admin/clients", { params }),
     listBranches: (params?: ListBranchesParams) =>
-        apiClient.get<components["schemas"]["BranchListResponse"]>("/admin/branches", { params }),
+        apiClient.get<components["schemas"]["ConsoleBranchListResponse"]>("/admin/branches", { params }),
     getTenantsPortfolio: (params?: GetTenantsPortfolioParams) =>
         apiClient.get<TenantsPortfolioResponse>("/admin/tenants/portfolio", { params }),
     getTenantsCompanyCockpit: (params: GetTenantsCompanyCockpitParams) =>
@@ -1351,13 +1354,13 @@ export const adminApi = {
     auditTenantsSensitiveAccess: (data: AuditTenantsSensitiveAccessRequest) =>
         apiClient.post<AuditTenantsSensitiveAccessResponse>("/admin/tenants/sensitive-access", data),
     listFleetAttention: (params?: ListFleetAttentionParams) =>
-        apiClient.get<components["schemas"]["FleetAttentionResponse"]>("/admin/fleet/attention", { params }),
+        apiClient.get<components["schemas"]["ConsoleFleetAttentionResponse"]>("/admin/fleet/attention", { params }),
     listIncidents: (params?: { limit?: number }) =>
         apiClient.get<IncidentListResponse>("/admin/incidents", { params }),
     listIntegrations: (params?: ListIntegrationsParams) =>
-        apiClient.get<components["schemas"]["IntegrationsListResponse"]>("/admin/integrations", { params }),
+        apiClient.get<components["schemas"]["ConsoleIntegrationsListResponse"]>("/admin/integrations", { params }),
     listProviderLifecycle: (params?: ListProviderLifecycleParams) =>
-        apiClient.get<components["schemas"]["ProviderLifecycleListResponse"]>("/admin/provider-lifecycle", { params }),
+        apiClient.get<components["schemas"]["ConsoleProviderLifecycleListResponse"]>("/admin/provider-lifecycle", { params }),
     getMarketingSegmentsCatalog: () =>
         apiClient.get<MarketingSegmentCatalogResponse>("/admin/marketing/segments"),
     listMarketingCampaigns: (params?: ListMarketingCampaignsParams) =>
@@ -1398,112 +1401,112 @@ export const adminApi = {
     reconcileIntegrationBranch: (branchId: string, data: IntegrationBranchActionRequest) =>
         apiClient.post<IntegrationBranchActionResponse>(`/admin/integrations/${branchId}/reconcile`, data),
     listMemberships: (params?: ListMembershipsParams) =>
-        apiClient.get<components["schemas"]["MembershipListResponse"]>("/admin/memberships", { params }),
-    createCompany: (data: components["schemas"]["CompanyCreateRequest"]) =>
-        apiClient.post<components["schemas"]["CompanyCreateResponse"]>("/admin/companies", data),
-    patchCompany: (companyId: string, data: components["schemas"]["CompanyUpdateRequest"]) =>
-        apiClient.patch<components["schemas"]["Company"]>(`/admin/companies/${companyId}`, data),
-    createClient: (data: components["schemas"]["ClientCreateRequest"]) =>
-        apiClient.post<components["schemas"]["ClientCreateResponse"]>("/admin/clients", data),
-    patchClient: (clientId: string, data: components["schemas"]["ClientUpdateRequest"]) =>
-        apiClient.patch<components["schemas"]["Client"]>(`/admin/clients/${clientId}`, data),
-    archiveClient: (clientId: string, data: components["schemas"]["ClientLifecycleActionRequest"]) =>
-        apiClient.post<components["schemas"]["Client"]>(`/admin/clients/${clientId}/archive`, data),
-    restoreClient: (clientId: string, data: components["schemas"]["ClientLifecycleActionRequest"]) =>
-        apiClient.post<components["schemas"]["Client"]>(`/admin/clients/${clientId}/restore`, data),
-    createBranch: (data: components["schemas"]["BranchCreateRequest"]) =>
-        apiClient.post<components["schemas"]["BranchCreateResponse"]>("/admin/branches", data),
-    patchBranch: (branchId: string, data: components["schemas"]["BranchUpdateRequest"]) =>
-        apiClient.patch<components["schemas"]["Branch"]>(`/admin/branches/${branchId}`, data),
+        apiClient.get<components["schemas"]["ConsoleMembershipListResponse"]>("/admin/memberships", { params }),
+    createCompany: (data: components["schemas"]["ConsoleCompanyCreateRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleCompanyCreateResponse"]>("/admin/companies", data),
+    patchCompany: (companyId: string, data: components["schemas"]["ConsoleCompanyUpdateRequest"]) =>
+        apiClient.patch<components["schemas"]["ConsoleCompany"]>(`/admin/companies/${companyId}`, data),
+    createClient: (data: components["schemas"]["ConsoleClientCreateRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleClientCreateResponse"]>("/admin/clients", data),
+    patchClient: (clientId: string, data: components["schemas"]["ConsoleClientUpdateRequest"]) =>
+        apiClient.patch<components["schemas"]["ConsoleClient"]>(`/admin/clients/${clientId}`, data),
+    archiveClient: (clientId: string, data: components["schemas"]["ConsoleClientLifecycleActionRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleClient"]>(`/admin/clients/${clientId}/archive`, data),
+    restoreClient: (clientId: string, data: components["schemas"]["ConsoleClientLifecycleActionRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleClient"]>(`/admin/clients/${clientId}/restore`, data),
+    createBranch: (data: components["schemas"]["ConsoleBranchCreateRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleBranchCreateResponse"]>("/admin/branches", data),
+    patchBranch: (branchId: string, data: components["schemas"]["ConsoleBranchUpdateRequest"]) =>
+        apiClient.patch<components["schemas"]["ConsoleBranch"]>(`/admin/branches/${branchId}`, data),
     listBranchChanges: (params?: ListBranchChangesParams) =>
-        apiClient.get<components["schemas"]["BranchChangeListResponse"]>("/admin/branch-changes", { params }),
+        apiClient.get<components["schemas"]["ConsoleBranchChangeListResponse"]>("/admin/branch-changes", { params }),
     getBranchChange: (changeId: string) =>
-        apiClient.get<components["schemas"]["BranchChangeResponse"]>(`/admin/branch-changes/${changeId}`),
-    draftBranchChange: (data: components["schemas"]["BranchChangeDraftRequest"]) =>
-        apiClient.post<components["schemas"]["BranchChangeResponse"]>("/admin/branch-changes/draft", data),
+        apiClient.get<components["schemas"]["ConsoleBranchChangeResponse"]>(`/admin/branch-changes/${changeId}`),
+    draftBranchChange: (data: components["schemas"]["ConsoleBranchChangeDraftRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleBranchChangeResponse"]>("/admin/branch-changes/draft", data),
     validateBranchChange: (changeId: string) =>
-        apiClient.post<components["schemas"]["BranchChangeResponse"]>(`/admin/branch-changes/${changeId}/validate`),
-    publishBranchChange: (changeId: string, data: components["schemas"]["BranchChangePublishRequest"]) =>
-        apiClient.post<components["schemas"]["BranchChangeResponse"]>(`/admin/branch-changes/${changeId}/publish`, data),
-    rollbackBranchChange: (changeId: string, data: components["schemas"]["BranchChangeRollbackRequest"]) =>
-        apiClient.post<components["schemas"]["BranchChangeResponse"]>(`/admin/branch-changes/${changeId}/rollback`, data),
+        apiClient.post<components["schemas"]["ConsoleBranchChangeResponse"]>(`/admin/branch-changes/${changeId}/validate`),
+    publishBranchChange: (changeId: string, data: components["schemas"]["ConsoleBranchChangePublishRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleBranchChangeResponse"]>(`/admin/branch-changes/${changeId}/publish`, data),
+    rollbackBranchChange: (changeId: string, data: components["schemas"]["ConsoleBranchChangeRollbackRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleBranchChangeResponse"]>(`/admin/branch-changes/${changeId}/rollback`, data),
     approveBranchGoLive: (branchId: string, data: BranchGoLiveDecisionRequest) =>
-        apiClient.post<components["schemas"]["Branch"]>(`/admin/branches/${branchId}/go-live/approve`, data),
+        apiClient.post<components["schemas"]["ConsoleBranch"]>(`/admin/branches/${branchId}/go-live/approve`, data),
     rejectBranchGoLive: (branchId: string, data: BranchGoLiveDecisionRequest) =>
-        apiClient.post<components["schemas"]["Branch"]>(`/admin/branches/${branchId}/go-live/reject`, data),
+        apiClient.post<components["schemas"]["ConsoleBranch"]>(`/admin/branches/${branchId}/go-live/reject`, data),
     waiveBranchGoLive: (branchId: string, data: BranchGoLiveWaiverRequest) =>
-        apiClient.post<components["schemas"]["Branch"]>(`/admin/branches/${branchId}/go-live/waive`, data),
-    createAgent: (data: components["schemas"]["AgentCreateRequest"]) =>
-        apiClient.post<components["schemas"]["AgentCreateResponse"]>("/admin/agents", data),
-    disableAgent: (agentId: string, data: components["schemas"]["AgentLifecycleActionRequest"]) =>
-        apiClient.post<components["schemas"]["Agent"]>(`/admin/agents/${agentId}/disable`, data),
-    enableAgent: (agentId: string, data: components["schemas"]["AgentLifecycleActionRequest"]) =>
-        apiClient.post<components["schemas"]["Agent"]>(`/admin/agents/${agentId}/enable`, data),
-    rebindAgentOidc: (agentId: string, data: components["schemas"]["AgentOidcRebindRequest"]) =>
-        apiClient.post<components["schemas"]["AgentOidcRebindResponse"]>(`/admin/agents/${agentId}/oidc/rebind`, data),
-    createMembership: (data: components["schemas"]["MembershipCreateRequest"]) =>
-        apiClient.post<components["schemas"]["AgentMembership"]>("/admin/memberships", data),
-    patchMembership: (membershipId: string, data: components["schemas"]["MembershipUpdateRequest"]) =>
-        apiClient.patch<components["schemas"]["AgentMembership"]>(`/admin/memberships/${membershipId}`, data),
+        apiClient.post<components["schemas"]["ConsoleBranch"]>(`/admin/branches/${branchId}/go-live/waive`, data),
+    createAgent: (data: components["schemas"]["ConsoleAgentCreateRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleAgentCreateResponse"]>("/admin/agents", data),
+    disableAgent: (agentId: string, data: components["schemas"]["ConsoleAgentLifecycleActionRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleAgent"]>(`/admin/agents/${agentId}/disable`, data),
+    enableAgent: (agentId: string, data: components["schemas"]["ConsoleAgentLifecycleActionRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleAgent"]>(`/admin/agents/${agentId}/enable`, data),
+    rebindAgentOidc: (agentId: string, data: components["schemas"]["ConsoleAgentOidcRebindRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleAgentOidcRebindResponse"]>(`/admin/agents/${agentId}/oidc/rebind`, data),
+    createMembership: (data: components["schemas"]["ConsoleMembershipCreateRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleAgentMembership"]>("/admin/memberships", data),
+    patchMembership: (membershipId: string, data: components["schemas"]["ConsoleMembershipUpdateRequest"]) =>
+        apiClient.patch<components["schemas"]["ConsoleAgentMembership"]>(`/admin/memberships/${membershipId}`, data),
     getCapabilities: (params: { branch_id?: string; clientId?: string }) =>
-        apiClient.get<components["schemas"]["CapabilitiesResponse"]>("/admin/capabilities", {
+        apiClient.get<components["schemas"]["ConsoleCapabilitiesResponse"]>("/admin/capabilities", {
             params: params.branch_id ? { branch_id: params.branch_id } : undefined,
             headers: buildClientHeader(params.clientId),
         }),
-    patchCapabilities: (data: components["schemas"]["CapabilitiesPatchRequest"], clientId?: string) =>
-        apiClient.patch<components["schemas"]["CapabilitiesRecord"]>("/admin/capabilities", data, {
+    patchCapabilities: (data: components["schemas"]["ConsoleCapabilitiesPatchRequest"], clientId?: string) =>
+        apiClient.patch<components["schemas"]["ConsoleCapabilitiesRecord"]>("/admin/capabilities", data, {
             headers: buildClientHeader(clientId),
         }),
     getOnboardingContract: (params: { branch_id?: string; clientId?: string }) =>
-        apiClient.get<components["schemas"]["OnboardingContractResponse"]>("/admin/onboarding-contract", {
+        apiClient.get<components["schemas"]["ConsoleOnboardingContractResponse"]>("/admin/onboarding-contract", {
             params: params.branch_id ? { branch_id: params.branch_id } : undefined,
             headers: buildClientHeader(params.clientId),
         }),
     patchOnboardingContract: (
-        data: components["schemas"]["OnboardingContractPatchRequest"],
+        data: components["schemas"]["ConsoleOnboardingContractPatchRequest"],
         clientId?: string,
     ) =>
-        apiClient.patch<components["schemas"]["OnboardingContractRecord"]>("/admin/onboarding-contract", data, {
+        apiClient.patch<components["schemas"]["ConsoleOnboardingContractRecord"]>("/admin/onboarding-contract", data, {
             headers: buildClientHeader(clientId),
         }),
     getWebhookSecret: (params: { branch_id?: string; clientId?: string }) =>
-        apiClient.get<components["schemas"]["WebhookSecretResponse"]>("/admin/webhook-secret", {
+        apiClient.get<components["schemas"]["ConsoleWebhookSecretResponse"]>("/admin/webhook-secret", {
             params: params.branch_id ? { branch_id: params.branch_id } : undefined,
             headers: buildClientHeader(params.clientId),
         }),
     runOnboardingAutopilot: (
-        data: components["schemas"]["OnboardingAutopilotRequest"],
+        data: components["schemas"]["ConsoleOnboardingAutopilotRequest"],
         clientId?: string,
     ) =>
-        apiClient.post<components["schemas"]["OnboardingAutopilotResponse"]>("/admin/onboarding/autopilot", data, {
+        apiClient.post<components["schemas"]["ConsoleOnboardingAutopilotResponse"]>("/admin/onboarding/autopilot", data, {
             headers: buildClientHeader(clientId),
         }),
     listOnboardingBlueprints: (params?: ListOnboardingBlueprintsParams) =>
         apiClient.get<OnboardingBlueprintListResponse>("/admin/onboarding-blueprints", { params }),
     listReferencePacks: (params?: ListReferencePacksParams) =>
-        apiClient.get<components["schemas"]["ReferencePackListResponse"]>("/admin/reference-packs", { params }),
-    upsertReferencePack: (domainSlug: string, data: components["schemas"]["ReferencePackUpsertRequest"]) =>
-        apiClient.put<components["schemas"]["ReferencePack"]>(`/admin/reference-packs/${domainSlug}`, data),
+        apiClient.get<components["schemas"]["ConsoleReferencePackListResponse"]>("/admin/reference-packs", { params }),
+    upsertReferencePack: (domainSlug: string, data: components["schemas"]["ConsoleReferencePackUpsertRequest"]) =>
+        apiClient.put<components["schemas"]["ConsoleReferencePack"]>(`/admin/reference-packs/${domainSlug}`, data),
 };
 
 /** Onboarding endpoints */
 export const onboardingApi = {
     status: (branchId?: string) =>
-        apiClient.get<components["schemas"]["OnboardingStatusResponse"]>("/onboarding/status", {
+        apiClient.get<components["schemas"]["ConsoleOnboardingStatusResponse"]>("/onboarding/status", {
             params: branchId ? { branch_id: branchId } : undefined,
         }),
     scorecard: (branchId?: string) =>
-        apiClient.get<components["schemas"]["OnboardingScorecardResponse"]>("/onboarding/scorecard", {
+        apiClient.get<components["schemas"]["ConsoleOnboardingScorecardResponse"]>("/onboarding/scorecard", {
             params: branchId ? { branch_id: branchId } : undefined,
         }),
-    advance: (data: components["schemas"]["OnboardingAdvanceRequest"]) =>
-        apiClient.post<components["schemas"]["OnboardingStatusResponse"]>("/onboarding/advance", data),
+    advance: (data: components["schemas"]["ConsoleOnboardingAdvanceRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleOnboardingStatusResponse"]>("/onboarding/advance", data),
 };
 
 /** Confirmation endpoints */
 export const confirmationsApi = {
-    create: (data: components["schemas"]["ConfirmationCreateRequest"]) =>
-        apiClient.post<components["schemas"]["ConfirmationResponse"]>("/confirmations", data),
+    create: (data: components["schemas"]["ConsoleConfirmationCreateRequest"]) =>
+        apiClient.post<components["schemas"]["ConsoleConfirmationResponse"]>("/confirmations", data),
 };
 
 /** Audit endpoints */

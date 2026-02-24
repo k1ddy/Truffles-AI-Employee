@@ -28,6 +28,10 @@ def _resolve_adapter(client_slug: str | None = None) -> ModuleType:
     return _load_adapter(module_path)
 
 
+def get_pack_adapter(client_slug: str | None = None) -> ModuleType:
+    return _resolve_adapter(client_slug)
+
+
 def _normalize_text(text: str) -> str:
     return _resolve_adapter()._normalize_text(text)
 
@@ -303,6 +307,7 @@ __all__ = [
     "build_quiet_hours_notice",
     "compose_multi_truth_reply",
     "format_reply_from_truth",
+    "get_pack_adapter",
     "get_pack_decision",
     "get_pack_price_item",
     "get_pack_price_reply",

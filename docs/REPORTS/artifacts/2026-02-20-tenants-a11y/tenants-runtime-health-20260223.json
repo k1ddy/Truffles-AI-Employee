@@ -1,0 +1,1 @@
+{"status":"healthy","timestamp":"2026-02-23T07:58:39.853Z","latency_ms":331,"components":{"frontend":"ok","api":{"status":"healthy","port":8000,"version":"93824a4e"},"database":"connected","qdrant":"reachable","outbox":{"pending":0,"failed":74,"failed_24h":74,"failed_total":4831,"status":"warning"}}}

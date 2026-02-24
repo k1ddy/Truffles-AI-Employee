@@ -178,7 +178,7 @@ export CHATFLOW_TOKEN="<chatflow_token>"
 export INSTANCE_ID="<chatflow_instance_id>"
 ```
 
-1) Send outreach + auto pause 30m:
+1) Send outreach in existing case + auto pause 30m:
 ```bash
 curl -sS -X POST "$CONSOLE_URL/outreach/messages" \
   -H "Authorization: Bearer $CONSOLE_TOKEN" \
@@ -190,9 +190,23 @@ curl -sS -X POST "$CONSOLE_URL/outreach/messages" \
   | jq
 ```
 
+1.1) Send no-case outreach (without `conversation_id`) and capture auto-case linkage:
+```bash
+NO_CASE_RESPONSE=$(curl -sS -X POST "$CONSOLE_URL/outreach/messages" \
+  -H "Authorization: Bearer $CONSOLE_TOKEN" \
+  -H "X-Client-Id: $CLIENT_ID" \
+  -H "X-Branch-Id: $BRANCH_ID" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: outreach-nocase-$(date +%s)" \
+  -d "{\"destination\":\"$REMOTE_JID\",\"content\":\"STG no-case outreach check\",\"pause_bot_minutes\":30}")
+printf '%s\n' "$NO_CASE_RESPONSE" | jq
+export OUTREACH_CONVERSATION_ID=$(printf '%s\n' "$NO_CASE_RESPONSE" | jq -r '.conversation_id // empty')
+export OUTREACH_CASE_ID=$(printf '%s\n' "$NO_CASE_RESPONSE" | jq -r '.case_id // empty')
+```
+
 2) Check lock status:
 ```bash
-curl -sS "$CONSOLE_URL/conversations/$CONVERSATION_ID/human-lock" \
+curl -sS "$CONSOLE_URL/conversations/${OUTREACH_CONVERSATION_ID:-$CONVERSATION_ID}/human-lock" \
   -H "Authorization: Bearer $CONSOLE_TOKEN" \
   -H "X-Client-Id: $CLIENT_ID" \
   -H "X-Branch-Id: $BRANCH_ID" \
@@ -210,13 +224,13 @@ python3 ops/chatflow_send.py \
 
 4) Verify decision trace/meta (expect `human_lock_silent`):
 ```bash
-python3 ops/diagnose.py explain --conversation-id "$CONVERSATION_ID" --minutes 10 --limit 20
-python3 ops/diagnose.py trace-bundle --conversation-id "$CONVERSATION_ID" --minutes 10 --output -
+python3 ops/diagnose.py explain --conversation-id "${OUTREACH_CONVERSATION_ID:-$CONVERSATION_ID}" --minutes 10 --limit 20
+python3 ops/diagnose.py trace-bundle --conversation-id "${OUTREACH_CONVERSATION_ID:-$CONVERSATION_ID}" --minutes 10 --output -
 ```
 
 5) Release pause and verify bot answers again:
 ```bash
-curl -sS -X DELETE "$CONSOLE_URL/conversations/$CONVERSATION_ID/human-lock" \
+curl -sS -X DELETE "$CONSOLE_URL/conversations/${OUTREACH_CONVERSATION_ID:-$CONVERSATION_ID}/human-lock" \
   -H "Authorization: Bearer $CONSOLE_TOKEN" \
   -H "X-Client-Id: $CLIENT_ID" \
   -H "X-Branch-Id: $BRANCH_ID" \
@@ -229,6 +243,8 @@ curl -sS -X DELETE "$CONSOLE_URL/conversations/$CONVERSATION_ID/human-lock" \
 - `trace-bundle` output with `decision=human_lock_silent` for locked inbound
 - `decision_meta` for last inbound
 - latest `outbox_messages` row status (`queued|sent|failed`)
+- for no-case flow: `case_id` + `conversation_id` from `POST /outreach/messages`
+- `decision_trace` stage `outreach_auto_case_bootstrap` (decision/reason/dedupe_key)
 
 SQL snapshot:
 ```bash
@@ -236,7 +252,7 @@ DB_USER=$(docker exec -i truffles_postgres_1 /bin/sh -lc 'printf %s "${POSTGRES_
 docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "\
 SELECT id, status, attempts, last_error, updated_at \
 FROM outbox_messages \
-WHERE conversation_id = '$CONVERSATION_ID'::uuid \
+WHERE conversation_id = '${OUTREACH_CONVERSATION_ID:-$CONVERSATION_ID}'::uuid \
 ORDER BY created_at DESC \
 LIMIT 5;"
 ```
@@ -253,3 +269,32 @@ WHERE active = TRUE;"
 ```
 
 - If feature rollback is required: deploy previous image via `scripts/restart_release.sh` and re-run section B checks.
+
+### F. Incident triage for no-case outreach
+
+Symptoms and actions:
+- Missing case link (`case_id` empty, `conversation_id` set):
+```bash
+python3 ops/diagnose.py explain --conversation-id "$OUTREACH_CONVERSATION_ID" --minutes 15 --limit 30
+```
+Expect `decision_trace` contains stage `outreach_auto_case_bootstrap`; if absent, inspect `audit_events` `event_type='outreach_sent'` and rollback to previous release.
+- Duplicate cases for same destination in short burst:
+```bash
+DB_USER=$(docker exec -i truffles_postgres_1 /bin/sh -lc 'printf %s "${POSTGRES_USER:-postgres}"')
+docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "\
+SELECT id, status, created_at, trigger_value, meta->>'outreach_dedupe_key' AS dedupe_key \
+FROM handovers \
+WHERE client_id = '$CLIENT_ID'::uuid
+  AND channel_ref = '$REMOTE_JID'
+  AND trigger_value = 'console_outreach_no_case'
+ORDER BY created_at DESC
+LIMIT 20;"
+```
+If multiple rows share same `dedupe_key` and close timestamps, classify as dedupe defect and hotfix before next deploy.
+- Orphan outreach (`outbox sent`, case not visible in Inbox):
+```bash
+curl -sS "$CONSOLE_URL/cases?status=open&branch_id=$BRANCH_ID&limit=20" \
+  -H "Authorization: Bearer $CONSOLE_TOKEN" \
+  -H "X-Client-Id: $CLIENT_ID" | jq '.items[] | {id, conversation_id, status}'
+```
+If case exists in DB but not in API, inspect branch access/RBAC for the actor and record incident in `STATE.md`.

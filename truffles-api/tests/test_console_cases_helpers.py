@@ -142,3 +142,68 @@ def test_require_branch_access_denies_branch_scoped_admin_outside_allowed_branch
         console_router._require_branch_access(context, branch_id, message="Access denied")
     assert exc_info.value.status_code == 403
     assert exc_info.value.code == "ACCESS_DENIED"
+
+
+def test_resolve_outreach_auto_case_bucket_minutes_bounds(monkeypatch):
+    monkeypatch.delenv("OUTREACH_AUTO_CASE_BUCKET_MINUTES", raising=False)
+    assert console_router._resolve_outreach_auto_case_bucket_minutes() == 30
+
+    monkeypatch.setenv("OUTREACH_AUTO_CASE_BUCKET_MINUTES", "0")
+    assert console_router._resolve_outreach_auto_case_bucket_minutes() == 1
+
+    monkeypatch.setenv("OUTREACH_AUTO_CASE_BUCKET_MINUTES", "999")
+    assert console_router._resolve_outreach_auto_case_bucket_minutes() == 240
+
+    monkeypatch.setenv("OUTREACH_AUTO_CASE_BUCKET_MINUTES", "bad")
+    assert console_router._resolve_outreach_auto_case_bucket_minutes() == 30
+
+
+def test_build_outreach_auto_case_dedupe_key_is_deterministic():
+    client_id = uuid4()
+    branch_id = uuid4()
+    now = datetime(2026, 2, 22, 12, 14, 55, tzinfo=timezone.utc)
+    bucket_start = console_router._resolve_outreach_auto_case_bucket_start(
+        now_utc=now,
+        bucket_minutes=30,
+    )
+    key_1 = console_router._build_outreach_auto_case_dedupe_key(
+        client_id=client_id,
+        branch_id=branch_id,
+        remote_jid="77771234567@s.whatsapp.net",
+        bucket_started_at=bucket_start,
+    )
+    key_2 = console_router._build_outreach_auto_case_dedupe_key(
+        client_id=client_id,
+        branch_id=branch_id,
+        remote_jid="77771234567@s.whatsapp.net",
+        bucket_started_at=bucket_start,
+    )
+    assert key_1 == key_2
+    assert key_1.startswith("outreach-no-case:")
+
+
+def test_record_outreach_auto_case_trace_trims_to_limit():
+    conversation = SimpleNamespace(
+        context={
+            "decision_trace": [
+                {"stage": f"legacy_{idx}", "decision": "noop"}
+                for idx in range(console_router._OUTREACH_AUTO_CASE_TRACE_MAX + 2)
+            ]
+        }
+    )
+    case_id = uuid4()
+
+    console_router._record_outreach_auto_case_trace(
+        conversation=conversation,
+        case_id=case_id,
+        decision="case_created",
+        reason="new_case_created",
+        dedupe_key="outreach-no-case:test",
+        bucket_started_at=datetime.now(timezone.utc),
+        bucket_minutes=30,
+    )
+
+    trace = conversation.context["decision_trace"]
+    assert len(trace) == console_router._OUTREACH_AUTO_CASE_TRACE_MAX
+    assert trace[-1]["stage"] == "outreach_auto_case_bootstrap"
+    assert trace[-1]["case_id"] == str(case_id)

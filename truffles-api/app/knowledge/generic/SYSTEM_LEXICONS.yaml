@@ -15,6 +15,14 @@ booking_request:
     - жазылу
     - бос уақыт
     - уақыт бар ма
+booking_desire_keywords:
+  ru:
+    - хочу
+    - нужн
+    - надо
+  kk:
+    - керек
+    - қалаймын
 booking_keywords:
   ru:
     - запис
@@ -30,6 +38,12 @@ booking_keywords:
     - бронь
     - заброн
     - окошк
+time_only_request_phrases:
+  ru:
+    - во сколько
+    - в какое время
+    - какое время
+    - которое время
 booking_relative_day_keywords:
   ru:
     - сегодня
@@ -56,6 +70,17 @@ consult_intent_blockers:
     - перенос
     - отмен
     - окошк
+booking_collect_detail_markers:
+  ru:
+    - без запис
+    - сроч
+booking_collect_detail_relative_markers:
+  ru:
+    - через
+booking_collect_detail_duration_units:
+  ru:
+    - час
+    - мин
 hours_keywords:
   ru:
     - работаете
@@ -112,6 +137,59 @@ duration_time_units:
     - минута
     - минуты
     - минут
+info_time_markers:
+  ru:
+    - врем
+    - час
+info_hours_stems:
+  ru:
+    - работ
+    - рабоч
+info_duration_fallback_verbs:
+  ru:
+    - займет
+    - занимает
+info_duration_fallback_question_markers:
+  ru:
+    - врем
+    - сколько
+info_duration_service_context_markers:
+  ru:
+    - процедур
+    - услуг
+    - сеанс
+    - маникюр
+    - педикюр
+    - стриж
+    - окраш
+    - массаж
+info_master_keywords:
+  ru:
+    - мастер
+    - специалист
+    - кто делает
+    - кто будет делать
+    - кто будет проводить
+    - кто будет дела
+    - кто выполняет
+  kk:
+    - шебер
+    - маман
+    - ким жасайд
+info_master_person_keywords:
+  ru:
+    - кто
+info_master_action_keywords:
+  ru:
+    - дела
+    - провод
+info_master_service_keywords:
+  ru:
+    - процедур
+    - услуг
+    - сеанс
+    - маникюр
+    - стриж
 location_keywords:
   ru:
     - адрес
@@ -150,6 +228,43 @@ consult_skip_address_phrases:
     - как доехать
     - как пройти
     - остановк
+booking_verification_keywords:
+  ru:
+    - проверь
+    - провер
+    - подтверд
+    - подтвержд
+  en:
+    - check
+    - confirm
+    - verify
+services_overview_phrases:
+  ru:
+    - ассортимент услуг
+    - какой у вас ассортимент услуг
+    - какие услуги
+    - что вы предлагаете
+    - что у вас есть
+    - какие процедуры
+    - какие есть услуги
+daypart_evening_keywords:
+  ru:
+    - вечер
+    - вечером
+    - на вечер
+    - к вечеру
+daypart_morning_keywords:
+  ru:
+    - утро
+    - утром
+    - на утро
+daypart_day_keywords:
+  ru:
+    - день
+    - днем
+    - днём
+    - на день
+    - днев
 offtopic_keywords:
   ru:
     - чат бот
