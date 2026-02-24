@@ -2209,6 +2209,12 @@ _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT = _parse_env_int(
     min_value=1,
     max_value=200,
 )
+_TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT = _parse_env_int(
+    "TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT",
+    default=20,
+    min_value=1,
+    max_value=200,
+)
 _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MIN_INTERVAL_SECONDS = _parse_env_int(
     "TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MIN_INTERVAL_SECONDS",
     default=30,
@@ -3016,6 +3022,47 @@ def _schedule_fleet_summary_prewarm_for_company_ids(
         )
 
 
+def _schedule_fleet_attention_prewarm_for_company_ids(
+    *,
+    company_ids: set[UUID],
+) -> None:
+    if not _TENANTS_FLEET_CACHE_PREWARM_ON_INVALIDATION_ENABLED:
+        return
+    if not company_ids:
+        return
+    capped_company_ids = set(sorted(company_ids, key=str)[:_TENANTS_FLEET_CACHE_PREWARM_MAX_COMPANY_SCOPES])
+    if not capped_company_ids:
+        return
+    active_clients_by_company = _load_active_clients_by_company(company_ids=capped_company_ids)
+    if not active_clients_by_company:
+        return
+    for active_client_ids in active_clients_by_company.values():
+        if not active_client_ids:
+            continue
+        if len(active_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+            continue
+        scope_key = _build_fleet_attention_cache_scope_key(
+            active_client_ids=active_client_ids,
+            stale_after_minutes=_INTEGRATION_DEFAULT_STALE_MINUTES,
+            include_low_mode=False,
+            limit=_TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT,
+        )
+        if not _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key):
+            continue
+        task = {
+            "scope_key": scope_key,
+            "active_client_ids": [str(client_id) for client_id in sorted(active_client_ids, key=str)],
+            "stale_after_minutes": _INTEGRATION_DEFAULT_STALE_MINUTES,
+            "include_low_mode": False,
+            "limit": _TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT,
+        }
+        _start_fleet_attention_refresh_task(
+            scope_key=scope_key,
+            task=task,
+            thread_name="tenants-fleet-attention-prewarm-company",
+        )
+
+
 def _schedule_fleet_global_prewarm() -> None:
     if not _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_SCOPE_ENABLED:
         return
@@ -3091,6 +3138,7 @@ def _on_console_session_after_commit(session: Session) -> None:
     scoped_company_ids = {company_id for company_id in raw_company_ids if isinstance(company_id, UUID)}
     if scoped_company_ids:
         _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
+        _schedule_fleet_attention_prewarm_for_company_ids(company_ids=scoped_company_ids)
     if global_prewarm_required:
         _schedule_fleet_global_prewarm()
 
@@ -14769,38 +14817,54 @@ async def list_branches(
     company_uuid = _parse_uuid_param("company_id", company_id)
     client_uuid = _parse_uuid_param("client_id", client_id)
     branch_uuid = _parse_uuid_param("branch_id", branch_id)
-    allowed_client_ids = _accessible_client_ids(context)
-    query = db.query(Branch).filter(Branch.client_id.in_(allowed_client_ids))
-    scoped_company_client_ids: set[UUID] | None = None
+    query = db.query(Branch)
+    client_join_applied = False
+
+    def _ensure_client_join() -> None:
+        nonlocal query, client_join_applied
+        if client_join_applied:
+            return
+        query = query.join(Client, Client.id == Branch.client_id)
+        client_join_applied = True
+
     if company_uuid:
         _require_company_access(context, company_uuid)
-        scoped_company_client_ids = {
-            client.id
-            for client in (context.accessible_clients or [])
-            if client.company_id == company_uuid
-        }
-        if context.client and context.client.company_id == company_uuid:
-            scoped_company_client_ids.add(context.client.id)
-        if not scoped_company_client_ids:
-            return ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
-        query = query.filter(Branch.client_id.in_(scoped_company_client_ids))
+        _ensure_client_join()
+        query = query.filter(Client.company_id == company_uuid)
     if lifecycle_mode == "active":
-        query = query.filter(Branch.is_active.is_(True))
+        _ensure_client_join()
+        query = query.filter(
+            Client.status == "active",
+            Branch.is_active.is_(True),
+        )
     elif lifecycle_mode == "archived":
         query = query.filter(Branch.is_active.is_(False))
     if client_uuid:
         _require_client_access(context, client_uuid)
-        if scoped_company_client_ids is not None and client_uuid not in scoped_company_client_ids:
-            raise ConsoleAPIError(400, "INVALID_PARAM", "client_id does not belong to company_id")
+        if company_uuid is not None:
+            resolved_company_id = _resolve_company_id_for_client_in_context(context, client_uuid)
+            if resolved_company_id is None:
+                resolved_company_id = (
+                    db.query(Client.company_id)
+                    .filter(Client.id == client_uuid)
+                    .scalar()
+                )
+            if resolved_company_id != company_uuid:
+                raise ConsoleAPIError(400, "INVALID_PARAM", "client_id does not belong to company_id")
         query = query.filter(Branch.client_id == client_uuid)
     if branch_uuid:
         _require_branch_access(context, branch_uuid, message="Branch belongs to another tenant")
-        branch_entity = db.query(Branch).filter(Branch.id == branch_uuid).first()
-        if branch_entity is None:
+        branch_scope = (
+            db.query(Branch.client_id.label("client_id"), Client.company_id.label("company_id"))
+            .join(Client, Client.id == Branch.client_id)
+            .filter(Branch.id == branch_uuid)
+            .first()
+        )
+        if branch_scope is None:
             return ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
-        if client_uuid is not None and branch_entity.client_id != client_uuid:
+        if client_uuid is not None and branch_scope.client_id != client_uuid:
             raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
-        if scoped_company_client_ids is not None and branch_entity.client_id not in scoped_company_client_ids:
+        if company_uuid is not None and branch_scope.company_id != company_uuid:
             raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to company_id")
         query = query.filter(Branch.id == branch_uuid)
 
@@ -14940,6 +15004,7 @@ async def get_tenants_company_cockpit(
     request: Request,
     company_id: str,
     client_id: Optional[str] = None,
+    include_branches: Optional[str] = None,
     lifecycle: Optional[str] = None,
     client_limit: int = 20,
     branch_limit: int = 20,
@@ -14956,6 +15021,7 @@ async def get_tenants_company_cockpit(
             {
                 "company_id",
                 "client_id",
+                "include_branches",
                 "lifecycle",
                 "client_limit",
                 "branch_limit",
@@ -14968,6 +15034,7 @@ async def get_tenants_company_cockpit(
         _validate_limit(client_limit)
         _validate_limit(branch_limit)
         lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+        include_branches_mode = _parse_bool_param("include_branches", include_branches, default=True)
 
         company_uuid = _parse_uuid_param("company_id", company_id)
         if company_uuid is None:
@@ -14997,27 +15064,29 @@ async def get_tenants_company_cockpit(
             db=db,
         )
 
-        branches_request = _request_with_query_params(
-            request,
-            {
-                "cursor": branch_cursor,
-                "limit": branch_limit,
-                "q": branch_q,
-                "company_id": str(company_uuid),
-                "client_id": str(selected_client_uuid) if selected_client_uuid else None,
-                "lifecycle": lifecycle_mode,
-            },
-        )
-        branches_response = await list_branches(
-            request=branches_request,
-            cursor=branch_cursor,
-            limit=branch_limit,
-            q=branch_q,
-            company_id=str(company_uuid),
-            client_id=str(selected_client_uuid) if selected_client_uuid else None,
-            lifecycle=lifecycle_mode,
-            db=db,
-        )
+        branches_response = ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+        if include_branches_mode:
+            branches_request = _request_with_query_params(
+                request,
+                {
+                    "cursor": branch_cursor,
+                    "limit": branch_limit,
+                    "q": branch_q,
+                    "company_id": str(company_uuid),
+                    "client_id": str(selected_client_uuid) if selected_client_uuid else None,
+                    "lifecycle": lifecycle_mode,
+                },
+            )
+            branches_response = await list_branches(
+                request=branches_request,
+                cursor=branch_cursor,
+                limit=branch_limit,
+                q=branch_q,
+                company_id=str(company_uuid),
+                client_id=str(selected_client_uuid) if selected_client_uuid else None,
+                lifecycle=lifecycle_mode,
+                db=db,
+            )
 
         return ConsoleTenantsCompanyCockpitResponse(
             generated_at=datetime.now(timezone.utc).isoformat(),

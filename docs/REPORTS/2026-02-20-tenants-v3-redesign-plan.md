@@ -353,3 +353,198 @@
 
 5. Interpretation.
 - Wave 6 canary evidence is now complete for this rollout slice: deterministic e2e/a11y lanes are green, deployed build is verified, and runtime SLO snapshot is within thresholds.
+
+## Post-merge perf recheck (2026-02-24, UTC)
+1. Runtime tenants perf snapshot refreshed after latest merge.
+- Command:
+  - `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --pretty --output /tmp/tenants_perf_snapshot_20260224_postmerge.json`
+- Artifact:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-merge-20260224.json`
+
+2. Current p95/p99 status from Prometheus histogram.
+- `portfolio`: `p95=1000ms`, `p99=1000ms`, SLO `<1200ms` pass (`samples=2`).
+- `company_cockpit`: `p95=250ms`, `p99=250ms`, SLO `<1000ms` pass (`samples=1`).
+- `branches GET`: `p95=2500ms`, `p99=2500ms`, SLO `<800ms` fail (`samples=3`).
+- Overall script result: `status=fail`, `required_slo_failed=true`.
+
+3. Interpretation.
+- Wave 1 contract alignment is complete, but Wave 4 runtime performance work remains open because `branches` p95/p99 exceeds target in latest snapshot and requires branch-list path optimization / targeted runtime profiling.
+
+## Branch-path optimization + SLO recovery recheck (2026-02-24, UTC)
+1. Root-cause facts confirmed before optimization.
+- `branches` histogram snapshot had low sample size (`samples=3`) with high upper bucket (`p95/p99=2500ms`), making branch SLO unstable in low-traffic window.
+- Code inspection of `/admin/branches` showed scalability risk for large fleets: base query relied on `Branch.client_id IN accessible_client_ids` set assembled from context.
+
+2. Optimization implemented in codebase.
+- `/admin/branches` query path now uses `Client` join filters (`status/company`) instead of large `client_id IN (...)` pre-filter for platform-admin scope.
+- Added branch-list perf indexes in migration:
+  - `truffles-api/migrations/040_add_branches_listing_perf_indexes.sql`
+  - `idx_branches_client_active_created_desc`
+  - `idx_branches_active_created_desc`
+  - `idx_clients_status_company_id`
+- Extended backend contract tests for branch path and large scope filtering in `truffles-api/tests/test_console_tenants_list.py`.
+
+3. Runtime recheck after authenticated load.
+- Authenticated request baseline artifact:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-authenticated-perf-baseline-20260224-post-branches-load.json`
+  - `branches (company scope): p95=83ms, p99=98ms (40 calls, all 200)`
+  - `portfolio: p95=531ms, p99=556ms (20 calls, all 200)`
+  - `company_cockpit: p95=635ms (company), p95=366ms (company+client), all 200`
+- Prometheus snapshot after auth load:
+  - command: `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --pretty --output /tmp/tenants_perf_snapshot_20260224_after_authload_recheck.json`
+  - artifact: `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260224-recheck.json`
+  - `branches p95=100ms (samples=80)` pass
+  - `portfolio p95=500ms (samples=40)` pass
+  - `company_cockpit p95=500ms (samples=41)` pass
+  - overall `status=pass`.
+
+4. Interpretation.
+- Runtime SLO breach from the low-sample snapshot is no longer reproduced after controlled authenticated load.
+- Wave 4 remains `done/partial` because full incremental precompute pipeline and large-fleet reproducible perf regimen are still pending, but current branch-list path and runtime metrics are back within SLO thresholds.
+
+## Wave 3 decomposition continuation: query/context hooks (2026-02-24, UTC)
+1. Implemented extraction from `tenants/page.tsx`.
+- Added `console-web/src/app/tenants/use-tenants-data-queries.ts` for tenants query orchestration (`companies/portfolio/company-cockpit/clients/branches/fleet-attention/branch-changes/audit/weekly-snapshots`).
+- Added `console-web/src/app/tenants/use-tenants-actions.ts` for context-chain actions (`set company/client/branch`, `apply context to filters`, branch-context validation).
+- `console-web/src/app/tenants/page.tsx` now composes hook outputs and remains feature-equivalent for current operator flows.
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `2789` to `2487` LOC.
+- Regression surface reduced for data/context concerns; remaining large action pipelines are still in page and stay in backlog for next decomposition step.
+
+3. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`)
+
+4. Interpretation.
+- `orchestration-only` target is an architectural constraint (isolate data/actions from view composition), not a reduction of control surface.
+- Functional operator control remains intact (`create/edit/archive/restore/publish/rollback/context`), while decomposition advances incrementally.
+
+## Wave 3 decomposition continuation: intent/KPI handlers (2026-02-24, UTC)
+1. Implemented extraction from `tenants/page.tsx`.
+- `runActionQueueIntent`, `runKpiAction`, and client target navigation moved into `console-web/src/app/tenants/use-tenants-actions.ts`.
+- Page now consumes these handlers from hook output and keeps the same panel wiring (`ActionQueue`, `OperationalKpi`, `FleetAttention`).
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `2487` to `2422` LOC.
+- Query/context/intent orchestration is now centralized in hooks; remaining large action pipelines (quick-create/CRUD/lifecycle/branch-change) stay in page backlog.
+
+3. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`)
+
+4. Interpretation.
+- Decomposition is progressing without contract loss; operator control remains unchanged while architectural blast radius is reduced step-by-step.
+
+## Wave 3 decomposition continuation: quick-create handlers (2026-02-24, UTC)
+1. Implemented extraction from `tenants/page.tsx`.
+- `handleQuickCreateCompany`, `handleQuickCreateClient`, and `handleQuickCreateBranch` moved into `console-web/src/app/tenants/use-tenants-actions.ts`.
+- `console-web/src/app/tenants/page.tsx` now only consumes these handlers from hook output and keeps the same `TenantsQuickCreatePanel` contract (`onCreateCompany/onCreateClient/onCreateBranch`).
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `2422` to `2301` LOC.
+- Query/context/intent/quick-create orchestration is now centralized in hooks; remaining page-heavy pipelines are CRUD/lifecycle/branch-change.
+
+3. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`)
+- `scripts/session_check.sh` (pass)
+
+4. Interpretation.
+- Decomposition remains behavior-preserving: operator control surface is unchanged while orchestration blast radius continues to shrink.
+
+## Wave 3 decomposition continuation: company/client save handlers (2026-02-24, UTC)
+1. Implemented extraction from `tenants/page.tsx`.
+- `handleSaveCompany` and `handleSaveClient` moved into `console-web/src/app/tenants/use-tenants-actions.ts`.
+- `page.tsx` now consumes save handlers from hook output; panel contracts stay unchanged (`onSaveEdit`, `onSaveClientEdit`).
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `2301` to `2214` LOC.
+- Query/context/intent/quick-create/company-client-save orchestration is centralized in hooks; remaining page-heavy flows are lifecycle/branch-change and editor bootstrap.
+
+3. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`)
+- `scripts/session_check.sh` (pass)
+
+4. Interpretation.
+- Decomposition remains behavior-preserving and incremental: operator actions are unchanged while regression surface continues to shrink.
+
+## Wave 3 decomposition continuation: editor bootstrap + lifecycle + branch-change pipelines (2026-02-24, UTC)
+1. Implemented extraction from `tenants/page.tsx`.
+- Moved editor bootstrap handlers to hook:
+  - `startCompanyEdit`
+  - `startClientEdit`
+  - `startBranchEdit`
+- Moved lifecycle pipeline handlers to hook:
+  - `openClientLifecycleAction`
+  - `closeClientLifecycleDraft`
+  - `handleClientLifecycleAction`
+- Moved branch-change pipeline handlers to hook:
+  - `requiresBranchConfirmation`
+  - `handlePreviewBranchChange`
+  - `handlePublishBranchChange`
+  - `handleRollbackBranchChange`
+  - `cancelBranchEdit`
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `2214` to `1883` LOC.
+- `useTenantsActions` now owns main action orchestration (context/intent/quick-create/save/editor bootstrap/lifecycle/branch-change), while page is mostly compose + derived state.
+
+3. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`)
+- `scripts/session_check.sh` (pass)
+
+4. Interpretation.
+- Selected Wave 3 goals (`1/2/3`) are completed for this slice without behavioral regression in deterministic checks.
+
+## Wave 3/4 continuation: scope-derived hook + company attention prewarm (2026-02-24, UTC)
+1. Implemented decomposition continuation for derived scope state.
+- Added `console-web/src/app/tenants/use-tenants-scope-derived-state.ts`.
+- Moved context-derived names/maps/filter-options from page into hook:
+  - `clientCompanyIdById`, `branchClientIdById`, `branchCompanyIdById`
+  - `selectedCompanyName`, `selectedClientName`, `selectedBranchName`
+  - `pageFilterCompanyOptions`, `pageFilterClientOptions`, `pageFilterBranchOptions`
+- `tenants/page.tsx` now consumes derived scope model instead of in-file mapping blocks.
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `1883` to `1723` LOC.
+- Regression surface for scope derivation is isolated in dedicated hook, while operator control flow remains unchanged.
+
+3. Implemented Wave 4 targeted prewarm continuation.
+- Added company-scope fleet-attention prewarm worker:
+  - `_schedule_fleet_attention_prewarm_for_company_ids`
+  - wired from `after_commit` alongside existing summary prewarm.
+- Added env contract for company attention prewarm limit:
+  - `_TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT`
+- Extended backend tests in `truffles-api/tests/test_console_tenants_list.py`:
+  - `test_on_console_session_after_commit_schedules_company_prewarm` now verifies both summary + attention schedulers.
+  - `test_schedule_fleet_attention_prewarm_for_company_ids_starts_refresh_task`.
+
+4. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py -k "prewarm or invalidate_tenants_fleet_cache_scope or on_console_session_after_commit"` (`8 passed`)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`85 passed`)
+
+5. Runtime evidence refresh.
+- Command:
+  - `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --pretty --output /tmp/tenants_perf_snapshot_20260224_company_attention_prewarm.json`
+- Artifact:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-company-attention-prewarm-20260224.json`
+- Snapshot status:
+  - `branches p95=100ms` (samples=76) pass
+  - `portfolio p95=50ms` (samples=2) pass
+  - `company_cockpit p95=10ms` (samples=2) pass
+  - overall `status=pass`.
+
+6. Interpretation.
+- Wave 3 decomposition and Wave 4 targeted prewarm moved forward without behavior loss in deterministic checks.
+- Remaining Wave 4 backlog stays unchanged: full incremental precompute pipeline (`event stream -> targeted/global strategy`) for very large fleets.

@@ -104,10 +104,50 @@
   - Applied deploy fix for strict typing: `waitForLoginTransition` now uses typed `transition()` helper so both Promise branches return exact `TransitionResult` shape without literal widening.
   - Local validation completed for deploy fix: `corepack pnpm -C console-web run build`, `corepack pnpm -C console-web run lint`, `scripts/session_check.sh`.
   - Opened hotfix PR with deploy fix: `https://github.com/k1ddy/Truffles-AI-Employee/pull/809` (`fix(deploy): resolve console-web type error in e2e global setup`).
+  - Post-merge factual audit completed on `main@0f90099c` vs TP execution matrix: Waves 0/2/6/flag rollout are `done`, Wave 1 and Wave 4 remain `done/partial` with explicit remaining scope (large-company perf contracts + full incremental precompute evidence).
+  - Wave 1 contract debt reduced: `/admin/tenants/company-cockpit` now supports `include_branches` (`true` by default), and `/tenants` sends `include_branches=false` so cockpit request path no longer duplicates branch payload/compute already fetched via `/admin/branches`.
+  - Added backend contract test `test_get_tenants_company_cockpit_skips_branches_when_not_requested` to guarantee `list_branches` is not called in `include_branches=false` mode.
+  - Updated TP/STATE factual status to reflect completed cockpit payload dedupe and remaining items.
+  - Validation for this continuation: `pytest -q truffles-api/tests/test_console_tenants_list.py -k "company_cockpit"` (`3 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`80 passed`), `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `python3 truffles-api/scripts/generate_openapi.py --check`.
+  - Continued on top of fresh base merge `origin/main@802af698` (merge-only, no rebase) to keep TP execution on current mainline.
+  - Closed remaining Wave1 large-scope perf-contract test debt for `company-cockpit`:
+    - `test_get_tenants_company_cockpit_passes_large_scope_pagination_contract`
+    - `test_get_tenants_company_cockpit_rejects_oversized_limits_before_subqueries`
+  - Continued Wave4 decomposition with behavior-preserving extraction of operational KPI rules/compute into `console-web/src/app/tenants/operational-kpi.ts`; `tenants/page.tsx` reduced from `2969` to `2789` LOC.
+  - Captured post-merge runtime perf snapshot artifact `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-merge-20260224.json` and synced report/TP facts:
+    - `portfolio p95=1000ms (p99=1000ms)` pass
+    - `company_cockpit p95=250ms (p99=250ms)` pass
+    - `branches p95=2500ms (p99=2500ms)` fail
+  - Validation for this continuation: `pytest -q truffles-api/tests/test_console_tenants_list.py -k "company_cockpit or oversized_limits or large_scope_pagination"` (`6 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`83 passed`), `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`.
+  - Closed Wave4 branch-path perf gap: `/admin/branches` query no longer starts with large `Branch.client_id IN (...)`; path now scopes through `Client` join filters (`company/status`) and keeps strict company/client/branch consistency guards.
+  - Added branch-list runtime perf indexes in `truffles-api/migrations/040_add_branches_listing_perf_indexes.sql` (`idx_branches_client_active_created_desc`, `idx_branches_active_created_desc`, `idx_clients_status_company_id`).
+  - Extended branch contract coverage in `truffles-api/tests/test_console_tenants_list.py` with `test_list_branches_company_scope_filters_on_clients_company_id` and updated query mock helpers for join/filter predicate assertions.
+  - Captured authenticated runtime perf baseline and post-load Prometheus snapshot artifacts:
+    - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-authenticated-perf-baseline-20260224-post-branches-load.json`
+    - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260224-recheck.json`
+    - Result: `branches p95=100ms`, `portfolio p95=500ms`, `company_cockpit p95=500ms`, overall snapshot `status=pass`.
+  - Validation for branch-path continuation: `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py`, `pytest -q truffles-api/tests/test_console_tenants_list.py -k "list_branches or company_cockpit"` (`13 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`), `python3 truffles-api/scripts/generate_openapi.py --check`, `scripts/session_check.sh`.
+  - Wave3 decomposition continuation delivered: extracted `useTenantsDataQueries` (React Query orchestration) and `useTenantsActions` (context chain actions) from `tenants/page.tsx` while preserving operator control contract.
+  - `tenants/page.tsx` reduced from `2789` to `2487` LOC; data/query wiring moved to `console-web/src/app/tenants/use-tenants-data-queries.ts`, context synchronization moved to `console-web/src/app/tenants/use-tenants-actions.ts`.
+  - Wave3 decomposition continuation part 2 delivered: moved `runActionQueueIntent`, `runKpiAction`, and client target navigation handlers from `tenants/page.tsx` into `useTenantsActions`.
+  - `tenants/page.tsx` reduced further from `2487` to `2422` LOC while preserving current UI behavior and panel wiring.
+  - Wave3 decomposition continuation part 3 delivered: moved quick-create handlers (`handleQuickCreateCompany`, `handleQuickCreateClient`, `handleQuickCreateBranch`) from `tenants/page.tsx` into `useTenantsActions`.
+  - `tenants/page.tsx` reduced from `2422` to `2301` LOC while keeping `TenantsQuickCreatePanel` behavior and action contracts unchanged.
+  - Wave3 decomposition continuation part 4 delivered: moved company/client save handlers (`handleSaveCompany`, `handleSaveClient`) from `tenants/page.tsx` into `useTenantsActions`.
+  - `tenants/page.tsx` reduced from `2301` to `2214` LOC while keeping company/client edit save behavior unchanged.
+  - Wave3 decomposition continuation part 5 delivered: moved editor bootstrap (`startCompanyEdit/startClientEdit/startBranchEdit`), lifecycle (`open/close/submit`) and branch-change (`preview/publish/rollback/cancel`) pipelines from `tenants/page.tsx` into `useTenantsActions`.
+  - `tenants/page.tsx` reduced from `2214` to `1883` LOC while keeping clients/lifecycle/branch-change panel contracts unchanged.
+  - Updated canon docs for factual status and semantics: TP clarifies that `orchestration-only` is architectural isolation (not loss of control), and report captures the decomposition continuation with checks/evidence.
+  - Validation for decomposition continuation: `corepack pnpm -C console-web run lint` (pass), `corepack pnpm -C console-web run build` (pass), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`), `scripts/session_check.sh`.
+  - Wave3/4 continuation delivered: added `console-web/src/app/tenants/use-tenants-scope-derived-state.ts` and moved scope-derived context names/maps/filter options out of `tenants/page.tsx` (`1883 -> 1723` LOC), preserving current control flows.
+  - Wave4 targeted prewarm continuation delivered: added affected-company attention prewarm (`_schedule_fleet_attention_prewarm_for_company_ids`) and wired it from `after_commit` together with summary prewarm.
+  - Added/updated backend contracts: `test_on_console_session_after_commit_schedules_company_prewarm` now checks summary+attention scheduling, and `test_schedule_fleet_attention_prewarm_for_company_ids_starts_refresh_task` validates company attention prewarm payload.
+  - Refreshed runtime perf evidence: `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-company-attention-prewarm-20260224.json` (`status=pass`, `branches p95=100ms`, `portfolio p95=50ms`, `company_cockpit p95=10ms`).
+  - Validation for this continuation: `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py`, `pytest -q truffles-api/tests/test_console_tenants_list.py -k "prewarm or invalidate_tenants_fleet_cache_scope or on_console_session_after_commit"` (`8 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`85 passed`), `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --pretty --output /tmp/tenants_perf_snapshot_20260224_company_attention_prewarm.json`.
 - next:
-  - Дождаться зелёного CI для PR `#809` и merge в `main`, затем перепроверить deploy run на parity.
-  - После merge зафиксировать runtime perf snapshot после серии tenant write операций (stale-window evidence + cache hit ratio для non-affected companies).
-  - Следующий шаг Wave4/F5: расширить targeted precompute на global summary/attention strategy без full cold-start.
+  - Wave4 remaining backlog: довести incremental precompute pipeline до устойчивой модели для large fleet (event stream -> targeted precompute strategy) и закрепить long-run perf evidence.
+  - Продолжить декомпозицию `tenants/page.tsx`: вынести remaining helper/formatting блоки (`branch patch/snapshot helpers`, audit mapping/formatters) в отдельные tenant modules для дальнейшего уменьшения blast radius.
+  - Зафиксировать post-merge CI/deploy evidence для текущего continuation после публикации ветки/PR.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -173,7 +213,19 @@
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22329292602
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22329943275
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/809
+  - truffles-api/migrations/040_add_branches_listing_perf_indexes.sql
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-authenticated-perf-baseline-20260224-post-branches-load.json
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260224-recheck.json
+  - console-web/src/app/tenants/use-tenants-data-queries.ts
+  - console-web/src/app/tenants/use-tenants-actions.ts
+  - console-web/src/app/tenants/use-tenants-scope-derived-state.ts
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-company-attention-prewarm-20260224.json
+  - /tmp/tenants_perf_snapshot_20260224_company_attention_prewarm.json
   - console-web/e2e/global-setup.ts
+  - console-web/src/app/tenants/page.tsx
+  - console-web/src/lib/api-client.ts
+  - truffles-api/app/routers/console.py
+  - truffles-api/tests/test_console_tenants_list.py
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-23T23:49:10Z
+- last_updated: 2026-02-24T03:25:00Z
