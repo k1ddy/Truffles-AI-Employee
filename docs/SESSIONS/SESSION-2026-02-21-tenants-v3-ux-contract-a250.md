@@ -166,8 +166,13 @@
   - Added reproducible authenticated long-run perf lane `ops/console_tenants_perf_long_run.py` (load profile for `portfolio/company-cockpit/branches` + integrated snapshot gate via `ops/console_tenants_perf_snapshot.py`).
   - Captured long-run runtime artifacts: `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-long-run-20260224.json` and `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-long-run-snapshot-20260224.json` (`status=pass`, `request_failures=0`, samples `portfolio=112`, `company_cockpit=111`, `branches=144`, p95 `500/250/100 ms`).
   - Validation for this continuation: `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py ops/console_tenants_perf_snapshot.py ops/console_tenants_perf_long_run.py`, `python3 -m py_compile ops/console_tenants_perf_snapshot.py ops/console_tenants_perf_long_run.py`, `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`93 passed`), `python3 truffles-api/scripts/generate_openapi.py --check`.
+  - Wave4 continuation delivered: added scheduled projection maintenance compaction with interval gate (`_maybe_run_fleet_projection_maintenance`) wired into summary/attention refresh workers and incremental prewarm dispatch worker.
+  - Added projection compaction observability metrics in `logging_config.py`: run outcome, deleted rows total, and latest deleted rows gauge (`console_tenants_fleet_projection_compaction_*`).
+  - Added contract tests for stale-row compaction delete path and maintenance interval throttling in `truffles-api/tests/test_console_tenants_list.py`.
+  - Opened continuation PR: `https://github.com/k1ddy/Truffles-AI-Employee/pull/816`.
+  - CI stop-the-line handled for PR `#816`: `session-gate` failed due missing `docs/SESSIONS + docs/SESSION_INDEX` updates (`https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22345304849`), fixed in follow-up commit.
 - next:
-  - Wave4 remaining backlog: эволюция к fully materialized fleet read-model/backpressure policy для very-large-fleet (10M+ tenants path), при сохранении текущего fail-open контракта.
+  - Wave4 remaining backlog: довести materialized projection до fully async/offline режима (reduce request-time fallback share на very-large-fleet) с сохранением fail-open контракта.
   - Wave3 remaining backlog: вынести оставшийся compose wiring из `tenants/page.tsx` в lightweight orchestration hook без потери operator control.
   - Закрепить perf governance: добавить регулярный CI/manual lane запуск `ops/console_tenants_perf_long_run.py` с версионируемыми артефактами в report pipeline.
 - evidence:
@@ -238,6 +243,8 @@
   - truffles-api/migrations/040_add_branches_listing_perf_indexes.sql
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-authenticated-perf-baseline-20260224-post-branches-load.json
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260224-recheck.json
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/816
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22345304849
   - console-web/src/app/tenants/use-tenants-data-queries.ts
   - console-web/src/app/tenants/use-tenants-actions.ts
   - console-web/src/app/tenants/use-tenants-scope-derived-state.ts
@@ -260,4 +267,4 @@
   - truffles-api/tests/test_console_tenants_list.py
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-24T08:12:00Z
+- last_updated: 2026-02-24T09:47:24Z
