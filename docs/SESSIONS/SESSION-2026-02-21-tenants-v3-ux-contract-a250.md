@@ -8,6 +8,7 @@
 - base_ref: origin/main
 - scope: Контракт состояния Tenants + Wave3 snapshot hardening + частичное переключение Tenants на server contract (`portfolio/cockpit`)
 - done:
+  - Wave4 continuation (part 9): request fallback path now enqueues throttled company-scope projection self-healing prewarm when fallback clients are not fully sync-persisted; added env controls `TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_*` and contract tests (`test_load_or_build_fleet_client_details_map_enqueues_projection_fallback_prewarm_for_unpersisted_clients`, `test_load_or_build_fleet_client_details_map_skips_projection_fallback_prewarm_when_all_fallback_clients_persisted`, `test_throttle_projection_fallback_prewarm_company_ids_respects_interval`), checks green (`ruff`, `pytest ...` -> `104 passed`).
   - Дополнен действующий TP контрактами состояния, матрицей поведения, глоссарием и acceptance сценариями.
   - Исправлен `apply context` в Tenants: источник теперь `readConsoleContextScopeFromStorage`, а не stale `meData`.
   - В верхних контролах Tenants убраны смешанные тех-термины и RU/EN-микс в key labels.
@@ -171,6 +172,10 @@
   - Added contract tests for stale-row compaction delete path and maintenance interval throttling in `truffles-api/tests/test_console_tenants_list.py`.
   - Opened continuation PR: `https://github.com/k1ddy/Truffles-AI-Employee/pull/816`.
   - CI stop-the-line handled for PR `#816`: `session-gate` failed due missing `docs/SESSIONS + docs/SESSION_INDEX` updates (`https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22345304849`), fixed in follow-up commit.
+  - Post-merge fact check confirmed PR `#816` merged in `origin/main@687a3bcf`; scheduled compaction + compaction observability is now mainline.
+  - Wave4 continuation delivered (part 8): request/cache-miss paths now persist bounded fallback projection results (`TENANTS_FLEET_CLIENT_PROJECTION_REQUEST_PERSIST_ENABLED`, `TENANTS_FLEET_CLIENT_PROJECTION_REQUEST_PERSIST_MAX_CLIENTS`) across `list_clients` (fleet/filter/summary miss) and `fleet_attention`, reducing repeated request-time fallback compute while keeping response payload complete.
+  - Added/updated contracts for bounded persist path: `test_load_or_build_fleet_client_details_map_respects_persist_limit`, `test_build_fleet_attention_response_requests_projection_persist`, `test_list_clients_stores_summary_in_cache_after_miss` (persist kwargs), `test_list_clients_filters_by_fleet_payment` (persist kwargs).
+  - Validation for part 8: `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py` (pass), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`101 passed`).
 - next:
   - Wave4 remaining backlog: довести materialized projection до fully async/offline режима (reduce request-time fallback share на very-large-fleet) с сохранением fail-open контракта.
   - Wave3 remaining backlog: вынести оставшийся compose wiring из `tenants/page.tsx` в lightweight orchestration hook без потери operator control.
@@ -267,4 +272,4 @@
   - truffles-api/tests/test_console_tenants_list.py
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-24T09:47:24Z
+- last_updated: 2026-02-24T10:25:08Z
