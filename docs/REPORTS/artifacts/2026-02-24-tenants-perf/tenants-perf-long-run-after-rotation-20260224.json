@@ -1,0 +1,102 @@
+{
+  "base_url": "https://api.truffles.kz",
+  "generated_at": "2026-02-24T12:44:24.483974+00:00",
+  "loops": 120,
+  "metrics_url": "https://api.truffles.kz/metrics",
+  "request_failures": 0,
+  "request_failures_allowed": false,
+  "request_failures_failed": false,
+  "request_stats": {
+    "branches": {
+      "errors": [],
+      "failed": 0,
+      "ok": 120,
+      "statuses": {
+        "200": 120
+      }
+    },
+    "company_cockpit": {
+      "errors": [],
+      "failed": 0,
+      "ok": 120,
+      "statuses": {
+        "200": 120
+      }
+    },
+    "portfolio": {
+      "errors": [],
+      "failed": 0,
+      "ok": 120,
+      "statuses": {
+        "200": 120
+      }
+    }
+  },
+  "resolved_scope": {
+    "branch_id": null,
+    "client_id": "c839d5dd-65be-4733-a5d2-72c9f70707f0",
+    "company_id": "6a510116-a633-4ce0-91e2-972e51221b49"
+  },
+  "sleep_ms": 0,
+  "snapshot": {
+    "branches_get_latency": {
+      "/console/v1/admin/branches": {
+        "p50_ms": 50.0,
+        "p95_ms": 100.0,
+        "p95_slo_ms": 800.0,
+        "p95_slo_pass": true,
+        "p99_ms": 500.0,
+        "samples": 180
+      }
+    },
+    "error": null,
+    "generated_at": "2026-02-24T12:44:24.461004+00:00",
+    "metrics_url": "https://api.truffles.kz/metrics",
+    "projection_observability": {
+      "coverage_pass": true,
+      "coverage_ratio": 1.0,
+      "coverage_target_min": 0.7,
+      "fallback_pass": true,
+      "fallback_ratio": 0.0,
+      "fallback_target_max": 0.3,
+      "freshness_lag_seconds": 14.561,
+      "freshness_lag_target_max_seconds": 900.0,
+      "freshness_pass": true,
+      "required": true
+    },
+    "required_projection_gate_failed": false,
+    "required_sample_size_failed": false,
+    "required_slo_failed": false,
+    "sample_targets": {
+      "branches_min_samples": 80,
+      "company_cockpit_min_samples": 40,
+      "portfolio_min_samples": 40
+    },
+    "slo_targets_ms": {
+      "branches_get_p95": 800.0,
+      "company_cockpit_p95": 1000.0,
+      "portfolio_p95": 1200.0
+    },
+    "status": "pass",
+    "tenants_endpoint_latency": {
+      "company_cockpit": {
+        "p50_ms": 50.0,
+        "p95_ms": 100.0,
+        "p95_slo_ms": 1000.0,
+        "p95_slo_pass": true,
+        "p99_ms": 250.0,
+        "samples": 123
+      },
+      "portfolio": {
+        "p50_ms": 100.0,
+        "p95_ms": 250.0,
+        "p95_slo_ms": 1200.0,
+        "p95_slo_pass": true,
+        "p99_ms": 500.0,
+        "samples": 125
+      }
+    }
+  },
+  "started_at": "2026-02-24T12:42:20.443112+00:00",
+  "status": "pass"
+}
