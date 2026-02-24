@@ -401,3 +401,22 @@
 4. Interpretation.
 - Runtime SLO breach from the low-sample snapshot is no longer reproduced after controlled authenticated load.
 - Wave 4 remains `done/partial` because full incremental precompute pipeline and large-fleet reproducible perf regimen are still pending, but current branch-list path and runtime metrics are back within SLO thresholds.
+
+## Wave 3 decomposition continuation: query/context hooks (2026-02-24, UTC)
+1. Implemented extraction from `tenants/page.tsx`.
+- Added `console-web/src/app/tenants/use-tenants-data-queries.ts` for tenants query orchestration (`companies/portfolio/company-cockpit/clients/branches/fleet-attention/branch-changes/audit/weekly-snapshots`).
+- Added `console-web/src/app/tenants/use-tenants-actions.ts` for context-chain actions (`set company/client/branch`, `apply context to filters`, branch-context validation).
+- `console-web/src/app/tenants/page.tsx` now composes hook outputs and remains feature-equivalent for current operator flows.
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `2789` to `2487` LOC.
+- Regression surface reduced for data/context concerns; remaining large action pipelines are still in page and stay in backlog for next decomposition step.
+
+3. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`)
+
+4. Interpretation.
+- `orchestration-only` target is an architectural constraint (isolate data/actions from view composition), not a reduction of control surface.
+- Functional operator control remains intact (`create/edit/archive/restore/publish/rollback/context`), while decomposition advances incrementally.

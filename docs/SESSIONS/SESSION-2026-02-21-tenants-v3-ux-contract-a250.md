@@ -127,9 +127,13 @@
     - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260224-recheck.json`
     - Result: `branches p95=100ms`, `portfolio p95=500ms`, `company_cockpit p95=500ms`, overall snapshot `status=pass`.
   - Validation for branch-path continuation: `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py`, `pytest -q truffles-api/tests/test_console_tenants_list.py -k "list_branches or company_cockpit"` (`13 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`), `python3 truffles-api/scripts/generate_openapi.py --check`, `scripts/session_check.sh`.
+  - Wave3 decomposition continuation delivered: extracted `useTenantsDataQueries` (React Query orchestration) and `useTenantsActions` (context chain actions) from `tenants/page.tsx` while preserving operator control contract.
+  - `tenants/page.tsx` reduced from `2789` to `2487` LOC; data/query wiring moved to `console-web/src/app/tenants/use-tenants-data-queries.ts`, context synchronization moved to `console-web/src/app/tenants/use-tenants-actions.ts`.
+  - Updated canon docs for factual status and semantics: TP clarifies that `orchestration-only` is architectural isolation (not loss of control), and report captures the decomposition continuation with checks/evidence.
+  - Validation for decomposition continuation: `corepack pnpm -C console-web run lint` (pass), `corepack pnpm -C console-web run build` (pass), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`), `scripts/session_check.sh`.
 - next:
   - Wave4 remaining backlog: довести incremental precompute pipeline до устойчивой модели для large fleet (event stream -> targeted precompute strategy) и закрепить long-run perf evidence.
-  - Продолжить декомпозицию `tenants/page.tsx` через безопасное вынесение следующего orchestration блока без изменения UX-контракта.
+  - Продолжить декомпозицию `tenants/page.tsx`: вынести CRUD/lifecycle/branch-change action pipelines из страницы в `useTenantsActions` без изменения UX-контракта.
   - Зафиксировать post-merge CI/deploy evidence для текущего continuation после публикации ветки/PR.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
@@ -199,6 +203,8 @@
   - truffles-api/migrations/040_add_branches_listing_perf_indexes.sql
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-authenticated-perf-baseline-20260224-post-branches-load.json
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260224-recheck.json
+  - console-web/src/app/tenants/use-tenants-data-queries.ts
+  - console-web/src/app/tenants/use-tenants-actions.ts
   - console-web/e2e/global-setup.ts
   - console-web/src/app/tenants/page.tsx
   - console-web/src/lib/api-client.ts
@@ -206,4 +212,4 @@
   - truffles-api/tests/test_console_tenants_list.py
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-24T01:42:02Z
+- last_updated: 2026-02-24T02:06:26Z

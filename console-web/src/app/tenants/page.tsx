@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { InfiniteData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
@@ -22,7 +22,6 @@ import type { TenantsSensitiveAction } from "@/components/TenantsSensitiveIdCell
 import TenantsTopControls, { type TenantsFilterOption } from "@/components/TenantsTopControls";
 import {
     adminApi,
-    auditApi,
     authApi,
     canAccessConsole,
     confirmationsApi,
@@ -33,7 +32,6 @@ import {
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 import {
     readConsoleContextScopeFromStorage,
-    setConsoleContextScope,
 } from "@/lib/console-context-storage";
 import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
 import {
@@ -46,6 +44,8 @@ import {
     type OperationalKpiId,
     type OperationalKpiStatus,
 } from "./operational-kpi";
+import { useTenantsDataQueries } from "./use-tenants-data-queries";
+import { useTenantsActions } from "./use-tenants-actions";
 import { useTenantsPageFilters } from "./use-tenants-page-filters";
 
 type CompanyEditorState = {
@@ -808,220 +808,32 @@ export default function TenantsPage() {
         );
     }, [clientLifecycleAuditById]);
 
-    const companiesQuery = useInfiniteQuery<
-        components["schemas"]["ConsoleCompanyListResponse"],
-        Error,
-        InfiniteData<components["schemas"]["ConsoleCompanyListResponse"], string | undefined>,
-        ["tenants-companies", string | undefined],
-        string | undefined
-    >({
-        queryKey: ["tenants-companies", companyQueryValue],
-        queryFn: async ({ pageParam }) => {
-            const cursor = typeof pageParam === "string" ? pageParam : undefined;
-            const response = await adminApi.listCompanies({
-                cursor,
-                limit: 20,
-                q: companyQueryValue,
-            });
-            return response.data;
-        },
-        initialPageParam: undefined,
-        getNextPageParam: (lastPage) =>
-            lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
-        enabled: tenantsEnabled,
-    });
-    const tenantsPortfolioQuery = useQuery({
-        queryKey: [
-            "tenants-portfolio",
-            clientQueryValue,
-            pageFilterCompanyId,
-            tenantLifecycle,
-            fleetLifecycleFilter,
-            fleetPaymentFilter,
-            fleetServiceFilter,
-        ],
-        queryFn: async () => {
-            const response = await adminApi.getTenantsPortfolio({
-                limit: 20,
-                q: clientQueryValue,
-                company_id: pageFilterCompanyId ?? undefined,
-                lifecycle: tenantLifecycle,
-                attention_limit: 12,
-                stale_after_minutes: 60,
-                include_low: "false",
-            });
-            return response.data;
-        },
-        enabled: tenantsEnabled,
-        staleTime: 30000,
-    });
-    const tenantsCompanyCockpitQuery = useQuery({
-        queryKey: [
-            "tenants-company-cockpit",
-            pageFilterCompanyId,
-            pageFilterClientId,
-            clientQueryValue,
-            branchQueryValue,
-            tenantLifecycle,
-        ],
-        queryFn: async () => {
-            if (!pageFilterCompanyId) {
-                return null;
-            }
-            const response = await adminApi.getTenantsCompanyCockpit({
-                company_id: pageFilterCompanyId,
-                client_id: pageFilterClientId ?? undefined,
-                include_branches: "false",
-                lifecycle: tenantLifecycle,
-                client_limit: 20,
-                client_q: clientQueryValue,
-            });
-            return response.data;
-        },
-        enabled: tenantsEnabled && !!pageFilterCompanyId,
-        staleTime: 30000,
-    });
-
-    const clientsQuery = useInfiniteQuery<
-        components["schemas"]["ConsoleClientListResponse"],
-        Error,
-        InfiniteData<components["schemas"]["ConsoleClientListResponse"], string | undefined>,
-        [
-            "tenants-clients",
-            string | undefined,
-            string | null,
-            TenantLifecycleMode,
-            FleetLifecycleFilter,
-            FleetPaymentFilter,
-            FleetServiceFilter,
-        ],
-        string | undefined
-    >({
-        queryKey: [
-            "tenants-clients",
-            clientQueryValue,
-            pageFilterCompanyId,
-            tenantLifecycle,
-            fleetLifecycleFilter,
-            fleetPaymentFilter,
-            fleetServiceFilter,
-        ],
-        queryFn: async ({ pageParam }) => {
-            const cursor = typeof pageParam === "string" ? pageParam : undefined;
-            const response = await adminApi.listClients({
-                cursor,
-                limit: 20,
-                q: clientQueryValue,
-                company_id: pageFilterCompanyId ?? undefined,
-                lifecycle: tenantLifecycle,
-                include_fleet: "true",
-                include_summary: cursor ? undefined : "true",
-                fleet_lifecycle: fleetLifecycleFilter === "all" ? undefined : fleetLifecycleFilter,
-                payment_status: fleetPaymentFilter === "all" ? undefined : fleetPaymentFilter,
-                service_state: fleetServiceFilter === "all" ? undefined : fleetServiceFilter,
-            });
-            return response.data;
-        },
-        initialPageParam: undefined,
-        getNextPageParam: (lastPage) =>
-            lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
-        enabled: tenantsEnabled,
-    });
-
-    const branchesQuery = useInfiniteQuery<
-        components["schemas"]["ConsoleBranchListResponse"],
-        Error,
-        InfiniteData<components["schemas"]["ConsoleBranchListResponse"], string | undefined>,
-        ["tenants-branches", string | undefined, string | null, string | null, string | null, TenantLifecycleMode],
-        string | undefined
-    >({
-        queryKey: ["tenants-branches", branchQueryValue, pageFilterCompanyId, pageFilterClientId, pageFilterBranchId, tenantLifecycle],
-        queryFn: async ({ pageParam }) => {
-            const cursor = typeof pageParam === "string" ? pageParam : undefined;
-            const response = await adminApi.listBranches({
-                cursor,
-                limit: 20,
-                q: branchQueryValue,
-                company_id: pageFilterCompanyId ?? undefined,
-                client_id: pageFilterClientId ?? undefined,
-                branch_id: pageFilterBranchId ?? undefined,
-                lifecycle: tenantLifecycle,
-            });
-            return response.data;
-        },
-        initialPageParam: undefined,
-        getNextPageParam: (lastPage) =>
-            lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
-        enabled: tenantsEnabled,
-    });
-    const fleetAttentionQuery = useQuery({
-        queryKey: ["tenants-fleet-attention", tenantLifecycle],
-        queryFn: async () => {
-            const response = await adminApi.listFleetAttention({
-                limit: 12,
-                stale_after_minutes: 60,
-                include_low: "false",
-            });
-            return response.data;
-        },
-        enabled: tenantsEnabled && tenantLifecycle === "active" && tenantsPortfolioQuery.isError,
-    });
-    const branchChangesQuery = useQuery({
-        queryKey: ["tenants-branch-changes", branchEditor?.id],
-        queryFn: async () => {
-            if (!branchEditor?.id) {
-                return null;
-            }
-            const response = await adminApi.listBranchChanges({
-                branch_id: branchEditor.id,
-                limit: 10,
-            });
-            return response.data;
-        },
-        enabled: tenantsEnabled && !!branchEditor?.id,
-    });
-    const recentBranchChangesKpiQuery = useQuery({
-        queryKey: ["tenants-branch-changes-recent-kpi", tenantLifecycle],
-        queryFn: async () => {
-            const response = await adminApi.listBranchChanges({
-                limit: 100,
-            });
-            return response.data;
-        },
-        enabled: tenantsEnabled && tenantLifecycle === "active",
-    });
-    const selectedClientAuditQuery = useQuery({
-        queryKey: ["tenants-client-lifecycle-audit-api", pageFilterClientId],
-        queryFn: async () => {
-            if (!pageFilterClientId) {
-                return [];
-            }
-            const response = await auditApi.list({
-                entity_type: "client",
-                entity_id: pageFilterClientId,
-                limit: 50,
-            });
-            return response.data.items ?? [];
-        },
-        enabled: tenantsEnabled && !!pageFilterClientId,
-        staleTime: 30000,
-    });
-    const weeklySnapshotsServerQuery = useQuery({
-        queryKey: ["tenants-weekly-snapshots", pageFilterClientId],
-        queryFn: async () => {
-            if (!pageFilterClientId) {
-                return [] as TenantsOperationalSnapshot[];
-            }
-            const response = await adminApi.listTenantsWeeklySnapshots({
-                client_id: pageFilterClientId,
-                limit: MAX_WEEKLY_SNAPSHOTS,
-            });
-            return (response.data.items ?? [])
-                .map((item) => mapWeeklySnapshotRecordToViewModel(item))
-                .filter((item): item is TenantsOperationalSnapshot => item !== null);
-        },
-        enabled: tenantsEnabled && !!pageFilterClientId,
-        staleTime: 30000,
+    const {
+        companiesQuery,
+        tenantsPortfolioQuery,
+        tenantsCompanyCockpitQuery,
+        clientsQuery,
+        branchesQuery,
+        fleetAttentionQuery,
+        branchChangesQuery,
+        recentBranchChangesKpiQuery,
+        selectedClientAuditQuery,
+        weeklySnapshotsServerQuery,
+    } = useTenantsDataQueries<TenantsOperationalSnapshot>({
+        tenantsEnabled,
+        companyQueryValue,
+        clientQueryValue,
+        branchQueryValue,
+        pageFilterCompanyId,
+        pageFilterClientId,
+        pageFilterBranchId,
+        tenantLifecycle,
+        fleetLifecycleFilter,
+        fleetPaymentFilter,
+        fleetServiceFilter,
+        branchEditorId: branchEditor?.id,
+        maxWeeklySnapshots: MAX_WEEKLY_SNAPSHOTS,
+        mapWeeklySnapshotRecordToViewModel,
     });
     useEffect(() => {
         if (!pageFilterClientId) {
@@ -1418,138 +1230,24 @@ export default function TenantsPage() {
         }
     };
 
-    const completeContextScope = (scope: { companyId?: string | null; clientId?: string | null; branchId?: string | null }) => {
-        const normalizedBranchId = normalizeOptionalId(scope.branchId);
-        let normalizedClientId = normalizeOptionalId(scope.clientId);
-        let normalizedCompanyId = normalizeOptionalId(scope.companyId);
-        if (normalizedBranchId) {
-            const branchClientId = branchClientIdById.get(normalizedBranchId);
-            if (!normalizedClientId && branchClientId) {
-                normalizedClientId = branchClientId;
-            }
-            if (!normalizedCompanyId) {
-                const branchCompanyId = branchCompanyIdById.get(normalizedBranchId);
-                if (branchCompanyId) {
-                    normalizedCompanyId = branchCompanyId;
-                }
-            }
-        }
-        if (!normalizedCompanyId && normalizedClientId) {
-            normalizedCompanyId = clientCompanyIdById.get(normalizedClientId) ?? null;
-        }
-        return {
-            companyId: normalizedCompanyId,
-            clientId: normalizedClientId,
-            branchId: normalizedBranchId,
-        };
-    };
-
-    const validateScopeForBranchActions = (
-        scope: { companyId?: string | null; clientId?: string | null; branchId?: string | null },
-        actionLabel: string,
-    ) => {
-        const normalized = completeContextScope(scope);
-        if (normalized.branchId && (!normalized.clientId || !normalized.companyId)) {
-            reportValidationError(
-                `Нельзя выполнить "${actionLabel}": для филиала требуется связка company + client.`,
-                "TENANTS_SCOPE_INVALID",
-                "filters",
-            );
-            return null;
-        }
-        return normalized;
-    };
-
-    const writeContextScope = (scope: { companyId?: string | null; clientId?: string | null; branchId?: string | null }) => {
-        const normalized = completeContextScope(scope);
-        setConsoleContextScope({
-            companyId: normalized.companyId ?? "",
-            clientId: normalized.clientId ?? "",
-            branchId: normalized.branchId ?? "",
-        });
-        refreshContext();
-        return normalized;
-    };
-
-    const setCompanyContext = (companyId?: string | null) => {
-        writeContextScope({
-            companyId,
-            clientId: null,
-            branchId: null,
-        });
-    };
-
-    const setClientContext = (clientId?: string | null, companyId?: string | null) => {
-        const storedScope = readConsoleContextScopeFromStorage();
-        writeContextScope({
-            companyId: companyId ?? storedScope.companyId,
-            clientId,
-            branchId: null,
-        });
-    };
-
-    const setBranchContext = (branchId?: string | null) => {
-        const storedScope = readConsoleContextScopeFromStorage();
-        writeContextScope({
-            companyId: storedScope.companyId,
-            clientId: storedScope.clientId,
-            branchId,
-        });
-    };
-    const clearContextLens = () => {
-        setCompanyContext(null);
-    };
-    const setClientContextAndPageFilters = (clientId?: string | null, companyId?: string | null) => {
-        const nextScope = writeContextScope({
-            companyId,
-            clientId,
-            branchId: null,
-        });
-        applyScopeToPageFilters(nextScope);
-    };
-    const setBranchContextAndPageFilters = (
-        input?: string | { branchId?: string | null; clientId?: string | null; companyId?: string | null } | null,
-    ) => {
-        const branchPatch = typeof input === "string" || input == null ? { branchId: input ?? null } : input;
-        const storedScope = readConsoleContextScopeFromStorage();
-        const nextScopeCandidate = validateScopeForBranchActions(
-            {
-                companyId: branchPatch.companyId ?? pageFilterCompanyId ?? storedScope.companyId,
-                clientId: branchPatch.clientId ?? pageFilterClientId ?? storedScope.clientId,
-                branchId: branchPatch.branchId ?? null,
-            },
-            "В контекст филиала",
-        );
-        if (!nextScopeCandidate) {
-            return;
-        }
-        const nextScope = writeContextScope({
-            companyId: nextScopeCandidate.companyId,
-            clientId: nextScopeCandidate.clientId,
-            branchId: nextScopeCandidate.branchId,
-        });
-        applyScopeToPageFilters(nextScope);
-    };
-    const applyContextToPageFilters = () => {
-        const storedScope = readConsoleContextScopeFromStorage();
-        const nextScope = validateScopeForBranchActions(storedScope, "Взять из рабочего контура");
-        if (!nextScope) {
-            return;
-        }
-        applyScopeToPageFilters(nextScope);
-        if (
-            (nextScope.companyId ?? "") !== storedScope.companyId
-            || (nextScope.clientId ?? "") !== storedScope.clientId
-            || (nextScope.branchId ?? "") !== storedScope.branchId
-        ) {
-            setConsoleContextScope({
-                companyId: nextScope.companyId ?? "",
-                clientId: nextScope.clientId ?? "",
-                branchId: nextScope.branchId ?? "",
-            });
-            refreshContext();
-        }
-    };
+    const {
+        setCompanyContext,
+        setClientContext,
+        setBranchContext,
+        clearContextLens,
+        setClientContextAndPageFilters,
+        setBranchContextAndPageFilters,
+        applyContextToPageFilters,
+    } = useTenantsActions({
+        clientCompanyIdById,
+        branchClientIdById,
+        branchCompanyIdById,
+        pageFilterCompanyId,
+        pageFilterClientId,
+        applyScopeToPageFilters,
+        refreshContext,
+        reportValidationError,
+    });
 
     const handleQuickCreateCompany = async () => {
         const companyName = quickCreateForm.companyName.trim();
