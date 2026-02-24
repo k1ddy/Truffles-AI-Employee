@@ -548,3 +548,42 @@
 6. Interpretation.
 - Wave 3 decomposition and Wave 4 targeted prewarm moved forward without behavior loss in deterministic checks.
 - Remaining Wave 4 backlog stays unchanged: full incremental precompute pipeline (`event stream -> targeted/global strategy`) for very large fleets.
+
+## Wave 3/4 continuation: helper extraction + incremental event prewarm queue (2026-02-24, UTC)
+1. Implemented decomposition continuation for page helpers.
+- Added `console-web/src/app/tenants/tenants-page-helpers.ts` and moved:
+  - lifecycle audit parsing/merge/push (`safeParseLifecycleAuditMap`, `mergeLifecycleAuditEntries`, `pushLifecycleAuditEntry`)
+  - branch edit patch/snapshot helpers (`buildBranchChangePatch`, `applyBranchSnapshotToEditor`)
+  - shared formatters/helpers (`formatStateLabel`, `formatDateTimeLabel`, `formatReferenceScopeReason`, `toIsoWeekKey`, `isValidTimezoneName`)
+- `console-web/src/app/tenants/page.tsx` now imports helper functions/types and keeps UI composition flow.
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `1723` to `1376` LOC.
+- Residual page scope is mostly UI compose/orchestration; helper/format logic is isolated in tenant module.
+
+3. Implemented incremental prewarm event metadata queue in backend.
+- Added session info key:
+  - `_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY`
+- Invalidation path now writes normalized events (`reason + company_ids`) via:
+  - `_queue_fleet_incremental_prewarm_event`
+- `after_commit` now consumes event list and schedules:
+  - company summary prewarm
+  - company attention prewarm
+  - global prewarm
+- `after_rollback` now clears incremental event queue.
+
+4. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py -k "prewarm or invalidate_tenants_fleet_cache_scope or on_console_session_after_commit or on_console_session_after_rollback"` (`11 passed`)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`88 passed`)
+- `python3 truffles-api/scripts/generate_openapi.py --check` (pass)
+
+5. Merge/CI evidence and runtime note.
+- Merge verification: PR `#810` merged, CI run `22335329574` green (including deploy lane).
+- Runtime snapshot attempt at this stage had no metric samples for tenants histograms, so no new canonical perf artifact was recorded from that attempt.
+
+6. Interpretation.
+- Wave 3 decomposition and Wave 4 event-driven scheduling moved forward with contract tests and no deterministic regressions.
+- Remaining Wave 4 backlog remains unchanged: durable incremental precompute worker strategy + long-run reproducible perf evidence for very large fleets.

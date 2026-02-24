@@ -2243,6 +2243,7 @@ _TENANTS_FLEET_CACHE_REFRESH_INFLIGHT: set[str] = set()
 _TENANTS_FLEET_CACHE_REFRESH_LOCK = Lock()
 _TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY = "tenants_fleet_cache_prewarm_company_ids"
 _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY = "tenants_fleet_cache_prewarm_global"
+_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY = "tenants_fleet_cache_prewarm_events"
 _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_LOCK = Lock()
 _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_NEXT_ALLOWED_AT = 0.0
 
@@ -2908,6 +2909,36 @@ def _queue_fleet_global_prewarm(db: Session) -> None:
     db.info[_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY] = True
 
 
+def _queue_fleet_incremental_prewarm_event(
+    db: Session,
+    *,
+    reason: str,
+    company_ids: set[UUID],
+) -> None:
+    scoped_ids = {
+        company_id
+        for company_id in company_ids
+        if company_id is not None
+    }
+    info_value = db.info.get(_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY)
+    if not isinstance(info_value, list):
+        info_value = []
+        db.info[_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY] = info_value
+    normalized_event = {
+        "reason": reason,
+        "company_ids": [str(company_id) for company_id in sorted(scoped_ids, key=str)],
+    }
+    if normalized_event not in info_value:
+        info_value.append(normalized_event)
+
+    # Keep current scheduling contract while adding event stream metadata.
+    _queue_fleet_summary_prewarm_company_ids(
+        db,
+        company_ids=scoped_ids,
+    )
+    _queue_fleet_global_prewarm(db)
+
+
 def _load_global_active_client_ids(
     *,
     max_clients: int,
@@ -3129,6 +3160,35 @@ def _schedule_fleet_global_prewarm() -> None:
 
 @event.listens_for(Session, "after_commit")
 def _on_console_session_after_commit(session: Session) -> None:
+    raw_events = session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY, None)
+    if isinstance(raw_events, list):
+        scoped_company_ids: set[UUID] = set()
+        global_prewarm_required = False
+        for raw_event in raw_events:
+            if not isinstance(raw_event, dict):
+                continue
+            event_company_ids = raw_event.get("company_ids")
+            if isinstance(event_company_ids, list):
+                for raw_company_id in event_company_ids:
+                    if not isinstance(raw_company_id, str):
+                        continue
+                    try:
+                        scoped_company_ids.add(UUID(raw_company_id))
+                    except (TypeError, ValueError):
+                        continue
+            global_prewarm_required = True
+
+        # Clear legacy keys if event stream was present.
+        session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
+        session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY, None)
+
+        if scoped_company_ids:
+            _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
+            _schedule_fleet_attention_prewarm_for_company_ids(company_ids=scoped_company_ids)
+        if global_prewarm_required:
+            _schedule_fleet_global_prewarm()
+        return
+
     raw_company_ids = session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
     global_prewarm_required = bool(
         session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY, False)
@@ -3145,6 +3205,7 @@ def _on_console_session_after_commit(session: Session) -> None:
 
 @event.listens_for(Session, "after_rollback")
 def _on_console_session_after_rollback(session: Session) -> None:
+    session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY, None)
     session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
     session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY, None)
 
@@ -3493,11 +3554,11 @@ def _invalidate_tenants_fleet_cache_scope(
         return
     except Exception:
         return
-    _queue_fleet_summary_prewarm_company_ids(
+    _queue_fleet_incremental_prewarm_event(
         db,
+        reason=reason,
         company_ids=scoped_company_ids,
     )
-    _queue_fleet_global_prewarm(db)
 
 
 def _normalize_client_lifecycle_reason(reason: str) -> str:
