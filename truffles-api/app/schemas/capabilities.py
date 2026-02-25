@@ -4,7 +4,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 CAPABILITIES_SCHEMA_VERSION = "v1"
-_TOOL_POLICY_TOKEN_RE = re.compile(
+_CAPABILITY_TOKEN_RE = re.compile(
     r"^(?:\*|[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*|\.\*))$"
 )
 
@@ -53,7 +53,7 @@ class CapabilityTools(BaseModel):
             token = str(item or "").strip().casefold()
             if not token:
                 continue
-            if not _TOOL_POLICY_TOKEN_RE.match(token):
+            if not _CAPABILITY_TOKEN_RE.match(token):
                 raise ValueError(
                     "tool policy token must be '*', '<group>.*' or '<group>.<action>'"
                 )
@@ -72,6 +72,8 @@ class CapabilitiesPayload(BaseModel):
     providers: CapabilityProviders = Field(default_factory=CapabilityProviders)
     features: CapabilityFeatures = Field(default_factory=CapabilityFeatures)
     tools: CapabilityTools = Field(default_factory=CapabilityTools)
+    allowed_fact_scopes: Optional[list[str]] = None
+    handoff_policy: Optional[Literal["allow", "manager_request_only", "deny"]] = None
 
     @field_validator("domain_slug")
     @classmethod
@@ -84,3 +86,35 @@ class CapabilitiesPayload(BaseModel):
         if not re.match(r"^[a-z0-9_-]+$", cleaned):
             raise ValueError("domain_slug must be lowercase alphanum/underscore/hyphen")
         return cleaned
+
+    @field_validator("allowed_fact_scopes")
+    @classmethod
+    def validate_allowed_fact_scopes(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        if value is None:
+            return None
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            token = str(item or "").strip().casefold()
+            if not token:
+                continue
+            if not _CAPABILITY_TOKEN_RE.match(token):
+                raise ValueError(
+                    "fact scope token must be '*', '<group>.*' or '<group>.<scope>'"
+                )
+            if token in seen:
+                continue
+            seen.add(token)
+            normalized.append(token)
+        return normalized or None
+
+    @field_validator("handoff_policy", mode="before")
+    @classmethod
+    def normalize_handoff_policy(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+        token = str(value).strip().casefold()
+        return token or None

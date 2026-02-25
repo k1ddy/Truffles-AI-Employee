@@ -4,3 +4,8 @@ d58b1992ed46d653f460171e4780df7a76720dfa:truffles-api/tests/test_console_outreac
 # False positive: docker image tag in session log command list (PR #782 history).
 3c230d3e008d0843c7c57e18f5ebc6acbbf1c6f0:docs/SESSIONS/SESSION-2026-02-19-llm-first-firebreak-a1.md:generic-api-key:130
 3c230d3e008d0843c7c57e18f5ebc6acbbf1c6f0:docs/SESSIONS/SESSION-2026-02-19-llm-first-firebreak-a1.md:generic-api-key:131
+
+# False positives: docker image tags in firebreak evidence docs (PR #811 history).
+0eb9a4d4846327deb6e7ab106628080e27dd282c:docs/REPORTS/2026-02-21-firebreak-human-quality-wave-hq1.md:generic-api-key:211
+0eb9a4d4846327deb6e7ab106628080e27dd282c:docs/SESSIONS/SESSION-2026-02-19-llm-first-firebreak-a1.md:generic-api-key:178
+0eb9a4d4846327deb6e7ab106628080e27dd282c:docs/SESSIONS/SESSION-2026-02-19-llm-first-firebreak-a1.md:generic-api-key:179
