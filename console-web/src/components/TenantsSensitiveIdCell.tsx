@@ -92,7 +92,7 @@ export default function TenantsSensitiveIdCell({
     };
 
     return (
-        <div className="text-xs text-muted-foreground">
+        <div className="text-xs text-muted-foreground" data-testid="tenants-sensitive-id-cell">
             <span>{revealed ? `instance_id: ${normalizedValue}` : formatMaskedInstanceId(normalizedValue)}</span>
             {hasValue ? (
                 <span className="ml-2 inline-flex items-center gap-1">

@@ -1050,13 +1050,44 @@ test.describe('Platform Admin Tenants', () => {
         expect(counters.cockpitCalls).toBeGreaterThan(0);
     });
 
-    test('should keep tenants copy business-oriented without raw technical markers @smoke', async ({ page }) => {
+    test('should keep tenants copy business-oriented and isolate technical markers to security/debug zones @smoke', async ({ page }) => {
         await openTenants(page);
-        const body = page.locator('body');
-        await expect(body).not.toContainText('TENANTS_V3_CONTROL_TOWER');
-        await expect(body).not.toContainText('trace_id:');
-        await expect(body).not.toContainText('slug =');
-        await expect(body).not.toContainText('telegram_chat_id');
+        const tenantsPage = page.getByTestId('tenants-page');
+        await expect(tenantsPage).not.toContainText('TENANTS_V3_CONTROL_TOWER');
+        await expect(tenantsPage).not.toContainText('trace_id:');
+        await expect(tenantsPage).not.toContainText('slug =');
+        await expect(tenantsPage).not.toContainText('telegram_chat_id');
+
+        const quickCreatePanel = page.getByTestId('tenants-quick-create');
+        await expect(quickCreatePanel).toContainText('Идентификатор WhatsApp (если есть)');
+        await expect(quickCreatePanel).not.toContainText('Instance ID (если есть)');
+
+        const modes = page.getByTestId('tenants-workspace-modes');
+        if (await modes.isVisible().catch(() => false)) {
+            await page.getByTestId('tenants-mode-changes').click();
+        }
+
+        const changePanel = page.getByTestId('tenants-change-management');
+        await expect(changePanel).toBeVisible();
+        await changePanel.getByRole('button', { name: 'Редактировать' }).first().click();
+        await expect(changePanel).toContainText('Идентификатор WhatsApp (опционально)');
+        await expect(changePanel).toContainText('Чат Telegram (опционально)');
+        await expect(changePanel).toContainText('Тег базы знаний (опционально)');
+        await expect(changePanel).not.toContainText('WhatsApp instance ID');
+        await expect(changePanel).not.toContainText('Telegram chat ID');
+        await expect(changePanel).not.toContainText('knowledge_tag');
+        await expect(changePanel).not.toContainText('branch_deactivate');
+
+        const sensitiveCells = changePanel.getByTestId('tenants-sensitive-id-cell');
+        await expect(sensitiveCells.first()).toBeVisible();
+        await expect(sensitiveCells.first()).toContainText('instance_id');
+        const changePanelText = (await changePanel.innerText()).toLowerCase();
+        const sensitiveZoneTexts = (await sensitiveCells.allInnerTexts()).map((item) => item.toLowerCase());
+        const operatorTextWithoutSensitiveZones = sensitiveZoneTexts.reduce(
+            (acc, item) => acc.split(item).join(' '),
+            changePanelText,
+        );
+        expect(operatorTextWithoutSensitiveZones).not.toContain('instance_id');
     });
 
     test('should audit instance_id reveal and copy actions on Tenants @smoke', async ({ page }) => {
