@@ -54,9 +54,11 @@ DemoSalonDecision = PackDecision
 
 _RESOLVER_CONTRACT_VERSION = "v1"
 _RESOLVER_DEFAULT_VERSION = "2026-02-23"
+_FACT_BUNDLE_VERSION = "v1"
 _RESOLVER_FACT_CONFIDENCE = 0.92
 _RESOLVER_COLLECT_CONFIDENCE = 0.42
 _RESOLVER_HANDOFF_CONFIDENCE = 0.35
+_FACT_FALLBACK_MIN_CONFIDENCE = 0.58
 _ACTION_CLASS_BY_ACTION = {
     "collect": "COLLECT",
     "booking_prompt": "COLLECT",
@@ -206,6 +208,55 @@ def _extract_slot_candidates(meta: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _resolve_pack_id(meta: dict[str, Any], *, client_slug: str | None) -> str:
+    if not isinstance(meta, dict):
+        meta = {}
+    for key in ("pack_id", "knowledge_tag", "policy_type"):
+        token = meta.get(key)
+        if isinstance(token, str) and token.strip():
+            return token.strip()
+    if isinstance(client_slug, str) and client_slug.strip():
+        return client_slug.strip()
+    return "neutral_pack"
+
+
+def _build_fact_bundle(
+    *,
+    meta: dict[str, Any],
+    intent: str | None,
+    action_class: str,
+    confidence: float,
+    abstain_reason: str | None,
+    entity_refs: list[dict[str, Any]],
+    client_slug: str | None,
+) -> dict[str, Any]:
+    intent_token = intent.strip() if isinstance(intent, str) and intent.strip() else None
+    entity_id = None
+    if entity_refs:
+        first_ref = entity_refs[0]
+        if isinstance(first_ref, dict):
+            ref_id = first_ref.get("id")
+            if isinstance(ref_id, str) and ref_id.strip():
+                entity_id = ref_id.strip()
+    fact_source = meta.get("fact_source")
+    if isinstance(fact_source, str) and fact_source.strip():
+        source_ref = fact_source.strip()
+    elif intent_token:
+        source_ref = f"intent:{intent_token.casefold()}"
+    else:
+        source_ref = "intent:unknown"
+    return {
+        "version": _FACT_BUNDLE_VERSION,
+        "pack_id": _resolve_pack_id(meta, client_slug=client_slug),
+        "entity_id": entity_id,
+        "source_ref": source_ref,
+        "confidence": confidence,
+        "action_class": action_class,
+        "intent_class": intent_token,
+        "abstain_reason": abstain_reason,
+    }
+
+
 def _derive_resolver_confidence(meta: dict[str, Any], *, action_class: str) -> float:
     if isinstance(meta, dict):
         for key in (
@@ -264,6 +315,7 @@ def ensure_resolver_meta(
     resolver_id: str,
     resolver_version: str | None = None,
     ruleset_version: str | None = None,
+    client_slug: str | None = None,
 ) -> dict[str, Any]:
     payload = dict(meta) if isinstance(meta, dict) else {}
     resolver_id_token = (
@@ -307,11 +359,27 @@ def ensure_resolver_meta(
         "resolver_version": resolver_version_token,
         "ruleset_version": ruleset_token,
     }
+    fact_bundle = _build_fact_bundle(
+        meta=payload,
+        intent=intent,
+        action_class=action_class,
+        confidence=confidence,
+        abstain_reason=abstain_reason,
+        entity_refs=entity_refs,
+        client_slug=client_slug,
+    )
     payload.update(resolver_contract)
     payload["resolver_contract_version"] = _RESOLVER_CONTRACT_VERSION
     payload["resolver_contract"] = resolver_contract
     payload["resolver_confidence"] = confidence
     payload["resolver_candidates"] = entity_refs
+    payload["fact_bundle"] = fact_bundle
+    payload["provenance"] = {
+        "pack_id": fact_bundle["pack_id"],
+        "entity_id": fact_bundle["entity_id"],
+        "source_ref": fact_bundle["source_ref"],
+        "confidence": fact_bundle["confidence"],
+    }
     return payload
 
 
@@ -321,6 +389,7 @@ def enrich_pack_decision(
     resolver_id: str,
     resolver_version: str | None = None,
     ruleset_version: str | None = None,
+    client_slug: str | None = None,
 ) -> PackDecision | None:
     if not isinstance(decision, PackDecision):
         return decision
@@ -331,6 +400,7 @@ def enrich_pack_decision(
         resolver_id=resolver_id,
         resolver_version=resolver_version,
         ruleset_version=ruleset_version,
+        client_slug=client_slug,
     )
     return PackDecision(
         action=decision.action,
@@ -355,6 +425,7 @@ def get_pack_decision(
     return enrich_pack_decision(
         decision,
         resolver_id="pack_runtime.truth_gate",
+        client_slug=client_slug,
     )
 
 
@@ -372,7 +443,64 @@ def get_pack_service_decision(
     return enrich_pack_decision(
         decision,
         resolver_id="pack_runtime.service_matcher",
+        client_slug=client_slug,
     )
+
+
+def has_consult_recommendation_signal(decision: PackDecision | None) -> bool:
+    if not isinstance(decision, PackDecision):
+        return False
+    meta = decision.meta if isinstance(decision.meta, dict) else {}
+    if bool(meta.get("consult_recommendation")):
+        return True
+    fact_intents = meta.get("fact_intents")
+    if isinstance(fact_intents, list) and any(
+        isinstance(item, str) and item.strip().casefold() == "consult_reply" for item in fact_intents
+    ):
+        return True
+    intent_token = decision.intent.strip().casefold() if isinstance(decision.intent, str) else ""
+    resolver_contract = meta.get("resolver_contract")
+    if isinstance(resolver_contract, dict):
+        intent_class = resolver_contract.get("intent_class")
+        if isinstance(intent_class, str) and intent_class.strip().casefold() == "consult_reply":
+            return True
+    return intent_token == "consult_reply"
+
+
+def is_timeout_fact_fallback_candidate(
+    decision: PackDecision | None,
+    *,
+    min_confidence: float = _FACT_FALLBACK_MIN_CONFIDENCE,
+) -> bool:
+    if not isinstance(decision, PackDecision):
+        return False
+    if not isinstance(decision.response, str) or not decision.response.strip():
+        return False
+    action = str(decision.action or "").strip().casefold()
+    if action != "reply":
+        return False
+    meta = decision.meta if isinstance(decision.meta, dict) else {}
+    resolver_contract = meta.get("resolver_contract")
+    action_class = None
+    abstain_reason = None
+    confidence = None
+    if isinstance(resolver_contract, dict):
+        action_class = resolver_contract.get("action_class")
+        abstain_reason = resolver_contract.get("abstain_reason")
+        confidence = _coerce_confidence(resolver_contract.get("confidence"))
+    if not isinstance(action_class, str):
+        action_class = meta.get("action_class")
+    if not isinstance(abstain_reason, str):
+        abstain_reason = meta.get("abstain_reason")
+    if confidence is None:
+        confidence = _coerce_confidence(meta.get("resolver_confidence"))
+    if confidence is None:
+        confidence = _RESOLVER_FACT_CONFIDENCE
+    if not isinstance(action_class, str) or action_class.strip().upper() != "FACT":
+        return False
+    if isinstance(abstain_reason, str) and abstain_reason.strip():
+        return False
+    return confidence >= max(0.0, min(float(min_confidence), 1.0))
 
 
 def has_walkin_without_booking_signal(
@@ -423,10 +551,12 @@ __all__ = [
     "get_pack_price_reply",
     "get_pack_service_decision",
     "get_pack_service_hint",
+    "has_consult_recommendation_signal",
     "get_signal_lexicon_list",
     "get_system_anchor_groups",
     "get_system_lexicon_list",
     "has_walkin_without_booking_signal",
+    "is_timeout_fact_fallback_candidate",
     "load_policy_pack",
     "load_system_lexicons",
     "load_yaml_truth",

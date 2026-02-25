@@ -55,14 +55,20 @@
   - Added static CLI gate `llm-quality-gates` to `ops/diagnose.py` and wired it into CI `core-eval` as a hard block for lexicon/hardcode deltas before core tests.
   - Migrated targeted regressions from response-substring primary checks to contract assertions (`decision_meta`, `decision_trace`, `tool_decision`, `expected_reply_type`) in booking/calendar/message endpoint suites.
   - Opened PR `#811` with full remediation diff and deterministic validation evidence.
+  - Synced worktree to merged `origin/main` (`ba4dcef173839c6d3565cdbf630e6174f6110c07`) and re-ran remediation deterministic contour on merged head.
+  - Re-ran deterministic contour on merged head: `py_compile` + `ruff` + pytest bundles (`test_booking_quality_status_gate`, `test_booking_quality_scenario_contract_gate`, `test_booking_quality_response_guard`, `test_calendar_slot_response_contract`, `test_master_info_flow`, `test_pack_runtime_service`, `test_pack_grounding_contract`, `test_message_endpoint` filtered, `test_booking_quality_*.py`) => all green (`77 + 52 + 125 + 167` passed).
+  - Rebuilt runtime container with commit parity and test simulation enabled (`truffles-api-firebreak-hq1-ba4dcef1`, port `18161`, `GIT_COMMIT=ba4dcef...`, `TEST_MODE=1`) to satisfy llm-quality runtime fingerprint preflight.
+  - Confirmed canonical human scenario freeze remains active: replay on `/tmp/booking_quality/blocking_scenarios_human.json` is now `INVALID` at scenario-contract preflight (`weak_oracle_turn`) under enforced run-economy/hard-preflight gates.
+  - Executed contractized micro replay chain with canonical baseline on merged head:
+  - L1 no-judge: `booking-replay-20260224-contractized-a1-micro1-nojudge-r1` => `infra_valid=true`, `semantic_valid=true`, `blocking_reason_count=0`, `hq1_bad_turn_count=0`.
+  - L2 critical: `booking-replay-20260224-contractized-a1-micro1-critical-r2` => `infra_valid=true`, `semantic_valid=true`, `judge.counts.fail=0`, `blocking_reason_count=0`, `hq1_bad_turn_count=0`.
+  - Captured before/after blocking-set delta against historical failing critical run `booking-human-critical-hq1-l2-contract-first-a1-r1`: `blocking_reason_count 22 -> 0`, `judge_fail 6 -> 0`, `handoff_miss 1 -> 0`, `non_actionable_reply 1 -> 0`, `booking_flow_break 6 -> 0`.
 - next:
-  - Fix mixed `master + hours/location` arbitration so `master` remains dominant without explicit location/hours anchors.
-  - Fix non-actionable fallback in `catalog.service_query` assortment turns.
-  - Validate fixed expected-reply progression on HQ1 human blocking replay (`/tmp/booking_quality/blocking_scenarios_human.json`) and record before/after blocking set.
-  - Run `L2` `judge-mode critical` replay on `/tmp/booking_quality/blocking_scenarios_human.json` (single bounded run) after confirming acceptance dialog set.
-  - Continue TP Track B runtime refactor for remaining post-tool semantic rewrites outside the current policy-core guard scope and remove lexical degrade paths where reason-coded clarify/handoff is required.
-  - Execute fresh canonical lock-run (`judge-mode all`, fail-on-thresholds) on current `main` head and then replay vs this lock baseline.
-  - Wire structured scenario-generation progress into llm-quality summary/warnings for faster infra triage without reading raw stderr.
+  - Re-canonicalize `/tmp/booking_quality/blocking_scenarios_human.json` (remove `weak_oracle_turn`) so HQ1 full scenario set can pass scenario-contract preflight without waivers.
+  - Re-run HQ1 full chain (`L1` no-judge + `L2` critical) on re-canonicalized human scenarios with same runtime parity and replay isolation flags.
+  - Execute fresh canonical lock-run (`judge-mode all`, fail-on-thresholds) on current `main` head and replay against that lock baseline.
+  - Continue TP Track B runtime refactor for remaining post-tool semantic rewrites outside policy-core guard scope and remove lexical degrade paths where reason-coded clarify/handoff is required.
+  - Keep structured scenario-generation progress in llm-quality summaries for faster infra triage.
 - evidence:
   - pytest -q truffles-api/tests/test_demo_salon_eval.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_chaos_dialogs.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_message_endpoint.py
   - 289 passed, 2 warnings
@@ -131,8 +137,8 @@
   - ruff check truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py
   - python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py
   - bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD
-  - docker build -t truffles-api:firebreak-hq1-wt -f truffles-api/Dockerfile .
-  - docker run -d --name truffles-api-firebreak-hq1 --env-file truffles-api/.env --network truffles_internal-net -p 18160:8000 truffles-api:firebreak-hq1-wt
+  - docker build -t truffles-api-firebreak-hq1-wt -f truffles-api/Dockerfile .
+  - docker run -d --name truffles-api-firebreak-hq1 --env-file truffles-api/.env --network truffles_internal-net -p 18160:8000 truffles-api-firebreak-hq1-wt
   - curl -sS --max-time 10 http://127.0.0.1:18160/admin/health
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18160 --client-slug demo_salon --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 2 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-human-nojudge-hq1-r4-a1
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18160 --client-slug demo_salon --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 1 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-human-nojudge-hq1-r5-a1
@@ -161,5 +167,23 @@
   - pytest -q truffles-api/tests/test_calendar_slot_response_contract.py truffles-api/tests/test_booking_appointments.py
   - pytest -q truffles-api/tests/test_message_endpoint.py
   - timeout 240 pytest -q truffles-api/tests/test_demo_salon_eval.py
+  - git merge --no-edit origin/main
+  - python3 -m py_compile ops/diagnose.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/info.py truffles-api/app/routers/webhook/session_memory.py truffles-api/app/services/tool_registry_service.py truffles-api/app/services/pack_runtime_service.py
+  - ruff check ops/diagnose.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/info.py truffles-api/app/routers/webhook/session_memory.py truffles-api/app/services/tool_registry_service.py truffles-api/app/services/pack_runtime_service.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_scenario_contract_gate.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_calendar_slot_response_contract.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_pack_runtime_service.py truffles-api/tests/test_pack_grounding_contract.py
+  - pytest -q truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_scenario_contract_gate.py truffles-api/tests/test_booking_quality_response_guard.py
+  - pytest -q truffles-api/tests/test_calendar_slot_response_contract.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_pack_runtime_service.py truffles-api/tests/test_pack_grounding_contract.py
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "booking or expected_reply or session_memory or policy_core"
+  - pytest -q truffles-api/tests/test_booking_quality_*.py
+  - python3 ops/diagnose.py llm-quality-gates --delta-gate-base-ref origin/main --hardcode-core-base-ref origin/main --run-economy-gate off
+  - docker build -t firebreak-hq1-runtime -f truffles-api/Dockerfile .
+  - docker run -d --name firebreak-hq1-runtime --env-file truffles-api/.env -e TEST_MODE=1 -e GIT_COMMIT=ba4dcef -e BUILD_TIME=2026-02-24T03:00:00Z --network truffles_internal-net -p 18161:8000 firebreak-hq1-runtime
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18161 --client-slug demo_salon --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 1 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode off --allow-judge-off --fail-on-thresholds --max-failures 5 --manager-mode skip --pending-mode skip --skip-outbox --allow-non-allowlist --run-id booking-human-nojudge-hq1-20260224-a1-r1b (`INVALID`: `weak_oracle_turn`)
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18161 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-replay-20260223-contractized-a1-micro1-nojudge-ffda-step7/scenarios.json --baseline-summary /tmp/booking_quality/booking-replay-20260223-contractized-a1-micro1-critical-ffda-step7/summary.json --count 1 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode off --allow-judge-off --fail-on-thresholds --max-failures 5 --manager-mode skip --pending-mode skip --skip-outbox --allow-non-allowlist --run-id booking-replay-20260224-contractized-a1-micro1-nojudge-r1
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18161 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-replay-20260224-contractized-a1-micro1-nojudge-r1/scenarios.json --baseline-summary /tmp/booking_quality/booking-replay-20260223-contractized-a1-micro1-critical-ffda-step7/summary.json --count 1 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode critical --fail-on-thresholds --fail-on-regression --max-failures 10 --manager-mode skip --pending-mode skip --skip-outbox --allow-non-allowlist --run-id booking-replay-20260224-contractized-a1-micro1-critical-r2
+  - /tmp/booking_quality/booking-replay-20260224-contractized-a1-micro1-nojudge-r1/{summary.json,brief.md,responses.jsonl,trace_bundle.jsonl}
+  - /tmp/booking_quality/booking-replay-20260224-contractized-a1-micro1-critical-r2/{summary.json,brief.md,responses.jsonl,trace_bundle.jsonl}
   - PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/811
-- last_updated: 2026-02-24T07:32:16+05:00
+  - 2026-02-25 PR#825 red-fix: restored missing `pack_runtime_service` export used by `decision.py` (`is_timeout_fact_fallback_candidate`) and sanitized session/report doc image tags to pass gitleaks.
+  - python3 -m py_compile truffles-api/app/services/pack_runtime_service.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/response.py
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core_timeout_fact_fallback or llm_policy_core" (`77 passed`)
+- last_updated: 2026-02-25T11:48:00+05:00

@@ -205,3 +205,41 @@
 - result: `FAIL` (`semantic_valid=false`), reason `regression_breach` (`degraded_fallback_rate delta=+0.10 vs baseline`).
 - quality snapshot: `infra_valid=true`, `judge.fail=0`, `run_integrity_valid=true`, `hardcode_core_gate_valid=true`.
 - artifacts: `/tmp/booking_quality/booking-replay-20260224-contractized-a1-micro1-critical-r1/{summary.json,brief.md,responses.jsonl,trace_bundle.jsonl}`.
+
+## Post-Merge Validation (2026-02-24, commit `ba4dcef`)
+- runtime parity restored on dedicated container:
+- image/container: `firebreak-hq1-runtime` (commit `ba4dcef`)
+- endpoint: `http://127.0.0.1:18161/admin/version`
+- version: `git_commit=ba4dcef173839c6d3565cdbf630e6174f6110c07`, `TEST_MODE=1`.
+- deterministic contour on merged head:
+- `test_booking_quality_status_gate + scenario_contract_gate + response_guard` -> `77 passed`
+- `test_calendar_slot_response_contract + test_master_info_flow + test_pack_runtime_service + test_pack_grounding_contract` -> `52 passed`
+- `test_message_endpoint -k "booking or expected_reply or session_memory or policy_core"` -> `125 passed`
+- `test_booking_quality_*.py` -> `167 passed`
+- `llm-quality-gates` on merged head: all gates valid (`lexicon_regex_delta_gate`, `hardcode_core_gate`, `run_economy_gate=off`).
+
+### Replay gate status after merge
+- canonical human full scenario (`/tmp/booking_quality/blocking_scenarios_human.json`) remains blocked by contract preflight:
+- run_id: `booking-human-nojudge-hq1-20260224-a1-r1b`
+- result: `INVALID`
+- reason: `weak_oracle_turn`
+- this confirms freeze policy from TP and keeps full HQ1 replay blocked until scenario re-canonicalization.
+
+### Contractized micro replay chain (canonical baseline)
+- L1 no-judge:
+- run_id: `booking-replay-20260224-contractized-a1-micro1-nojudge-r1`
+- quality: `infra_valid=true`, `semantic_valid=true`, `blocking_reason_count=0`, `hq1_bad_turn_count=0`, `run_integrity_valid=true`
+- artifacts: `/tmp/booking_quality/booking-replay-20260224-contractized-a1-micro1-nojudge-r1/{summary.json,brief.md,responses.jsonl,trace_bundle.jsonl}`
+- L2 critical:
+- run_id: `booking-replay-20260224-contractized-a1-micro1-critical-r2`
+- quality: `infra_valid=true`, `semantic_valid=true`, `blocking_reason_count=0`, `hq1_bad_turn_count=0`, `judge.counts.fail=0`, `run_integrity_valid=true`
+- artifacts: `/tmp/booking_quality/booking-replay-20260224-contractized-a1-micro1-critical-r2/{summary.json,brief.md,responses.jsonl,trace_bundle.jsonl}`
+
+### Before/After delta (critical)
+- baseline fail run: `booking-human-critical-hq1-l2-contract-first-a1-r1`
+- prior snapshot: `blocking_reason_count=22`, `judge_fail=6`, `handoff_miss=1`, `non_actionable_reply=1`, `booking_flow_break=6`
+- current micro critical snapshot: all above classes reduced to `0` (`blocking_reason_count=0`, `judge_fail=0`)
+
+### Current acceptance state
+- micro contract chain is green on merged commit with runtime parity.
+- full HQ1 human chain is still blocked by scenario-contract quality (`weak_oracle_turn`) and requires re-canonicalized full scenarios before `L1/L2/L3` acceptance.

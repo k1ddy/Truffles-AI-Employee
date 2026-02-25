@@ -91,3 +91,70 @@ def test_scenario_contract_blocks_confirm_before_check_booking():
 
     assert result["valid"] is False
     assert "check_confirm_sequence_missing" in result["reasons"]
+
+
+def test_scenario_contract_acceptance_rejects_relaxed_envelope():
+    fn = _load_scenario_contract_helper()
+    result = fn(
+        dialogs=[
+            {
+                "turns": [
+                    {"text": "Хочу записаться", "tags": ["booking"], "expect": {"reply_type": "time"}},
+                    {"text": "Проверьте запись", "tags": ["check_booking"], "expect": {"action": "reply"}},
+                    {"text": "Да", "tags": ["confirm"], "expect": {"action": "reply"}},
+                ]
+            }
+        ],
+        scenario_coverage="booking,info,interrupt",
+        requested_count=2,
+        include_media=False,
+        acceptance_contract=True,
+    )
+
+    assert result["valid"] is False
+    assert "acceptance_count_lt_10" in result["reasons"]
+    assert "acceptance_dialogs_lt_10" in result["reasons"]
+    assert "acceptance_include_media_required" in result["reasons"]
+    assert "acceptance_missing_coverage:handoff" in result["reasons"]
+    assert "acceptance_handoff_tag_missing" in result["reasons"]
+
+
+def test_scenario_contract_acceptance_accepts_canonical_envelope():
+    fn = _load_scenario_contract_helper()
+    dialogs = [
+        {
+            "turns": [
+                {
+                    "text": "Отправляю фото и хочу записаться",
+                    "tags": ["booking", "media"],
+                    "expect": {"reply_type": "time"},
+                },
+                {
+                    "text": "Проверьте мою запись",
+                    "tags": ["check_booking"],
+                    "expect": {"action": "reply"},
+                },
+                {
+                    "text": "Да, подтверждаю",
+                    "tags": ["confirm"],
+                    "expect": {"action": "reply"},
+                },
+                {
+                    "text": "Соедините с менеджером",
+                    "tags": ["handoff", "interrupt"],
+                    "expect": {"action": "handoff"},
+                },
+            ]
+        }
+        for _ in range(10)
+    ]
+    result = fn(
+        dialogs=dialogs,
+        scenario_coverage="booking,info,interrupt,handoff",
+        requested_count=10,
+        include_media=True,
+        acceptance_contract=True,
+    )
+
+    assert result["valid"] is True
+    assert result["reasons"] == []
