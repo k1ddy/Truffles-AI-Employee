@@ -766,6 +766,9 @@ test.describe('Platform Admin Tenants', () => {
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
             await expect(page.getByTestId('tenants-context-lens')).toBeVisible();
+            await expect(
+                page.getByTestId('tenants-lifecycle-controls').getByRole('button', { name: /^Все$/ }),
+            ).toHaveCount(0);
             const workspaceGuide = page.getByTestId('tenants-workspace-guide');
             if (await workspaceGuide.isVisible().catch(() => false)) {
                 await expect(workspaceGuide).toBeVisible();
@@ -778,6 +781,9 @@ test.describe('Platform Admin Tenants', () => {
 
             await page.getByTestId('tenants-mode-decommission').click();
             await expect(page.getByTestId('tenants-decommission-center')).toBeVisible();
+            await expect(
+                page.getByTestId('tenants-decommission-lifecycle-controls').getByRole('button', { name: /^Все$/ }),
+            ).toHaveCount(0);
             await expect(page.getByTestId('tenants-clients-section')).toBeVisible();
 
             await page.getByTestId('tenants-mode-portfolio').click();
@@ -796,6 +802,22 @@ test.describe('Platform Admin Tenants', () => {
         await expect(page.getByTestId('context-company-select')).toHaveCount(0);
         await expect(page.getByTestId('context-client-select')).toHaveCount(0);
         await expect(page.getByTestId('context-branch-select')).toHaveCount(0);
+        const advancedClear = page.getByTestId('tenants-context-clear-advanced');
+        await expect(advancedClear).toBeVisible();
+        await expect(page.getByTestId('tenants-context-clear-branch')).not.toBeVisible();
+        await expect(page.getByTestId('tenants-context-clear-client')).not.toBeVisible();
+        await page.getByTestId('tenants-context-clear-advanced-toggle').click();
+        await expect(page.getByTestId('tenants-context-clear-branch')).toBeVisible();
+        await expect(page.getByTestId('tenants-context-clear-client')).toBeVisible();
+    });
+
+    test('should run onboarding action queue intent with visible section focus', async ({ page }) => {
+        const actionQueue = page.getByTestId('tenants-action-queue');
+        await expect(actionQueue).toBeVisible();
+        const onboardingRun = actionQueue.getByRole('button', { name: 'Открыть Onboarding' }).first();
+        await expect(onboardingRun).toBeVisible();
+        await onboardingRun.click();
+        await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
     });
 
     test('should show explicit field contracts in Tenants branch editor @smoke', async ({ page }) => {
@@ -1048,6 +1070,46 @@ test.describe('Platform Admin Tenants', () => {
             await page.waitForTimeout(500);
         }
         expect(counters.cockpitCalls).toBeGreaterThan(0);
+    });
+
+    test('should keep tenants copy business-oriented and isolate technical markers to security/debug zones @smoke', async ({ page }) => {
+        await openTenants(page);
+        const tenantsPage = page.getByTestId('tenants-page');
+        await expect(tenantsPage).not.toContainText('TENANTS_V3_CONTROL_TOWER');
+        await expect(tenantsPage).not.toContainText('trace_id:');
+        await expect(tenantsPage).not.toContainText('slug =');
+        await expect(tenantsPage).not.toContainText('telegram_chat_id');
+
+        const quickCreatePanel = page.getByTestId('tenants-quick-create');
+        await expect(quickCreatePanel).toContainText('Идентификатор WhatsApp (если есть)');
+        await expect(quickCreatePanel).not.toContainText('Instance ID (если есть)');
+
+        const modes = page.getByTestId('tenants-workspace-modes');
+        if (await modes.isVisible().catch(() => false)) {
+            await page.getByTestId('tenants-mode-changes').click();
+        }
+
+        const changePanel = page.getByTestId('tenants-change-management');
+        await expect(changePanel).toBeVisible();
+        await changePanel.getByRole('button', { name: 'Редактировать' }).first().click();
+        await expect(changePanel).toContainText('Идентификатор WhatsApp (опционально)');
+        await expect(changePanel).toContainText('Чат Telegram (опционально)');
+        await expect(changePanel).toContainText('Тег базы знаний (опционально)');
+        await expect(changePanel).not.toContainText('WhatsApp instance ID');
+        await expect(changePanel).not.toContainText('Telegram chat ID');
+        await expect(changePanel).not.toContainText('knowledge_tag');
+        await expect(changePanel).not.toContainText('branch_deactivate');
+
+        const sensitiveCells = changePanel.getByTestId('tenants-sensitive-id-cell');
+        await expect(sensitiveCells.first()).toBeVisible();
+        await expect(sensitiveCells.first()).toContainText('instance_id');
+        const changePanelText = (await changePanel.innerText()).toLowerCase();
+        const sensitiveZoneTexts = (await sensitiveCells.allInnerTexts()).map((item) => item.toLowerCase());
+        const operatorTextWithoutSensitiveZones = sensitiveZoneTexts.reduce(
+            (acc, item) => acc.split(item).join(' '),
+            changePanelText,
+        );
+        expect(operatorTextWithoutSensitiveZones).not.toContain('instance_id');
     });
 
     test('should audit instance_id reveal and copy actions on Tenants @smoke', async ({ page }) => {

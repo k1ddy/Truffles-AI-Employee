@@ -1125,6 +1125,7 @@ export type TenantsPortfolioResponse = {
 export type GetTenantsCompanyCockpitParams = {
     company_id: string;
     client_id?: string;
+    include_branches?: "true" | "false";
     lifecycle?: "active" | "archived" | "all";
     client_limit?: number;
     branch_limit?: number;

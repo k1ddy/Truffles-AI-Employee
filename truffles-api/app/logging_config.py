@@ -206,6 +206,48 @@ TENANTS_ENDPOINT_LATENCY = _get_or_create_metric(
     ("endpoint",),
     buckets=_HISTOGRAM_BUCKETS,
 )
+TENANTS_FLEET_PROJECTION_CLIENTS_TOTAL = _get_or_create_metric(
+    Counter,
+    "console_tenants_fleet_projection_clients_total",
+    "Fleet projection client-resolution counts by source.",
+    ("source",),
+)
+TENANTS_FLEET_PROJECTION_LAST_COVERAGE_RATIO = _get_or_create_metric(
+    Gauge,
+    "console_tenants_fleet_projection_last_coverage_ratio",
+    "Coverage ratio for the latest projection load_or_build pass.",
+    (),
+)
+TENANTS_FLEET_PROJECTION_LAST_FALLBACK_RATIO = _get_or_create_metric(
+    Gauge,
+    "console_tenants_fleet_projection_last_fallback_ratio",
+    "Fallback ratio for the latest projection load_or_build pass.",
+    (),
+)
+TENANTS_FLEET_PROJECTION_LAST_FRESHNESS_LAG_SECONDS = _get_or_create_metric(
+    Gauge,
+    "console_tenants_fleet_projection_last_freshness_lag_seconds",
+    "Maximum projection row freshness lag (seconds) for the latest load pass.",
+    (),
+)
+TENANTS_FLEET_PROJECTION_COMPACTION_RUNS_TOTAL = _get_or_create_metric(
+    Counter,
+    "console_tenants_fleet_projection_compaction_runs_total",
+    "Projection compaction runs by outcome.",
+    ("outcome",),
+)
+TENANTS_FLEET_PROJECTION_COMPACTION_ROWS_TOTAL = _get_or_create_metric(
+    Counter,
+    "console_tenants_fleet_projection_compaction_rows_total",
+    "Total projection rows deleted by compaction.",
+    (),
+)
+TENANTS_FLEET_PROJECTION_LAST_COMPACTION_DELETED_ROWS = _get_or_create_metric(
+    Gauge,
+    "console_tenants_fleet_projection_last_compaction_deleted_rows",
+    "Rows deleted in the latest projection compaction run.",
+    (),
+)
 
 
 def _normalize_client_slug(client_slug: str | None) -> str:
@@ -417,6 +459,60 @@ def record_tenants_endpoint_latency(endpoint: str, elapsed_ms: float | None) -> 
         return
     normalized_endpoint = (endpoint or "unknown").strip() or "unknown"
     TENANTS_ENDPOINT_LATENCY.labels(endpoint=normalized_endpoint).observe(elapsed_ms / 1000.0)
+
+
+def record_tenants_fleet_projection_observation(
+    *,
+    total_clients: int,
+    materialized_clients: int,
+    fallback_clients: int,
+    max_freshness_lag_seconds: float | None,
+) -> None:
+    """Record projection coverage/fallback/freshness observability for tenants read paths."""
+    safe_total = max(int(total_clients), 0)
+    safe_materialized = max(min(int(materialized_clients), safe_total), 0)
+    safe_fallback = max(min(int(fallback_clients), safe_total), 0)
+    safe_unresolved = max(safe_total - safe_materialized - safe_fallback, 0)
+
+    if safe_total > 0:
+        coverage_ratio = safe_materialized / safe_total
+        fallback_ratio = safe_fallback / safe_total
+    else:
+        coverage_ratio = 1.0
+        fallback_ratio = 0.0
+
+    if TENANTS_FLEET_PROJECTION_LAST_COVERAGE_RATIO is not None:
+        TENANTS_FLEET_PROJECTION_LAST_COVERAGE_RATIO.set(coverage_ratio)
+    if TENANTS_FLEET_PROJECTION_LAST_FALLBACK_RATIO is not None:
+        TENANTS_FLEET_PROJECTION_LAST_FALLBACK_RATIO.set(fallback_ratio)
+
+    freshness_lag = max(float(max_freshness_lag_seconds), 0.0) if max_freshness_lag_seconds is not None else 0.0
+    if TENANTS_FLEET_PROJECTION_LAST_FRESHNESS_LAG_SECONDS is not None:
+        TENANTS_FLEET_PROJECTION_LAST_FRESHNESS_LAG_SECONDS.set(freshness_lag)
+
+    if TENANTS_FLEET_PROJECTION_CLIENTS_TOTAL is not None:
+        if safe_materialized > 0:
+            TENANTS_FLEET_PROJECTION_CLIENTS_TOTAL.labels(source="materialized").inc(safe_materialized)
+        if safe_fallback > 0:
+            TENANTS_FLEET_PROJECTION_CLIENTS_TOTAL.labels(source="fallback").inc(safe_fallback)
+        if safe_unresolved > 0:
+            TENANTS_FLEET_PROJECTION_CLIENTS_TOTAL.labels(source="unresolved").inc(safe_unresolved)
+
+
+def record_tenants_fleet_projection_compaction(
+    *,
+    outcome: str,
+    deleted_rows: int,
+) -> None:
+    """Record projection compaction outcome and deleted-row counts."""
+    normalized_outcome = (outcome or "unknown").strip().lower() or "unknown"
+    safe_deleted = max(int(deleted_rows), 0)
+    if TENANTS_FLEET_PROJECTION_COMPACTION_RUNS_TOTAL is not None:
+        TENANTS_FLEET_PROJECTION_COMPACTION_RUNS_TOTAL.labels(outcome=normalized_outcome).inc()
+    if TENANTS_FLEET_PROJECTION_LAST_COMPACTION_DELETED_ROWS is not None:
+        TENANTS_FLEET_PROJECTION_LAST_COMPACTION_DELETED_ROWS.set(safe_deleted)
+    if TENANTS_FLEET_PROJECTION_COMPACTION_ROWS_TOTAL is not None and safe_deleted > 0:
+        TENANTS_FLEET_PROJECTION_COMPACTION_ROWS_TOTAL.inc(safe_deleted)
 
 
 def http_in_progress_inc(method: str) -> None:

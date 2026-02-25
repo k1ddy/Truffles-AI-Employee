@@ -20,22 +20,18 @@ export default function TenantsDecommissionPanel({
                         Архивация и восстановление клиентов с прозрачным подтверждением.
                     </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2" data-testid="tenants-decommission-lifecycle-controls">
                     <button
                         className={tenantLifecycle === "archived" ? "btn-primary" : "btn-ghost"}
                         onClick={() => onTenantLifecycleChange("archived")}
+                        data-testid="tenants-decommission-lifecycle-archived"
                     >
                         Только архив
                     </button>
                     <button
-                        className={tenantLifecycle === "all" ? "btn-primary" : "btn-ghost"}
-                        onClick={() => onTenantLifecycleChange("all")}
-                    >
-                        Все
-                    </button>
-                    <button
                         className={tenantLifecycle === "active" ? "btn-primary" : "btn-ghost"}
                         onClick={() => onTenantLifecycleChange("active")}
+                        data-testid="tenants-decommission-lifecycle-active"
                     >
                         Активные
                     </button>

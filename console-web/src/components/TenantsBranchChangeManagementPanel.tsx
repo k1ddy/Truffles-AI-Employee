@@ -213,10 +213,8 @@ export default function TenantsBranchChangeManagementPanel({
                                     <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
                                         <div className="grid gap-3">
                                             <div className="rounded-lg border border-border/60 bg-background p-3 text-[11px] text-muted-foreground" data-testid="tenants-branch-input-contract">
-                                                Форматы: `slug` = `a-z0-9_-`; `timezone` = IANA (`Asia/Almaty`);
-                                                `phone` = 7-15 цифр (допускаются `+`, пробелы, `()`, `-`);
-                                                `telegram_chat_id` = целое число (`-100...`);
-                                                `knowledge_tag` = `a-z0-9_-` до 64.
+                                                Перед публикацией проверьте данные филиала: код филиала без пробелов, корректный часовой пояс,
+                                                рабочий телефон, канал WhatsApp/Telegram и актуальный тег базы знаний.
                                             </div>
                                             <div className="grid gap-3 sm:grid-cols-2">
                                                 <label className="text-xs text-muted-foreground">
@@ -229,7 +227,7 @@ export default function TenantsBranchChangeManagementPanel({
                                                     />
                                                 </label>
                                                 <label className="text-xs text-muted-foreground">
-                                                    Slug (идентификатор)
+                                                    Код филиала
                                                     <input
                                                         className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                         value={branchEditor.slug}
@@ -239,7 +237,7 @@ export default function TenantsBranchChangeManagementPanel({
                                                     />
                                                 </label>
                                                 <label className="text-xs text-muted-foreground">
-                                                    Timezone (опционально)
+                                                    Часовой пояс (опционально)
                                                     <input
                                                         className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                         value={branchEditor.timezone}
@@ -249,7 +247,7 @@ export default function TenantsBranchChangeManagementPanel({
                                                     />
                                                 </label>
                                                 <label className="text-xs text-muted-foreground">
-                                                    Phone (опционально)
+                                                    Телефон (опционально)
                                                     <input
                                                         className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                         value={branchEditor.phone}
@@ -259,7 +257,7 @@ export default function TenantsBranchChangeManagementPanel({
                                                     />
                                                 </label>
                                                 <label className="text-xs text-muted-foreground">
-                                                    instance_id (опционально)
+                                                    Идентификатор WhatsApp (опционально)
                                                     <input
                                                         className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                         value={branchEditor.instanceId}
@@ -269,7 +267,7 @@ export default function TenantsBranchChangeManagementPanel({
                                                     />
                                                 </label>
                                                 <label className="text-xs text-muted-foreground">
-                                                    telegram_chat_id (опционально)
+                                                    Чат Telegram (опционально)
                                                     <input
                                                         className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                         value={branchEditor.telegramChatId}
@@ -279,7 +277,7 @@ export default function TenantsBranchChangeManagementPanel({
                                                     />
                                                 </label>
                                                 <label className="text-xs text-muted-foreground">
-                                                    knowledge_tag (опционально)
+                                                    Тег базы знаний (опционально)
                                                     <input
                                                         className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                         value={branchEditor.knowledgeTag}
@@ -329,12 +327,12 @@ export default function TenantsBranchChangeManagementPanel({
                                                 </div>
                                                 {!branchEditor.original.isActive && branchEditor.isActive && !branchEditor.instanceId.trim() ? (
                                                     <div className="text-destructive">
-                                                        Нельзя активировать без `instance_id`.
+                                                        Нельзя активировать без идентификатора WhatsApp.
                                                     </div>
                                                 ) : null}
                                                 {confirmationNeeded ? (
                                                     <div className="text-amber-700">
-                                                        Изменение требует подтверждения (`branch_deactivate`).
+                                                        Изменение требует подтверждения по политике деактивации.
                                                     </div>
                                                 ) : (
                                                     <div className="text-muted-foreground">

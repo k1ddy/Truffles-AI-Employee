@@ -6,8 +6,10 @@ from uuid import uuid4
 import pytest
 
 from app.routers import console as console_router
+from app.schemas.capabilities import CapabilitiesPayload
 from app.schemas.console import (
     ConsoleBranchUpdateRequest,
+    ConsoleCapabilitiesPatchRequest,
     ConsoleClientCreateRequest,
     ConsoleClientLifecycleActionRequest,
     ConsoleClientUpdateRequest,
@@ -531,6 +533,70 @@ async def test_update_branch_invalidates_fleet_cache_on_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_company_requires_platform_admin(monkeypatch):
+    db = Mock()
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(role="owner"),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.create_company(
+            request=Mock(),
+            body=ConsoleCompanyCreateRequest(name="New Co"),
+            db=db,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_update_client_requires_platform_admin(monkeypatch):
+    db = Mock()
+    client_id = uuid4()
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(role="owner"),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.update_client(
+            client_id,
+            request=Mock(),
+            body=ConsoleClientUpdateRequest(slug="updated"),
+            db=db,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_restore_client_requires_platform_admin(monkeypatch):
+    db = Mock()
+    client_id = uuid4()
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(role="owner"),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.restore_client(
+            client_id,
+            request=Mock(),
+            body=ConsoleClientLifecycleActionRequest(reason="restore"),
+            db=db,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
 async def test_update_company_rejects_cross_tenant_company_for_owner(monkeypatch):
     company_id = uuid4()
     company = SimpleNamespace(id=company_id, name="Other Company", billing_info={})
@@ -717,3 +783,76 @@ def test_normalize_branch_patch_payload_rejects_non_string_instance_id():
 
     assert normalized == {}
     assert "instance_id must be string" in errors
+
+
+@pytest.mark.asyncio
+async def test_patch_capabilities_requires_platform_admin(monkeypatch):
+    db = Mock()
+    body = ConsoleCapabilitiesPatchRequest(
+        scope="client",
+        payload=CapabilitiesPayload(),
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(role="owner"),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.patch_capabilities(
+            request=Mock(),
+            body=body,
+            db=db,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_patch_capabilities_platform_admin_allowed(monkeypatch):
+    db = Mock()
+    body = ConsoleCapabilitiesPatchRequest(
+        scope="client",
+        payload=CapabilitiesPayload.model_validate(
+            {"channels": {"whatsapp": True}, "features": {"booking_mode": "collect_preferences"}}
+        ),
+    )
+    audit_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(role="platform_admin"),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_get_latest_capability", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "record_audit_event",
+        lambda *_args, **kwargs: audit_calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_serialize_capabilities_record",
+        lambda record: SimpleNamespace(
+            scope=record.scope,
+            status=record.status,
+            schema_version=record.schema_version,
+            client_id=record.client_id,
+            branch_id=record.branch_id,
+        ),
+    )
+
+    response = await console_router.patch_capabilities(
+        request=Mock(),
+        body=body,
+        db=db,
+    )
+
+    assert response.scope == "client"
+    assert response.status == "active"
+    db.add.assert_called_once()
+    db.commit.assert_called_once()
+    assert len(audit_calls) == 1

@@ -15,6 +15,7 @@
 | `docs/SESSION_INDEX.md` | Индекс активных сессий (single source of truth) | Архитектор/Brain/Hands |
 | `docs/SESSIONS/` | Логи сессий (контекст, планы, worktree/branch) | Архитектор/Brain/Hands |
 | `docs/SESSIONS/SESSION_TEMPLATE.md` | Шаблон сессионного лога | Архитектор/Brain/Hands |
+| `docs/BLOCK_GRAPH.yaml` | Граф блоков (BLOCK_ID/DEPENDS_ON/UNLOCKS/status) для zero-context исполнения | Архитектор/Brain/Hands |
 | `contracts/` | Канон контрактов (Console API, ошибки) | Архитектор/Frontend |
 | `contracts/console_api/schemathesis.toml` | Seed/overrides для Schemathesis contract smoke | Backend/QA |
 | `contracts/events/` | Контракты событий (outbox) | Архитектор/Backend |
@@ -49,6 +50,7 @@
 | `scripts/check_migration_governance.py` | Governance check для SQL миграций (naming/frozen ops migrations) | Backend/OPS |
 | `scripts/session_start.sh` | Создать worktree/branch и session log (agent suffix обязателен) | Все роли |
 | `scripts/session_check.sh` | Проверка сессии перед commit/push | Все роли |
+| `scripts/zero_context_gate.sh` | Проверка полноты TP+Report для zero-context блока | Brain/Architect/Hands |
 | `scripts/session_end.sh` | Закрытие сессии + index обновление | Все роли |
 | `scripts/session_resume.sh` | Возобновить активную сессию после compaction (по умолчанию SESSION_AGENT) | Все роли |
 | `scripts/session_index_rebuild.sh` | Пересобрать `docs/SESSION_INDEX.md` из `docs/SESSIONS/*` | Brain/Architect |
@@ -100,6 +102,7 @@
 | `truffles-api/app/models/marketing_consent.py` | Marketing consent state (`opt_in/opt_out`) | Backend |
 | `truffles-api/app/models/marketing_suppression.py` | Manual/automatic suppression registry | Backend |
 | `truffles-api/app/models/outbox_status_event.py` | DB model for outbox status events (analytics) | Backend |
+| `truffles-api/app/models/tenants_fleet_prewarm_job.py` | Durable prewarm dispatch queue model for tenants fleet cache rebuild | Backend |
 | `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
 | `truffles-api/app/provider_gateway_app.py` | Отдельный app для Provider Gateway | Backend |
 | `truffles-api/app/inbox_service_app.py` | Отдельный app для Inbox Service | Backend |
@@ -117,6 +120,7 @@
 | `truffles-api/migrations/021_add_outbox_status_events.sql` | Migration: outbox_status_events (status history) | Backend/OPS |
 | `truffles-api/migrations/022_add_alert_events.sql` | Migration: alert_events (no_response, etc.) | Backend/OPS |
 | `truffles-api/migrations/034_marketing_pro_v1.sql` | Migration: Marketing Pro v1 schema (campaign state + audience/suppression/delivery events) | Backend/OPS |
+| `truffles-api/migrations/041_add_tenants_fleet_prewarm_jobs.sql` | Migration: durable tenants fleet prewarm dispatch queue | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/src/app/insights/page.tsx` | Insights/Analytics page (read-only daily metrics) | Frontend |
@@ -125,6 +129,10 @@
 | `console-web/src/components/TenantsSensitiveIdCell.tsx` | Mask/reveal/copy ячейка чувствительного `instance_id` с audit hook | Frontend |
 | `console-web/src/components/TenantsQuickCreatePanel.tsx` | Вынесенный quick-create блок Tenants (компания/клиент/филиал) с явными label-id для a11y | Frontend |
 | `console-web/src/components/TenantsOperationalKpiPanel.tsx` | Вынесенная панель операционных KPI/alert hooks/weekly snapshots для Tenants (platform_admin) | Frontend |
+| `console-web/src/app/tenants/use-tenants-scope-derived-state.ts` | Derived scope/state hook для `/tenants` (context names/maps/filter options) | Frontend |
+| `console-web/src/app/tenants/tenants-page-helpers.ts` | Shared helpers/types/formatters for Tenants page (lifecycle audit, branch patch/snapshot, scope/date labels) | Frontend |
+| `console-web/src/app/tenants/use-tenants-action-queue.ts` | Hook для action-queue orchestration и archive predicate в `/tenants` | Frontend |
+| `console-web/src/app/tenants/use-tenants-operational-model.ts` | Hook для вычисления Tenants operational KPI/drilldown/alert/report модели | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
 | `console-web/e2e/tenants-a11y.spec.ts` | Live Playwright + Axe evidence для Tenants (desktop/mobile) | Frontend/QA |
 | `console-web/eslint.config.js` | ESLint flat config для console-web | Frontend |
@@ -139,6 +147,9 @@
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
 | `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` | Booking confirm verification runbook | QA/OPS/Brain |
+| `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
+| `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
+| `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |
 | `docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md` | Weekly control-loop runbook для Platform Admin (snapshot -> backlog -> checks) | Brain/Architect |
 | `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md` | Post-merge control-loop runbook для Owner/Admin (`T+0/T+24`) | Brain/Architect |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
@@ -165,10 +176,14 @@
 | `docs/REPORTS/2026-02-16-owner-admin-wave9-subscription-contract-v1.md` | Report: Owner/Admin wave-9 (subscription contract = plan + fact + action) | Brain/Architect |
 | `docs/REPORTS/2026-02-16-owner-admin-wave10-subscription-truth-v1.md` | Report: Owner/Admin wave-10 (subscription truth mode: fail-closed contract + diagnostics) | Brain/Architect |
 | `docs/REPORTS/2026-02-17-console-postmerge-acceptance-p95-wave123-v1.md` | Report: Post-merge acceptance + p95 timing audit (platform_admin/owner_admin) with nav reliability findings | Brain/Architect |
+| `docs/REPORTS/2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md` | Report: session-scoped zero-context gate isolation for UCPV1 track | Brain/Architect |
+| `docs/REPORTS/REPORT_TEMPLATE_ZERO_CONTEXT.md` | Шаблон отчёта для zero-context block delivery | Brain/Architect/Hands |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP_TEMPLATE_ZERO_CONTEXT.md` | Шаблон Task Package для zero-context block delivery | Brain/Architect/Hands |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md`
 - `docs/TASK_PACKAGES/TP-2026-02-22-outreach-auto-case-a200.md`
 - `docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-wave10-subscription-truth-a88.md`
 - `docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave7-fact-os-a1.md`
