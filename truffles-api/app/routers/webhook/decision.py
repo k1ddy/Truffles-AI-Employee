@@ -627,18 +627,18 @@ def _should_block_expected_reply_by_info(
         question_like = any(tokens[0].startswith(prefix) for prefix in legacy.QUESTION_WORD_PREFIXES)
     location_question_signal = bool(
         question_like
-        and any(token.startswith("где") for token in tokens)
-        and any(stem in normalized_message for stem in ("салон", "адрес", "наход", "располож"))
+        and _has_explicit_location_or_hours_request(
+            message_text,
+            client_slug=client_slug,
+            strict=True,
+        )
     )
     verification_signal = _looks_like_booking_verification_request(message_text)
     reschedule_signal = _looks_like_booking_reschedule_request(
         message_text,
         client_slug=client_slug,
     )
-    media_offer_signal = bool(
-        ("фото" in normalized_message or "референс" in normalized_message)
-        and any(stem in normalized_message for stem in ("отправ", "пришл", "скин", "покаж"))
-    )
+    media_offer_signal = style_reference_signal
     expected_reply_candidate = None
     if expected_reply_type == legacy.EXPECTED_REPLY_TIME:
         expected_reply_candidate = _validate_expected_reply_value(
