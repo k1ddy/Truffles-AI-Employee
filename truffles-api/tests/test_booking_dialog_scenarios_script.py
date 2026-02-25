@@ -245,6 +245,32 @@ def test_ensure_required_tags_reorders_check_before_confirm():
     assert check_idx < confirm_idx
 
 
+def test_required_llm_tags_include_handoff_for_handoff_coverage():
+    required = _module._required_llm_tags(["booking", "info", "interrupt", "handoff"])
+
+    assert "handoff" in required
+
+
+def test_ensure_required_tags_adds_handoff_for_handoff_coverage():
+    ctx = _module._build_context(random.Random(23))
+    turns = [
+        {"kind": "text", "text": "Хочу записаться", "tags": ["booking"], "expect": {}},
+        {"kind": "text", "text": "Можно на 19:00?", "tags": ["time"], "expect": {}},
+        {"kind": "text", "text": "Меня зовут Лена", "tags": ["name"], "expect": {}},
+        {"kind": "text", "text": "Да, подтверждаю.", "tags": ["confirm"], "expect": {}},
+    ]
+
+    enriched = _module._ensure_required_tags(
+        turns,
+        ctx,
+        max_turns=12,
+        coverage=["booking", "info", "interrupt", "handoff"],
+    )
+    tags = {tag for turn in enriched for tag in (turn.get("tags") or [])}
+
+    assert "handoff" in tags
+
+
 def test_call_openai_classifies_quota_error(monkeypatch):
     error_payload = json.dumps(
         {

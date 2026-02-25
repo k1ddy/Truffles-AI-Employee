@@ -74,6 +74,7 @@ CANONICAL_EXPECT_INFO_SECTIONS = sorted(
 )
 REQUIRED_LLM_TAGS = ["booking", "time", "name"]
 REQUIRED_BOOKING_CONFIRM_TAGS = ["check_booking", "confirm"]
+REQUIRED_HANDOFF_TAGS = ["handoff"]
 DEFAULT_REFERENCE_IMAGE_PATH = "/home/zhan/TrufflesLogoClear.png"
 DEFAULT_REFERENCE_IMAGE_URL = "https://app.chatflow.kz/static/demo/reference.jpg"
 REQUIRED_LLM_TURNS = {
@@ -85,6 +86,11 @@ REQUIRED_LLM_TURNS = {
         "tags": ["check_booking"],
     },
     "confirm": {"text": "Да, подтверждаю.", "tags": ["confirm"]},
+    "handoff": {
+        "text": "Можно связаться с менеджером?",
+        "tags": ["handoff", "human"],
+        "expect": {"action": "handoff", "state": "pending"},
+    },
 }
 
 
@@ -200,6 +206,10 @@ def _required_llm_tags(coverage: list[str] | None) -> list[str]:
     }
     if "booking" in coverage_tokens:
         for tag in REQUIRED_BOOKING_CONFIRM_TAGS:
+            if tag not in required:
+                required.append(tag)
+    if "handoff" in coverage_tokens:
+        for tag in REQUIRED_HANDOFF_TAGS:
             if tag not in required:
                 required.append(tag)
     return required
