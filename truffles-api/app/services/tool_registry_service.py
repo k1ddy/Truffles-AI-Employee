@@ -25,6 +25,7 @@ from app.services.appointment_reminder_service import (
 from app.services.appointment_service import AppointmentConflictError, SchedulingService
 from app.services.calendar_sync_service import enqueue_appointment_sync, get_provider_health
 from app.services.capabilities_runtime import get_runtime_capabilities
+from app.services.capability_manifest_service import resolve_tool_protocol_decision
 from app.services.pack_runtime_service import (
     _detect_promotion_intent,
     _has_duration_signal,
@@ -1352,15 +1353,9 @@ def execute_tool_action(
             },
         )
 
-    allow_tokens, deny_tokens, capability_source = _resolve_runtime_tool_policy()
-    capability_block_reason = None
-    if _is_tool_policy_enforcement_enabled():
-        capability_block_reason = _tool_action_block_reason(
-            tool_action=tool_action,
-            allow_tokens=allow_tokens,
-            deny_tokens=deny_tokens,
-        )
-    if capability_block_reason:
+    protocol_decision = resolve_tool_protocol_decision(tool_action)
+    capability_block_reason = protocol_decision.reason
+    if not protocol_decision.allowed:
         response_text = (
             "В этом филиале онлайн-календарь для такого запроса отключен. "
             "Передам менеджеру, чтобы помочь вручную."
@@ -1376,14 +1371,20 @@ def execute_tool_action(
                 "tool_action": tool_action,
                 "tool_decision": "capability_blocked",
                 "capability_reason": capability_block_reason,
-                "capability_source": capability_source,
+                "capability_source": protocol_decision.source,
+                "tool_protocol_decision": "blocked",
+                "tool_protocol_enforced": protocol_decision.enforcement_enabled,
+                "tool_protocol_deny_by_default": protocol_decision.deny_by_default,
             },
             trace={
                 "stage": "tool_registry",
                 "decision": "capability_blocked",
                 "tool_action": tool_action,
                 "capability_reason": capability_block_reason,
-                "capability_source": capability_source,
+                "capability_source": protocol_decision.source,
+                "tool_protocol_decision": "blocked",
+                "tool_protocol_enforced": protocol_decision.enforcement_enabled,
+                "tool_protocol_deny_by_default": protocol_decision.deny_by_default,
             },
         )
 

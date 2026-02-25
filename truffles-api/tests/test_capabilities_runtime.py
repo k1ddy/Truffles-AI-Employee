@@ -2,6 +2,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
+
 from app.routers.webhook.booking import _resolve_booking_settings
 from app.schemas.capabilities import CapabilitiesPayload
 from app.services import capabilities_runtime
@@ -112,6 +115,41 @@ def test_build_runtime_capabilities_merges_tool_policy():
     assert runtime.payload.tools.deny == ["calendar.book_slot"]
 
 
+def test_build_runtime_capabilities_merges_fact_scopes_and_handoff_policy():
+    client_id = uuid4()
+    branch_id = uuid4()
+    client_payload = {
+        "allowed_fact_scopes": ["info.*", "consult.master"],
+        "handoff_policy": "allow",
+    }
+    branch_payload = {
+        "allowed_fact_scopes": ["info.hours"],
+        "handoff_policy": "manager_request_only",
+    }
+
+    def _fake_get_latest_capability(_db, *, client_id, scope, branch_id):
+        assert client_id is not None
+        if scope == "client" and branch_id is None:
+            return SimpleNamespace(payload_json=client_payload, status="active")
+        if scope == "branch" and branch_id is not None:
+            return SimpleNamespace(payload_json=branch_payload, status="active")
+        return None
+
+    original = capabilities_runtime._get_latest_capability
+    capabilities_runtime._get_latest_capability = _fake_get_latest_capability
+    try:
+        runtime = capabilities_runtime.build_runtime_capabilities(
+            db=Mock(),
+            client_id=client_id,
+            branch_id=branch_id,
+        )
+    finally:
+        capabilities_runtime._get_latest_capability = original
+
+    assert runtime.payload.allowed_fact_scopes == ["info.hours"]
+    assert runtime.payload.handoff_policy == "manager_request_only"
+
+
 def test_capabilities_payload_normalizes_tool_policy_tokens():
     payload = CapabilitiesPayload.model_validate(
         {
@@ -124,3 +162,20 @@ def test_capabilities_payload_normalizes_tool_policy_tokens():
 
     assert payload.tools.allow == ["calendar.*", "calendar.book_slot"]
     assert payload.tools.deny == ["catalog.location"]
+
+
+def test_capabilities_payload_normalizes_fact_scopes_and_handoff_policy():
+    payload = CapabilitiesPayload.model_validate(
+        {
+            "allowed_fact_scopes": [" INFO.* ", "info.hours", "INFO.HOURS"],
+            "handoff_policy": " MANAGER_REQUEST_ONLY ",
+        }
+    )
+
+    assert payload.allowed_fact_scopes == ["info.*", "info.hours"]
+    assert payload.handoff_policy == "manager_request_only"
+
+
+def test_capabilities_payload_rejects_invalid_fact_scope_token():
+    with pytest.raises(ValidationError):
+        CapabilitiesPayload.model_validate({"allowed_fact_scopes": ["info scope"]})

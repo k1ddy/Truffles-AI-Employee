@@ -1,4 +1,5 @@
 from app.services.expected_reply_contract import (
+    EXPECTED_REPLY_NAME,
     EXPECTED_REPLY_SERVICE,
     EXPECTED_REPLY_TIME,
     normalize_expected_reply_type,
@@ -90,7 +91,7 @@ def test_tool_contract_reschedule_verifier_blocked_requires_handoff():
     assert decision.reason == "calendar_reschedule_handoff"
 
 
-def test_tool_contract_get_booking_verifier_blocked_collects_reference():
+def test_tool_contract_get_booking_verifier_blocked_collects_time_when_name_known():
     decision = resolve_tool_expected_reply_contract(
         tool_action="calendar.get_booking",
         tool_decision="verifier_blocked",
@@ -104,4 +105,21 @@ def test_tool_contract_get_booking_verifier_blocked_collects_reference():
 
     assert decision is not None
     assert decision.expected_reply_type == EXPECTED_REPLY_TIME
+    assert decision.reason == "calendar_get_booking_collect_reference"
+
+
+def test_tool_contract_get_booking_verifier_blocked_collects_name_when_name_missing():
+    decision = resolve_tool_expected_reply_contract(
+        tool_action="calendar.get_booking",
+        tool_decision="verifier_blocked",
+        current_expected_reply_type=None,
+        memory_expected_reply_type=None,
+        booking_has_service=True,
+        booking_has_datetime=True,
+        booking_has_name=False,
+        booking_active=True,
+    )
+
+    assert decision is not None
+    assert decision.expected_reply_type == EXPECTED_REPLY_NAME
     assert decision.reason == "calendar_get_booking_collect_reference"

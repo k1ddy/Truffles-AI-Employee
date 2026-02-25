@@ -79,6 +79,13 @@ consult_intent_cues:
     - как выбрать
     - уход
     - ничего страш
+consult_recommendation_terms:
+  ru:
+    - посовет
+    - рекоменд
+    - что выбрать
+    - какую лучше
+    - какой лучше
 consult_intent_blockers:
   ru:
     - запис
@@ -215,6 +222,12 @@ location_keywords:
     - как добраться
     - как проехать
     - как доехать
+location_question_scope_terms:
+  ru:
+    - салон
+    - адрес
+    - наход
+    - располож
 service_question_keywords:
   ru:
     - делаете
@@ -229,6 +242,13 @@ service_question_keywords:
     - бар ма
     - қызмет көрсет
     - көрсетесіз
+haircut_service_markers:
+  ru:
+    - стриж
+    - челк
+  en:
+    - haircut
+    - bangs
 service_question_location_phrases:
   ru:
     - адрес
@@ -243,6 +263,26 @@ consult_skip_address_phrases:
     - как доехать
     - как пройти
     - остановк
+style_reference_media_terms:
+  ru:
+    - фото
+    - картин
+    - референс
+    - пример
+  en:
+    - photo
+    - picture
+    - reference
+style_reference_send_terms:
+  ru:
+    - отправ
+    - пришл
+    - скин
+    - покаж
+  en:
+    - send
+    - share
+    - upload
 booking_verification_keywords:
   ru:
     - проверь

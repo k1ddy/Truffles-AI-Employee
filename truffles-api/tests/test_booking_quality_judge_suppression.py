@@ -10,6 +10,7 @@ def _load_suppress_helper():
     wanted_functions = {
         "_llm_quality_normalize_expect_token",
         "_llm_quality_normalize_tool_token",
+        "_llm_quality_effective_intent",
         "_llm_quality_check_booking_tool_answered",
         "_llm_quality_has_expected_followup_prompt",
         "_llm_quality_should_suppress_missed_question_judge_fail",
@@ -85,6 +86,23 @@ def test_suppresses_missed_question_for_media_turn_during_booking_flow():
     assert suppress is True
 
 
+def test_suppresses_missed_question_for_media_booking_prompt_without_reason_code():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={"action": "booking_prompt"},
+        meta_action="booking_prompt",
+        expected_reply_type_value="service_choice",
+        booking_active=True,
+        turn_tags=["media"],
+        outbox_text="На какую услугу хотите записаться?",
+    )
+
+    assert suppress is True
+
+
 def test_suppresses_missed_question_when_followup_prompt_is_present():
     fn = _load_suppress_helper()
 
@@ -126,13 +144,14 @@ def test_does_not_suppress_missed_question_for_calendar_list_slots_booking_reply
     assert suppress is False
 
 
-def test_does_not_suppress_missed_question_for_calendar_get_booking_booking_reply():
+def test_suppresses_missed_question_for_calendar_get_booking_contract_answer():
     fn = _load_suppress_helper()
 
     suppress = fn(
         judge_result={"verdict": "fail", "reasons": ["missed_question"]},
         strict_reasons=[],
         meta={
+            "action": "reply",
             "intent": "calendar.get_booking",
             "tool_decision": "not_found",
             "llm_policy_override_reason_code": "required_slot_missing",
@@ -144,7 +163,28 @@ def test_does_not_suppress_missed_question_for_calendar_get_booking_booking_repl
         outbox_text="Проверил: пока не вижу подтвержденной записи.",
     )
 
-    assert suppress is False
+    assert suppress is True
+
+
+def test_suppresses_missed_question_for_media_calendar_prompt_with_followup():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={
+            "action": "reply",
+            "intent": "calendar.list_slots",
+            "tool_decision": "ok",
+        },
+        meta_action="reply",
+        expected_reply_type_value="time",
+        booking_active=True,
+        turn_tags=["media"],
+        outbox_text="Понял. На какую дату и время вам удобно?",
+    )
+
+    assert suppress is True
 
 
 def test_does_not_suppress_missed_question_without_whitelist_reason_code():

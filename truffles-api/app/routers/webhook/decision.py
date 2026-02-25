@@ -638,7 +638,17 @@ def _should_block_expected_reply_by_info(
         message_text,
         client_slug=client_slug,
     )
-    media_offer_signal = style_reference_signal
+    media_offer_terms = get_system_lexicon_list("style_reference_media_terms")
+    media_offer_verbs = get_system_lexicon_list("style_reference_send_terms")
+    media_offer_signal = bool(
+        style_reference_signal
+        or (
+            media_offer_terms
+            and media_offer_verbs
+            and any(term in normalized_message for term in media_offer_terms)
+            and any(term in normalized_message for term in media_offer_verbs)
+        )
+    )
     expected_reply_candidate = None
     if expected_reply_type == legacy.EXPECTED_REPLY_TIME:
         expected_reply_candidate = _validate_expected_reply_value(

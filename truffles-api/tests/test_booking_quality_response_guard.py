@@ -92,6 +92,23 @@ def _load_evaluate_turn():
     return namespace["_llm_quality_evaluate_turn"]
 
 
+def _load_dry_run_contract_helper():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+    selected_nodes = []
+    for node in tree.body:
+        if (
+            isinstance(node, ast.FunctionDef)
+            and node.name == "_llm_quality_apply_dry_run_response_contract"
+        ):
+            selected_nodes.append(node)
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {}
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace["_llm_quality_apply_dry_run_response_contract"]
+
+
 def _load_expectation_helpers():
     script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
     source = script_path.read_text(encoding="utf-8")
@@ -149,6 +166,24 @@ def _load_duplicate_ack_helpers():
             names = {target.id for target in node.targets if isinstance(target, ast.Name)}
             if {"CHAOS_PENDING_ACTIONS"} & names:
                 selected_nodes.append(node)
+        if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
+            selected_nodes.append(node)
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {"json": json}
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace
+
+
+def _load_message_recovery_helper():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+    wanted_functions = {
+        "_escape_sql_literal",
+        "_llm_quality_fetch_assistant_reply_from_messages",
+    }
+    selected_nodes = []
+    for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
             selected_nodes.append(node)
     module = ast.Module(body=selected_nodes, type_ignores=[])
@@ -503,6 +538,43 @@ def test_missing_bot_reply_suppressed_on_infra_webhook_error():
     assert "outbox_delivery_timeout" not in reasons
 
 
+def test_dry_run_contract_marks_missing_bot_reply_for_expected_turn():
+    apply_contract = _load_dry_run_contract_helper()
+    reasons = apply_contract(
+        [],
+        dry_run=True,
+        expected_response=True,
+        bot_response=False,
+    )
+
+    assert "missing_bot_reply" in reasons
+
+
+def test_dry_run_contract_keeps_existing_reasons_without_duplicate_missing_reply():
+    apply_contract = _load_dry_run_contract_helper()
+    reasons = apply_contract(
+        ["missing_bot_reply", "judge_fail"],
+        dry_run=True,
+        expected_response=True,
+        bot_response=False,
+    )
+
+    assert reasons.count("missing_bot_reply") == 1
+    assert "judge_fail" in reasons
+
+
+def test_dry_run_contract_is_noop_when_not_dry_run():
+    apply_contract = _load_dry_run_contract_helper()
+    reasons = apply_contract(
+        ["judge_fail"],
+        dry_run=False,
+        expected_response=True,
+        bot_response=False,
+    )
+
+    assert reasons == ["judge_fail"]
+
+
 def test_duplicate_ack_detector_handles_nested_string_payload():
     helpers = _load_duplicate_ack_helpers()
     fn = helpers["_llm_quality_payload_is_duplicate_ack"]
@@ -555,6 +627,50 @@ def test_duplicate_ack_does_not_infer_when_outbox_failed():
         outbox_payload_status="FAILED",
         outbox_summary={"count": 1, "status": "FAILED"},
     )
+
+
+def test_message_recovery_helper_returns_assistant_text():
+    helpers = _load_message_recovery_helper()
+    fn = helpers["_llm_quality_fetch_assistant_reply_from_messages"]
+    captured = {}
+
+    def _run_psql_query(_db_user, query):
+        captured["query"] = query
+        return json.dumps({"content": "  Отлично, время подходит. Как вас зовут?  "}), None
+
+    helpers["_run_psql_query"] = _run_psql_query
+    text, error = fn(
+        "postgres",
+        "conv-id",
+        "msg-id",
+        window_seconds=30,
+    )
+
+    assert error is None
+    assert text == "Отлично, время подходит. Как вас зовут?"
+    assert "interval '30 seconds'" in captured["query"]
+
+
+def test_message_recovery_helper_clamps_window_and_handles_empty_payload():
+    helpers = _load_message_recovery_helper()
+    fn = helpers["_llm_quality_fetch_assistant_reply_from_messages"]
+    captured = {}
+
+    def _run_psql_query(_db_user, query):
+        captured["query"] = query
+        return "{}", None
+
+    helpers["_run_psql_query"] = _run_psql_query
+    text, error = fn(
+        "postgres",
+        "conv-id",
+        "msg-id",
+        window_seconds=999,
+    )
+
+    assert error is None
+    assert text is None
+    assert "interval '180 seconds'" in captured["query"]
 
 
 def test_false_booking_confirmation_is_reported_without_calendar_proof():

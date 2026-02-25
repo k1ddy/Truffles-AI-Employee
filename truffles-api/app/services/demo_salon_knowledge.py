@@ -1729,6 +1729,48 @@ def _format_service_not_found_reply(truth: dict) -> str | None:
     return template
 
 
+def _has_recommendation_signal(normalized: str, client_slug: str | None) -> bool:
+    if not normalized:
+        return False
+    markers = get_signal_lexicon_list(client_slug, "consult_recommendation_terms")
+    if not markers:
+        markers = get_signal_lexicon_list(client_slug, "consult_intent_cues")
+    return bool(markers) and _contains_any(normalized, markers)
+
+
+def _has_haircut_marker(normalized: str, client_slug: str | None) -> bool:
+    if not normalized:
+        return False
+    markers = get_signal_lexicon_list(client_slug, "haircut_service_markers")
+    return bool(markers) and _contains_any(normalized, markers)
+
+
+def _format_haircut_recommendation_reply(truth: dict, *, client_slug: str | None) -> str:
+    suggestions: list[str] = []
+    catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
+    if isinstance(catalog, dict):
+        raw_suggestions = catalog.get("suggestions")
+        if isinstance(raw_suggestions, list):
+            for item in raw_suggestions:
+                text = str(item).strip()
+                if text and _has_haircut_marker(_normalize_text(text), client_slug):
+                    suggestions.append(text)
+    if not suggestions:
+        suggestions = ["Женская стрижка", "Мужская стрижка", "Стрижка машинкой"]
+    picked = ", ".join(suggestions[:3])
+    return (
+        f"Для стрижки обычно выбирают: {picked}. "
+        "Если подскажете длину волос и желаемый результат, порекомендую точнее."
+    )
+
+
+def _with_consult_recommendation_meta(meta: dict[str, Any] | None) -> dict[str, Any]:
+    payload = dict(meta) if isinstance(meta, dict) else {}
+    payload["consult_recommendation"] = True
+    payload.setdefault("resolver_signal", "consult_recommendation")
+    return payload
+
+
 def _format_contact_reply(
     *,
     client_slug: str | None = _DEFAULT_CLIENT_SLUG,
@@ -3327,7 +3369,14 @@ def get_demo_salon_service_decision(
         reply = None
         if consult_intent and not price_or_duration_signal:
             service_name = service.get("name") if isinstance(service, dict) else None
-            if isinstance(service_name, str) and service_name.strip():
+            recommendation_signal = _has_recommendation_signal(normalized, slug)
+            if (
+                recommendation_signal
+                and isinstance(service_name, str)
+                and _has_haircut_marker(_normalize_text(service_name), slug)
+            ):
+                reply = _format_haircut_recommendation_reply(truth, client_slug=slug)
+            elif isinstance(service_name, str) and service_name.strip():
                 reply = _format_service_presence_reply_for_name(service_name, slug)
             if not reply:
                 description = service.get("description") if isinstance(service, dict) else None
@@ -3336,11 +3385,16 @@ def get_demo_salon_service_decision(
         if not reply:
             reply = _format_service_reply(service, truth, slug)
         if reply:
-            meta = _build_fact_meta(
+            raw_meta = _build_fact_meta(
                 meta=service_query_meta,
                 fact_source="service_matcher",
                 fact_intents=["service_match"],
                 service_query_meta=service_query_meta,
+            )
+            meta = (
+                _with_consult_recommendation_meta(raw_meta)
+                if consult_intent and not price_or_duration_signal and _has_recommendation_signal(normalized, slug)
+                else raw_meta
             )
             return DemoSalonDecision(
                 action="reply",
@@ -3348,6 +3402,23 @@ def get_demo_salon_service_decision(
                 intent="service_match",
                 meta=meta,
             )
+
+    if consult_intent and _has_haircut_marker(normalized, slug) and _has_recommendation_signal(normalized, slug):
+        reply = _format_haircut_recommendation_reply(truth, client_slug=slug)
+        meta = _with_consult_recommendation_meta(
+            _build_fact_meta(
+                meta=service_query_meta,
+                fact_source="truth",
+                fact_intents=["consult_reply"],
+                service_query_meta=service_query_meta,
+            )
+        )
+        return DemoSalonDecision(
+            action="reply",
+            response=reply,
+            intent="consult_reply",
+            meta=meta,
+        )
 
     reply = _format_service_not_found_reply(truth)
     if reply:

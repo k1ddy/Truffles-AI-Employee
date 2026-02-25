@@ -102,7 +102,7 @@ def test_merge_expectations_sanitizes_handoff_override_without_handoff_tags():
     )
 
     assert expect["action"] is None
-    assert expect["state"] is None
+    assert expect["state"] == "bot_active"
     assert expect["expected_reply"] is True
 
 
@@ -117,6 +117,12 @@ def test_merge_expectations_drops_info_override_without_info_tags():
 
     assert expect["info_sections"] == []
     assert expect["expected_reply"] is True
+
+
+def test_merge_expectations_assigns_default_state_for_weak_tags():
+    expect = _merge_expectations(["noise"], None)
+
+    assert expect["state"] == "bot_active"
 
 
 def test_generate_llm_dialogs_retries_after_json_error(monkeypatch):

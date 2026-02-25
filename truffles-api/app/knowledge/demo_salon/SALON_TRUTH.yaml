@@ -1339,6 +1339,26 @@ domain_pack:
         - акци
         - льгот
         - промо
+    promotion_promo_code_terms:
+      ru:
+        - промокод
+        - промо-код
+        - промо код
+        - promo code
+        - promo-code
+        - promocode
+        - купон
+    master_long_haircut_phrases:
+      ru:
+        - долгими стрижками
+        - долгие стрижки
+        - длинные стрижки
+        - стрижки на длинные волосы
+        - длинные волосы
+    master_long_haircut_anchor_groups:
+      ru:
+        - долг стриж
+        - длин волос
     why_price_from_required_terms:
       ru:
         - почему

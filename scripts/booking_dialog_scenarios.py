@@ -605,7 +605,7 @@ def _default_expect() -> dict[str, Any]:
         "action": None,
         "info_sections": [],
         "reply_type": None,
-        "state": None,
+        "state": "bot_active",
         "expected_reply": None,
         "allow_booking_stall": False,
     }
@@ -838,6 +838,11 @@ def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
                 expect["info_sections"].append(section)
     expect["state"] = _sanitize_expect_state_by_tags(tags, expect.get("state"))
     expect["action"] = _sanitize_expect_action_by_tags(tags, expect.get("action"))
+    if expect.get("state") is None:
+        # Scenario contract requires at least one strong oracle field per turn.
+        # Keep state deterministic-by-default while allowing pending/manager
+        # expansion in runtime evaluator based on turn tags.
+        expect["state"] = "bot_active"
     if "media" in tag_set:
         # Style/media turns can legally end in pending with an immediate ack.
         # Keep reply expectation open in generated scenarios.

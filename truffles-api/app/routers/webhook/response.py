@@ -578,6 +578,13 @@ def _maybe_apply_consult_return(
 ) -> str | None:
     if not consult_return_pending:
         return bot_response
+    reason_token = str(reason or "").strip().casefold()
+    if reason_token in {"llm_policy_core_booking", "intent_queue_booking"}:
+        # Booking/check-booking prompts must stay focused on the current user turn
+        # and should not be polluted by stale consult follow-ups.
+        return bot_response
+    if "booking" in reason_token:
+        return bot_response
     from app.routers.webhook.context_manager import _apply_consult_return
 
     return _apply_consult_return(
@@ -588,6 +595,30 @@ def _maybe_apply_consult_return(
         consult_context=consult_context,
         reason=reason,
     )
+
+
+def _should_append_booking_followup_for_consult(
+    *,
+    booking_goal_locked: bool,
+    consult_action: str | None,
+    message_text: str | None,
+    expected_reply_type: str | None,
+    client_slug: str | None,
+) -> bool:
+    if not booking_goal_locked:
+        return False
+    action_token = str(consult_action or "").strip().casefold()
+    if action_token in {"consult_reply", "consult_clarify"}:
+        from . import _legacy as legacy
+
+        if expected_reply_type not in {legacy.EXPECTED_REPLY_TIME, legacy.EXPECTED_REPLY_NAME}:
+            return True
+        if not isinstance(message_text, str) or not message_text.strip():
+            return False
+
+        if not legacy._is_booking_request(message_text, client_slug=client_slug):
+            return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -724,6 +755,7 @@ def _handle_consult_flow(
         PackDecision,
         get_pack_decision,
         get_pack_service_decision,
+        has_consult_recommendation_signal,
     )
 
     from . import _legacy as legacy
@@ -832,6 +864,38 @@ def _handle_consult_flow(
                 intent_decomp_payload["consult_topic"] = consult_topic
                 if consult_question:
                     intent_decomp_payload["consult_question"] = consult_question
+    if not consult_intent and isinstance(message_text, str) and message_text.strip():
+        consult_probe_decision = get_pack_service_decision(
+            message_text,
+            client_slug=client_slug,
+            intent_decomp=intent_decomp_payload,
+        )
+        consult_probe_payload = (
+            dict(intent_decomp_payload)
+            if isinstance(intent_decomp_payload, dict)
+            else {}
+        )
+        if not has_consult_recommendation_signal(consult_probe_decision):
+            consult_probe_payload["consult_intent"] = True
+            if not consult_probe_payload.get("consult_question"):
+                consult_probe_payload["consult_question"] = message_text.strip()
+            fallback_probe_decision = get_pack_service_decision(
+                message_text,
+                client_slug=client_slug,
+                intent_decomp=consult_probe_payload,
+            )
+            if has_consult_recommendation_signal(fallback_probe_decision):
+                consult_probe_decision = fallback_probe_decision
+                intent_decomp_payload = consult_probe_payload
+        if has_consult_recommendation_signal(consult_probe_decision):
+            consult_intent = True
+            if service_availability_decision is None:
+                service_availability_decision = consult_probe_decision
+            if isinstance(intent_decomp_payload, dict):
+                intent_decomp_payload = dict(intent_decomp_payload)
+                intent_decomp_payload["consult_intent"] = True
+                if not intent_decomp_payload.get("consult_question"):
+                    intent_decomp_payload["consult_question"] = message_text.strip()
     consult_intent_signal = bool(consult_intent or consult_context_active)
     booking_goal_locked = bool(
         booking_wants_flow
@@ -1059,6 +1123,7 @@ def _handle_consult_flow(
                     message_text,
                 ) or _has_duration_signal(normalized_message, message_text)
             truth_priority_intent = None
+            truth_priority_decision: PackDecision | None = None
             if message_text:
                 truth_priority_decision = get_pack_decision(
                     message_text,
@@ -1079,6 +1144,18 @@ def _handle_consult_flow(
                 or info_class_intents
                 & {"location", "hours", "parking", "contact", "master", "duration", "pricing"}
             )
+            consult_recommendation_signal = bool(
+                has_consult_recommendation_signal(service_availability_decision)
+            )
+            if not consult_recommendation_signal and isinstance(truth_priority_decision, PackDecision):
+                consult_recommendation_signal = has_consult_recommendation_signal(
+                    truth_priority_decision
+                )
+            if consult_recommendation_signal and not consult_intent:
+                consult_intent = True
+                if isinstance(intent_decomp_payload, dict):
+                    intent_decomp_payload = dict(intent_decomp_payload)
+                    intent_decomp_payload["consult_intent"] = True
             service_matcher = None
             handler_override = legacy._get_policy_handler(None, client_slug=client_slug)
             if isinstance(handler_override, dict):
@@ -1088,9 +1165,36 @@ def _handle_consult_flow(
             if (
                 service_availability_decision is None
                 and not truth_priority_intent
-                and (explicit_info_intent or (short_circuit_service and price_or_duration_signal))
+                and (
+                    explicit_info_intent
+                    or consult_recommendation_signal
+                    or (short_circuit_service and price_or_duration_signal)
+                )
             ):
-                if service_matcher:
+                if consult_recommendation_signal:
+                    consult_intent_decomp = (
+                        dict(intent_decomp_payload)
+                        if isinstance(intent_decomp_payload, dict)
+                        else {}
+                    )
+                    # Recommendation questions can be tagged as `other` by intent-decomp.
+                    # Force consult intent for service decision so runtime follows
+                    # consult recommendation contract instead of generic clarify fallback.
+                    consult_intent_decomp["consult_intent"] = True
+                    if isinstance(message_text, str) and message_text.strip():
+                        consult_intent_decomp.setdefault("consult_question", message_text.strip())
+                    service_availability_decision = get_pack_service_decision(
+                        message_text,
+                        client_slug=client_slug,
+                        intent_decomp=consult_intent_decomp,
+                    )
+                    if service_availability_decision is None and service_matcher:
+                        service_availability_decision = service_matcher(
+                            message_text,
+                            client_slug=client_slug,
+                            intent_decomp=intent_decomp_payload,
+                        )
+                elif service_matcher:
                     service_availability_decision = service_matcher(
                         message_text,
                         client_slug=client_slug,
@@ -1752,7 +1856,14 @@ def _handle_consult_flow(
                 bot_response = legacy.MSG_STYLE_REFERENCE_NEED_MEDIA
         bot_response = legacy._combine_sidecar(bot_response, intent_queue_followup)
         booking_followup = None
-        if booking_goal_locked:
+        append_booking_followup = _should_append_booking_followup_for_consult(
+            booking_goal_locked=booking_goal_locked,
+            consult_action=consult_decision.intent,
+            message_text=message_text,
+            expected_reply_type=expected_reply_type,
+            client_slug=client_slug,
+        )
+        if append_booking_followup:
             if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
                 booking_followup = legacy.MSG_BOOKING_ASK_SERVICE
             elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:
@@ -1770,6 +1881,8 @@ def _handle_consult_flow(
                     booking_state,
                     refusal_flags=refusal_flags,
                 )
+        elif booking_goal_locked:
+            consult_meta["booking_followup_suppressed"] = True
         if booking_followup:
             consult_meta["booking_followup"] = True
         bot_response = legacy._append_followup(bot_response, booking_followup)
@@ -2494,15 +2607,20 @@ def _handle_ai_response_action(
                     and not intent_decomp_explicit_query
                     and not controller_service_query
                 )
-                service_semantic_allowed = bool(
-                    explicit_service_hint
-                    or intent_decomp_explicit_query
-                    or controller_service_query
-                    or booking_signal
-                    or (info_intent_hint and not info_only_semantic_skip)
-                    or in_signals
-                    or anchors_in_hits > 0
-                )
+                if info_only_semantic_skip:
+                    # For info-only interruptions (parking/hours/location/etc.)
+                    # do not run service semantic matcher in booking context.
+                    service_semantic_allowed = False
+                else:
+                    service_semantic_allowed = bool(
+                        explicit_service_hint
+                        or intent_decomp_explicit_query
+                        or controller_service_query
+                        or booking_signal
+                        or info_intent_hint
+                        or in_signals
+                        or anchors_in_hits > 0
+                    )
                 if not service_semantic_allowed:
                     if info_only_semantic_skip:
                         if saved_message:
