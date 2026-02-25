@@ -137,8 +137,8 @@
   - ruff check truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py
   - python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py
   - bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD
-  - docker build -t truffles-api:firebreak-hq1-wt -f truffles-api/Dockerfile .
-  - docker run -d --name truffles-api-firebreak-hq1 --env-file truffles-api/.env --network truffles_internal-net -p 18160:8000 truffles-api:firebreak-hq1-wt
+  - docker build -t truffles-api-firebreak-hq1-wt -f truffles-api/Dockerfile .
+  - docker run -d --name truffles-api-firebreak-hq1 --env-file truffles-api/.env --network truffles_internal-net -p 18160:8000 truffles-api-firebreak-hq1-wt
   - curl -sS --max-time 10 http://127.0.0.1:18160/admin/health
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18160 --client-slug demo_salon --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 2 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-human-nojudge-hq1-r4-a1
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18160 --client-slug demo_salon --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 1 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-human-nojudge-hq1-r5-a1
@@ -175,12 +175,15 @@
   - pytest -q truffles-api/tests/test_message_endpoint.py -k "booking or expected_reply or session_memory or policy_core"
   - pytest -q truffles-api/tests/test_booking_quality_*.py
   - python3 ops/diagnose.py llm-quality-gates --delta-gate-base-ref origin/main --hardcode-core-base-ref origin/main --run-economy-gate off
-  - docker build -t truffles-api:firebreak-hq1-ba4dcef1 -f truffles-api/Dockerfile .
-  - docker run -d --name truffles-api-firebreak-hq1-ba4dcef1 --env-file truffles-api/.env -e TEST_MODE=1 -e GIT_COMMIT=ba4dcef173839c6d3565cdbf630e6174f6110c07 -e BUILD_TIME=2026-02-24T03:00:00Z --network truffles_internal-net -p 18161:8000 truffles-api:firebreak-hq1-ba4dcef1
+  - docker build -t truffles-api-firebreak-hq1-ba4dcef1 -f truffles-api/Dockerfile .
+  - docker run -d --name truffles-api-firebreak-hq1-ba4dcef1 --env-file truffles-api/.env -e TEST_MODE=1 -e GIT_COMMIT=ba4dcef173839c6d3565cdbf630e6174f6110c07 -e BUILD_TIME=2026-02-24T03:00:00Z --network truffles_internal-net -p 18161:8000 truffles-api-firebreak-hq1-ba4dcef1
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18161 --client-slug demo_salon --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 1 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode off --allow-judge-off --fail-on-thresholds --max-failures 5 --manager-mode skip --pending-mode skip --skip-outbox --allow-non-allowlist --run-id booking-human-nojudge-hq1-20260224-a1-r1b (`INVALID`: `weak_oracle_turn`)
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18161 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-replay-20260223-contractized-a1-micro1-nojudge-ffda-step7/scenarios.json --baseline-summary /tmp/booking_quality/booking-replay-20260223-contractized-a1-micro1-critical-ffda-step7/summary.json --count 1 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode off --allow-judge-off --fail-on-thresholds --max-failures 5 --manager-mode skip --pending-mode skip --skip-outbox --allow-non-allowlist --run-id booking-replay-20260224-contractized-a1-micro1-nojudge-r1
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18161 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-replay-20260224-contractized-a1-micro1-nojudge-r1/scenarios.json --baseline-summary /tmp/booking_quality/booking-replay-20260223-contractized-a1-micro1-critical-ffda-step7/summary.json --count 1 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode critical --fail-on-thresholds --fail-on-regression --max-failures 10 --manager-mode skip --pending-mode skip --skip-outbox --allow-non-allowlist --run-id booking-replay-20260224-contractized-a1-micro1-critical-r2
   - /tmp/booking_quality/booking-replay-20260224-contractized-a1-micro1-nojudge-r1/{summary.json,brief.md,responses.jsonl,trace_bundle.jsonl}
   - /tmp/booking_quality/booking-replay-20260224-contractized-a1-micro1-critical-r2/{summary.json,brief.md,responses.jsonl,trace_bundle.jsonl}
   - PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/811
-- last_updated: 2026-02-24T08:12:00+05:00
+  - 2026-02-25 PR#825 red-fix: restored missing `pack_runtime_service` export used by `decision.py` (`is_timeout_fact_fallback_candidate`) and sanitized session/report doc image tags to pass gitleaks.
+  - python3 -m py_compile truffles-api/app/services/pack_runtime_service.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/response.py
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core_timeout_fact_fallback or llm_policy_core" (`77 passed`)
+- last_updated: 2026-02-25T11:20:00+05:00

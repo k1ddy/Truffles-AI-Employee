@@ -208,7 +208,7 @@
 
 ## Post-Merge Validation (2026-02-24, commit `ba4dcef`)
 - runtime parity restored on dedicated container:
-- image/container: `truffles-api:firebreak-hq1-ba4dcef1` / `truffles-api-firebreak-hq1-ba4dcef1`
+- image/container: `truffles-api-firebreak-hq1-ba4dcef1` / `truffles-api-firebreak-hq1-ba4dcef1`
 - endpoint: `http://127.0.0.1:18161/admin/version`
 - version: `git_commit=ba4dcef173839c6d3565cdbf630e6174f6110c07`, `TEST_MODE=1`.
 - deterministic contour on merged head:
