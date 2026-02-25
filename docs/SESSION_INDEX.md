@@ -4,10 +4,11 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-22-universal-control-plane-v1-a500 | active | feat/2026-02-22-universal-control-plane-v1-a500 | /home/zhan/worktrees/2026-02-22-universal-control-plane-v1-a500 | docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-master-a500.md | 2026-02-24 |
 | 2026-02-22-marketing-ux-fixes-a1 | done | feat/2026-02-22-marketing-ux-fixes-a1 | /home/zhan/worktrees/2026-02-22-marketing-ux-fixes-a1 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-22 |
 | 2026-02-22-marketing-owner-first-v2-a1 | done | feat/2026-02-22-marketing-owner-first-v2-a1 | /home/zhan/worktrees/2026-02-22-marketing-owner-first-v2-a1 | docs/TASK_PACKAGES/TP-2026-02-22-marketing-owner-first-v2-a1.md | 2026-02-22 |
 | 2026-02-22-deploy-clone-retry-a1 | active | feat/2026-02-22-deploy-clone-retry-a1 | /home/zhan/worktrees/2026-02-22-deploy-clone-retry-a1 | docs/TASK_PACKAGES/TP-2026-02-22-deploy-clone-retry-a1.md | 2026-02-22 |
-| 2026-02-21-tenants-v3-ux-contract-a250 | active | feat/2026-02-21-tenants-v3-ux-contract-a250 | /home/zhan/worktrees/2026-02-21-tenants-v3-ux-contract-a250 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md | 2026-02-23T23:49:10Z |
+| 2026-02-21-tenants-v3-ux-contract-a250 | active | feat/2026-02-21-tenants-v3-ux-contract-a250 | /home/zhan/worktrees/2026-02-21-tenants-v3-ux-contract-a250 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md | 2026-02-24T11:02:38Z |
 | 2026-02-21-marketing-pro-v1-a300 | done | feat/2026-02-21-marketing-pro-v1-a300 | /home/zhan/worktrees/2026-02-21-marketing-pro-v1-a300 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-21 |
 | 2026-02-21-marketing-p1p3-a1 | active | feat/2026-02-21-marketing-p1p3-a1 | /home/zhan/worktrees/2026-02-21-marketing-p1p3-a1 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-21 |
 | 2026-02-21-inbox-pause-bot-a1 | active | feat/2026-02-21-inbox-human-lock-v2-a1 | /home/zhan/worktrees/2026-02-21-inbox-pause-bot-a1 | docs/TASK_PACKAGES/TP-2026-02-21-inbox-human-lock-v2-a1.md | 2026-02-21 |

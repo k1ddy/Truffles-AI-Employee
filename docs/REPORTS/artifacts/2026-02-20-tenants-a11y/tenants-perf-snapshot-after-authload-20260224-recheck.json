@@ -1,0 +1,40 @@
+{
+  "branches_get_latency": {
+    "/console/v1/admin/branches": {
+      "p50_ms": 100.0,
+      "p95_ms": 100.0,
+      "p95_slo_ms": 800.0,
+      "p95_slo_pass": true,
+      "p99_ms": 250.0,
+      "samples": 80
+    }
+  },
+  "error": null,
+  "generated_at": "2026-02-24T01:38:15.052845+00:00",
+  "metrics_url": "https://api.truffles.kz/metrics",
+  "required_slo_failed": false,
+  "slo_targets_ms": {
+    "branches_get_p95": 800.0,
+    "company_cockpit_p95": 1000.0,
+    "portfolio_p95": 1200.0
+  },
+  "status": "pass",
+  "tenants_endpoint_latency": {
+    "company_cockpit": {
+      "p50_ms": 250.0,
+      "p95_ms": 500.0,
+      "p95_slo_ms": 1000.0,
+      "p95_slo_pass": true,
+      "p99_ms": 1000.0,
+      "samples": 41
+    },
+    "portfolio": {
+      "p50_ms": 250.0,
+      "p95_ms": 500.0,
+      "p95_slo_ms": 1200.0,
+      "p95_slo_pass": true,
+      "p99_ms": 1000.0,
+      "samples": 40
+    }
+  }
+}

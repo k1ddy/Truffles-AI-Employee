@@ -181,25 +181,32 @@ export default function TenantsTopControls({
                     </span>
                     <button
                         className="btn-ghost"
-                        onClick={onClearBranchContext}
-                        data-testid="tenants-context-clear-branch"
-                    >
-                        Очистить филиал
-                    </button>
-                    <button
-                        className="btn-ghost"
-                        onClick={onClearClientContext}
-                        data-testid="tenants-context-clear-client"
-                    >
-                        Очистить клиента
-                    </button>
-                    <button
-                        className="btn-ghost"
                         onClick={onClearContext}
                         data-testid="tenants-context-clear-all"
                     >
                         Сбросить контур
                     </button>
+                    <details className="rounded-md border border-border/60 bg-background px-2 py-1" data-testid="tenants-context-clear-advanced">
+                        <summary className="cursor-pointer text-foreground/80" data-testid="tenants-context-clear-advanced-toggle">
+                            Точечная очистка
+                        </summary>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <button
+                                className="btn-ghost"
+                                onClick={onClearBranchContext}
+                                data-testid="tenants-context-clear-branch"
+                            >
+                                Очистить филиал
+                            </button>
+                            <button
+                                className="btn-ghost"
+                                onClick={onClearClientContext}
+                                data-testid="tenants-context-clear-client"
+                            >
+                                Очистить клиента
+                            </button>
+                        </div>
+                    </details>
                 </div>
                 <div className="mt-2 text-xs text-foreground/70">
                     Контур используется при переходах между разделами. Для списка на этой странице используйте кнопку «Взять из рабочего контура».
@@ -278,7 +285,7 @@ export default function TenantsTopControls({
                 </>
             ) : (
                 <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-foreground/80" data-testid="tenants-control-tower-disabled">
-                    Режим Control Tower отключён. Доступен базовый обзор портфеля с фильтрами и управлением контекстом.
+                    Расширенный режим отключён. Доступен базовый обзор портфеля с фильтрами и рабочим контекстом.
                 </div>
             )}
         </div>

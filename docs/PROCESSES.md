@@ -4,6 +4,10 @@
 
 This document defines the **contracts** between all actors in the system: processes, humans, logic modules, interfaces, and external services.
 
+Operational note
+- Execution workflow for humans/agents is standardized in `docs/runbooks/EXECUTION_CYCLE.md` (post-run, post-session, post-phase checklists).
+- Zero-context autonomous block delivery is standardized in `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` (`BLOCK_ID/DEPENDS_ON/UNLOCKS` + handoff bridge).
+
 ---
 
 ## 1. Actors & Responsibilities

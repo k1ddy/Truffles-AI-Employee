@@ -19,6 +19,33 @@
 - `2026-02-23`: Wave 4 scope-aware invalidation continuation — `tenants_fleet_cache` schema extended with `scope_company_id/scope_client_id` (`migration 039`), summary cache upserts persist scope metadata, and write-path invalidation now targets `scope_company_id IS NULL OR scope_company_id IN (affected company_ids)` instead of full-table cache wipe.
 - `2026-02-23`: Wave 4 targeted prewarm continuation — invalidation now queues affected `company_id` scopes for post-commit async summary rebuild (`after_commit` queue + prewarm worker), reducing cold-start for mutated company scopes while preserving fail-open mutation path.
 - `2026-02-23`: Wave 4 + CI hardening continuation — post-commit prewarm расширен до `global portfolio` (summary + attention default scope, rate-limited) для снижения cold-start после мутаций, `console-contract-live` исправлен на корректный schemathesis base URL, `console-e2e-live` auth setup защищён от `AggregateError` в login transition.
+- `2026-02-24`: Wave 1 contract debt continuation — `company-cockpit` получил `include_branches` (`true` by default), `/tenants` запрашивает cockpit с `include_branches=false` (branches остаются из `/admin/branches`), что убирает дублирующий branch payload/compute в company scope without breaking API compatibility.
+- `2026-02-24`: Wave 1/4 continuation — added large-scope `company-cockpit` perf-contract tests (limit/cursor/query propagation + fail-fast on oversized limits), extracted operational KPI compute/rules from `tenants/page.tsx` into `console-web/src/app/tenants/operational-kpi.ts` (`2969 -> 2789` LOC), and refreshed runtime p95/p99 snapshot artifact (`tenants-perf-snapshot-after-merge-20260224.json`) with explicit branch SLO miss evidence.
+- `2026-02-24`: Wave 4 branch-path continuation — optimized `/admin/branches` query contract for platform scale (removed large `client_id IN (...)` filter in favor of `Client` join filters by `status/company`, added branch-list indexes in migration `040_add_branches_listing_perf_indexes.sql`, expanded branch contract tests), and rechecked runtime SLO after authenticated load (`branches p95=100ms`, snapshot `status=pass`).
+- `2026-02-24`: Clarified decomposition contract semantics — `page.tsx -> orchestration-only` means architectural isolation of data/actions from view composition; it does **not** mean reducing operator control. Functional controls (`create/edit/archive/restore/publish/rollback/context`) remain mandatory and already available.
+- `2026-02-24`: Wave 3 decomposition continuation — extracted `useTenantsDataQueries` (React Query orchestration) and `useTenantsActions` (context chain actions) from `tenants/page.tsx`; page size reduced `2789 -> 2487` LOC while preserving current operator workflows.
+- `2026-02-24`: Wave 3 decomposition continuation (part 2) — moved intent/KPI navigation handlers (`runActionQueueIntent`, `runKpiAction`, client target navigation) from `tenants/page.tsx` into `useTenantsActions`; page size reduced `2487 -> 2422` LOC.
+- `2026-02-24`: Wave 3 decomposition continuation (part 3) — moved quick-create handlers (`handleQuickCreateCompany`, `handleQuickCreateClient`, `handleQuickCreateBranch`) from `tenants/page.tsx` into `useTenantsActions`; page size reduced `2422 -> 2301` LOC.
+- `2026-02-24`: Wave 3 decomposition continuation (part 4) — moved company/client save handlers (`handleSaveCompany`, `handleSaveClient`) from `tenants/page.tsx` into `useTenantsActions`; page size reduced `2301 -> 2214` LOC.
+- `2026-02-24`: Wave 3 decomposition continuation (part 5) — moved editor bootstrap + lifecycle + branch-change pipelines (`startCompanyEdit/startClientEdit/startBranchEdit`, `open/close/submit lifecycle`, `preview/publish/rollback branch change`) from `tenants/page.tsx` into `useTenantsActions`; page size reduced `2214 -> 1883` LOC.
+- `2026-02-24`: Wave 3/4 continuation — extracted scope-derived state into `useTenantsScopeDerivedState` (`context names/maps/filter options`, `tenants/page.tsx: 1883 -> 1723` LOC) and extended post-commit targeted prewarm to include affected-company `fleet_attention` (not only summary) via `_schedule_fleet_attention_prewarm_for_company_ids` with contract tests; runtime perf snapshot refreshed (`tenants-perf-snapshot-after-company-attention-prewarm-20260224.json`, `status=pass`).
+- `2026-02-24`: Wave 3/4 continuation (part 2) — extracted remaining lifecycle/branch patch/format helpers from `tenants/page.tsx` into `tenants-page-helpers.ts` (`1723 -> 1376` LOC), and extended incremental prewarm to event metadata queue (`_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY`) consumed in `after_commit` (summary+attention+global schedule) with rollback cleanup + contract tests; post-merge verification confirms PR `#810` merged with green CI run `22335329574`.
+- `2026-02-24`: Wave 3/4 continuation (part 3) — extracted action-queue orchestration from `tenants/page.tsx` into `use-tenants-action-queue.ts` (`1376 -> 1268` LOC), introduced coalesced post-commit prewarm dispatch queue (`_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX`, `_TENANTS_FLEET_PREWARM_DISPATCH_BATCH_MAX`) to batch company/global rebuild scheduling, and hardened runtime perf gate with required minimum samples (`portfolio/company_cockpit/branches`) plus authenticated load snapshot evidence (`tenants-perf-snapshot-after-dispatch-load-20260224.json`, `status=pass`).
+- `2026-02-24`: Wave 3/4 continuation (part 4) — extracted operational KPI/alert/report computations from `tenants/page.tsx` into `use-tenants-operational-model.ts` (`1268 -> 1167` LOC), switched incremental prewarm dispatch from in-memory queue to durable DB-backed queue (`tenants_fleet_prewarm_jobs`, migration `041`) with processing auto-heal timeout + retry/completion markers, and added reproducible authenticated long-run perf lane (`ops/console_tenants_perf_long_run.py`) with green runtime artifact (`tenants-perf-long-run-20260224.json`, `status=pass`).
+- `2026-02-24`: Wave 3/4/5 continuation (part 5) — extracted report/snapshot/ops actions into `use-tenants-page-operations.ts` (`tenants/page.tsx: 1167 -> 1064` LOC), introduced materialized fleet projection model (`tenants_fleet_client_projection`, migration `042`) with read-path fallback loader + background compaction/backpressure, and added deterministic business-copy e2e guard (`platform-admin.spec.ts`: no raw `TENANTS_V3_CONTROL_TOWER`/`trace_id`/`slug =`/`telegram_chat_id` markers on `/tenants`).
+- `2026-02-24`: Wave 4/3 continuation (part 6) — added projection observability metrics + threshold gates (`coverage/fallback/freshness`) in `ops/console_tenants_perf_snapshot.py`/`ops/console_tenants_perf_long_run.py` backed by runtime metrics (`console_tenants_fleet_projection_last_*`), and extracted residual page orchestration glue (`reportValidation/reportProvisioning/refresh/audit`) into `use-tenants-page-orchestration.ts` to reduce `/tenants` compose complexity.
+- `2026-02-24`: Wave 4 continuation (part 7) — added scheduled projection maintenance compaction (`_maybe_run_fleet_projection_maintenance`) wired into summary/attention refresh workers and prewarm dispatch worker, plus persistence observability metrics (`console_tenants_fleet_projection_compaction_*`) and contract tests for stale-row delete + interval throttling.
+- `2026-02-24`: Wave 4 continuation (part 8) — enabled bounded request/cache-miss projection persist (`TENANTS_FLEET_CLIENT_PROJECTION_REQUEST_PERSIST_ENABLED`, `TENANTS_FLEET_CLIENT_PROJECTION_REQUEST_PERSIST_MAX_CLIENTS`) in `list_clients` + `fleet_attention` + summary cache-miss path to reduce repeated request-time fallback compute while keeping response correctness.
+- `2026-02-24`: Wave 4 continuation (part 9) — added fallback-triggered projection self-healing prewarm (`TENANTS_FLEET_CLIENT_PROJECTION_FALLBACK_PREWARM_*`): when request path falls back to compute and not all clients are persisted synchronously, company scopes are enqueued to durable incremental prewarm dispatch with per-company throttle, reducing repeated fallback on sustained large-scope reads.
+- `2026-02-24`: Wave 4 continuation (part 10) — added overflow-aware global prewarm fallback: when global prewarm scope overflows max active clients (or exceeds async scope cap), system no longer drops prewarm entirely and now enqueues throttled company-scope durable prewarm derived from overflow client slice (`_maybe_enqueue_projection_fallback_prewarm_for_client_ids`), reducing large-scope cold windows.
+- `2026-02-24`: Wave 4 continuation (part 11) — projection maintenance compaction now self-heals affected scopes: after stale row delete, compaction enqueues throttled company-scope durable prewarm for deleted rows' `company_id`s, reducing fallback spikes caused by stale cleanup windows.
+- `2026-02-24`: Wave 4 perf-lane contract continuation — `ops/console_tenants_perf_long_run.py` now auto-resolves `company_id/client_id` from `/admin/tenants/portfolio` when explicit scope is absent, removing synthetic `company-cockpit=422` runs and restoring valid runtime gate evidence (`docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-auto-scope-20260224.json`, `status=pass`).
+- `2026-02-24`: Wave 4 continuation (part 12) — fallback prewarm company-scope selection now rotates across overflow scopes (instead of always taking the first `N` companies), preventing starvation under sustained large-scope reads; runtime lane rechecked with authenticated 120-loop run (`docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-rotation-20260224.json`, `status=pass`).
+- `2026-02-24`: Wave 3 continuation (part 9) — extracted page render/composition tree from `tenants/page.tsx` into `console-web/src/app/tenants/tenants-page-view.tsx` and reduced page shell to orchestration+prop wiring (`1064 -> 954` LOC); validation: `lint`, `build`, and deterministic `platform-admin.spec.ts` (`18 passed`).
+- `2026-02-25`: closure pass for remaining residuals — fixed binary gates introduced for Wave 3/Wave 4; Wave 3 marked `done` (orchestration shell + dedicated view composition layer), and Wave 4 marked `done` after 3 consecutive authenticated long-run passes with `request_failures=0`, `fallback_ratio=0.0`, and p95 SLO pass (`docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run{1,2,3}.json`).
+- `2026-02-25`: Wave 5 closure pass — завершён hard copy-gate: branch/quick-create user copy очищен от raw technical tokens (`instance_id/telegram_chat_id/knowledge_tag`), deterministic e2e контракт усилен проверкой "тех-термины только в security/debug zone", lane `platform-admin.spec.ts` green (`18 passed`).
+- `2026-02-25`: UX actionability reset — по факту production/operator feedback зафиксирован residual `button-noise` defect (`F9`): избыток mode/context controls на верхнем экране, часть action intents даёт только mode switch без явного результатного фокуса; принят отдельный closure-пакет `Wave 2.1` (de-noise + actionable intents).
+- `2026-02-26`: Wave 2.1 closure pass — убран `All` из primary lifecycle/decommission controls, context clear controls уплотнены в advanced block, `workspace_*` intents переведены в observable section focus (mode+lifecycle+scroll target); deterministic lane `platform-admin.spec.ts` подтверждён `19 passed` с новыми контрактными проверками UX actionability.
 
 ## Canon refs
 - `AGENTS.md`
@@ -41,13 +68,45 @@
 ## Execution status (FACT, по текущему коду)
 | Wave | Статус | Что подтверждено | Что не закрыто |
 |---|---|---|---|
-| Wave 1 API contract alignment | `done/partial` | `branch_id` добавлен в `/admin/branches` + frontend pass-through + e2e Scenario B3; `company-cockpit` при `client_id=null` теперь остаётся в company scope (`truffles-api/app/routers/console.py`, `console-web/src/app/tenants/page.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Техдолг: унифицировать/сократить дублирующий `branches` payload в `company-cockpit` и расширить perf-contract tests на большие company scopes |
+| Wave 1 API contract alignment | `done` | `branch_id` добавлен в `/admin/branches` + frontend pass-through + e2e Scenario B3; `company-cockpit` при `client_id=null` теперь остаётся в company scope; `include_branches=false` устраняет дубли branch payload в `/tenants` cockpit read path; large-scope contract tests добавлены (`truffles-api/tests/test_console_tenants_list.py`: `test_get_tenants_company_cockpit_passes_large_scope_pagination_contract`, `test_get_tenants_company_cockpit_rejects_oversized_limits_before_subqueries`) | Нет блокеров по API contract; дальнейшая работа смещена в Wave 4 runtime perf/read-model |
 | Wave 2 Context kernel | `done` | Атомарный sync `company/client/branch`, orphan-branch guard, стабильные B/C/D + отключён конфликтующий header-edit контекста на `/tenants` (`context-managed-in-tenants`) (`console-web/src/app/tenants/page.tsx`, `console-web/src/components/ConsoleShell.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Нет блокеров |
-| Wave 3 Data contract | `done/partial` | Typed weekly snapshot schema + table/fallback (`truffles-api/app/schemas/console.py:249`, `truffles-api/app/routers/console.py:13434`) | Модель аналитики и fleet-агрегации не рассчитана на очень большой объём (`F5`) |
-| Wave 4 Decomposition/perf | `done/partial` | Вынесены `OperationalKpi`, `FleetAttention`, `PortfolioCompanies`, `Clients`, `ChangeManagement`, `Decommission`, `ClientLifecycleModal` секции; page-filter race для Scenario C устранён в `use-tenants-page-filters.ts`; backend perf-track запущен через `console_tenants_endpoint_latency{endpoint=portfolio|company_cockpit}` + router instrumentation; внедрён read-model cache (`truffles-api/migrations/038_add_tenants_fleet_cache.sql`, `truffles-api/app/models/tenants_fleet_cache.py`, `truffles-api/app/routers/console.py`) + cache tests (`truffles-api/tests/test_console_tenants_list.py`); добавлен async stale-while-refresh для cache-hit near-expiry (`Thread` background refresh + inflight dedupe) для summary/attention; write-path cache invalidation переведён на scope-aware режим по `scope_company_id` (`migration 039`); post-commit prewarm теперь покрывает affected company scopes + global default portfolio scope (summary + attention) с throttling | Полный incremental precompute pipeline (event stream -> targeted precompute with global scope strategy) и perf baseline на truly large fleet ещё впереди |
-| Wave 5 A11y/copy | `done/partial` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен, business-copy упрощён в `TopControls`/`ActionQueue`/`Fleet`/`Company edit`, deep lifecycle/editor copy очищен (`console-web/src/components/TenantsClientLifecycleModal.tsx`, `console-web/src/components/TenantsClientsPanel.tsx`, `console-web/src/app/tenants/page.tsx`) | Остаточный тех-copy ограничен preset/debug контекстом (`trace_id` в platform preset), mainline UX очищен |
+| Wave 2.1 UX actionability closure | `done` | `All` удалён из primary lifecycle/decommission controls; secondary context clear controls свёрнуты в advanced block; `workspace_*` intents в `runActionQueueIntent`/`runKpiAction` дают observable effect (mode+lifecycle+section focus); deterministic e2e усилен проверками `no-All` + compact controls + action run outcome | Нет блокеров; закрыто бинарным gate `WG2.1` (см. ниже) |
+| Wave 3 Data contract | `done` | Typed weekly snapshot schema + table/fallback (`truffles-api/app/schemas/console.py:249`, `truffles-api/app/routers/console.py:13434`); в `/tenants` добавлены decomposition hooks `useTenantsDataQueries`, `useTenantsActions`, `useTenantsScopeDerivedState`, `useTenantsActionQueue`, `useTenantsOperationalModel`, `useTenantsPageOperations`, `useTenantsPageOrchestration`, helper module `tenants-page-helpers.ts` (lifecycle audit / branch patch / formatters), dedicated render composition layer `tenants-page-view.tsx`; `tenants/page.tsx` reduced `1883 -> 954`; deterministic lane validation (`platform-admin.spec.ts`: `19 passed`). | Закрыто бинарным gate `WG3` (см. ниже) |
+| Wave 4 Decomposition/perf | `done` | Вынесены `OperationalKpi`, `FleetAttention`, `PortfolioCompanies`, `Clients`, `ChangeManagement`, `Decommission`, `ClientLifecycleModal`; внедрён read-model cache + scope-aware invalidation + durable prewarm queue + materialized projection + branch hot-path indexes; perf gate усилен sample-size и projection observability; authenticated long-run lane выполнен в 3 последовательных прогонах (`run1/run2/run3`) с `request_failures=0`, `fallback_ratio=0.0`, `portfolio p95=250`, `company_cockpit p95=100`, `branches p95=100` и `status=pass` во всех трёх случаях. | Закрыто бинарным gate `WG4` (см. ниже) |
+| Wave 5 A11y/copy | `done` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен, business-copy упрощён в `TopControls`/`ActionQueue`/`Fleet`/`Company edit`, lifecycle audit очищен от raw `trace_id`, branch/quick-create validation copy переведён в business wording, e2e контракт усилен: raw technical markers запрещены в operator flow и допускаются только в explicit security/debug zone (`tenants-sensitive-id-cell`) | Закрыто бинарным gate `WG5` (см. ниже) |
 | Wave 6 E2E realism | `done` | `platform-admin.spec.ts` стабилизирован: deterministic auth/session, нет `test.skip`, сценарии A/B/C/D/E hard-fail (`console-web/e2e/platform-admin.spec.ts`, `console-web/playwright.config.ts`) | Нет |
-| Feature flag rollout | `done` | `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` в коде (`console-web/src/app/tenants/page.tsx:850`), rollout policy формализован (`shadow -> canary -> full` + rollback), post-merge canary evidence зафиксирован: live build stamp, live a11y green, runtime SLO snapshot pass | Нет блокеров |
+| Feature flag rollout | `done` | `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` в коде (`console-web/src/app/tenants/page.tsx`), rollout policy формализован (`shadow -> canary -> full` + rollback), post-merge canary evidence зафиксирован: live build stamp, live a11y green, runtime SLO snapshot pass | Нет блокеров |
+
+## Binary closure gates (fixed)
+- `WG3` (Wave 3 done) passes only if all are true:
+  - `tenants/page.tsx` is orchestration shell (no inline render tree for main sections),
+  - dedicated view composition exists in `console-web/src/app/tenants/tenants-page-view.tsx`,
+  - deterministic `platform-admin.spec.ts` lane is green.
+- `WG4` (Wave 4 done) passes only if all are true:
+  - 3 consecutive authenticated long-run runs are `status=pass`,
+  - each run has `request_failures=0`,
+  - each run has `projection_observability.fallback_ratio <= 0.05`,
+  - each run keeps p95 SLO pass for `portfolio/company_cockpit/branches`.
+- `WG5` (Wave 5 done) passes only if all are true:
+  - deterministic `platform-admin.spec.ts` includes hard copy-gate for `/tenants` (`operator flow` vs `security/debug zone`),
+  - branch/quick-create visible copy in operator flow does not contain raw tokens `instance_id/telegram_chat_id/knowledge_tag`,
+  - raw `instance_id` marker remains visible only inside explicit sensitive zone (`data-testid=\"tenants-sensitive-id-cell\"`) for audited reveal/copy actions.
+- `WG2.1` (Wave 2.1 done) passes only if all are true:
+  - `All` отсутствует в primary lifecycle controls (`tenants-page-view`, `TenantsDecommissionPanel`),
+  - secondary context clear controls доступны через compact advanced block (не как постоянные primary buttons),
+  - `workspace_*` intents приводят к observable target focus (mode+lifecycle+scroll section),
+  - deterministic `platform-admin.spec.ts` содержит и проходит UX actionability assertions.
+- `WG3` result: `PASS`.
+- `WG4` result: `PASS`.
+- `WG5` result: `PASS`.
+- `WG2.1` result: `PASS`.
+- `WG4` evidence:
+  - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run1.json`
+  - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run2.json`
+  - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run3.json`
+- `WG5` evidence:
+  - `console-web/e2e/platform-admin.spec.ts` test: `should keep tenants copy business-oriented and isolate technical markers to security/debug zones`
+- local deterministic checks: `lint`, `build`, `platform-admin.spec.ts` (`19 passed`).
 
 ## Critical problems (FACT, deep check)
 ### F1 (closed). Branch scope drift после `Взять из рабочего контура`
@@ -70,20 +129,22 @@ Impact:
 ### F3 (closed). Branch list contract в company scope
 Evidence:
 - `company-cockpit` передаёт `client_id` только если он явно выбран; при `client_id=null` работает company scope (`truffles-api/app/routers/console.py`).
+- `company-cockpit` поддерживает `include_branches=false`; `/tenants` использует этот режим и не тянет дублирующий branches payload из cockpit (`truffles-api/app/routers/console.py`, `console-web/src/app/tenants/page.tsx`).
 - Основной branch list в `/tenants` работает через `/admin/branches` с явными `company_id/client_id/branch_id` фильтрами и e2e контрактом B3 (`console-web/src/app/tenants/page.tsx`, `console-web/e2e/platform-admin.spec.ts`).
 Impact:
 - Ложный branch-slice "только первый клиент" больше не воспроизводится в текущем контракте `/tenants`.
+- Убран лишний branch payload/compute из cockpit request path в company scope.
 - Остаточная задача — perf/read-model для очень больших портфелей (`F5`).
 
-### F4. Монолит страницы сохраняется (высокий regression risk)
+### F4 (closed). Монолит страницы и оркестрация
 Evidence:
-- `console-web/src/app/tenants/page.tsx` = ~2970 LOC (после Wave 4 декомпозиции), но всё ещё оркестрационный монолит.
-- Внутри одной страницы: context orchestration, filters, CRUD, lifecycle modal, branch-change pipeline, KPI, snapshots, onboarding.
+- `console-web/src/app/tenants/page.tsx` = ~954 LOC и выполняет orchestration shell роль.
+- Основной render/composition tree вынесен в `console-web/src/app/tenants/tenants-page-view.tsx`.
+- Query/context/actions/operational model вынесены в hooks, helper pipelines вынесены в `tenants-page-helpers.ts`.
 Impact:
-- любое изменение цепляет много сценариев.
-- сложнее изолировать баги и удерживать инварианты.
+- Wave 3 closure gate `WG3` выполнен; operator control сохранён.
 
-### F5. Серверные fleet-агрегации требуют дальнейшего масштабного precompute (частично закрыто)
+### F5 (closed). Серверные fleet-агрегации и perf gate для large scope
 Evidence:
 - `_build_fleet_client_details_map` грузит branches для набора клиентов и считает агрегаты в Python (`truffles-api/app/routers/console.py:3281`).
 - `_build_fleet_summary_for_scope` сканирует батчами клиентов и на каждый батч строит heavy details (`truffles-api/app/routers/console.py:3623`).
@@ -92,13 +153,26 @@ Evidence:
 - Добавлен async cache refresh near-expiry на cache-hit с inflight-guard (`_schedule_fleet_summary_async_refresh`, `_schedule_fleet_attention_async_refresh`) для сдвига тяжелого precompute из hot request path (`truffles-api/app/routers/console.py`).
 - Добавлен event-driven invalidation cache на mutation path (`_invalidate_tenants_fleet_cache_scope`) для `update_company/create|update|archive|restore_client`, `create|update_branch`, `branch go-live approve/reject/waive`, `integration_reconcile/provider_ops execute` (`truffles-api/app/routers/console.py`), с контрактными тестами в `truffles-api/tests/test_console_admin_provisioning.py`.
 - Добавлен scope metadata contract (`scope_company_id/scope_client_id`) в cache table/model (`truffles-api/migrations/039_add_tenants_fleet_cache_scope_columns.sql`, `truffles-api/app/models/tenants_fleet_cache.py`) и scope-aware delete (`global + affected companies`) вместо полного wipe.
-- Добавлен post-commit prewarm contract для affected company scopes: invalidation складывает `company_ids` в session queue, `after_commit` запускает async summary rebuild worker (`_schedule_fleet_summary_prewarm_for_company_ids`) с inflight dedupe и scope key на `company_id + active clients hash`.
+- Добавлен post-commit prewarm contract для affected company scopes: invalidation складывает `company_ids` в session queue, `after_commit` запускает async summary + attention rebuild workers (`_schedule_fleet_summary_prewarm_for_company_ids`, `_schedule_fleet_attention_prewarm_for_company_ids`) с inflight dedupe и scope keys на company active-client slice.
 - Добавлен post-commit global prewarm contract: invalidation ставит `global prewarm` флаг, а `after_commit` запускает rate-limited async prewarm default portfolio cache (`fleet_summary` + `fleet_attention`) для active-client global scope.
+- Добавлен incremental event metadata queue (`_TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY`): invalidation path теперь пишет структурированные события (`reason + company_ids`), а `after_commit` строит scheduling summary/attention/global из event list и очищает legacy keys; `after_rollback` очищает event queue.
+- Добавлен dispatch/coalescing слой для incremental prewarm: `after_commit` теперь enqueue-события в dispatch queue и worker коалесит батч (company_ids + global flag) до scheduler вызовов, чтобы снизить burst-шторм scheduling в write-heavy сценариях.
+- Dispatch queue сделана durable: prewarm задачи пишутся в `tenants_fleet_prewarm_jobs` (migration `041`) и обрабатываются worker'ом через `pending -> processing -> done` с auto-heal stuck processing timeout и retry marker, что переживает процессные рестарты.
+- Добавлен материализованный projection layer `tenants_fleet_client_projection` (migration `042`) с контуром `load_or_build`: read path сначала использует projection rows, а отсутствующие/устаревшие клиенты пересчитываются fallback-ом и могут быть добиты в projection в background контуре.
+- Для company scope добавлен compaction guard (`keep_client_ids` + max threshold), чтобы удалять устаревшие projection rows без full-table операций.
+- Добавлены runtime observability metrics для projection read-path: `console_tenants_fleet_projection_last_coverage_ratio`, `console_tenants_fleet_projection_last_fallback_ratio`, `console_tenants_fleet_projection_last_freshness_lag_seconds` + source counters.
+- Perf gate расширен в `ops/console_tenants_perf_snapshot.py`: теперь контролируются не только latency/sample-size, но и projection gates (min coverage, max fallback, max freshness lag), с прокидкой в long-run lane (`ops/console_tenants_perf_long_run.py`).
+- Perf snapshot gate усилен minimum sample-size контрактом (`portfolio >= 20`, `company_cockpit >= 20`, `branches >= 50/80` по run параметрам): low-sample snapshots больше не считаются валидными для SLO вывода.
+- Добавлен reproducible long-run authenticated lane `ops/console_tenants_perf_long_run.py` (load profile + snapshot gate) с runtime evidence `tenants-perf-long-run-20260224.json` (`status=pass`, samples `portfolio=112`, `company_cockpit=111`, `branches=144`).
+- Long-run lane hardened against scope-contract drift: when no explicit `TENANTS_PERF_COMPANY_ID/client_id` is provided, runner derives first valid scope from portfolio payload (`clients.items[*].company_id/id`) and reuses it for `company-cockpit` + `branches`; evidence: `docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-auto-scope-20260224.json` (`status=pass`, `request_failures=0`, `company_cockpit: 200 x80`).
+- Overflow fallback prewarm selection now uses rotation over unique company scopes (`_select_projection_fallback_prewarm_company_ids`) so repeated large-scope reads do not starve tail companies; evidence: `docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-rotation-20260224.json` (`status=pass`, `loops=120`, `request_failures=0`, projection `fallback_ratio=0.0`).
+- Closure evidence `WG4`: three consecutive authenticated long-run passes with strict fallback gate (`<= 0.05`) in `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run{1,2,3}.json`.
 Impact:
 - request-time нагрузка снижена за счёт cache-hit path.
 - stale-window после admin мутаций снижен (invalidate сразу после write path), при этом нагрузка на другие company scopes снижена за счёт scope-aware delete.
+- на read path часть fleet details теперь обслуживается из materialized rows, что уменьшает количество пересчётов в hot path и подготавливает переход к fully precomputed модели.
 - cold-start после мутаций снижен для affected company scope и default global portfolio scope за счёт post-commit prewarm вместо первого "дорогого" запроса пользователя.
-- для очень большого флота всё ещё нужен targeted incremental precompute и проверка p95/p99 под нагрузкой.
+- Wave 4 closure gate `WG4` выполнен; runtime gate зафиксирован бинарно и воспроизводимо.
 
 ### F6. A11y debt: контраст KPI карточек
 Evidence:
@@ -120,17 +194,27 @@ Impact:
 
 ### F8. E2E-контур не является жесткой страховкой от регрессий
 Evidence:
-- `platform-admin.spec.ts` работает в deterministic lane (`E2E_DETERMINISTIC_AUTH=1`) и проходит `14/14` без `test.skip`.
+- `platform-admin.spec.ts` работает в deterministic lane (`E2E_DETERMINISTIC_AUTH=1`) и проходит `19/19` без `test.skip`.
 - `tenants-a11y.spec.ts` переведён на deterministic mocks + жёсткий `expect(tenantsAvailable).toBe(true)` вместо `test.skip`.
 Impact:
 - Контур стал воспроизводимым и fail-closed.
 - Остаточный риск: warnings окружения (`NO_COLOR/FORCE_COLOR`, npm env warning) не влияют на pass/fail, но требуют отдельной hygiene-задачи.
 
+### F9 (closed). Избыточные верхние контролы и низкая perceived-actionability
+Evidence:
+- Верхний control-surface de-noised: в постоянных primary controls оставлен `Сбросить контур`, точечные очистки перенесены в `tenants-context-clear-advanced` (`console-web/src/components/TenantsTopControls.tsx`).
+- `workspace_*` intents в `runActionQueueIntent`/`runKpiAction` теперь дают observable effect: mode+lifecycle sync + scroll к целевой секции (`tenants-fleet-attention`, `tenants-onboarding-section`, `tenants-change-management`, `tenants-decommission-center`) (`console-web/src/app/tenants/use-tenants-actions.ts`).
+- `All` удалён из primary lifecycle/decommission controls (`console-web/src/app/tenants/tenants-page-view.tsx`, `console-web/src/components/TenantsDecommissionPanel.tsx`).
+- Контракт зафиксирован в deterministic e2e: `no-All` для lifecycle controls, compact clear-controls visibility, action-queue onboarding intent outcome (`console-web/e2e/platform-admin.spec.ts`).
+Impact:
+- Снижен cognitive load верхнего экрана и устранены mode-only действия без результата.
+- Вкладка стала action-first: оператор получает явный результат каждого run intent.
+
 ## Root-cause map
 1. Нет единой state machine для `global context` и `page filters`.
 2. API `company-cockpit` требует cleanup/read-model hardening для больших объёмов, но блокирующий F3 bug закрыт.
 3. Fleet аналитика рассчитывается синхронно "на лету" вместо read-model/предагрегации.
-4. Страница остается orchestration-монолитом.
+4. Control-surface рос быстрее, чем контракты actionability и visibility.
 5. Тестовый контур допускает "soft skip", а не контрактную проверку.
 
 ## Invariant
@@ -236,6 +320,10 @@ Expected result:
 2. Удалить debug copy из business режима:
 - `page filter client_id`, `Threshold drill-down`, `Action Queue` (заменить на RU business labels).
 3. Убрать дублирующую информацию, которая не влияет на действие.
+4. `Wave 2.1` (actionability closure):
+- убрать `All` из primary lifecycle/decommission controls;
+- перенести вторичные context-reset кнопки в compact/advanced слой;
+- для `Action Queue` workspace intents обеспечить явный target focus (а не только mode switch).
 Expected result:
 - оператор за 3 шага понимает "где я / что вижу / что делать дальше".
 
@@ -296,6 +384,9 @@ Expected result:
 6. A11y: `critical=0`, `serious=0` для desktop/mobile.
 7. Perf SLO выполняются на тестовом профиле крупного флота.
 8. Feature flag rollout + rollback документированы и проверены.
+9. Wave 2.1 closure:
+- в верхнем экране остаются только action-first primary controls;
+- `run intent` не заканчивается "тихим" mode-only эффектом без visible target focus.
 
 ## Checks
 - `corepack pnpm -C console-web run lint`
@@ -319,7 +410,7 @@ Expected result:
 - openapi diff,
 - sample requests/responses for portfolio/cockpit/branches.
 3. Quality evidence:
-- e2e logs по A/B/C/D/E (`14 passed`),
+- e2e logs по A/B/C/D/E (`19 passed`),
 - axe JSON desktop/mobile (`critical=0`, `serious=0`),
 - perf summary with p95,
 - live canary artifacts:

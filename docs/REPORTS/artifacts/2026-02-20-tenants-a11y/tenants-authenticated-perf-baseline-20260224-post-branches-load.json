@@ -1,0 +1,60 @@
+{
+  "generated_at": "2026-02-24T01:38:10.020Z",
+  "base_url": "https://console.truffles.kz",
+  "company_id": "6a510116-a633-4ce0-91e2-972e51221b49",
+  "client_id": "c839d5dd-65be-4733-a5d2-72c9f70707f0",
+  "calls": [
+    {
+      "path": "/api/proxy/admin/branches?limit=20&lifecycle=active&company_id=6a510116-a633-4ce0-91e2-972e51221b49",
+      "count": 40,
+      "statuses": [
+        200
+      ],
+      "p50_ms": 67,
+      "p95_ms": 83,
+      "p99_ms": 98,
+      "min_ms": 57,
+      "max_ms": 98,
+      "avg_ms": 68.38
+    },
+    {
+      "path": "/api/proxy/admin/tenants/portfolio?limit=20&attention_limit=12&lifecycle=active&stale_after_minutes=60&include_low=false",
+      "count": 20,
+      "statuses": [
+        200
+      ],
+      "p50_ms": 336,
+      "p95_ms": 531,
+      "p99_ms": 556,
+      "min_ms": 215,
+      "max_ms": 556,
+      "avg_ms": 376.4
+    },
+    {
+      "path": "/api/proxy/admin/tenants/company-cockpit?company_id=6a510116-a633-4ce0-91e2-972e51221b49&lifecycle=active&client_limit=20",
+      "count": 20,
+      "statuses": [
+        200
+      ],
+      "p50_ms": 254,
+      "p95_ms": 635,
+      "p99_ms": 692,
+      "min_ms": 222,
+      "max_ms": 692,
+      "avg_ms": 295.7
+    },
+    {
+      "path": "/api/proxy/admin/tenants/company-cockpit?company_id=6a510116-a633-4ce0-91e2-972e51221b49&client_id=c839d5dd-65be-4733-a5d2-72c9f70707f0&lifecycle=active&client_limit=20",
+      "count": 20,
+      "statuses": [
+        200
+      ],
+      "p50_ms": 271,
+      "p95_ms": 366,
+      "p99_ms": 368,
+      "min_ms": 226,
+      "max_ms": 368,
+      "avg_ms": 275.3
+    }
+  ]
+}

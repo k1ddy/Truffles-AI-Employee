@@ -17,6 +17,8 @@ Defaults:
   agent:      required (or via SESSION_AGENT) and must match session-id suffix
   force-new:  allow new session even when open sessions exist for the same agent
   auto-commit: commit session log + index after creation (or set SESSION_AUTO_COMMIT=1)
+  sync/dedupe: fetches `origin/main`, requires local `main` == `origin/main`,
+               and blocks duplicate active `BLOCK_ID` sessions when TP defines `BLOCK_ID`
 USAGE
 }
 
@@ -29,6 +31,7 @@ base_ref="origin/main"
 force_new="false"
 auto_commit="false"
 agent=""
+block_id=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -51,6 +54,96 @@ repo_parent=$(dirname "$repo_root")
 canonical_repo_root="${TRUFFLES_CANONICAL_REPO_ROOT:-/home/zhan/truffles-main}"
 session_lease_hours="${SESSION_LEASE_HOURS:-24}"
 now_ts=$(date +%s)
+
+extract_block_id_from_tp_file() {
+  local tp_file="$1"
+  if [[ ! -f "$tp_file" ]]; then
+    echo ""
+    return 0
+  fi
+  awk -F': ' '
+    {
+      if ($0 ~ /`BLOCK_ID`/) {
+        value=$2
+        gsub(/\r/, "", value)
+        gsub(/^[ \t]+|[ \t]+$/, "", value)
+        gsub(/`/, "", value)
+        if (value == "" || value == "none" || value ~ /^<.*>$/) {
+          next
+        }
+        print value
+        exit
+      }
+    }
+  ' "$tp_file"
+}
+
+ensure_origin_main_sync() {
+  if ! git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
+    echo "ERROR: remote 'origin' not configured; cannot validate sync with main." >&2
+    exit 1
+  fi
+
+  if ! git -C "$repo_root" fetch --quiet origin main; then
+    echo "ERROR: failed to fetch origin/main; sync check cannot continue." >&2
+    exit 1
+  fi
+
+  local origin_main_sha local_main_sha
+  origin_main_sha=$(git -C "$repo_root" rev-parse --verify origin/main 2>/dev/null || true)
+  local_main_sha=$(git -C "$repo_root" rev-parse --verify main 2>/dev/null || true)
+
+  if [[ -z "$origin_main_sha" || -z "$local_main_sha" ]]; then
+    echo "ERROR: unable to resolve local/main or origin/main for sync check." >&2
+    exit 1
+  fi
+
+  if [[ "$origin_main_sha" != "$local_main_sha" ]]; then
+    echo "ERROR: local main is not synchronized with origin/main." >&2
+    echo "Run: cd ${repo_root} && git checkout main && git pull --ff-only origin main" >&2
+    exit 1
+  fi
+}
+
+check_duplicate_active_block_session() {
+  local candidate_block_id="$1"
+  if [[ -z "$candidate_block_id" ]]; then
+    return 0
+  fi
+
+  local index_file="$repo_root/docs/SESSION_INDEX.md"
+  if [[ ! -f "$index_file" ]]; then
+    return 0
+  fi
+
+  local active_entries
+  active_entries=$(awk -F'|' '
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    /^\|/ {
+      sid=trim($2); status=trim($3); task_package=trim($6)
+      if (sid=="" || sid=="session_id") next
+      if (status!="active") next
+      print sid "|" task_package
+    }
+  ' "$index_file")
+
+  local sid tp_rel tp_abs active_block_id
+  while IFS='|' read -r sid tp_rel; do
+    [[ -z "$sid" || -z "$tp_rel" ]] && continue
+    if [[ "$tp_rel" == /* ]]; then
+      tp_abs="$tp_rel"
+    else
+      tp_abs="$repo_root/$tp_rel"
+    fi
+    active_block_id=$(extract_block_id_from_tp_file "$tp_abs")
+    if [[ "$active_block_id" == "$candidate_block_id" ]]; then
+      echo "ERROR: duplicate active block detected for BLOCK_ID '${candidate_block_id}'." >&2
+      echo "Active session: ${sid} (task_package: ${tp_rel})" >&2
+      echo "Resume existing session or close it before starting a duplicate block." >&2
+      exit 1
+    fi
+  done <<< "$active_entries"
+}
 
 if ! [[ "$session_lease_hours" =~ ^[0-9]+$ ]]; then
   echo "ERROR: SESSION_LEASE_HOURS must be an integer (got '${session_lease_hours}')." >&2
@@ -126,6 +219,10 @@ if [[ ! -f "$repo_root/$task_package" ]]; then
   echo "ERROR: Task Package not found: ${task_package}" >&2
   exit 1
 fi
+
+block_id=$(extract_block_id_from_tp_file "$repo_root/$task_package")
+ensure_origin_main_sync
+check_duplicate_active_block_session "$block_id"
 
 if [[ "${SESSION_AUTO_COMMIT:-}" == "1" || "${SESSION_AUTO_COMMIT:-}" == "true" ]]; then
   auto_commit="true"
@@ -242,6 +339,7 @@ if [[ ! -f "$session_file" ]]; then
 - status: active
 - owner: Top Architect / Brain / Hands
 - task_package: ${task_package}
+- block_id: ${block_id:-n/a}
 - branch: ${branch}
 - worktree: ${worktree}
 - base_ref: ${base_ref}
@@ -285,3 +383,6 @@ echo "Session created: ${session_file}"
 echo "Worktree: ${worktree}"
 echo "Branch: ${branch}"
 echo "Task Package: ${task_package}"
+if [[ -n "$block_id" ]]; then
+  echo "Block ID: ${block_id}"
+fi

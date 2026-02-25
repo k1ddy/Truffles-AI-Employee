@@ -57,6 +57,9 @@
 
 Примечания:
 - Support = read‑only для Ops/Provisioning; write‑операции доступны только platform_admin/owner/admin.
+- Tenant hierarchy write (`/admin/companies*`, `/admin/clients*`, archive/restore) — только `platform_admin`.
+- `PATCH /console/v1/admin/capabilities` — исключение: write разрешён только `platform_admin`.
+- Governance catalogs (`/admin/onboarding-blueprints`, `/admin/reference-packs*`) — доступ только `platform_admin`.
 - Team/Settings скрыты для manager/support; read‑only команда не предоставляется.
 
 ---
@@ -232,8 +235,9 @@ Pack‑файл — **генерируемый артефакт** при publish
 ## 11) API границы (минимальный набор)
 
 **Provisioning (Platform Admin):**
-- `POST /console/v1/admin/companies|clients|branches|agents`
-- `PATCH /console/v1/admin/capabilities`
+- `POST /console/v1/admin/companies|clients|branches|agents` (`companies|clients` write: только `platform_admin`)
+- `PATCH /console/v1/admin/capabilities` (write: только `platform_admin`)
+- `GET /console/v1/admin/onboarding-blueprints`, `GET|PUT /console/v1/admin/reference-packs*` (platform governance catalog)
 
 **Knowledge:**
 - `GET /console/v1/knowledge/current`
