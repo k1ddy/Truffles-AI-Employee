@@ -9,6 +9,12 @@
 - zero_context_gate: off
 - scope: Контракт состояния Tenants + Wave3 snapshot hardening + частичное переключение Tenants на server contract (`portfolio/cockpit`)
 - done:
+  - Wave 2.1 UX actionability closure завершён по факту: `All` удалён из primary lifecycle/decommission controls, secondary context clear действия перенесены в compact advanced block, `workspace_*` intents переведены в observable section focus (`mode + lifecycle + scroll target`).
+  - Wave 2.1 contract закреплён в deterministic e2e: добавлены проверки `no-All` в lifecycle controls, compact visibility для точечной очистки контекста и сценарий `run onboarding action queue intent -> tenants-onboarding-section`.
+  - ТЗ обновлён по факту реализации: `Wave 2.1 = done`, `F9 = closed`, добавлен бинарный gate `WG2.1 = PASS`.
+  - Проверки closure-пакета: `corepack pnpm -C console-web run lint` (pass), `corepack pnpm -C console-web run build` (pass), `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 corepack pnpm -C console-web exec playwright test e2e/platform-admin.spec.ts --project=chromium --workers=1` (`19 passed`), `scripts/session_check.sh` (pass).
+  - Открыт PR continuation: `https://github.com/k1ddy/Truffles-AI-Employee/pull/824` (`fix(tenants): close wave2.1 UX actionability contract`).
+  - CI stop-the-line на PR `#824`: `session-gate` failed (`https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22383521872`, step `Session gate`) с причиной `Missing session log updates (docs/SESSIONS + docs/SESSION_INDEX.md)`; фиксируется текущим update session artifacts.
   - Closure package executed (steps 1..4): added fixed binary gates `WG3/WG4` in TP, removed residual `done/partial` loop for Wave3/Wave4, and aligned status to fact-based `done` for both waves.
   - Wave4 closure evidence captured via 3 consecutive authenticated long-run passes (`loops=120` each) with strict fallback gate (`projection_fallback_ratio <= 0.05`), `request_failures=0`, and SLO pass:
     - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run1.json`
