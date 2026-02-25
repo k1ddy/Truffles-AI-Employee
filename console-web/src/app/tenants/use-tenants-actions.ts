@@ -1136,7 +1136,7 @@ export function useTenantsActions({
             return;
         }
         if (instanceId && !phone) {
-            reportValidationError("Для instance_id укажите phone филиала");
+            reportValidationError("Для идентификатора WhatsApp укажите номер филиала");
             return;
         }
         setQuickCreateRunning("branch");

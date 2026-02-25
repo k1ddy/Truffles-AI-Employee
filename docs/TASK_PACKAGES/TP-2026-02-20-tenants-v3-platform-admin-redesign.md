@@ -43,6 +43,7 @@
 - `2026-02-24`: Wave 4 continuation (part 12) — fallback prewarm company-scope selection now rotates across overflow scopes (instead of always taking the first `N` companies), preventing starvation under sustained large-scope reads; runtime lane rechecked with authenticated 120-loop run (`docs/REPORTS/artifacts/2026-02-24-tenants-perf/tenants-perf-long-run-after-rotation-20260224.json`, `status=pass`).
 - `2026-02-24`: Wave 3 continuation (part 9) — extracted page render/composition tree from `tenants/page.tsx` into `console-web/src/app/tenants/tenants-page-view.tsx` and reduced page shell to orchestration+prop wiring (`1064 -> 954` LOC); validation: `lint`, `build`, and deterministic `platform-admin.spec.ts` (`18 passed`).
 - `2026-02-25`: closure pass for remaining residuals — fixed binary gates introduced for Wave 3/Wave 4; Wave 3 marked `done` (orchestration shell + dedicated view composition layer), and Wave 4 marked `done` after 3 consecutive authenticated long-run passes with `request_failures=0`, `fallback_ratio=0.0`, and p95 SLO pass (`docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run{1,2,3}.json`).
+- `2026-02-25`: Wave 5 closure pass — завершён hard copy-gate: branch/quick-create user copy очищен от raw technical tokens (`instance_id/telegram_chat_id/knowledge_tag`), deterministic e2e контракт усилен проверкой "тех-термины только в security/debug zone", lane `platform-admin.spec.ts` green (`18 passed`).
 
 ## Canon refs
 - `AGENTS.md`
@@ -69,7 +70,7 @@
 | Wave 2 Context kernel | `done` | Атомарный sync `company/client/branch`, orphan-branch guard, стабильные B/C/D + отключён конфликтующий header-edit контекста на `/tenants` (`context-managed-in-tenants`) (`console-web/src/app/tenants/page.tsx`, `console-web/src/components/ConsoleShell.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Нет блокеров |
 | Wave 3 Data contract | `done` | Typed weekly snapshot schema + table/fallback (`truffles-api/app/schemas/console.py:249`, `truffles-api/app/routers/console.py:13434`); в `/tenants` добавлены decomposition hooks `useTenantsDataQueries`, `useTenantsActions`, `useTenantsScopeDerivedState`, `useTenantsActionQueue`, `useTenantsOperationalModel`, `useTenantsPageOperations`, `useTenantsPageOrchestration`, helper module `tenants-page-helpers.ts` (lifecycle audit / branch patch / formatters), dedicated render composition layer `tenants-page-view.tsx`; `tenants/page.tsx` reduced `1883 -> 954`; deterministic lane validation (`platform-admin.spec.ts`: `18 passed`). | Закрыто бинарным gate `WG3` (см. ниже) |
 | Wave 4 Decomposition/perf | `done` | Вынесены `OperationalKpi`, `FleetAttention`, `PortfolioCompanies`, `Clients`, `ChangeManagement`, `Decommission`, `ClientLifecycleModal`; внедрён read-model cache + scope-aware invalidation + durable prewarm queue + materialized projection + branch hot-path indexes; perf gate усилен sample-size и projection observability; authenticated long-run lane выполнен в 3 последовательных прогонах (`run1/run2/run3`) с `request_failures=0`, `fallback_ratio=0.0`, `portfolio p95=250`, `company_cockpit p95=100`, `branches p95=100` и `status=pass` во всех трёх случаях. | Закрыто бинарным gate `WG4` (см. ниже) |
-| Wave 5 A11y/copy | `done/partial` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен, business-copy упрощён в `TopControls`/`ActionQueue`/`Fleet`/`Company edit`, lifecycle audit очищен от raw `trace_id`, branch change copy переведён в business wording, добавлен e2e контракт на отсутствие raw technical markers в `/tenants` | Тех-термины допускаются только в целевых security/debug действиях (например sensitive-ID reveal), но не в основном операторском потоке |
+| Wave 5 A11y/copy | `done` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен, business-copy упрощён в `TopControls`/`ActionQueue`/`Fleet`/`Company edit`, lifecycle audit очищен от raw `trace_id`, branch/quick-create validation copy переведён в business wording, e2e контракт усилен: raw technical markers запрещены в operator flow и допускаются только в explicit security/debug zone (`tenants-sensitive-id-cell`) | Закрыто бинарным gate `WG5` (см. ниже) |
 | Wave 6 E2E realism | `done` | `platform-admin.spec.ts` стабилизирован: deterministic auth/session, нет `test.skip`, сценарии A/B/C/D/E hard-fail (`console-web/e2e/platform-admin.spec.ts`, `console-web/playwright.config.ts`) | Нет |
 | Feature flag rollout | `done` | `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` в коде (`console-web/src/app/tenants/page.tsx`), rollout policy формализован (`shadow -> canary -> full` + rollback), post-merge canary evidence зафиксирован: live build stamp, live a11y green, runtime SLO snapshot pass | Нет блокеров |
 
@@ -83,12 +84,20 @@
   - each run has `request_failures=0`,
   - each run has `projection_observability.fallback_ratio <= 0.05`,
   - each run keeps p95 SLO pass for `portfolio/company_cockpit/branches`.
+- `WG5` (Wave 5 done) passes only if all are true:
+  - deterministic `platform-admin.spec.ts` includes hard copy-gate for `/tenants` (`operator flow` vs `security/debug zone`),
+  - branch/quick-create visible copy in operator flow does not contain raw tokens `instance_id/telegram_chat_id/knowledge_tag`,
+  - raw `instance_id` marker remains visible only inside explicit sensitive zone (`data-testid=\"tenants-sensitive-id-cell\"`) for audited reveal/copy actions.
 - `WG3` result: `PASS`.
 - `WG4` result: `PASS`.
+- `WG5` result: `PASS`.
 - `WG4` evidence:
   - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run1.json`
   - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run2.json`
   - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run3.json`
+- `WG5` evidence:
+  - `console-web/e2e/platform-admin.spec.ts` test: `should keep tenants copy business-oriented and isolate technical markers to security/debug zones`
+  - local deterministic checks: `lint`, `build`, `platform-admin.spec.ts` (`18 passed`).
 
 ## Critical problems (FACT, deep check)
 ### F1 (closed). Branch scope drift после `Взять из рабочего контура`
@@ -176,7 +185,7 @@ Impact:
 
 ### F8. E2E-контур не является жесткой страховкой от регрессий
 Evidence:
-- `platform-admin.spec.ts` работает в deterministic lane (`E2E_DETERMINISTIC_AUTH=1`) и проходит `14/14` без `test.skip`.
+- `platform-admin.spec.ts` работает в deterministic lane (`E2E_DETERMINISTIC_AUTH=1`) и проходит `18/18` без `test.skip`.
 - `tenants-a11y.spec.ts` переведён на deterministic mocks + жёсткий `expect(tenantsAvailable).toBe(true)` вместо `test.skip`.
 Impact:
 - Контур стал воспроизводимым и fail-closed.
@@ -375,7 +384,7 @@ Expected result:
 - openapi diff,
 - sample requests/responses for portfolio/cockpit/branches.
 3. Quality evidence:
-- e2e logs по A/B/C/D/E (`14 passed`),
+- e2e logs по A/B/C/D/E (`18 passed`),
 - axe JSON desktop/mobile (`critical=0`, `serious=0`),
 - perf summary with p95,
 - live canary artifacts:

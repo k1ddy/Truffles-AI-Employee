@@ -291,7 +291,7 @@ export function buildBranchChangePatch(editor: BranchEditorLike): {
         return {
             patch: {},
             hasChanges: false,
-            error: "telegram_chat_id: ожидается целое число (например -1001234567890)",
+            error: "Чат Telegram: ожидается целое число (например -1001234567890)",
         };
     }
     if (telegramChatId !== editor.original.telegramChatId) {
@@ -302,7 +302,7 @@ export function buildBranchChangePatch(editor: BranchEditorLike): {
         return {
             patch: {},
             hasChanges: false,
-            error: "knowledge_tag: [a-z0-9_-], до 64 символов",
+            error: "Тег базы знаний: [a-z0-9_-], до 64 символов",
         };
     }
     if (knowledgeTag !== editor.original.knowledgeTag) {
@@ -315,7 +315,7 @@ export function buildBranchChangePatch(editor: BranchEditorLike): {
         return {
             patch: {},
             hasChanges: false,
-            error: "instance_id обязателен для активного филиала",
+            error: "Для активного филиала обязателен идентификатор WhatsApp",
         };
     }
     return { patch, hasChanges: Object.keys(patch).length > 0 };
@@ -395,4 +395,3 @@ export function mapAuditEventToLifecycleEntry(
         traceId: typeof payload.trace_id === "string" ? payload.trace_id : undefined,
     };
 }
-

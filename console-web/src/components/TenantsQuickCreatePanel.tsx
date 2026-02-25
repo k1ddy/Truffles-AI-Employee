@@ -147,7 +147,7 @@ export default function TenantsQuickCreatePanel({
                             data-testid="tenants-quick-create-branch-phone"
                         />
                         <label htmlFor="quick-create-branch-instance-id" className="text-xs text-muted-foreground">
-                            Instance ID (если есть)
+                            Идентификатор WhatsApp (если есть)
                         </label>
                         <input
                             id="quick-create-branch-instance-id"
