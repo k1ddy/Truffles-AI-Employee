@@ -9,6 +9,11 @@
 - zero_context_gate: off
 - scope: Контракт состояния Tenants + Wave3 snapshot hardening + частичное переключение Tenants на server contract (`portfolio/cockpit`)
 - done:
+  - Closure package executed (steps 1..4): added fixed binary gates `WG3/WG4` in TP, removed residual `done/partial` loop for Wave3/Wave4, and aligned status to fact-based `done` for both waves.
+  - Wave4 closure evidence captured via 3 consecutive authenticated long-run passes (`loops=120` each) with strict fallback gate (`projection_fallback_ratio <= 0.05`), `request_failures=0`, and SLO pass:
+    - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run1.json`
+    - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run2.json`
+    - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run3.json`
   - Wave3 continuation (part 9): вынесен основной render/composition слой Tenants в `console-web/src/app/tenants/tenants-page-view.tsx`; `console-web/src/app/tenants/page.tsx` сокращён `1064 -> 954` LOC и оставлен как orchestration shell + prop wiring.
   - Валидация Wave3 part 9: `corepack pnpm -C console-web run lint` (pass), `corepack pnpm -C console-web run build` (pass), `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 corepack pnpm -C console-web exec playwright test e2e/platform-admin.spec.ts --project=chromium --workers=1` (`18 passed`).
   - Wave4 continuation (part 12): projection fallback prewarm selection now rotates across overflow company scopes via `_select_projection_fallback_prewarm_company_ids` (instead of fixed first-N), preventing starvation under sustained large-scope reads.
@@ -188,11 +193,16 @@
   - Added/updated contracts for bounded persist path: `test_load_or_build_fleet_client_details_map_respects_persist_limit`, `test_build_fleet_attention_response_requests_projection_persist`, `test_list_clients_stores_summary_in_cache_after_miss` (persist kwargs), `test_list_clients_filters_by_fleet_payment` (persist kwargs).
   - Validation for part 8: `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py` (pass), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`101 passed`).
 - next:
-  - Wave4 remaining backlog: довести materialized projection до fully async/offline режима (reduce request-time fallback share на very-large-fleet) с сохранением fail-open контракта.
-  - Wave3 remaining backlog: вынести оставшийся compose wiring из `tenants/page.tsx` в lightweight orchestration hook без потери operator control.
+  - Wave5 remaining backlog: формализовать бинарный copy-gate для security/debug терминов в operator flow (сейчас статус `done/partial`).
   - Закрепить perf governance: добавить регулярный CI/manual lane запуск `ops/console_tenants_perf_long_run.py` с версионируемыми артефактами в report pipeline.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
+  - docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run1.json
+  - docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run2.json
+  - docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run3.json
+  - docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-snapshot-closure-run1.json
+  - docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-snapshot-closure-run2.json
+  - docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-snapshot-closure-run3.json
   - console-web/src/app/tenants/page.tsx
   - console-web/src/app/tenants/tenants-page-view.tsx
   - console-web/src/components/TenantsQuickCreatePanel.tsx
