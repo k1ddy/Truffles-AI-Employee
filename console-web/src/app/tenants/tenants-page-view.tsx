@@ -132,25 +132,21 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
                         onSetClientContext={actionQueue.onSetClientContext}
                     />
                 ) : null}
-                <div className="flex flex-wrap items-center gap-2 pt-1">
+                <div className="flex flex-wrap items-center gap-2 pt-1" data-testid="tenants-lifecycle-controls">
                     <span className="text-xs text-muted-foreground">Режим списка:</span>
                     <button
                         className={tenantLifecycle === "active" ? "btn-primary" : "btn-ghost"}
                         onClick={() => onTenantLifecycleChange("active")}
+                        data-testid="tenants-lifecycle-active"
                     >
                         Активные
                     </button>
                     <button
                         className={tenantLifecycle === "archived" ? "btn-primary" : "btn-ghost"}
                         onClick={() => onTenantLifecycleChange("archived")}
+                        data-testid="tenants-lifecycle-archived"
                     >
                         Архив
-                    </button>
-                    <button
-                        className={tenantLifecycle === "all" ? "btn-primary" : "btn-ghost"}
-                        onClick={() => onTenantLifecycleChange("all")}
-                    >
-                        Все
                     </button>
                 </div>
             </div>
