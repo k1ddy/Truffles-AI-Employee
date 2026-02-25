@@ -9481,6 +9481,7 @@ def _llm_quality_should_infer_bot_response_from_duplicate_ack(
     outbox_payload_status=None,
     outbox_summary=None,
     trace_entries=None,
+    ignore_transport_block=False,
 ):
     if bot_response or not expected_response:
         return False
@@ -9504,7 +9505,7 @@ def _llm_quality_should_infer_bot_response_from_duplicate_ack(
         return False
     if "BILLING_BLOCKED" in delivery_error_code or "AUTH" in delivery_error_code:
         return False
-    if isinstance(trace_entries, list):
+    if not ignore_transport_block and isinstance(trace_entries, list):
         for entry in reversed(trace_entries):
             if not isinstance(entry, dict):
                 continue
@@ -12199,6 +12200,7 @@ def _run_llm_quality(args):
                     outbox_payload_status=outbox_payload_status,
                     outbox_summary=outbox_summary,
                     trace_entries=trace_entries,
+                    ignore_transport_block=args.skip_outbox,
                 ):
                     bot_response = True
                     bot_response_inferred_duplicate_ack = True

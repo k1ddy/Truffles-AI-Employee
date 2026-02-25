@@ -629,6 +629,37 @@ def test_duplicate_ack_does_not_infer_when_outbox_failed():
     )
 
 
+def test_duplicate_ack_does_not_infer_when_transport_trace_is_billing_blocked():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_should_infer_bot_response_from_duplicate_ack"]
+    assert not fn(
+        bot_response=False,
+        expected_response=True,
+        response_payload={"message": "duplicate message_id"},
+        attempts=2,
+        meta={"action": "reply"},
+        meta_error=None,
+        state="bot_active",
+        trace_entries=[{"stage": "transport", "reason": "provider_billing_blocked"}],
+    )
+
+
+def test_duplicate_ack_infers_when_skip_outbox_ignores_transport_trace_block():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_should_infer_bot_response_from_duplicate_ack"]
+    assert fn(
+        bot_response=False,
+        expected_response=True,
+        response_payload={"message": "duplicate message_id"},
+        attempts=2,
+        meta={"action": "reply"},
+        meta_error=None,
+        state="bot_active",
+        trace_entries=[{"stage": "transport", "reason": "provider_billing_blocked"}],
+        ignore_transport_block=True,
+    )
+
+
 def test_message_recovery_helper_returns_assistant_text():
     helpers = _load_message_recovery_helper()
     fn = helpers["_llm_quality_fetch_assistant_reply_from_messages"]

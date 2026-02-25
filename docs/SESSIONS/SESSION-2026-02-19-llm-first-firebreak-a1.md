@@ -6,6 +6,7 @@
 - branch: fix/llm-first-firebreak-2026-02-19
 - worktree: /home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19
 - base_ref: origin/main
+- zero_context_gate: off
 - scope: Close firebreak misroutes in booking arbitration and ship regression tests with deterministic evidence.
 - done:
   - Pulled latest main and implemented firebreak fixes in booking/decision/info routing.
