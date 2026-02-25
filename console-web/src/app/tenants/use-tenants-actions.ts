@@ -423,6 +423,21 @@ export function useTenantsActions({
         navigateTo(target);
     }, [navigateTo, setClientContextAndPageFilters]);
 
+    const focusWorkspaceSection = useCallback((target: {
+        mode: TenantsWorkspaceMode;
+        lifecycle: TenantLifecycleMode;
+        sectionTestId: string;
+    }) => {
+        setWorkspaceMode(target.mode);
+        setTenantLifecycle(target.lifecycle);
+        setTimeout(() => {
+            document.querySelector(`[data-testid="${target.sectionTestId}"]`)?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+            });
+        }, 120);
+    }, [setTenantLifecycle, setWorkspaceMode]);
+
     const runActionQueueIntent = useCallback((item: ActionQueueItemForIntent) => {
         if (item.intent === "set_context") {
             setClientContextAndPageFilters(item.clientId, item.companyId);
@@ -437,53 +452,69 @@ export function useTenantsActions({
             return;
         }
         if (item.intent === "workspace_portfolio") {
-            setWorkspaceMode("portfolio");
+            focusWorkspaceSection({
+                mode: "portfolio",
+                lifecycle: "active",
+                sectionTestId: "tenants-fleet-attention",
+            });
             return;
         }
         if (item.intent === "workspace_onboarding") {
-            setWorkspaceMode("onboarding");
+            focusWorkspaceSection({
+                mode: "onboarding",
+                lifecycle: "active",
+                sectionTestId: "tenants-onboarding-section",
+            });
             return;
         }
         if (item.intent === "workspace_changes") {
-            setWorkspaceMode("changes");
+            focusWorkspaceSection({
+                mode: "changes",
+                lifecycle: "active",
+                sectionTestId: "tenants-change-management",
+            });
             return;
         }
         if (item.intent === "workspace_decommission") {
-            setWorkspaceMode("decommission");
+            focusWorkspaceSection({
+                mode: "decommission",
+                lifecycle: "archived",
+                sectionTestId: "tenants-decommission-center",
+            });
         }
-    }, [openClientContextTarget, setClientContextAndPageFilters, setWorkspaceMode]);
+    }, [focusWorkspaceSection, openClientContextTarget, setClientContextAndPageFilters]);
 
     const runKpiAction = useCallback((action: OperationalKpiAction) => {
         if (action === "onboarding") {
-            setWorkspaceMode("onboarding");
-            setTenantLifecycle("active");
-            setTimeout(() => {
-                document.querySelector('[data-testid="tenants-onboarding-section"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 120);
+            focusWorkspaceSection({
+                mode: "onboarding",
+                lifecycle: "active",
+                sectionTestId: "tenants-onboarding-section",
+            });
             return;
         }
         if (action === "changes") {
-            setWorkspaceMode("changes");
-            setTenantLifecycle("active");
-            setTimeout(() => {
-                document.querySelector('[data-testid="tenants-change-management"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 120);
+            focusWorkspaceSection({
+                mode: "changes",
+                lifecycle: "active",
+                sectionTestId: "tenants-change-management",
+            });
             return;
         }
         if (action === "decommission") {
-            setWorkspaceMode("decommission");
-            setTenantLifecycle("all");
-            setTimeout(() => {
-                document.querySelector('[data-testid="tenants-decommission-center"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 120);
+            focusWorkspaceSection({
+                mode: "decommission",
+                lifecycle: "archived",
+                sectionTestId: "tenants-decommission-center",
+            });
             return;
         }
-        setWorkspaceMode("portfolio");
-        setTenantLifecycle("active");
-        setTimeout(() => {
-            document.querySelector('[data-testid="tenants-fleet-attention"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 120);
-    }, [setTenantLifecycle, setWorkspaceMode]);
+        focusWorkspaceSection({
+            mode: "portfolio",
+            lifecycle: "active",
+            sectionTestId: "tenants-fleet-attention",
+        });
+    }, [focusWorkspaceSection]);
 
     const startCompanyEdit = useCallback((company: components["schemas"]["ConsoleCompany"]) => {
         if (!company.id) {

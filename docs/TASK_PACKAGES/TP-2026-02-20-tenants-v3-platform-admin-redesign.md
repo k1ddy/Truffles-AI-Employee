@@ -44,6 +44,8 @@
 - `2026-02-24`: Wave 3 continuation (part 9) — extracted page render/composition tree from `tenants/page.tsx` into `console-web/src/app/tenants/tenants-page-view.tsx` and reduced page shell to orchestration+prop wiring (`1064 -> 954` LOC); validation: `lint`, `build`, and deterministic `platform-admin.spec.ts` (`18 passed`).
 - `2026-02-25`: closure pass for remaining residuals — fixed binary gates introduced for Wave 3/Wave 4; Wave 3 marked `done` (orchestration shell + dedicated view composition layer), and Wave 4 marked `done` after 3 consecutive authenticated long-run passes with `request_failures=0`, `fallback_ratio=0.0`, and p95 SLO pass (`docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run{1,2,3}.json`).
 - `2026-02-25`: Wave 5 closure pass — завершён hard copy-gate: branch/quick-create user copy очищен от raw technical tokens (`instance_id/telegram_chat_id/knowledge_tag`), deterministic e2e контракт усилен проверкой "тех-термины только в security/debug zone", lane `platform-admin.spec.ts` green (`18 passed`).
+- `2026-02-25`: UX actionability reset — по факту production/operator feedback зафиксирован residual `button-noise` defect (`F9`): избыток mode/context controls на верхнем экране, часть action intents даёт только mode switch без явного результатного фокуса; принят отдельный closure-пакет `Wave 2.1` (de-noise + actionable intents).
+- `2026-02-26`: Wave 2.1 closure pass — убран `All` из primary lifecycle/decommission controls, context clear controls уплотнены в advanced block, `workspace_*` intents переведены в observable section focus (mode+lifecycle+scroll target); deterministic lane `platform-admin.spec.ts` подтверждён `19 passed` с новыми контрактными проверками UX actionability.
 
 ## Canon refs
 - `AGENTS.md`
@@ -68,7 +70,8 @@
 |---|---|---|---|
 | Wave 1 API contract alignment | `done` | `branch_id` добавлен в `/admin/branches` + frontend pass-through + e2e Scenario B3; `company-cockpit` при `client_id=null` теперь остаётся в company scope; `include_branches=false` устраняет дубли branch payload в `/tenants` cockpit read path; large-scope contract tests добавлены (`truffles-api/tests/test_console_tenants_list.py`: `test_get_tenants_company_cockpit_passes_large_scope_pagination_contract`, `test_get_tenants_company_cockpit_rejects_oversized_limits_before_subqueries`) | Нет блокеров по API contract; дальнейшая работа смещена в Wave 4 runtime perf/read-model |
 | Wave 2 Context kernel | `done` | Атомарный sync `company/client/branch`, orphan-branch guard, стабильные B/C/D + отключён конфликтующий header-edit контекста на `/tenants` (`context-managed-in-tenants`) (`console-web/src/app/tenants/page.tsx`, `console-web/src/components/ConsoleShell.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Нет блокеров |
-| Wave 3 Data contract | `done` | Typed weekly snapshot schema + table/fallback (`truffles-api/app/schemas/console.py:249`, `truffles-api/app/routers/console.py:13434`); в `/tenants` добавлены decomposition hooks `useTenantsDataQueries`, `useTenantsActions`, `useTenantsScopeDerivedState`, `useTenantsActionQueue`, `useTenantsOperationalModel`, `useTenantsPageOperations`, `useTenantsPageOrchestration`, helper module `tenants-page-helpers.ts` (lifecycle audit / branch patch / formatters), dedicated render composition layer `tenants-page-view.tsx`; `tenants/page.tsx` reduced `1883 -> 954`; deterministic lane validation (`platform-admin.spec.ts`: `18 passed`). | Закрыто бинарным gate `WG3` (см. ниже) |
+| Wave 2.1 UX actionability closure | `done` | `All` удалён из primary lifecycle/decommission controls; secondary context clear controls свёрнуты в advanced block; `workspace_*` intents в `runActionQueueIntent`/`runKpiAction` дают observable effect (mode+lifecycle+section focus); deterministic e2e усилен проверками `no-All` + compact controls + action run outcome | Нет блокеров; закрыто бинарным gate `WG2.1` (см. ниже) |
+| Wave 3 Data contract | `done` | Typed weekly snapshot schema + table/fallback (`truffles-api/app/schemas/console.py:249`, `truffles-api/app/routers/console.py:13434`); в `/tenants` добавлены decomposition hooks `useTenantsDataQueries`, `useTenantsActions`, `useTenantsScopeDerivedState`, `useTenantsActionQueue`, `useTenantsOperationalModel`, `useTenantsPageOperations`, `useTenantsPageOrchestration`, helper module `tenants-page-helpers.ts` (lifecycle audit / branch patch / formatters), dedicated render composition layer `tenants-page-view.tsx`; `tenants/page.tsx` reduced `1883 -> 954`; deterministic lane validation (`platform-admin.spec.ts`: `19 passed`). | Закрыто бинарным gate `WG3` (см. ниже) |
 | Wave 4 Decomposition/perf | `done` | Вынесены `OperationalKpi`, `FleetAttention`, `PortfolioCompanies`, `Clients`, `ChangeManagement`, `Decommission`, `ClientLifecycleModal`; внедрён read-model cache + scope-aware invalidation + durable prewarm queue + materialized projection + branch hot-path indexes; perf gate усилен sample-size и projection observability; authenticated long-run lane выполнен в 3 последовательных прогонах (`run1/run2/run3`) с `request_failures=0`, `fallback_ratio=0.0`, `portfolio p95=250`, `company_cockpit p95=100`, `branches p95=100` и `status=pass` во всех трёх случаях. | Закрыто бинарным gate `WG4` (см. ниже) |
 | Wave 5 A11y/copy | `done` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен, business-copy упрощён в `TopControls`/`ActionQueue`/`Fleet`/`Company edit`, lifecycle audit очищен от raw `trace_id`, branch/quick-create validation copy переведён в business wording, e2e контракт усилен: raw technical markers запрещены в operator flow и допускаются только в explicit security/debug zone (`tenants-sensitive-id-cell`) | Закрыто бинарным gate `WG5` (см. ниже) |
 | Wave 6 E2E realism | `done` | `platform-admin.spec.ts` стабилизирован: deterministic auth/session, нет `test.skip`, сценарии A/B/C/D/E hard-fail (`console-web/e2e/platform-admin.spec.ts`, `console-web/playwright.config.ts`) | Нет |
@@ -88,16 +91,22 @@
   - deterministic `platform-admin.spec.ts` includes hard copy-gate for `/tenants` (`operator flow` vs `security/debug zone`),
   - branch/quick-create visible copy in operator flow does not contain raw tokens `instance_id/telegram_chat_id/knowledge_tag`,
   - raw `instance_id` marker remains visible only inside explicit sensitive zone (`data-testid=\"tenants-sensitive-id-cell\"`) for audited reveal/copy actions.
+- `WG2.1` (Wave 2.1 done) passes only if all are true:
+  - `All` отсутствует в primary lifecycle controls (`tenants-page-view`, `TenantsDecommissionPanel`),
+  - secondary context clear controls доступны через compact advanced block (не как постоянные primary buttons),
+  - `workspace_*` intents приводят к observable target focus (mode+lifecycle+scroll section),
+  - deterministic `platform-admin.spec.ts` содержит и проходит UX actionability assertions.
 - `WG3` result: `PASS`.
 - `WG4` result: `PASS`.
 - `WG5` result: `PASS`.
+- `WG2.1` result: `PASS`.
 - `WG4` evidence:
   - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run1.json`
   - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run2.json`
   - `docs/REPORTS/artifacts/2026-02-25-tenants-perf-closure/tenants-perf-long-run-closure-run3.json`
 - `WG5` evidence:
   - `console-web/e2e/platform-admin.spec.ts` test: `should keep tenants copy business-oriented and isolate technical markers to security/debug zones`
-  - local deterministic checks: `lint`, `build`, `platform-admin.spec.ts` (`18 passed`).
+- local deterministic checks: `lint`, `build`, `platform-admin.spec.ts` (`19 passed`).
 
 ## Critical problems (FACT, deep check)
 ### F1 (closed). Branch scope drift после `Взять из рабочего контура`
@@ -185,17 +194,27 @@ Impact:
 
 ### F8. E2E-контур не является жесткой страховкой от регрессий
 Evidence:
-- `platform-admin.spec.ts` работает в deterministic lane (`E2E_DETERMINISTIC_AUTH=1`) и проходит `18/18` без `test.skip`.
+- `platform-admin.spec.ts` работает в deterministic lane (`E2E_DETERMINISTIC_AUTH=1`) и проходит `19/19` без `test.skip`.
 - `tenants-a11y.spec.ts` переведён на deterministic mocks + жёсткий `expect(tenantsAvailable).toBe(true)` вместо `test.skip`.
 Impact:
 - Контур стал воспроизводимым и fail-closed.
 - Остаточный риск: warnings окружения (`NO_COLOR/FORCE_COLOR`, npm env warning) не влияют на pass/fail, но требуют отдельной hygiene-задачи.
 
+### F9 (closed). Избыточные верхние контролы и низкая perceived-actionability
+Evidence:
+- Верхний control-surface de-noised: в постоянных primary controls оставлен `Сбросить контур`, точечные очистки перенесены в `tenants-context-clear-advanced` (`console-web/src/components/TenantsTopControls.tsx`).
+- `workspace_*` intents в `runActionQueueIntent`/`runKpiAction` теперь дают observable effect: mode+lifecycle sync + scroll к целевой секции (`tenants-fleet-attention`, `tenants-onboarding-section`, `tenants-change-management`, `tenants-decommission-center`) (`console-web/src/app/tenants/use-tenants-actions.ts`).
+- `All` удалён из primary lifecycle/decommission controls (`console-web/src/app/tenants/tenants-page-view.tsx`, `console-web/src/components/TenantsDecommissionPanel.tsx`).
+- Контракт зафиксирован в deterministic e2e: `no-All` для lifecycle controls, compact clear-controls visibility, action-queue onboarding intent outcome (`console-web/e2e/platform-admin.spec.ts`).
+Impact:
+- Снижен cognitive load верхнего экрана и устранены mode-only действия без результата.
+- Вкладка стала action-first: оператор получает явный результат каждого run intent.
+
 ## Root-cause map
 1. Нет единой state machine для `global context` и `page filters`.
 2. API `company-cockpit` требует cleanup/read-model hardening для больших объёмов, но блокирующий F3 bug закрыт.
 3. Fleet аналитика рассчитывается синхронно "на лету" вместо read-model/предагрегации.
-4. Страница остается orchestration-монолитом.
+4. Control-surface рос быстрее, чем контракты actionability и visibility.
 5. Тестовый контур допускает "soft skip", а не контрактную проверку.
 
 ## Invariant
@@ -301,6 +320,10 @@ Expected result:
 2. Удалить debug copy из business режима:
 - `page filter client_id`, `Threshold drill-down`, `Action Queue` (заменить на RU business labels).
 3. Убрать дублирующую информацию, которая не влияет на действие.
+4. `Wave 2.1` (actionability closure):
+- убрать `All` из primary lifecycle/decommission controls;
+- перенести вторичные context-reset кнопки в compact/advanced слой;
+- для `Action Queue` workspace intents обеспечить явный target focus (а не только mode switch).
 Expected result:
 - оператор за 3 шага понимает "где я / что вижу / что делать дальше".
 
@@ -361,6 +384,9 @@ Expected result:
 6. A11y: `critical=0`, `serious=0` для desktop/mobile.
 7. Perf SLO выполняются на тестовом профиле крупного флота.
 8. Feature flag rollout + rollback документированы и проверены.
+9. Wave 2.1 closure:
+- в верхнем экране остаются только action-first primary controls;
+- `run intent` не заканчивается "тихим" mode-only эффектом без visible target focus.
 
 ## Checks
 - `corepack pnpm -C console-web run lint`
@@ -384,7 +410,7 @@ Expected result:
 - openapi diff,
 - sample requests/responses for portfolio/cockpit/branches.
 3. Quality evidence:
-- e2e logs по A/B/C/D/E (`18 passed`),
+- e2e logs по A/B/C/D/E (`19 passed`),
 - axe JSON desktop/mobile (`critical=0`, `serious=0`),
 - perf summary with p95,
 - live canary artifacts:

@@ -766,6 +766,9 @@ test.describe('Platform Admin Tenants', () => {
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
             await expect(page.getByTestId('tenants-context-lens')).toBeVisible();
+            await expect(
+                page.getByTestId('tenants-lifecycle-controls').getByRole('button', { name: /^Все$/ }),
+            ).toHaveCount(0);
             const workspaceGuide = page.getByTestId('tenants-workspace-guide');
             if (await workspaceGuide.isVisible().catch(() => false)) {
                 await expect(workspaceGuide).toBeVisible();
@@ -778,6 +781,9 @@ test.describe('Platform Admin Tenants', () => {
 
             await page.getByTestId('tenants-mode-decommission').click();
             await expect(page.getByTestId('tenants-decommission-center')).toBeVisible();
+            await expect(
+                page.getByTestId('tenants-decommission-lifecycle-controls').getByRole('button', { name: /^Все$/ }),
+            ).toHaveCount(0);
             await expect(page.getByTestId('tenants-clients-section')).toBeVisible();
 
             await page.getByTestId('tenants-mode-portfolio').click();
@@ -796,6 +802,22 @@ test.describe('Platform Admin Tenants', () => {
         await expect(page.getByTestId('context-company-select')).toHaveCount(0);
         await expect(page.getByTestId('context-client-select')).toHaveCount(0);
         await expect(page.getByTestId('context-branch-select')).toHaveCount(0);
+        const advancedClear = page.getByTestId('tenants-context-clear-advanced');
+        await expect(advancedClear).toBeVisible();
+        await expect(page.getByTestId('tenants-context-clear-branch')).not.toBeVisible();
+        await expect(page.getByTestId('tenants-context-clear-client')).not.toBeVisible();
+        await page.getByTestId('tenants-context-clear-advanced-toggle').click();
+        await expect(page.getByTestId('tenants-context-clear-branch')).toBeVisible();
+        await expect(page.getByTestId('tenants-context-clear-client')).toBeVisible();
+    });
+
+    test('should run onboarding action queue intent with visible section focus', async ({ page }) => {
+        const actionQueue = page.getByTestId('tenants-action-queue');
+        await expect(actionQueue).toBeVisible();
+        const onboardingRun = actionQueue.getByRole('button', { name: 'Открыть Onboarding' }).first();
+        await expect(onboardingRun).toBeVisible();
+        await onboardingRun.click();
+        await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
     });
 
     test('should show explicit field contracts in Tenants branch editor @smoke', async ({ page }) => {
