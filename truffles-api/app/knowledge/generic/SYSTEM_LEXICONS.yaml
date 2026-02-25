@@ -38,6 +38,21 @@ booking_keywords:
     - бронь
     - заброн
     - окошк
+booking_reschedule_keywords:
+  ru:
+    - перенос
+    - перенести
+    - перезапис
+    - сдвин
+    - поменять время
+    - изменить время
+booking_cancel_keywords:
+  ru:
+    - отмен
+    - отменить
+    - отмена
+    - аннул
+    - сброс
 time_only_request_phrases:
   ru:
     - во сколько

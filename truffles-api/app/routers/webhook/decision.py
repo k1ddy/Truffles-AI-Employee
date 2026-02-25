@@ -309,6 +309,12 @@ from app.services.ai_service import (
     transcribe_audio_with_fallback,
 )
 from app.services.capabilities_runtime import build_runtime_capabilities, set_runtime_capabilities
+from app.services.capability_manifest_service import (
+    build_requested_fact_scopes,
+    resolve_fact_scope_decision,
+    resolve_handoff_policy_decision,
+    resolve_tool_protocol_decision,
+)
 from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
@@ -376,6 +382,7 @@ from app.services.pack_runtime_service import (
     get_system_anchor_groups,
     get_system_lexicon_list,
     has_walkin_without_booking_signal,
+    is_timeout_fact_fallback_candidate,
     load_system_lexicons,
     load_yaml_truth,
     semantic_question_type,
@@ -618,6 +625,20 @@ def _should_block_expected_reply_by_info(
     question_like = "?" in message_text
     if not question_like and tokens:
         question_like = any(tokens[0].startswith(prefix) for prefix in legacy.QUESTION_WORD_PREFIXES)
+    location_question_signal = bool(
+        question_like
+        and any(token.startswith("где") for token in tokens)
+        and any(stem in normalized_message for stem in ("салон", "адрес", "наход", "располож"))
+    )
+    verification_signal = _looks_like_booking_verification_request(message_text)
+    reschedule_signal = _looks_like_booking_reschedule_request(
+        message_text,
+        client_slug=client_slug,
+    )
+    media_offer_signal = bool(
+        ("фото" in normalized_message or "референс" in normalized_message)
+        and any(stem in normalized_message for stem in ("отправ", "пришл", "скин", "покаж"))
+    )
     expected_reply_candidate = None
     if expected_reply_type == legacy.EXPECTED_REPLY_TIME:
         expected_reply_candidate = _validate_expected_reply_value(
@@ -630,6 +651,10 @@ def _should_block_expected_reply_by_info(
         or price_signal
         or duration_signal
         or style_reference_signal
+        or location_question_signal
+        or verification_signal
+        or reschedule_signal
+        or media_offer_signal
     )
     if not blocked and expected_reply_type in {
         legacy.EXPECTED_REPLY_TIME,
@@ -3144,7 +3169,7 @@ MEMORY_POLICY_RETRIEVAL_MIN_TOKEN_LEN = max(
 )
 MEMORY_POLICY_RETRIEVAL_BLOCKED_KEYS = {"phone", "customer_phone", "contact_phone"}
 
-MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
+MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться? После этого сразу проверю свободное время."
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
 MSG_BOOKING_ASK_NAME = "Отлично, время подходит. Как вас зовут?"
 MSG_BOOKING_ASK_REFERENCE = (
@@ -3851,6 +3876,16 @@ POLICY_OVERRIDE_REASON_CODES = {
     "idempotency_replay_guard",
 }
 POLICY_OVERRIDE_REASON_DEFAULT = "contract_validation_failure"
+SEMANTIC_ARBITER_CONTRACT_VERSION = "v1"
+POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT = "policy_timeout_degrade"
+POLICY_TIMEOUT_DEGRADE_MAX_RETRIES = max(
+    int(os.environ.get("POLICY_TIMEOUT_DEGRADE_MAX_RETRIES", "1")),
+    0,
+)
+POLICY_TIMEOUT_DEGRADE_FACT_MIN_CONFIDENCE = max(
+    min(float(os.environ.get("POLICY_TIMEOUT_DEGRADE_FACT_MIN_CONFIDENCE", "0.58")), 1.0),
+    0.0,
+)
 LLM_POLICY_CORE_ENABLED = _is_env_enabled(
     os.environ.get("LLM_POLICY_CORE_ENABLED"), default=True
 )
@@ -4000,6 +4035,52 @@ def _looks_like_booking_verification_request(message_text: str | None) -> bool:
     if not normalized:
         return False
     return any(pattern.search(normalized) for pattern in BOOKING_VERIFICATION_PATTERNS)
+
+
+def _looks_like_promo_code_request(message_text: str | None, *, client_slug: str | None = None) -> bool:
+    if not message_text:
+        return False
+    normalized = _normalize_service_text(message_text).replace("-", " ")
+    if not normalized:
+        return False
+    promo_code_terms = get_signal_lexicon_list(client_slug, "promotion_promo_code_terms")
+    if not promo_code_terms:
+        return False
+    return any(token in normalized for token in promo_code_terms)
+
+
+def _format_discounts_reply_for_message(
+    *,
+    message_text: str | None,
+    policy_pack: dict | None,
+    policy_type: str | None,
+    client_slug: str | None = None,
+    promo_code_request: bool | None = None,
+) -> str | None:
+    reply = _format_discounts_policy_reply(
+        policy_pack=policy_pack,
+        policy_type=policy_type,
+    )
+    if not (isinstance(reply, str) and reply.strip()):
+        return None
+    if promo_code_request is None:
+        promo_code_request = _looks_like_promo_code_request(
+            message_text,
+            client_slug=client_slug,
+        )
+    if not promo_code_request:
+        return reply
+    discounts_policy = policy_pack.get("discounts") if isinstance(policy_pack, dict) else None
+    promo_code = None
+    if isinstance(discounts_policy, dict):
+        for key in ("promo_code", "promoCode", "special_promo_code", "code"):
+            raw = discounts_policy.get(key)
+            if isinstance(raw, str) and raw.strip():
+                promo_code = raw.strip()
+                break
+    if promo_code:
+        return f"Сейчас действует промокод {promo_code}. {reply}"
+    return f"Специальный промокод в правилах не указан. {reply}"
 
 
 def _resolve_policy_check_confirm_mode(policy_intent: str | None) -> str | None:
@@ -4243,6 +4324,138 @@ def _build_policy_plan_audit(
         "override_reason_codes": override_reason_codes,
         "override_reason_missing": override_reason_missing,
         "override_events": cleaned_events,
+    }
+
+
+def _normalize_semantic_refs(refs: list[str] | None) -> list[str]:
+    if not refs:
+        return []
+    cleaned: list[str] = []
+    for item in refs:
+        if not isinstance(item, str):
+            continue
+        token = item.strip().casefold()
+        if token and token not in cleaned:
+            cleaned.append(token)
+    return cleaned
+
+
+def _normalize_semantic_slots(slots: dict[str, str] | None) -> dict[str, str]:
+    if not isinstance(slots, dict):
+        return {}
+    cleaned: dict[str, str] = {}
+    for key in BOOKING_SLOT_ORDER:
+        value = slots.get(key)
+        if isinstance(value, str) and value.strip():
+            cleaned[key] = value.strip()
+    return cleaned
+
+
+def _build_semantic_arbiter_contract(
+    *,
+    intent: str | None,
+    action: str | None,
+    tool_action: str | None,
+    pack_refs: list[str] | None,
+    slots: dict[str, str] | None,
+    confidence: float | None,
+    reason: str | None,
+    goal: str | None,
+    open_questions: list[str] | None,
+    needs_manager: bool,
+    risk_signals: list[str] | None,
+) -> dict[str, Any]:
+    confidence_value: float | None = None
+    if isinstance(confidence, (int, float)):
+        confidence_value = max(0.0, min(float(confidence), 1.0))
+    return {
+        "intent_class": intent or None,
+        "action_class": action or None,
+        "tool_action": tool_action or None,
+        "fact_refs": _normalize_semantic_refs(pack_refs),
+        "slot_candidates": _normalize_semantic_slots(slots),
+        "confidence": confidence_value,
+        "abstain_reason": reason or None,
+        "goal": goal or None,
+        "open_questions": _normalize_semantic_refs(open_questions),
+        "needs_manager": bool(needs_manager),
+        "risk_signals": _normalize_semantic_refs(risk_signals),
+    }
+
+
+def _build_semantic_arbiter_audit(
+    *,
+    plan_contract: dict[str, Any] | None,
+    final_contract: dict[str, Any] | None,
+    override_events: list[dict[str, Any]] | None,
+    intent_override_events: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    plan_action = (
+        plan_contract.get("action_class")
+        if isinstance(plan_contract, dict)
+        else None
+    )
+    final_action = (
+        final_contract.get("action_class")
+        if isinstance(final_contract, dict)
+        else None
+    )
+    plan_tool_action = (
+        plan_contract.get("tool_action")
+        if isinstance(plan_contract, dict)
+        else None
+    )
+    final_tool_action = (
+        final_contract.get("tool_action")
+        if isinstance(final_contract, dict)
+        else None
+    )
+    plan_intent = (
+        plan_contract.get("intent_class")
+        if isinstance(plan_contract, dict)
+        else None
+    )
+    final_intent = (
+        final_contract.get("intent_class")
+        if isinstance(final_contract, dict)
+        else None
+    )
+    action_changed = bool(
+        isinstance(plan_action, str)
+        and plan_action
+        and (not isinstance(final_action, str) or final_action != plan_action)
+    )
+    tool_action_changed = bool(
+        isinstance(plan_tool_action, str)
+        and plan_tool_action
+        and (not isinstance(final_tool_action, str) or final_tool_action != plan_tool_action)
+    )
+    intent_changed = bool(
+        isinstance(plan_intent, str)
+        and plan_intent
+        and (not isinstance(final_intent, str) or final_intent != plan_intent)
+    )
+    override_reason_codes: list[str] = []
+    for event in override_events or []:
+        if not isinstance(event, dict):
+            continue
+        reason_code = _audit_policy_override_reason_code(event.get("reason_code"))
+        if reason_code and reason_code not in override_reason_codes:
+            override_reason_codes.append(reason_code)
+    intent_override_reason_codes: list[str] = []
+    for event in intent_override_events or []:
+        if not isinstance(event, dict):
+            continue
+        reason_code = _audit_policy_override_reason_code(event.get("reason_code"))
+        if reason_code and reason_code not in intent_override_reason_codes:
+            intent_override_reason_codes.append(reason_code)
+    return {
+        "action_changed": action_changed,
+        "tool_action_changed": tool_action_changed,
+        "intent_changed": intent_changed,
+        "override_reason_codes": override_reason_codes,
+        "intent_override_reason_codes": intent_override_reason_codes,
+        "intent_override_count": len(intent_override_events or []),
     }
 
 
@@ -4841,6 +5054,17 @@ def _is_timeout_degrade_failure(failure: dict[str, Any] | None) -> bool:
     return False
 
 
+def _timeout_degrade_retry_status(context_manager: dict[str, Any] | None) -> tuple[int, bool]:
+    manager = context_manager if isinstance(context_manager, dict) else {}
+    retry_count, _ = _get_clarify_attempt_state(
+        manager,
+        POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT,
+    )
+    retry_count = max(0, int(retry_count))
+    exhausted = retry_count >= POLICY_TIMEOUT_DEGRADE_MAX_RETRIES
+    return retry_count, exhausted
+
+
 def _is_retryable_policy_core_error_code(code: str | None) -> bool:
     if not isinstance(code, str):
         return False
@@ -4906,9 +5130,16 @@ def _should_use_expected_reply_collect_fast_path(
     booking_wants_flow: bool,
     booking_slot_signal: bool,
     consult_intent: bool,
+    booking_reference_present: bool,
+    booking_slots_complete: bool,
     refusal_flags: dict[str, bool] | None,
     client_slug: str | None,
 ) -> bool:
+    fast_path_enabled = str(
+        os.environ.get("POLICY_CORE_EXPECTED_REPLY_COLLECT_FAST_PATH", "0")
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if not fast_path_enabled:
+        return False
     if expected_reply_type not in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
         return False
     if expected_reply_matched is not False or expected_reply_blocked_by_info:
@@ -4916,11 +5147,44 @@ def _should_use_expected_reply_collect_fast_path(
     normalized_text = message_text.strip() if isinstance(message_text, str) else ""
     if not normalized_text:
         return False
-    if not booking_wants_flow or booking_slot_signal or consult_intent:
+    if not booking_wants_flow or consult_intent:
         return False
     if info_class_intents:
         return False
+    verification_text_signal = _looks_like_booking_verification_request(normalized_text)
+    allow_intent_override = False
+    if (
+        verification_text_signal
+        and expected_reply_type in {EXPECTED_REPLY_NAME, EXPECTED_REPLY_TIME}
+        and not booking_reference_present
+    ):
+        allow_intent_override = True
     if intent_decomp_set != {"other"}:
+        verification_intents = {
+            "check_booking",
+            "verify_booking",
+            "confirm_booking",
+            "booking_confirmation",
+        }
+        allow_verification_collect = bool(
+            intent_decomp_set
+            and intent_decomp_set <= verification_intents
+            and expected_reply_type in {EXPECTED_REPLY_NAME, EXPECTED_REPLY_TIME}
+            and not booking_reference_present
+        )
+        allow_booking_collect = bool(
+            intent_decomp_set == {"booking"}
+            and expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+            and not booking_reference_present
+            and (
+                not booking_slots_complete
+                or expected_reply_type in {EXPECTED_REPLY_NAME, EXPECTED_REPLY_TIME}
+            )
+        )
+        if not (allow_verification_collect or allow_booking_collect):
+            return False
+        allow_intent_override = True
+    if booking_slot_signal and not allow_intent_override:
         return False
     if _looks_like_info_query(normalized_text, client_slug=client_slug):
         return False
@@ -8738,6 +9002,13 @@ async def _handle_webhook_payload(
     policy_plan_tool_action = None
     policy_override_events: list[dict[str, Any]] = []
     policy_override_reason_missing_detected = False
+    policy_semantic_plan_contract: dict[str, Any] | None = None
+    policy_semantic_final_contract: dict[str, Any] | None = None
+    policy_semantic_intent_overrides: list[dict[str, Any]] = []
+    policy_capability_checks: list[dict[str, Any]] = []
+    policy_capability_block_reason: str | None = None
+    policy_capability_block_scope: str | None = None
+    policy_handoff_policy_blocked = False
 
     def _sync_policy_plan_audit(*, emit_trace: bool = False) -> None:
         if not policy_plan_action and not policy_plan_tool_action:
@@ -8796,6 +9067,55 @@ async def _handle_webhook_payload(
                 },
             )
 
+    def _sync_semantic_arbiter_meta() -> None:
+        nonlocal policy_semantic_plan_contract, policy_semantic_final_contract
+        if policy_semantic_plan_contract is None and (policy_plan_action or policy_plan_tool_action):
+            # Build late if fast-path metadata was initialized before plan snapshot creation.
+            policy_semantic_plan_contract = _build_semantic_arbiter_contract(
+                intent=policy_intent,
+                action=policy_plan_action or policy_action,
+                tool_action=policy_plan_tool_action or policy_tool_action,
+                pack_refs=policy_pack_refs,
+                slots=policy_slot_state_validated,
+                confidence=policy_confidence,
+                reason=policy_reason,
+                goal=policy_goal,
+                open_questions=policy_open_questions,
+                needs_manager=policy_needs_manager,
+                risk_signals=policy_risk_signals,
+            )
+        policy_semantic_final_contract = _build_semantic_arbiter_contract(
+            intent=policy_intent,
+            action=policy_action,
+            tool_action=policy_tool_action,
+            pack_refs=policy_pack_refs or resolved_policy_refs,
+            slots=policy_slot_state_validated,
+            confidence=policy_confidence,
+            reason=policy_reason,
+            goal=policy_goal,
+            open_questions=policy_open_questions,
+            needs_manager=policy_needs_manager,
+            risk_signals=policy_risk_signals,
+        )
+        semantic_audit = _build_semantic_arbiter_audit(
+            plan_contract=policy_semantic_plan_contract,
+            final_contract=policy_semantic_final_contract,
+            override_events=policy_override_events,
+            intent_override_events=policy_semantic_intent_overrides,
+        )
+        if not isinstance(llm_policy_core_meta, dict):
+            return
+        llm_policy_core_meta["semantic_arbiter"] = {
+            "contract_version": SEMANTIC_ARBITER_CONTRACT_VERSION,
+            "source": "llm_policy_core",
+            "plan": policy_semantic_plan_contract,
+            "final": policy_semantic_final_contract,
+            "audit": semantic_audit,
+        }
+        llm_policy_core_meta["semantic_intent_overrides"] = list(
+            policy_semantic_intent_overrides
+        )
+
     def _register_policy_override(
         *,
         reason_code: str | None,
@@ -8830,7 +9150,75 @@ async def _handle_webhook_payload(
             },
         )
         if isinstance(llm_policy_core_meta, dict):
+            _sync_semantic_arbiter_meta()
             _sync_policy_plan_audit()
+
+    def _register_policy_intent_override(
+        *,
+        reason_code: str | None,
+        reason: str,
+        from_intent: str | None,
+        to_intent: str | None,
+        source: str | None,
+    ) -> bool:
+        nonlocal policy_override_reason_missing_detected
+        if not (
+            isinstance(from_intent, str)
+            and from_intent.strip()
+            and isinstance(to_intent, str)
+            and to_intent.strip()
+        ):
+            return True
+        normalized_from = from_intent.strip().casefold()
+        normalized_to = to_intent.strip().casefold()
+        if normalized_from == normalized_to:
+            return True
+        normalized_reason_code = _audit_policy_override_reason_code(reason_code)
+        if not normalized_reason_code:
+            policy_override_reason_missing_detected = True
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "llm_policy_semantic_delta",
+                    "decision": "intent_override_missing_reason_guard_block",
+                    "reason_code_raw": reason_code,
+                    "reason": reason,
+                    "from_intent": normalized_from,
+                    "to_intent": normalized_to,
+                    "source": source.strip().casefold()
+                    if isinstance(source, str) and source.strip()
+                    else None,
+                },
+            )
+            if isinstance(llm_policy_core_meta, dict):
+                _sync_semantic_arbiter_meta()
+                _sync_policy_plan_audit()
+            return False
+        event = {
+            "reason_code": normalized_reason_code,
+            "reason": reason,
+            "from_intent": normalized_from,
+            "to_intent": normalized_to,
+        }
+        if isinstance(source, str) and source.strip():
+            event["source"] = source.strip().casefold()
+        policy_semantic_intent_overrides.append(event)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "llm_policy_semantic_delta",
+                "decision": "intent_override",
+                "reason_code": normalized_reason_code,
+                "reason": reason,
+                "from_intent": normalized_from,
+                "to_intent": normalized_to,
+                "source": event.get("source"),
+            },
+        )
+        if isinstance(llm_policy_core_meta, dict):
+            _sync_semantic_arbiter_meta()
+            _sync_policy_plan_audit()
+        return True
 
     def _apply_policy_guard_override(
         *,
@@ -8853,6 +9241,78 @@ async def _handle_webhook_payload(
             )
         else:
             _sync_policy_plan_audit()
+
+    def _send_override_reason_missing_clarify(
+        *,
+        guard_reason: str,
+        trace_decision: str,
+        trace_source: str | None = None,
+    ) -> WebhookResponse:
+        nonlocal policy_valid
+        nonlocal policy_validation_error
+        nonlocal policy_core_mode
+        nonlocal policy_core_degrade_reason
+        nonlocal policy_core_failure
+        nonlocal policy_override_reason_missing_detected
+        policy_valid = False
+        policy_validation_error = "override_reason_missing"
+        policy_override_reason_missing_detected = True
+        policy_core_mode = "degraded_fallback"
+        policy_core_degrade_reason = "policy_validation:override_reason_missing"
+        policy_core_failure = _classify_policy_core_degrade_reason(policy_core_degrade_reason)
+        if isinstance(llm_policy_core_meta, dict):
+            llm_policy_core_meta["validated"] = False
+            llm_policy_core_meta["validation_error"] = "override_reason_missing"
+            llm_policy_core_meta["override_reason_missing_detected"] = True
+            _sync_semantic_arbiter_meta()
+            _sync_policy_plan_audit()
+        if saved_message:
+            updates: dict[str, Any] = {
+                "policy_core_mode": policy_core_mode,
+                "policy_core_degrade_reason": policy_core_degrade_reason,
+                "policy_core_failure": policy_core_failure,
+                "llm_policy_override_reason_missing_detected": True,
+            }
+            if isinstance(llm_policy_core_meta, dict):
+                updates["llm_policy_core"] = llm_policy_core_meta
+            _update_message_decision_metadata(saved_message, updates)
+        _apply_policy_guard_override(
+            final_action="collect",
+            final_tool_action="collect",
+            reason_code="contract_validation_failure",
+            reason=guard_reason,
+        )
+        _sync_policy_plan_audit(emit_trace=True)
+        trace_payload: dict[str, Any] = {
+            "stage": "policy_core_guard",
+            "decision": trace_decision,
+            "state": conversation.state,
+            "mode": policy_core_mode,
+            "reason": policy_core_degrade_reason,
+        }
+        if isinstance(trace_source, str) and trace_source.strip():
+            trace_payload["source"] = trace_source.strip().casefold()
+        _record_decision_trace(conversation, trace_payload)
+        _record_message_decision_meta(
+            saved_message,
+            action="reply",
+            intent="policy_core_guard",
+            source="llm_policy_core",
+            fast_intent=False,
+        )
+        bot_response, sent = _send_and_save(MSG_FACT_GUARD_CLARIFY)
+        result_message = (
+            "Policy core override missing reason clarify sent"
+            if sent
+            else "Policy core override missing reason clarify failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
 
     policy_core_runtime_active = bool(
         LLM_POLICY_CORE_ENABLED
@@ -8942,6 +9402,15 @@ async def _handle_webhook_payload(
             booking_wants_flow=booking_wants_flow,
             booking_slot_signal=booking_slot_signal,
             consult_intent=consult_intent,
+            booking_reference_present=_booking_has_reference(
+                booking if isinstance(booking, dict) else None
+            ),
+            booking_slots_complete=_plan_has_complete_booking_slots(
+                _merge_booking_plan_slots(
+                    booking_state=booking if isinstance(booking, dict) else None,
+                    plan_slots=policy_slot_state,
+                )
+            ),
             refusal_flags=refusal_flags,
             client_slug=payload.client_slug,
         ):
@@ -9078,6 +9547,19 @@ async def _handle_webhook_payload(
             if isinstance(raw_needs_manager, bool):
                 policy_needs_manager = raw_needs_manager
             policy_risk_signals = _normalize_plan_refs(policy_payload.get("risk_signals"))
+            policy_semantic_plan_contract = _build_semantic_arbiter_contract(
+                intent=policy_intent,
+                action=policy_plan_action or policy_action,
+                tool_action=policy_plan_tool_action or policy_tool_action,
+                pack_refs=policy_pack_refs,
+                slots=policy_slot_state_validated,
+                confidence=policy_confidence,
+                reason=policy_reason,
+                goal=policy_goal,
+                open_questions=policy_open_questions,
+                needs_manager=policy_needs_manager,
+                risk_signals=policy_risk_signals,
+            )
 
             if not policy_intent:
                 policy_validation_error = "intent_invalid"
@@ -9389,6 +9871,45 @@ async def _handle_webhook_payload(
                         resolved_policy_refs = []
                         policy_pack_refs_dropped = True
 
+            if (
+                policy_validation_error is None
+                and policy_action == "fact"
+                and policy_tool_action in {"info", "consult"}
+            ):
+                requested_fact_scopes = build_requested_fact_scopes(
+                    tool_action=policy_tool_action,
+                    pack_refs=resolved_policy_refs or policy_pack_refs,
+                )
+                for scope in requested_fact_scopes:
+                    fact_scope_decision = resolve_fact_scope_decision(scope)
+                    check_payload = {
+                        "kind": "fact_scope",
+                        "scope": scope,
+                        "decision": "allow" if fact_scope_decision.allowed else "blocked",
+                        "reason": fact_scope_decision.reason,
+                        "source": fact_scope_decision.source,
+                        "allowed_scopes": list(fact_scope_decision.allowed_scopes),
+                    }
+                    policy_capability_checks.append(check_payload)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "capability_check",
+                            "decision": check_payload["decision"],
+                            "kind": "fact_scope",
+                            "fact_scope": scope,
+                            "capability_reason": fact_scope_decision.reason,
+                            "capability_source": fact_scope_decision.source,
+                        },
+                    )
+                    if not fact_scope_decision.allowed:
+                        policy_validation_error = "fact_scope_not_allowed"
+                        policy_capability_block_reason = (
+                            fact_scope_decision.reason or "fact_scope_not_allowed"
+                        )
+                        policy_capability_block_scope = scope
+                        break
+
             if policy_validation_error is None and policy_action == "handoff":
                 style_reference_handoff_signal = bool(
                     _policy_has_style_reference_hint(
@@ -9401,22 +9922,60 @@ async def _handle_webhook_payload(
                     )
                 )
                 if style_reference_handoff_signal and not has_media:
-                    previous_action = policy_action
-                    previous_tool_action = policy_tool_action
-                    policy_action = "collect"
-                    policy_tool_action = "collect"
+                    # Keep semantic arbiter output immutable. Runtime handoff guard below
+                    # will turn this into a style-reference media prompt without escalation.
                     policy_needs_manager = False
-                    _register_policy_override(
-                        reason_code="required_slot_missing",
-                        reason="style_reference_handoff_recovered_to_collect",
-                        from_action=previous_action,
-                        from_tool_action=previous_tool_action,
-                    )
                 else:
+                    explicit_manager_request_signal = bool(
+                        message_text
+                        and (
+                            is_human_request_message(message_text)
+                            or is_frustration_message(message_text)
+                        )
+                    )
+                    handoff_policy_decision = resolve_handoff_policy_decision(
+                        explicit_manager_request=explicit_manager_request_signal
+                    )
+                    handoff_capability_payload = {
+                        "kind": "handoff_policy",
+                        "policy": handoff_policy_decision.policy,
+                        "decision": "allow"
+                        if handoff_policy_decision.allowed
+                        else "blocked",
+                        "reason": handoff_policy_decision.reason,
+                        "source": handoff_policy_decision.source,
+                        "explicit_manager_request": bool(
+                            handoff_policy_decision.explicit_manager_request
+                        ),
+                    }
+                    policy_capability_checks.append(handoff_capability_payload)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "capability_check",
+                            "decision": handoff_capability_payload["decision"],
+                            "kind": "handoff_policy",
+                            "handoff_policy": handoff_policy_decision.policy,
+                            "capability_reason": handoff_policy_decision.reason,
+                            "capability_source": handoff_policy_decision.source,
+                            "explicit_manager_request": bool(
+                                handoff_policy_decision.explicit_manager_request
+                            ),
+                        },
+                    )
+                    if not handoff_policy_decision.allowed:
+                        policy_validation_error = "handoff_policy_blocked"
+                        policy_capability_block_reason = (
+                            handoff_policy_decision.reason or "handoff_policy_blocked"
+                        )
+                        policy_handoff_policy_blocked = True
+                        policy_needs_manager = False
+                        # Preserve fail-closed behavior: do not continue semantic handoff path.
+                        pass
                     # If LLM explicitly selected handoff, manager escalation is implied.
-                    if not policy_needs_manager:
+                    if policy_validation_error is None and not policy_needs_manager:
                         policy_needs_manager = True
-                    if message_text and not (
+                    if policy_validation_error is None and message_text and not (
                         is_human_request_message(message_text)
                         or is_frustration_message(message_text)
                     ):
@@ -9634,6 +10193,25 @@ async def _handle_webhook_payload(
             and policy_tool_action == "consult"
             and bool(info_class_intents)
         )
+        policy_semantic_final_contract = _build_semantic_arbiter_contract(
+            intent=policy_intent,
+            action=policy_action,
+            tool_action=policy_tool_action,
+            pack_refs=policy_pack_refs or resolved_policy_refs,
+            slots=policy_slot_state_validated,
+            confidence=policy_confidence,
+            reason=policy_reason,
+            goal=policy_goal,
+            open_questions=policy_open_questions,
+            needs_manager=policy_needs_manager,
+            risk_signals=policy_risk_signals,
+        )
+        semantic_arbiter_audit = _build_semantic_arbiter_audit(
+            plan_contract=policy_semantic_plan_contract,
+            final_contract=policy_semantic_final_contract,
+            override_events=policy_override_events,
+            intent_override_events=policy_semantic_intent_overrides,
+        )
         llm_policy_core_meta = {
             "attempted": policy_result.get("attempted") if isinstance(policy_result, dict) else False,
             "ok": policy_result.get("ok") if isinstance(policy_result, dict) else False,
@@ -9661,7 +10239,18 @@ async def _handle_webhook_payload(
             "low_confidence_ok": policy_low_confidence_ok,
             "pack_refs_dropped": policy_pack_refs_dropped,
             "action_normalized": policy_action_normalized,
+            "capability_checks": list(policy_capability_checks),
+            "capability_block_reason": policy_capability_block_reason,
+            "capability_block_scope": policy_capability_block_scope,
             "consult_normalized_to_info": consult_normalized_to_info,
+            "semantic_arbiter": {
+                "contract_version": SEMANTIC_ARBITER_CONTRACT_VERSION,
+                "source": "llm_policy_core",
+                "plan": policy_semantic_plan_contract,
+                "final": policy_semantic_final_contract,
+                "audit": semantic_arbiter_audit,
+            },
+            "semantic_intent_overrides": list(policy_semantic_intent_overrides),
             "memory_summary_used": bool(policy_memory_summary),
             "memory_profile_used": bool(policy_memory_profile),
             "memory_profile_keys": (
@@ -9682,6 +10271,7 @@ async def _handle_webhook_payload(
                 else []
             ),
         }
+        _sync_semantic_arbiter_meta()
         _sync_policy_plan_audit()
         _record_decision_trace(
             conversation,
@@ -9707,6 +10297,13 @@ async def _handle_webhook_payload(
                 "low_confidence_ok": policy_low_confidence_ok,
                 "pack_refs_dropped": policy_pack_refs_dropped,
                 "action_normalized": policy_action_normalized,
+                "capability_check_count": len(policy_capability_checks),
+                "capability_block_reason": policy_capability_block_reason,
+                "capability_block_scope": policy_capability_block_scope,
+                "semantic_action_changed": bool(semantic_arbiter_audit.get("action_changed")),
+                "semantic_tool_action_changed": bool(semantic_arbiter_audit.get("tool_action_changed")),
+                "semantic_intent_changed": bool(semantic_arbiter_audit.get("intent_changed")),
+                "semantic_intent_override_count": len(policy_semantic_intent_overrides),
                 "memory_summary_used": bool(policy_memory_summary),
                 "memory_profile_used": bool(policy_memory_profile),
                 "memory_profile_retrieved_keys": policy_memory_retrieved_keys,
@@ -9901,6 +10498,46 @@ async def _handle_webhook_payload(
             or is_frustration_message(message_text)
         )
     )
+    if policy_handoff_policy_blocked and explicit_manager_request_signal:
+        bot_response = MSG_FACT_GUARD_CLARIFY
+        _apply_policy_guard_override(
+            final_action="collect",
+            final_tool_action="collect",
+            reason_code="safety_policy_block",
+            reason="handoff_policy_blocked",
+        )
+        _sync_policy_plan_audit(emit_trace=True)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "policy_core_guard",
+                "decision": "handoff_blocked_by_policy",
+                "state": conversation.state,
+                "mode": policy_core_mode,
+                "reason": policy_core_degrade_reason,
+                "capability_reason": policy_capability_block_reason,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="reply",
+            intent="policy_core_guard",
+            source="llm_policy_core",
+            fast_intent=False,
+        )
+        bot_response, sent = _send_and_save(bot_response)
+        result_message = (
+            "Policy core handoff blocked by capability policy"
+            if sent
+            else "Policy core handoff blocked by capability policy; response_send=failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
     booking_slots_complete = _plan_has_complete_booking_slots(
         _merge_booking_plan_slots(
             booking_state=booking if isinstance(booking, dict) else None,
@@ -10067,42 +10704,9 @@ async def _handle_webhook_payload(
             )
 
         if policy_override_reason_missing_detected:
-            _apply_policy_guard_override(
-                final_action="collect",
-                final_tool_action="collect",
-                reason_code="contract_validation_failure",
-                reason="policy_core_override_reason_missing_clarify",
-            )
-            _sync_policy_plan_audit(emit_trace=True)
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "policy_core_guard",
-                    "decision": "override_missing_reason_clarify",
-                    "state": conversation.state,
-                    "mode": policy_core_mode,
-                    "reason": policy_core_degrade_reason,
-                },
-            )
-            _record_message_decision_meta(
-                saved_message,
-                action="reply",
-                intent="policy_core_guard",
-                source="llm_policy_core",
-                fast_intent=False,
-            )
-            bot_response, sent = _send_and_save(MSG_FACT_GUARD_CLARIFY)
-            result_message = (
-                "Policy core override missing reason clarify sent"
-                if sent
-                else "Policy core override missing reason clarify failed"
-            )
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message=result_message,
-                conversation_id=conversation.id,
-                bot_response=bot_response,
+            return _send_override_reason_missing_clarify(
+                guard_reason="policy_core_override_reason_missing_clarify",
+                trace_decision="override_missing_reason_clarify",
             )
 
         timeout_needs_booking_collect = bool(
@@ -10128,9 +10732,66 @@ async def _handle_webhook_payload(
             message_text,
             client_slug=payload.client_slug,
         )
+        timeout_booking_request_signal = bool(
+            message_text
+            and _is_booking_request(message_text, client_slug=payload.client_slug)
+            and not _looks_like_info_query(message_text, client_slug=payload.client_slug)
+        )
+        if not timeout_booking_request_signal:
+            timeout_booking_request_signal = bool(
+                booking_wants_flow
+                and booking_signal
+                and bool(intent_decomp_set & {"booking"})
+                and not bool(intent_decomp_set & INFO_INTENTS)
+            )
+        timeout_factual_fallback_reply: str | None = None
+        timeout_factual_fallback_meta: dict[str, Any] | None = None
+        timeout_factual_fallback_intent: str | None = None
         timeout_info_fallback_reply: str | None = None
         timeout_info_fallback_expected = None
         if policy_core_timeout_degrade and not timeout_needs_booking_collect and message_text:
+            timeout_pack_decision = get_pack_decision(
+                message_text,
+                client_slug=payload.client_slug,
+                intent_decomp=intent_decomp_payload,
+            )
+            timeout_pack_meta = (
+                timeout_pack_decision.meta
+                if isinstance(timeout_pack_decision, PackDecision)
+                and isinstance(timeout_pack_decision.meta, dict)
+                else {}
+            )
+            timeout_pack_intent = (
+                timeout_pack_decision.intent.strip().casefold()
+                if isinstance(timeout_pack_decision, PackDecision)
+                and isinstance(timeout_pack_decision.intent, str)
+                and timeout_pack_decision.intent.strip()
+                else ""
+            )
+            timeout_pack_reply = (
+                timeout_pack_decision.response.strip()
+                if isinstance(timeout_pack_decision, PackDecision)
+                and isinstance(timeout_pack_decision.response, str)
+                else ""
+            )
+            timeout_pack_blocked_intents = {
+                "service_not_found",
+                "service_clarify",
+                "duration_or_price_clarify",
+                "info_clarify",
+            }
+            if (
+                timeout_pack_reply
+                and timeout_pack_intent not in timeout_pack_blocked_intents
+                and not timeout_booking_request_signal
+                and is_timeout_fact_fallback_candidate(
+                    timeout_pack_decision,
+                    min_confidence=POLICY_TIMEOUT_DEGRADE_FACT_MIN_CONFIDENCE,
+                )
+            ):
+                timeout_factual_fallback_reply = timeout_pack_reply
+                timeout_factual_fallback_meta = timeout_pack_meta
+                timeout_factual_fallback_intent = timeout_pack_decision.intent
             try:
                 from app.services.tool_registry_service import (
                     _looks_like_services_overview_message,
@@ -10153,6 +10814,98 @@ async def _handle_webhook_payload(
                         current_expected_reply_type=expected_reply_type,
                         memory_expected_reply_type=memory_expected_reply_type,
                     )
+        if timeout_factual_fallback_reply and not timeout_info_fallback_reply:
+            timeout_factual_fallback_meta = (
+                timeout_factual_fallback_meta
+                if isinstance(timeout_factual_fallback_meta, dict)
+                else {}
+            )
+            timeout_expected_reply_type = timeout_factual_fallback_meta.get("expected_reply_type")
+            timeout_expected_reply_reason = timeout_factual_fallback_meta.get("expected_reply_reason")
+            context = _get_conversation_context(conversation)
+            if (
+                isinstance(timeout_expected_reply_type, str)
+                and timeout_expected_reply_type.strip()
+            ):
+                context = _set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=context,
+                    expected_reply_type=timeout_expected_reply_type.strip(),
+                    reason=(
+                        timeout_expected_reply_reason.strip()
+                        if isinstance(timeout_expected_reply_reason, str)
+                        and timeout_expected_reply_reason.strip()
+                        else "policy_core_timeout_fact_fallback"
+                    ),
+                    now=now,
+                )
+                _set_conversation_context(conversation, context)
+            info_sections = timeout_factual_fallback_meta.get("info_sections")
+            _apply_policy_guard_override(
+                final_action="fact",
+                final_tool_action="pack.fact_fallback",
+                reason_code="timeout_degrade",
+                reason="policy_core_timeout_fact_fallback",
+            )
+            _sync_policy_plan_audit(emit_trace=True)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "timeout_fact_fallback",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                    "resolver_id": timeout_factual_fallback_meta.get("resolver_id"),
+                    "resolver_confidence": timeout_factual_fallback_meta.get("resolver_confidence"),
+                    "intent": timeout_factual_fallback_intent,
+                    "info_sections": (
+                        info_sections if isinstance(info_sections, list) else []
+                    ),
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="reply",
+                intent=timeout_factual_fallback_intent or "policy_core_guard",
+                source="llm_policy_core",
+                fast_intent=False,
+            )
+            if saved_message:
+                meta_updates: dict[str, Any] = {
+                    "policy_core_guard_info_query": True,
+                    "policy_core_guard_recovery": "pack_fact_fallback",
+                    "resolver_confidence": timeout_factual_fallback_meta.get("resolver_confidence"),
+                }
+                if isinstance(info_sections, list):
+                    meta_updates["info_sections"] = info_sections
+                if (
+                    isinstance(timeout_expected_reply_type, str)
+                    and timeout_expected_reply_type.strip()
+                ):
+                    meta_updates["expected_reply_type"] = timeout_expected_reply_type.strip()
+                    if (
+                        isinstance(timeout_expected_reply_reason, str)
+                        and timeout_expected_reply_reason.strip()
+                    ):
+                        meta_updates["expected_reply_reason"] = (
+                            timeout_expected_reply_reason.strip()
+                        )
+                _update_message_decision_metadata(saved_message, meta_updates)
+            bot_response, sent = _send_and_save(timeout_factual_fallback_reply)
+            result_message = (
+                "Policy core timeout degrade factual fallback sent"
+                if sent
+                else "Policy core timeout degrade factual fallback failed"
+            )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
         if timeout_info_fallback_reply:
             context = _get_conversation_context(conversation)
             if timeout_info_fallback_expected:
@@ -10235,6 +10988,72 @@ async def _handle_webhook_payload(
                 or not booking_has_slot_context
             )
         ):
+            context = _get_conversation_context(conversation)
+            context_manager = _get_context_manager(context)
+            timeout_retry_count, timeout_retry_exhausted = _timeout_degrade_retry_status(
+                context_manager
+            )
+            if timeout_retry_exhausted:
+                _record_context_manager_decision(
+                    conversation,
+                    saved_message,
+                    decision="clarify_limit",
+                    updates={
+                        "clarify_attempt": {
+                            "intent": POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT,
+                            "count": timeout_retry_count,
+                        },
+                        "clarify_reason": "timeout_degrade",
+                        "clarify_limit": True,
+                    },
+                )
+                _apply_policy_guard_override(
+                    final_action="handoff",
+                    final_tool_action="handoff",
+                    reason_code="timeout_degrade",
+                    reason="policy_core_timeout_degrade_limit",
+                )
+                _sync_policy_plan_audit(emit_trace=True)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "policy_core_guard",
+                        "decision": "timeout_clarify_limit",
+                        "state": conversation.state,
+                        "mode": policy_core_mode,
+                        "reason": policy_core_degrade_reason,
+                        "retry_count": timeout_retry_count,
+                        "retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
+                    },
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "policy_core_timeout_retry_count": timeout_retry_count,
+                            "policy_core_timeout_retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
+                            "policy_core_timeout_retry_exhausted": True,
+                        },
+                    )
+                return _handle_clarify_limit_escalation(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message_text=message_text or "Клиент ожидает уточнение по записи.",
+                    saved_message=saved_message,
+                    source="policy_core_guard",
+                    allow_handover=routing.get("allow_handover_create", False),
+                    escalation_intent=POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT,
+                    send_response=_send_response,
+                    finalize_response=_finalize_bot_response,
+                )
+            timeout_retry_count = _register_clarify_attempt(
+                conversation=conversation,
+                saved_message=saved_message,
+                intent=POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT,
+                now=now,
+                reason="timeout_degrade",
+            )
             _apply_policy_guard_override(
                 final_action="collect",
                 final_tool_action="collect",
@@ -10250,6 +11069,8 @@ async def _handle_webhook_payload(
                     "state": conversation.state,
                     "mode": policy_core_mode,
                     "reason": policy_core_degrade_reason,
+                    "retry_count": timeout_retry_count,
+                    "retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
                 },
             )
             _record_message_decision_meta(
@@ -10259,6 +11080,14 @@ async def _handle_webhook_payload(
                 source="llm_policy_core",
                 fast_intent=False,
             )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "policy_core_timeout_retry_count": timeout_retry_count,
+                        "policy_core_timeout_retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
+                    },
+                )
             bot_response, sent = _send_and_save(MSG_FACT_GUARD_CLARIFY)
             result_message = (
                 "Policy core timeout degrade clarify sent"
@@ -10987,6 +11816,29 @@ async def _handle_webhook_payload(
                 in_signals.append("promotions_signal")
             class_router_result["in_signals"] = in_signals
 
+        promo_probe_texts: list[str] = []
+        if isinstance(message_text, str) and message_text.strip():
+            promo_probe_texts.append(message_text.strip())
+        saved_message_content = getattr(saved_message, "content", None) if saved_message else None
+        if isinstance(saved_message_content, str):
+            saved_text = saved_message_content.strip()
+            if saved_text and saved_text not in promo_probe_texts:
+                promo_probe_texts.append(saved_text)
+        if batch_messages:
+            for batch_item in batch_messages:
+                if not isinstance(batch_item, dict):
+                    continue
+                batch_text = batch_item.get("text") or batch_item.get("content")
+                if not isinstance(batch_text, str):
+                    continue
+                cleaned_batch_text = batch_text.strip()
+                if cleaned_batch_text and cleaned_batch_text not in promo_probe_texts:
+                    promo_probe_texts.append(cleaned_batch_text)
+        promo_code_request = any(
+            _looks_like_promo_code_request(text, client_slug=payload.client_slug)
+            for text in promo_probe_texts
+        )
+
         promotion_intent = _detect_promotion_intent(_normalize_text(message_text))
         promo_reply = None
         if promotion_intent == "promotion_birthday":
@@ -11007,9 +11859,12 @@ async def _handle_webhook_payload(
                 policy_type=policy_type,
             )
             discounts_reply = (
-                _format_discounts_policy_reply(
+                _format_discounts_reply_for_message(
+                    message_text=message_text,
                     policy_pack=policy_pack,
                     policy_type=policy_type,
+                    client_slug=payload.client_slug,
+                    promo_code_request=promo_code_request,
                 )
                 if discounts_available
                 else None
@@ -11060,7 +11915,15 @@ async def _handle_webhook_payload(
             followup_prompt
             and booking_followup
             and decision.action == "reply"
-            and expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+            and (
+                expected_reply_type in {
+                    EXPECTED_REPLY_SERVICE,
+                    EXPECTED_REPLY_TIME,
+                    EXPECTED_REPLY_NAME,
+                }
+                or promo_code_request
+                or (decision.intent == "discounts" and queue_set)
+            )
         )
         if suppress_booking_followup_for_info:
             # Keep booking expected_reply contract in context, but avoid stale
@@ -11126,6 +11989,8 @@ async def _handle_webhook_payload(
             "source": policy_source,
             "class_router": class_router_result,
         }
+        if promo_code_request:
+            trace_payload["promo_code_request"] = True
         discount_info_sections = ["promotions"]
         booking_interrupt_info = bool(booking_followup)
         booking_info_intents: list[str] = list(discount_info_sections)
@@ -11183,6 +12048,8 @@ async def _handle_webhook_payload(
                 meta_updates["booking_info_interrupt"] = True
                 meta_updates["booking_interrupt_info"] = True
                 meta_updates["booking_info_intents"] = list(booking_info_intents)
+            if promo_code_request:
+                meta_updates["promo_code_request"] = True
             if suppress_booking_followup_for_info:
                 meta_updates["carryover_ignored"] = True
                 meta_updates["carryover_ignored_reason"] = "info_reply_no_stale_booking_prompt"
@@ -11295,6 +12162,47 @@ async def _handle_webhook_payload(
 
         if is_tool_action(policy_tool_action):
             _set_policy_core_tool_observability(saved_message)
+            tool_protocol_gate = resolve_tool_protocol_decision(policy_tool_action)
+            capability_trace_payload = {
+                "stage": "capability_check",
+                "decision": "allow" if tool_protocol_gate.allowed else "blocked",
+                "tool_action": policy_tool_action,
+                "capability_source": tool_protocol_gate.source,
+                "capability_reason": tool_protocol_gate.reason,
+                "tool_policy_enforced": tool_protocol_gate.enforcement_enabled,
+                "tool_protocol_deny_by_default": tool_protocol_gate.deny_by_default,
+                "tool_policy_allow_tokens": list(tool_protocol_gate.allow_tokens),
+                "tool_policy_deny_tokens": list(tool_protocol_gate.deny_tokens),
+            }
+            _record_decision_trace(conversation, capability_trace_payload)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "tool_protocol_decision",
+                    "decision": "allow" if tool_protocol_gate.allowed else "blocked",
+                    "tool_action": policy_tool_action,
+                    "capability_source": tool_protocol_gate.source,
+                    "capability_reason": tool_protocol_gate.reason,
+                    "tool_policy_enforced": tool_protocol_gate.enforcement_enabled,
+                    "tool_protocol_deny_by_default": tool_protocol_gate.deny_by_default,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "capability_check": {
+                            "decision": "allow"
+                            if tool_protocol_gate.allowed
+                            else "blocked",
+                            "tool_action": policy_tool_action,
+                            "source": tool_protocol_gate.source,
+                            "reason": tool_protocol_gate.reason,
+                            "enforced": tool_protocol_gate.enforcement_enabled,
+                            "deny_by_default": tool_protocol_gate.deny_by_default,
+                        }
+                    },
+                )
             info_sections_hint: list[str] = []
             if policy_pack_refs:
                 info_sections_hint = [ref for ref in policy_pack_refs if ref in INFO_INTENTS]
@@ -11939,10 +12847,21 @@ async def _handle_webhook_payload(
                             isinstance(booking, dict) and booking.get("active") is True
                         ),
                     )
+                    reschedule_reference_handoff = bool(
+                        policy_tool_action == "calendar.get_booking"
+                        and isinstance(message_text, str)
+                        and _looks_like_booking_reschedule_request(
+                            message_text,
+                            client_slug=payload.client_slug,
+                        )
+                    )
                     handoff_required = bool(
-                        verifier_contract
-                        and verifier_contract.requires_handoff
-                        and policy_tool_action in {"calendar.reschedule", "calendar.cancel"}
+                        (
+                            verifier_contract
+                            and verifier_contract.requires_handoff
+                            and policy_tool_action in {"calendar.reschedule", "calendar.cancel"}
+                        )
+                        or reschedule_reference_handoff
                     )
                     if handoff_required:
                         if policy_tool_action == "calendar.cancel":
@@ -12794,7 +13713,10 @@ async def _handle_webhook_payload(
                         policy_tool_action == "calendar.reschedule"
                         and tool_decision
                         in {"missing_slot", "not_found", "contract_invalid", "verifier_blocked"}
-                        and _looks_like_booking_reschedule_request(message_text)
+                        and _looks_like_booking_reschedule_request(
+                            message_text,
+                            client_slug=payload.client_slug,
+                        )
                     )
                     or (
                         booking_verification_text_signal
@@ -12812,7 +13734,10 @@ async def _handle_webhook_payload(
                     or (
                         policy_tool_action == "calendar.list_slots"
                         and tool_decision == "missing_slot"
-                        and _looks_like_booking_reschedule_request(message_text)
+                        and _looks_like_booking_reschedule_request(
+                            message_text,
+                            client_slug=payload.client_slug,
+                        )
                         and explicit_manager_request_signal
                     )
                 )
@@ -12919,22 +13844,52 @@ async def _handle_webhook_payload(
                     and master_request_signal
                     and not has_explicit_location_or_hours
                 ):
+                    master_service_query = policy_service_query
+                    master_service_query_source = "policy_service_query"
+                    if (
+                        policy_tool_action == "catalog.service_query"
+                        and isinstance(raw_service_query_text, str)
+                        and raw_service_query_text.strip()
+                    ):
+                        master_service_query = raw_service_query_text.strip()
+                        master_service_query_source = "tool_args_raw"
+                    master_message_text = message_text
+                    saved_message_content = getattr(saved_message, "content", None) if saved_message else None
+                    if isinstance(saved_message_content, str) and saved_message_content.strip():
+                        master_message_text = saved_message_content.strip()
                     master_reply, master_meta = _build_info_intent_reply(
                         "master",
-                        service_query=policy_service_query,
+                        service_query=master_service_query,
                         client_slug=payload.client_slug,
-                        message_text=message_text,
+                        message_text=master_message_text,
                     )
                     if master_reply:
+                        if not _register_policy_intent_override(
+                            reason_code="contract_validation_failure",
+                            reason="master_signal_override",
+                            from_intent=policy_intent,
+                            to_intent="master",
+                            source=policy_tool_action,
+                        ):
+                            return _send_override_reason_missing_clarify(
+                                guard_reason="policy_core_intent_override_missing_reason_clarify",
+                                trace_decision="intent_override_missing_reason_clarify",
+                                trace_source="master_signal_override",
+                            )
                         context = _get_conversation_context(conversation)
-                        context = _set_expected_reply_context(
-                            conversation=conversation,
-                            saved_message=saved_message,
-                            context=context,
-                            expected_reply_type=EXPECTED_REPLY_SERVICE,
-                            reason="llm_policy_core_collect",
-                            now=now,
-                        )
+                        preserve_booking_expected = _get_expected_reply_type(context) in {
+                            EXPECTED_REPLY_TIME,
+                            EXPECTED_REPLY_NAME,
+                        }
+                        if not preserve_booking_expected:
+                            context = _set_expected_reply_context(
+                                conversation=conversation,
+                                saved_message=saved_message,
+                                context=context,
+                                expected_reply_type=EXPECTED_REPLY_SERVICE,
+                                reason="llm_policy_core_collect",
+                                now=now,
+                            )
                         if saved_message and isinstance(master_meta, dict):
                             _update_message_decision_metadata(saved_message, master_meta)
                         _record_decision_trace(
@@ -12944,6 +13899,8 @@ async def _handle_webhook_payload(
                                 "decision": "reply",
                                 "intent": "master",
                                 "source": "llm_policy_core",
+                                "service_query_source": master_service_query_source,
+                                "service_query": master_service_query or "",
                             },
                         )
                         _record_message_decision_meta(
@@ -13320,13 +14277,35 @@ async def _handle_webhook_payload(
             }
             if not booking_wants_flow and policy_info_intents:
                 primary_info_intent = policy_info_intents[0]
+                direct_info_service_query = policy_service_query
+                direct_info_service_query_source = "policy_service_query"
+                if (
+                    primary_info_intent == "master"
+                    and policy_tool_action == "catalog.service_query"
+                    and isinstance(raw_service_query_text, str)
+                    and raw_service_query_text.strip()
+                ):
+                    direct_info_service_query = raw_service_query_text.strip()
+                    direct_info_service_query_source = "tool_args_raw"
                 direct_info_reply, direct_info_meta = _build_info_intent_reply(
                     primary_info_intent,
-                    service_query=policy_service_query,
+                    service_query=direct_info_service_query,
                     client_slug=payload.client_slug,
                     message_text=message_text,
                 )
                 if direct_info_reply:
+                    if not _register_policy_intent_override(
+                        reason_code="contract_validation_failure",
+                        reason="info_ref_resolution",
+                        from_intent=policy_intent,
+                        to_intent=primary_info_intent,
+                        source=policy_tool_action,
+                    ):
+                        return _send_override_reason_missing_clarify(
+                            guard_reason="policy_core_intent_override_missing_reason_clarify",
+                            trace_decision="intent_override_missing_reason_clarify",
+                            trace_source="info_ref_resolution",
+                        )
                     if primary_info_intent in {"master"}:
                         context = _get_conversation_context(conversation)
                         context = _set_expected_reply_context(
@@ -13346,6 +14325,8 @@ async def _handle_webhook_payload(
                             "decision": "reply",
                             "intent": primary_info_intent,
                             "source": "llm_policy_core",
+                            "service_query_source": direct_info_service_query_source,
+                            "service_query": direct_info_service_query or "",
                         },
                     )
                     _record_message_decision_meta(
@@ -13549,6 +14530,67 @@ async def _handle_webhook_payload(
                 )
 
         elif policy_tool_action == "handoff":
+            if style_reference_text_signal and not has_media:
+                context = _get_conversation_context(conversation)
+                pending_payload = {
+                    "reason": "text_only",
+                    "requested_at": now.isoformat(),
+                    "expires_at": (
+                        now + timedelta(minutes=STYLE_REFERENCE_PENDING_TTL_MINUTES)
+                    ).isoformat(),
+                }
+                context = _set_style_reference_pending(context, pending_payload)
+                _set_conversation_context(conversation, context)
+                booking_style_reference_context = bool(
+                    booking_wants_flow
+                    or (
+                        isinstance(booking, dict)
+                        and booking.get("active") is True
+                    )
+                )
+                bot_response = (
+                    MSG_STYLE_REFERENCE_NEED_MEDIA_BOOKING
+                    if booking_style_reference_context
+                    else MSG_STYLE_REFERENCE_NEED_MEDIA
+                )
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "policy_core_guard",
+                        "decision": "handoff_style_reference_need_media",
+                        "state": conversation.state,
+                    },
+                )
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "style_reference",
+                        "decision": "need_media",
+                        "state": conversation.state,
+                        "pending": "text_only",
+                        "source": "llm_policy_core",
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="style_reference",
+                    intent="style_reference",
+                    source="llm_policy_core",
+                    fast_intent=False,
+                )
+                bot_response, sent = _send_and_save(bot_response)
+                result_message = (
+                    "LLM policy core handoff style reference prompt sent"
+                    if sent
+                    else "LLM policy core handoff style reference prompt failed"
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
             handover_message = message_text or "Клиент запросил менеджера."
             _, reused, telegram_sent = _reuse_active_handover(
                 db=db,
@@ -13659,6 +14701,92 @@ async def _handle_webhook_payload(
                 for slot_key, value in policy_slot_state_validated.items():
                     if not booking_state.get(slot_key):
                         booking_state[slot_key] = value
+                collect_reschedule_signal = bool(
+                    message_text
+                    and _looks_like_booking_reschedule_request(
+                        message_text,
+                        client_slug=payload.client_slug,
+                    )
+                )
+                collect_verification_signal = bool(
+                    message_text and _looks_like_booking_verification_request(message_text)
+                )
+                collect_has_booking_reference = _booking_has_reference(booking_state)
+                if collect_reschedule_signal and not collect_has_booking_reference:
+                    handover_message = message_text or "Клиент просит изменить время записи."
+                    _, reused, telegram_sent = _reuse_active_handover(
+                        db=db,
+                        conversation=conversation,
+                        user=user,
+                        message=handover_message,
+                        source="llm_policy_core_collect",
+                        intent="reschedule",
+                    )
+                    if reused:
+                        bot_response = MSG_ESCALATED
+                        result_message = (
+                            f"LLM policy core collect reschedule handoff reused, "
+                            f"telegram={'sent' if telegram_sent else 'failed'}"
+                        )
+                    elif (
+                        conversation.state == ConversationState.BOT_ACTIVE.value
+                        and routing.get("allow_handover_create", False)
+                    ):
+                        _record_escalation_metric("intent")
+                        result = escalate_to_pending(
+                            db=db,
+                            conversation=conversation,
+                            user_message=handover_message,
+                            trigger_type="intent",
+                            trigger_value="reschedule",
+                        )
+                        if result.ok:
+                            handover = result.value
+                            telegram_sent = send_telegram_notification(
+                                db=db,
+                                handover=handover,
+                                conversation=conversation,
+                                user=user,
+                                message=handover_message,
+                            )
+                            bot_response = MSG_ESCALATED
+                            result_message = (
+                                f"LLM policy core collect reschedule handoff, "
+                                f"telegram={'sent' if telegram_sent else 'failed'}"
+                            )
+                        else:
+                            bot_response = MSG_AI_ERROR
+                            result_message = "LLM policy core collect reschedule handoff failed"
+                    else:
+                        bot_response = MSG_ESCALATED
+                        result_message = "LLM policy core collect reschedule handoff skipped (already pending)"
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "booking",
+                            "decision": "collect_reschedule_handoff",
+                            "state": conversation.state,
+                            "source": "llm_policy_core",
+                            "missing_slot": policy_collect_slot,
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="escalate",
+                        intent="reschedule",
+                        source="booking_verification",
+                        fast_intent=False,
+                    )
+                    bot_response, sent = _send_and_save(bot_response)
+                    if not sent:
+                        result_message = f"{result_message}; response_send=failed"
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
                 booking_state["last_question"] = policy_collect_slot
                 prompt = None
                 if policy_collect_slot == "service":
@@ -13667,6 +14795,8 @@ async def _handle_webhook_payload(
                     prompt = MSG_BOOKING_ASK_DATETIME
                 elif policy_collect_slot == "name":
                     prompt = MSG_BOOKING_ASK_NAME
+                if collect_verification_signal and not collect_has_booking_reference:
+                    prompt = MSG_BOOKING_ASK_REFERENCE
                 context = _get_conversation_context(conversation)
                 context = _set_booking_context(context, booking_state)
                 _set_conversation_context(conversation, context)
@@ -13684,17 +14814,17 @@ async def _handle_webhook_payload(
                     conversation,
                     {
                         "stage": "booking",
-                        "decision": "prompt",
+                        "decision": "check_booking_prompt" if collect_verification_signal else "prompt",
                         "state": conversation.state,
                         "missing_slot": policy_collect_slot,
-                        "source": "llm_policy_core",
+                        "source": "booking_verification" if collect_verification_signal else "llm_policy_core",
                     },
                 )
                 _record_message_decision_meta(
                     saved_message,
-                    action="booking_prompt",
-                    intent="booking",
-                    source="llm_policy_core",
+                    action="check_booking_prompt" if collect_verification_signal else "booking_prompt",
+                    intent="check_booking" if collect_verification_signal else "booking",
+                    source="booking_verification" if collect_verification_signal else "llm_policy_core",
                     fast_intent=False,
                 )
                 bot_response = prompt or MSG_BOOKING_ASK_DATETIME

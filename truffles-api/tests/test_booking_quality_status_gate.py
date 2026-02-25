@@ -48,6 +48,7 @@ def _load_quality_helpers():
         "_llm_quality_check_thresholds",
         "_llm_quality_check_regression",
         "_llm_quality_collect_override_reason_codes",
+        "_llm_quality_collect_semantic_intent_override_audit",
         "_llm_quality_init_rewrite_governance_state",
         "_llm_quality_track_rewrite_governance",
         "_llm_quality_finalize_rewrite_governance",
@@ -153,6 +154,24 @@ def test_baseline_canonical_requires_judge_on():
     assert reason == "judge_mode_off"
 
 
+def test_baseline_canonical_rejects_dry_run_even_with_judge_enabled():
+    ns = _load_quality_helpers()
+    baseline_is_canonical = ns["_llm_quality_baseline_is_canonical"]
+
+    canonical, reason = baseline_is_canonical(
+        {
+            "config": {"judge_mode": "all", "dry_run": True},
+            "quality_status": {
+                "infra_valid": True,
+                "semantic_valid": True,
+                "blocking_reason_count": 0,
+            },
+        }
+    )
+    assert canonical is False
+    assert reason == "dry_run"
+
+
 def test_baseline_canonical_rejects_invalid_quality_status():
     ns = _load_quality_helpers()
     baseline_is_canonical = ns["_llm_quality_baseline_is_canonical"]
@@ -236,6 +255,14 @@ def test_thresholds_include_degraded_fallback_rate_gate():
     assert "degraded_fallback_rate" in breaches
 
 
+def test_threshold_defaults_are_aligned_with_acceptance_contract():
+    ns = _load_quality_helpers()
+    thresholds = ns["LLM_QUALITY_THRESHOLDS"]
+
+    assert thresholds["strict_pass_rate"] == 0.95
+    assert thresholds["degraded_fallback_rate"] == 0.05
+
+
 def test_regression_checks_degraded_fallback_rate_as_max_direction():
     ns = _load_quality_helpers()
     check_regression = ns["_llm_quality_check_regression"]
@@ -298,6 +325,75 @@ def test_rewrite_governance_blocks_missing_and_unknown_reason_codes():
     assert "rewrite_reason_missing" in status["blocking_counts"]
     assert "rewrite_reason_unknown" in status["blocking_counts"]
     assert status["rewrite_reason_coverage"] < 1.0
+
+
+def test_rewrite_governance_blocks_semantic_intent_override_audit_violations():
+    ns = _load_quality_helpers()
+    init_state = ns["_llm_quality_init_rewrite_governance_state"]
+    track = ns["_llm_quality_track_rewrite_governance"]
+    finalize = ns["_llm_quality_finalize_rewrite_governance"]
+
+    state = init_state()
+    track(
+        state,
+        {
+            "policy_core_mode": "policy_core",
+            "llm_policy_core": {
+                "semantic_arbiter": {"audit": {"intent_override_count": 1}},
+                "semantic_intent_overrides": [
+                    {"reason_code": "contract_validation_failure", "from_intent": "info", "to_intent": "master"}
+                ],
+            },
+        },
+    )
+    track(
+        state,
+        {
+            "policy_core_mode": "policy_core",
+            "llm_policy_core": {
+                "semantic_arbiter": {"audit": {"intent_override_count": 1}},
+                "semantic_intent_overrides": [{"from_intent": "info", "to_intent": "master"}],
+            },
+        },
+    )
+    track(
+        state,
+        {
+            "policy_core_mode": "policy_core",
+            "llm_policy_core": {
+                "semantic_arbiter": {"audit": {"intent_override_count": 1}},
+                "semantic_intent_overrides": [
+                    {"reason_code": "custom_override", "from_intent": "info", "to_intent": "master"}
+                ],
+            },
+        },
+    )
+    track(
+        state,
+        {
+            "policy_core_mode": "policy_core",
+            "llm_policy_core": {
+                "semantic_arbiter": {"audit": {"intent_override_count": 2}},
+                "semantic_intent_overrides": [
+                    {"reason_code": "contract_validation_failure", "from_intent": "info", "to_intent": "master"}
+                ],
+            },
+        },
+    )
+    status = finalize(
+        state,
+        max_post_llm_semantic_rewrite_rate=1.0,
+        max_keyword_override_rate=1.0,
+    )
+
+    assert status["valid"] is False
+    assert status["semantic_intent_override_turns"] == 4
+    assert status["semantic_intent_override_reason_missing_turns"] == 2
+    assert status["semantic_intent_override_reason_unknown_turns"] == 1
+    assert status["semantic_intent_override_count_mismatch_turns"] == 1
+    assert "semantic_intent_override_reason_missing" in status["blocking_counts"]
+    assert "semantic_intent_override_reason_unknown" in status["blocking_counts"]
+    assert "semantic_intent_override_count_mismatch" in status["blocking_counts"]
 
 
 def test_rewrite_governance_uses_discrete_turn_budget_ceiling():
@@ -832,6 +928,29 @@ def test_hq1_classifier_detects_booking_flow_break_and_hallucinated_fact():
     }
     classes = classify(hallucinated_record)
     assert "hallucinated_fact" in classes
+
+
+def test_hq1_classifier_ignores_media_turn_for_booking_flow_break():
+    ns = _load_quality_helpers()
+    classify = ns["_llm_quality_collect_hq1_classes"]
+
+    record = {
+        "turn_text": "Я могу прислать фото, если нужно.",
+        "turn_tags": ["media"],
+        "conversation_state": "bot_active",
+        "decision_meta": {
+            "action": "reply",
+            "intent": "calendar.list_slots",
+            "tool_action": "calendar.list_slots",
+            "tool_decision": "ok",
+        },
+        "turn_expectations": {"action": None, "info_sections": []},
+        "evaluation": {"strict_reasons": ["judge_fail"]},
+        "judge": {"verdict": "fail", "reasons": ["missed_question"]},
+        "outbox_text": "Понял, завтра по услуге «Стрижка». Подскажите, пожалуйста, точное время.",
+    }
+
+    assert "booking_flow_break" not in classify(record)
 
 
 def test_collect_blocking_reasons_merges_hq1_counts():

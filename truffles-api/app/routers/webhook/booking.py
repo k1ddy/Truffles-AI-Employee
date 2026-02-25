@@ -20,7 +20,7 @@ from sqlalchemy import func
 from app.schemas.webhook import WebhookResponse
 from app.services.appointment_service import SchedulingService
 from app.services.capabilities_runtime import get_runtime_capabilities
-from app.services.pack_runtime_service import get_system_lexicon_list
+from app.services.pack_runtime_service import get_system_lexicon_list, phrase_match_intent
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -935,16 +935,44 @@ def _resolve_booking_info_intents(
     return booking_info_intents
 
 
-def _looks_like_booking_reschedule_request(message_text: str | None) -> bool:
+def _looks_like_booking_reschedule_request(
+    message_text: str | None,
+    *,
+    client_slug: str | None = None,
+) -> bool:
     from . import _legacy as legacy
 
     normalized = legacy._normalize_text(message_text or "")
     if not normalized:
         return False
-    has_change_signal = any(stem in normalized for stem in ("измен", "перенес", "перенест", "сдвин"))
-    if not has_change_signal:
+    try:
+        intent_signals = {
+            str(item).strip().casefold()
+            for item in phrase_match_intent(normalized, client_slug=client_slug)
+            if isinstance(item, str) and item.strip()
+        }
+    except Exception:
+        intent_signals = set()
+    if intent_signals & {
+        "reschedule",
+        "cancel_request",
+        "policy_reschedule",
+        "policy_cancel",
+        "cancel_policy",
+    }:
+        return True
+    booking_reference_markers = get_system_lexicon_list("booking_request")
+    booking_keyword_markers = get_system_lexicon_list("booking_keywords")
+    reschedule_markers = get_system_lexicon_list("booking_reschedule_keywords")
+    if any(marker in normalized for marker in reschedule_markers):
+        return True
+    has_booking_reference = any(marker in normalized for marker in booking_reference_markers) or any(
+        marker in normalized for marker in booking_keyword_markers
+    )
+    if not has_booking_reference:
         return False
-    return any(stem in normalized for stem in ("врем", "дат", "утр", "вечер", "дн"))
+    cancel_markers = get_system_lexicon_list("booking_cancel_keywords")
+    return any(marker in normalized for marker in cancel_markers)
 
 
 def _select_expected_reply_message(
@@ -1720,7 +1748,10 @@ def _handle_booking_interrupt(
         client_slug=client_slug,
     )
     if (
-        _looks_like_booking_reschedule_request(booking_interrupt_text)
+        _looks_like_booking_reschedule_request(
+            booking_interrupt_text,
+            client_slug=client_slug,
+        )
         and conversation.state == legacy.ConversationState.BOT_ACTIVE.value
         and routing.get("allow_handover_create", False)
     ):

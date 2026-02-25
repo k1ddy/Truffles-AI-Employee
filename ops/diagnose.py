@@ -806,12 +806,12 @@ LLM_QUALITY_PROGRESS_SKIP_TAGS = {
 LLM_QUALITY_FAILURE_LIMIT = 50
 LLM_QUALITY_THRESHOLDS = {
     "reply_rate": 0.9,
-    "strict_pass_rate": 0.9,
+    "strict_pass_rate": 0.95,
     "expected_reply_rate": 0.95,
     "info_answer_rate": 0.7,
     "hard_fail_rate": 0.0,
     "unknown_state_rate": 0.02,
-    "degraded_fallback_rate": 0.2,
+    "degraded_fallback_rate": 0.05,
     "booking_slot_progress_rate": 0.25,
     "handoff_correct_rate": 0.9,
 }
@@ -855,6 +855,9 @@ LLM_QUALITY_BLOCKING_REASONS = (
     "keyword_override_budget_exceeded",
     "rewrite_reason_missing",
     "rewrite_reason_unknown",
+    "semantic_intent_override_reason_missing",
+    "semantic_intent_override_reason_unknown",
+    "semantic_intent_override_count_mismatch",
     "lexicon_regex_delta_violation",
     "hardcode_core_violation",
 )
@@ -972,6 +975,9 @@ LLM_QUALITY_REASON_LABELS = {
     "keyword_override_budget_exceeded": "keyword/regex override rate exceeded configured budget",
     "rewrite_reason_missing": "post-LLM rewrite executed without explicit whitelist reason-code",
     "rewrite_reason_unknown": "post-LLM rewrite used non-whitelist reason-code",
+    "semantic_intent_override_reason_missing": "semantic intent override missing whitelist reason-code",
+    "semantic_intent_override_reason_unknown": "semantic intent override used non-whitelist reason-code",
+    "semantic_intent_override_count_mismatch": "semantic intent override audit count mismatches recorded events",
     "lexicon_regex_delta_violation": "lexicon/regex delta without resolver + contract test delta",
     "hardcode_core_violation": "core hardcode gate detected raw keyword/regex branching in core diff",
     "wrong_action": "HQ1: wrong product outcome (FACT/COLLECT/HANDOFF mismatch)",
@@ -1022,6 +1028,9 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "keyword_override_budget_exceeded": "code",
     "rewrite_reason_missing": "canon",
     "rewrite_reason_unknown": "canon",
+    "semantic_intent_override_reason_missing": "canon",
+    "semantic_intent_override_reason_unknown": "canon",
+    "semantic_intent_override_count_mismatch": "canon",
     "lexicon_regex_delta_violation": "canon",
     "hardcode_core_violation": "canon",
     "wrong_action": "expectation",
@@ -3471,13 +3480,36 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         else ""
     )
     effective_intent = intent_value or tool_action_value
+    normalized_tags = {
+        str(tag).strip().lower()
+        for tag in (turn_tags or [])
+        if isinstance(tag, str) and tag.strip()
+    }
+    if _llm_quality_check_booking_tool_answered(meta, turn_tags, outbox_text):
+        return True
     if (
         booking_active
         and meta_action == "reply"
-        and effective_intent in {"calendar.list_slots", "calendar.get_booking"}
+        and effective_intent == "calendar.list_slots"
     ):
-        # Never suppress calendar booking misses: these are core semantic failures.
-        return False
+        media_booking_followup = bool(
+            "media" in normalized_tags
+            and expected_reply_type_value in {"service_choice", "time", "name"}
+            and _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value)
+        )
+        if not media_booking_followup:
+            # Keep core booking misses visible unless this is a media turn with
+            # a deterministic follow-up prompt contract.
+            return False
+        return True
+    if (
+        booking_active
+        and meta_action == "booking_prompt"
+        and "media" in normalized_tags
+        and expected_reply_type_value in {"service_choice", "time", "name"}
+        and _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value)
+    ):
+        return True
 
     suppression_whitelist = set(
         globals().get("LLM_QUALITY_MISSED_QUESTION_SUPPRESSION_REASON_CODES")
@@ -3516,11 +3548,6 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
     if _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value):
         return True
 
-    normalized_tags = {
-        str(tag).strip().lower()
-        for tag in (turn_tags or [])
-        if isinstance(tag, str) and tag.strip()
-    }
     if (
         booking_active
         and "media" in normalized_tags
@@ -4827,6 +4854,80 @@ def _llm_quality_collect_override_reason_codes(meta):
     return list(dict.fromkeys(raw_codes))
 
 
+def _llm_quality_collect_semantic_intent_override_audit(meta):
+    result = {
+        "audit_count": 0,
+        "event_count": 0,
+        "reason_codes": [],
+        "missing_reason": False,
+        "unknown_reason": False,
+        "count_mismatch": False,
+    }
+    if not isinstance(meta, dict):
+        return result
+    llm_policy_core = meta.get("llm_policy_core")
+    if not isinstance(llm_policy_core, dict):
+        return result
+
+    semantic_arbiter = llm_policy_core.get("semantic_arbiter")
+    semantic_audit = semantic_arbiter.get("audit") if isinstance(semantic_arbiter, dict) else None
+    audit_count_raw = semantic_audit.get("intent_override_count") if isinstance(semantic_audit, dict) else 0
+    try:
+        audit_count = max(int(audit_count_raw), 0)
+    except (TypeError, ValueError):
+        audit_count = 0
+    result["audit_count"] = audit_count
+    if audit_count <= 0:
+        return result
+
+    events_raw = llm_policy_core.get("semantic_intent_overrides")
+    events = events_raw if isinstance(events_raw, list) else []
+    result["event_count"] = len(events)
+    if result["event_count"] != audit_count:
+        result["count_mismatch"] = True
+
+    reason_codes = []
+    missing_reason = False
+    unknown_reason = False
+    for event in events:
+        if not isinstance(event, dict):
+            missing_reason = True
+            continue
+        reason_code = event.get("reason_code")
+        if not isinstance(reason_code, str) or not reason_code.strip():
+            missing_reason = True
+            continue
+        normalized = reason_code.strip().casefold()
+        if normalized not in reason_codes:
+            reason_codes.append(normalized)
+        if normalized not in LLM_POLICY_OVERRIDE_REASON_WHITELIST:
+            unknown_reason = True
+
+    audit_reason_codes_raw = (
+        semantic_audit.get("intent_override_reason_codes")
+        if isinstance(semantic_audit, dict)
+        else []
+    )
+    if isinstance(audit_reason_codes_raw, str):
+        audit_reason_codes_raw = [
+            token.strip() for token in audit_reason_codes_raw.split(",") if token.strip()
+        ]
+    if isinstance(audit_reason_codes_raw, list):
+        for item in audit_reason_codes_raw:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            normalized = item.strip().casefold()
+            if normalized not in reason_codes:
+                reason_codes.append(normalized)
+            if normalized not in LLM_POLICY_OVERRIDE_REASON_WHITELIST:
+                unknown_reason = True
+
+    result["reason_codes"] = reason_codes
+    result["missing_reason"] = bool(missing_reason or result["count_mismatch"] or not reason_codes)
+    result["unknown_reason"] = bool(unknown_reason)
+    return result
+
+
 def _llm_quality_init_rewrite_governance_state():
     return {
         "turns_seen": 0,
@@ -4835,6 +4936,10 @@ def _llm_quality_init_rewrite_governance_state():
         "rewrite_with_reason_turns": 0,
         "rewrite_reason_missing_turns": 0,
         "rewrite_unknown_reason_turns": 0,
+        "semantic_intent_override_turns": 0,
+        "semantic_intent_override_reason_missing_turns": 0,
+        "semantic_intent_override_reason_unknown_turns": 0,
+        "semantic_intent_override_count_mismatch_turns": 0,
         "keyword_override_turns": 0,
         "reason_counts": {},
     }
@@ -4851,10 +4956,22 @@ def _llm_quality_track_rewrite_governance(state, meta):
         state["policy_core_turns"] = int(state.get("policy_core_turns", 0) or 0) + 1
 
     reason_codes = _llm_quality_collect_override_reason_codes(meta)
+    semantic_override_audit = _llm_quality_collect_semantic_intent_override_audit(meta)
+    semantic_audit_count = int(semantic_override_audit.get("audit_count") or 0)
+    semantic_reason_codes = [
+        code
+        for code in (semantic_override_audit.get("reason_codes") or [])
+        if isinstance(code, str) and code.strip()
+    ]
+    reason_codes = list(dict.fromkeys([*reason_codes, *semantic_reason_codes]))
     missing_reason = bool(meta.get("llm_policy_override_reason_missing")) or bool(
         meta.get("llm_policy_override_reason_missing_detected")
     )
-    rewrite_turn = bool(reason_codes) or missing_reason
+    semantic_missing_reason = bool(semantic_override_audit.get("missing_reason"))
+    semantic_unknown_reason = bool(semantic_override_audit.get("unknown_reason"))
+    semantic_count_mismatch = bool(semantic_override_audit.get("count_mismatch"))
+    missing_reason = bool(missing_reason or semantic_missing_reason)
+    rewrite_turn = bool(reason_codes) or missing_reason or semantic_audit_count > 0
     if not rewrite_turn:
         return
 
@@ -4864,7 +4981,24 @@ def _llm_quality_track_rewrite_governance(state, meta):
             state.get("rewrite_reason_missing_turns", 0) or 0
         ) + 1
 
-    unknown_reason = False
+    if semantic_audit_count > 0:
+        state["semantic_intent_override_turns"] = int(
+            state.get("semantic_intent_override_turns", 0) or 0
+        ) + 1
+    if semantic_missing_reason:
+        state["semantic_intent_override_reason_missing_turns"] = int(
+            state.get("semantic_intent_override_reason_missing_turns", 0) or 0
+        ) + 1
+    if semantic_unknown_reason:
+        state["semantic_intent_override_reason_unknown_turns"] = int(
+            state.get("semantic_intent_override_reason_unknown_turns", 0) or 0
+        ) + 1
+    if semantic_count_mismatch:
+        state["semantic_intent_override_count_mismatch_turns"] = int(
+            state.get("semantic_intent_override_count_mismatch_turns", 0) or 0
+        ) + 1
+
+    unknown_reason = semantic_unknown_reason
     keyword_override = False
     reason_counts = state.setdefault("reason_counts", {})
     for code in reason_codes:
@@ -4897,6 +5031,16 @@ def _llm_quality_finalize_rewrite_governance(
     rewrite_with_reason_turns = int(state.get("rewrite_with_reason_turns", 0) or 0)
     rewrite_reason_missing_turns = int(state.get("rewrite_reason_missing_turns", 0) or 0)
     rewrite_unknown_reason_turns = int(state.get("rewrite_unknown_reason_turns", 0) or 0)
+    semantic_intent_override_turns = int(state.get("semantic_intent_override_turns", 0) or 0)
+    semantic_intent_override_reason_missing_turns = int(
+        state.get("semantic_intent_override_reason_missing_turns", 0) or 0
+    )
+    semantic_intent_override_reason_unknown_turns = int(
+        state.get("semantic_intent_override_reason_unknown_turns", 0) or 0
+    )
+    semantic_intent_override_count_mismatch_turns = int(
+        state.get("semantic_intent_override_count_mismatch_turns", 0) or 0
+    )
     keyword_override_turns = int(state.get("keyword_override_turns", 0) or 0)
     denominator = max(policy_core_turns or turns_seen, 1)
     rewrite_rate = round(rewrite_turns / denominator, 4)
@@ -4928,6 +5072,21 @@ def _llm_quality_finalize_rewrite_governance(
     if rewrite_unknown_reason_turns > 0:
         blocking_counts["rewrite_reason_unknown"] = rewrite_unknown_reason_turns
         reasons.append("rewrite_reason_unknown")
+    if semantic_intent_override_reason_missing_turns > 0:
+        blocking_counts["semantic_intent_override_reason_missing"] = (
+            semantic_intent_override_reason_missing_turns
+        )
+        reasons.append("semantic_intent_override_reason_missing")
+    if semantic_intent_override_reason_unknown_turns > 0:
+        blocking_counts["semantic_intent_override_reason_unknown"] = (
+            semantic_intent_override_reason_unknown_turns
+        )
+        reasons.append("semantic_intent_override_reason_unknown")
+    if semantic_intent_override_count_mismatch_turns > 0:
+        blocking_counts["semantic_intent_override_count_mismatch"] = (
+            semantic_intent_override_count_mismatch_turns
+        )
+        reasons.append("semantic_intent_override_count_mismatch")
 
     return {
         "valid": not reasons,
@@ -4939,6 +5098,16 @@ def _llm_quality_finalize_rewrite_governance(
         "rewrite_with_reason_turns": rewrite_with_reason_turns,
         "rewrite_reason_missing_turns": rewrite_reason_missing_turns,
         "rewrite_unknown_reason_turns": rewrite_unknown_reason_turns,
+        "semantic_intent_override_turns": semantic_intent_override_turns,
+        "semantic_intent_override_reason_missing_turns": (
+            semantic_intent_override_reason_missing_turns
+        ),
+        "semantic_intent_override_reason_unknown_turns": (
+            semantic_intent_override_reason_unknown_turns
+        ),
+        "semantic_intent_override_count_mismatch_turns": (
+            semantic_intent_override_count_mismatch_turns
+        ),
         "keyword_override_turns": keyword_override_turns,
         "post_llm_semantic_rewrite_rate": rewrite_rate,
         "keyword_override_rate": keyword_override_rate,
@@ -5633,8 +5802,21 @@ def _llm_quality_collect_hq1_classes(record):
     ):
         classes.add("non_actionable_reply")
 
+    booking_turn_tags = {
+        "booking",
+        "time",
+        "time_alt",
+        "name",
+        "service_choice",
+        "confirm",
+        "check_booking",
+        "reschedule",
+        "cancel",
+    }
+    explicit_booking_turn = bool(booking_turn_tags & turn_tags)
+    media_only_turn = bool("media" in turn_tags and not explicit_booking_turn)
     booking_signal = (
-        bool({"booking", "time", "time_alt", "name", "service_choice", "confirm"} & turn_tags)
+        explicit_booking_turn
         or meta_tool_action.startswith("calendar.")
         or meta_intent.startswith("calendar.")
     )
@@ -5647,7 +5829,7 @@ def _llm_quality_collect_hq1_classes(record):
         elif "judge_fail" in strict_reasons and (
             meta_tool_action in {"calendar.list_slots", "calendar.book_slot"}
             or meta_intent in {"calendar.list_slots", "calendar.book_slot"}
-        ):
+        ) and not media_only_turn:
             booking_flow_break = True
         if booking_flow_break:
             classes.add("booking_flow_break")
@@ -5693,6 +5875,9 @@ def _llm_quality_next_step_for_reason(reason):
         "keyword_override_budget_exceeded": "remove keyword/regex semantic overrides and rely on policy-core output",
         "rewrite_reason_missing": "add explicit whitelist reason-code for every post-LLM rewrite path",
         "rewrite_reason_unknown": "replace non-whitelist reason-codes with approved override reasons",
+        "semantic_intent_override_reason_missing": "require explicit whitelist reason-code for each semantic intent override event",
+        "semantic_intent_override_reason_unknown": "replace semantic intent override reason-code with whitelist-approved value",
+        "semantic_intent_override_count_mismatch": "align semantic_arbiter.audit.intent_override_count with semantic_intent_overrides events",
         "lexicon_regex_delta_violation": "pair lexicon/regex changes with resolver update and contract regression tests",
         "hardcode_core_violation": "remove raw phrase/regex branching from core files or move it to resolver/data with explicit allow marker",
         "wrong_action": "inspect plan/final action routing and tighten intent arbitration for this turn class",
@@ -5946,6 +6131,7 @@ def _llm_quality_write_failure_artifacts(
         },
         "config": {
             "mode": getattr(args, "mode", None),
+            "dry_run": bool(getattr(args, "dry_run", False)),
             "count": getattr(args, "count", None),
             "scenarios_file": getattr(args, "scenarios_file", None),
             "allow_weak_oracle": bool(getattr(args, "allow_weak_oracle", False)),
@@ -5993,6 +6179,98 @@ def _llm_quality_write_failure_artifacts(
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
     _llm_quality_write_brief(brief_path, summary)
+
+
+def _llm_quality_write_checkpoint_summary(
+    *,
+    args,
+    run_id,
+    output_dir,
+    started_at,
+    scenarios_path,
+    responses_path,
+    trace_bundle_path,
+    stats,
+    scenario_source,
+    stop_reason=None,
+    interrupted=False,
+):
+    output_dir = _llm_quality_default_output_dir(run_id, output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    summary_path = os.path.join(output_dir, "summary.json")
+    started_dt = started_at if isinstance(started_at, datetime) else datetime.now(timezone.utc)
+    finished_dt = datetime.now(timezone.utc)
+    duration_s = round((finished_dt - started_dt).total_seconds(), 2)
+    counts = stats if isinstance(stats, dict) else {}
+    turns_total = int(counts.get("turns") or 0)
+    strict_passed = int(counts.get("turns_strict_passed") or 0)
+    strict_pass_rate = round(strict_passed / max(turns_total, 1), 4) if turns_total > 0 else 0.0
+    dry_run = bool(getattr(args, "dry_run", False))
+    semantic_reasons = ["run_incomplete"]
+    if dry_run:
+        semantic_reasons.append("comparison_blocked:dry_run")
+    summary = {
+        "run_id": run_id,
+        "started_at": started_dt.isoformat(),
+        "finished_at": finished_dt.isoformat(),
+        "duration_s": duration_s,
+        "checkpoint": True,
+        "stop_reason": stop_reason or "in_progress",
+        "interrupted": bool(interrupted),
+        "output_dir": output_dir,
+        "scenarios_path": scenarios_path,
+        "responses_path": responses_path,
+        "trace_bundle_path": trace_bundle_path,
+        "scenario_source": scenario_source,
+        "config": {
+            "mode": getattr(args, "mode", None),
+            "dry_run": dry_run,
+            "count": getattr(args, "count", None),
+            "scenarios_file": getattr(args, "scenarios_file", None),
+            "judge_mode": getattr(args, "judge_mode", None),
+            "reset_before_dialog": bool(getattr(args, "reset_before_dialog", False)),
+            "jid_mode": getattr(args, "jid_mode", None),
+            "baseline_summary": getattr(args, "baseline_summary", None),
+        },
+        "infra_valid": False,
+        "semantic_valid": False,
+        "metrics": {
+            "counts": {
+                "dialogs": int(counts.get("dialogs") or 0),
+                "turns": turns_total,
+                "turns_expected_response": int(counts.get("turns_expected_response") or 0),
+                "turns_with_response": int(counts.get("turns_with_response") or 0),
+                "turns_missing_response": int(counts.get("turns_missing_response") or 0),
+                "turns_expected_missing": int(counts.get("turns_expected_missing") or 0),
+                "trace_rows_written": int(counts.get("trace_rows_written") or 0),
+                "turns_passed": int(counts.get("turns_passed") or 0),
+                "turns_failed": int(counts.get("turns_failed") or 0),
+                "turns_strict_passed": strict_passed,
+                "turns_strict_failed": int(counts.get("turns_strict_failed") or 0),
+                "turns_hard_failed": int(counts.get("turns_hard_failed") or 0),
+            },
+            "rates": {"strict_pass_rate": strict_pass_rate},
+        },
+        "quality_status": {
+            "infra_valid": False,
+            "infra_reasons": ["run_incomplete"],
+            "semantic_valid": False,
+            "semantic_reasons": semantic_reasons,
+            "blocking_reason_count": 1,
+            "blocking_reasons": {"run_incomplete": 1},
+            "process_blocking_counts": {"run_incomplete": 1},
+            "run_integrity_valid": False,
+            "run_integrity_reasons": ["run_incomplete"],
+            "comparison_blocked": dry_run,
+            "comparison_block_reasons": ["dry_run"] if dry_run else [],
+            "non_evaluable": dry_run,
+            "non_evaluable_reasons": ["dry_run"] if dry_run else [],
+        },
+        "blocking_reasons": {"count": 1, "reasons": {"run_incomplete": 1}},
+    }
+    with open(summary_path, "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, ensure_ascii=False, indent=2)
+
 
 def _llm_quality_redact_text(text: str | None) -> str | None:
     if not text:
@@ -6470,6 +6748,8 @@ def _llm_quality_baseline_is_canonical(payload):
         if isinstance(mode, str) and mode.strip():
             return False, f"judge_mode_{mode.strip().casefold()}"
         return False, "judge_mode_missing"
+    if isinstance(config, dict) and bool(config.get("dry_run")):
+        return False, "dry_run"
     quality_status = (payload or {}).get("quality_status") if isinstance(payload, dict) else None
     if isinstance(quality_status, dict):
         infra_valid = quality_status.get("infra_valid")
@@ -6528,13 +6808,23 @@ def _llm_quality_parse_coverage_tokens(value):
     return {token for token in raw_tokens if token and token not in {"none", "off"}}
 
 
-def _llm_quality_build_scenario_contract_status(*, dialogs, scenario_coverage, allow_weak_oracle=False):
+def _llm_quality_build_scenario_contract_status(
+    *,
+    dialogs,
+    scenario_coverage,
+    allow_weak_oracle=False,
+    requested_count=None,
+    include_media=False,
+    acceptance_contract=False,
+):
     coverage_tokens = _llm_quality_parse_coverage_tokens(scenario_coverage)
     required_tags_by_coverage = {
         "booking": ("booking", "check_booking", "confirm"),
+        "handoff": ("handoff",),
     }
     tag_counts = {}
     dialogs_with_check_confirm_sequence = 0
+    dialog_count = 0
     turn_count = 0
     weak_expectation_turns = 0
     reply_type_coverage_turns = 0
@@ -6549,6 +6839,7 @@ def _llm_quality_build_scenario_contract_status(*, dialogs, scenario_coverage, a
         turns = dialog.get("turns")
         if not isinstance(turns, list):
             continue
+        dialog_count += 1
         first_check_booking = None
         first_confirm_after_check = None
         for idx, turn in enumerate(turns):
@@ -6616,6 +6907,22 @@ def _llm_quality_build_scenario_contract_status(*, dialogs, scenario_coverage, a
         reasons.append("check_confirm_sequence_missing")
     if weak_expectation_turns > 0 and not allow_weak_oracle:
         reasons.append("weak_oracle_turn")
+    if acceptance_contract:
+        min_dialog_count = 10
+        if isinstance(requested_count, int) and requested_count < min_dialog_count:
+            reasons.append("acceptance_count_lt_10")
+        if dialog_count < min_dialog_count:
+            reasons.append("acceptance_dialogs_lt_10")
+        if not include_media:
+            reasons.append("acceptance_include_media_required")
+        required_acceptance_tokens = ("booking", "info", "interrupt", "handoff")
+        for token in required_acceptance_tokens:
+            if token not in coverage_tokens:
+                reasons.append(f"acceptance_missing_coverage:{token}")
+        if tag_counts.get("handoff", 0) <= 0:
+            reasons.append("acceptance_handoff_tag_missing")
+        if include_media and tag_counts.get("media", 0) <= 0:
+            reasons.append("acceptance_media_tag_missing")
 
     weak_expectation_ratio = round(
         weak_expectation_turns / max(turn_count, 1),
@@ -6639,6 +6946,7 @@ def _llm_quality_build_scenario_contract_status(*, dialogs, scenario_coverage, a
         "reasons": reasons,
         "coverage_tokens": sorted(coverage_tokens),
         "tag_counts": tag_counts,
+        "dialog_count": dialog_count,
         "dialogs_with_check_confirm_sequence": dialogs_with_check_confirm_sequence,
         "turn_count": turn_count,
         "weak_expectation_turns": weak_expectation_turns,
@@ -6986,6 +7294,30 @@ def _llm_quality_booking_slots_progressed(prev_slots, current_slots):
     return False
 
 
+def _llm_quality_booking_progress_from_contract(
+    *,
+    booking_progressed,
+    expected_reply_matched,
+    meta,
+    expected_reply_type,
+):
+    if booking_progressed:
+        return True
+    if expected_reply_matched is True:
+        return True
+    if not isinstance(meta, dict):
+        return False
+    if _llm_quality_effective_intent(meta) != "calendar.list_slots":
+        return False
+    if _llm_quality_normalize_tool_token(meta.get("tool_decision")) != "ok":
+        return False
+    expected_token = _llm_quality_normalize_tool_token(expected_reply_type)
+    if not expected_token:
+        return False
+    meta_expected_reply = _llm_quality_normalize_tool_token(meta.get("expected_reply_type"))
+    return _llm_quality_value_matches(expected_token, meta_expected_reply)
+
+
 def _llm_quality_booking_active(conv_meta):
     context = (conv_meta or {}).get("context") if isinstance(conv_meta, dict) else None
     expected_reply = _chaos_extract_expected_reply(context)
@@ -7006,6 +7338,19 @@ def _llm_quality_trace_missing_soft(meta, trace_error):
     if not isinstance(timing, dict) or not timing.get("pipeline_finished_at"):
         return False
     return bool(meta.get("action") or meta.get("pending_action"))
+
+
+def _llm_quality_apply_dry_run_response_contract(
+    reasons,
+    *,
+    dry_run,
+    expected_response,
+    bot_response,
+):
+    merged = list(reasons or [])
+    if dry_run and expected_response and not bot_response and "missing_bot_reply" not in merged:
+        merged.append("missing_bot_reply")
+    return merged
 
 
 def _llm_quality_evaluate_turn(
@@ -7773,7 +8118,7 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--include-media", action="store_true")
     parser.add_argument("--media-mode", choices=["text", "payload"], default="text")
     parser.add_argument("--media-kind", choices=["photo", "audio"], default="photo")
-    parser.add_argument("--scenario-coverage", default="booking,info,interrupt")
+    parser.add_argument("--scenario-coverage", default="booking,info,interrupt,handoff")
     parser.add_argument(
         "--scenario-gen-timeout",
         type=float,
@@ -8304,6 +8649,46 @@ def _resolve_openai_api_key(explicit=None, *, container_name=None):
                 return container_key, _alias_source(f"container:{container_name}", alias)
 
     return None, None
+
+
+def _openai_key_resolution_probe(*, container_name=None):
+    key_aliases = (
+        "OPENAI_API_KEY",
+        "OPENAI_KEY",
+        "OPENAI_API_TOKEN",
+        "OPENAI_TOKEN",
+        "LLM_API_KEY",
+        "OPENAI_JUDGE_API_KEY",
+        "JUDGE_API_KEY",
+    )
+    env_aliases_present = []
+    for alias in key_aliases:
+        if _clean_api_key(os.environ.get(alias)):
+            env_aliases_present.append(alias)
+
+    env_file_hits = []
+    env_files_checked = 0
+    for env_path in _openai_key_candidate_env_files():
+        env_files_checked += 1
+        env_map = _load_env_file(env_path)
+        for alias in key_aliases:
+            if _clean_api_key(env_map.get(alias)):
+                env_file_hits.append({"path": env_path, "alias": alias})
+                break
+
+    container_aliases_present = []
+    if container_name:
+        for alias in key_aliases:
+            if _clean_api_key(_resolve_env_from_container(container_name, alias)):
+                container_aliases_present.append(alias)
+
+    return {
+        "env_aliases_present": env_aliases_present,
+        "env_files_checked": env_files_checked,
+        "env_file_hits": env_file_hits,
+        "container_name": container_name,
+        "container_aliases_present": container_aliases_present,
+    }
 
 
 def _fetch_keycloak_token(env_map):
@@ -8926,6 +9311,66 @@ def _fetch_message_dedup_count(db_user, client_id, message_id):
         return int(row.strip()), None
     except ValueError:
         return None, None
+
+
+def _llm_quality_fetch_assistant_reply_from_messages(
+    db_user,
+    conversation_id,
+    inbound_message_id,
+    *,
+    window_seconds=45,
+):
+    if not db_user or not conversation_id or not inbound_message_id:
+        return None, None
+    safe_conversation_id = _escape_sql_literal(conversation_id)
+    safe_message_id = _escape_sql_literal(inbound_message_id)
+    try:
+        window = int(window_seconds)
+    except (TypeError, ValueError):
+        window = 45
+    window = max(5, min(window, 180))
+    query = (
+        "WITH inbound AS ("
+        "  SELECT created_at AS inbound_at "
+        "  FROM messages "
+        f"  WHERE conversation_id = '{safe_conversation_id}' "
+        f"    AND metadata->>'messageId' = '{safe_message_id}' "
+        "  ORDER BY created_at DESC "
+        "  LIMIT 1"
+        ") "
+        "SELECT json_build_object("
+        "  'content', m.content, "
+        "  'created_at', m.created_at"
+        ") "
+        "FROM messages m "
+        "JOIN inbound i ON TRUE "
+        f"WHERE m.conversation_id = '{safe_conversation_id}' "
+        "  AND m.role = 'assistant' "
+        "  AND m.created_at >= i.inbound_at "
+        f"  AND m.created_at <= i.inbound_at + interval '{window} seconds' "
+        "ORDER BY m.created_at ASC "
+        "LIMIT 1;"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return None, None
+    parsed = None
+    try:
+        parsed = json.loads(row.strip())
+    except Exception:
+        parsed = None
+    if not isinstance(parsed, dict):
+        return None, None
+    content = parsed.get("content")
+    if not isinstance(content, str):
+        return None, None
+    text = content.strip()
+    if not text:
+        return None, None
+    return text, None
+
 
 def _fetch_outbox_summary(db_user, client_id, inbound_message_id):
     safe_client = _escape_sql_literal(client_id)
@@ -10604,9 +11049,11 @@ def _run_llm_quality(args):
         args.llm_api_key = llm_api_key
         _export_openai_api_key(llm_api_key)
     elif args.mode == "llm":
+        key_probe = _openai_key_resolution_probe(container_name=container_name)
         raise SystemExit(
             "llm-quality: missing OPENAI_API_KEY for llm-mode run "
-            "(checked --llm-api-key, OPENAI_API_KEY aliases in env, *.env candidates, container env)"
+            "(checked --llm-api-key, OPENAI_API_KEY aliases in env, *.env candidates, container env); "
+            f"key_probe={json.dumps(key_probe, ensure_ascii=False)}"
         )
 
     judge_mode = args.judge_mode
@@ -10757,10 +11204,19 @@ def _run_llm_quality(args):
     if not dialogs:
         raise SystemExit("llm-quality: no dialogs to execute")
 
+    acceptance_contract = bool(
+        args.fail_on_thresholds
+        or args.fail_on_regression
+        or args.update_baseline
+        or args.run_economy_gate == "block"
+    )
     scenario_contract = _llm_quality_build_scenario_contract_status(
         dialogs=dialogs,
         scenario_coverage=args.scenario_coverage,
         allow_weak_oracle=bool(args.allow_weak_oracle),
+        requested_count=args.count,
+        include_media=bool(args.include_media),
+        acceptance_contract=acceptance_contract,
     )
     scenario_preflight_payload = {
         "stage": "llm_quality_scenario_contract_preflight",
@@ -10768,6 +11224,7 @@ def _run_llm_quality(args):
         "reasons": scenario_contract.get("reasons"),
         "coverage_tokens": scenario_contract.get("coverage_tokens"),
         "tag_counts": scenario_contract.get("tag_counts"),
+        "dialog_count": scenario_contract.get("dialog_count"),
         "dialogs_with_check_confirm_sequence": scenario_contract.get(
             "dialogs_with_check_confirm_sequence"
         ),
@@ -10777,6 +11234,7 @@ def _run_llm_quality(args):
         "reply_type_coverage": scenario_contract.get("reply_type_coverage"),
         "action_coverage": scenario_contract.get("action_coverage"),
         "info_coverage": scenario_contract.get("info_coverage"),
+        "acceptance_contract": acceptance_contract,
         "scenario_artifacts": scenario_artifact_status,
     }
     print(json.dumps(scenario_preflight_payload, ensure_ascii=False))
@@ -11415,6 +11873,8 @@ def _run_llm_quality(args):
     stop_reason = None
     stop_requested = False
     interrupted = False
+    checkpoint_interval_turns = 1 if args.dry_run else 5
+    last_checkpoint_turn = -1
 
     previous_sigint = signal.getsignal(signal.SIGINT)
     previous_sigterm = signal.getsignal(signal.SIGTERM)
@@ -11429,8 +11889,34 @@ def _run_llm_quality(args):
             stop_reason = f"signal_{signum}"
         print("llm-quality: stop requested, finishing current turn...", file=sys.stderr)
 
+    def _checkpoint_run_summary(*, force=False):
+        nonlocal last_checkpoint_turn
+        turns_done = int(stats.get("turns") or 0)
+        if not force:
+            if turns_done <= 0:
+                return
+            if turns_done == last_checkpoint_turn:
+                return
+            if turns_done % checkpoint_interval_turns != 0:
+                return
+        _llm_quality_write_checkpoint_summary(
+            args=args,
+            run_id=run_id,
+            output_dir=output_dir,
+            started_at=started_at,
+            scenarios_path=scenarios_path,
+            responses_path=responses_path,
+            trace_bundle_path=trace_bundle_path,
+            stats=stats,
+            scenario_source=scenario_source,
+            stop_reason=stop_reason,
+            interrupted=interrupted,
+        )
+        last_checkpoint_turn = turns_done
+
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
+    _checkpoint_run_summary(force=True)
 
     with open(responses_path, "w", encoding="utf-8") as responses_handle, open(
         trace_bundle_path, "w", encoding="utf-8"
@@ -11701,6 +12187,7 @@ def _run_llm_quality(args):
                         poll_interval=args.poll_interval,
                     )
                 bot_response_inferred_duplicate_ack = False
+                bot_response_recovered_from_messages = False
                 if _llm_quality_should_infer_bot_response_from_duplicate_ack(
                     bot_response=bot_response,
                     expected_response=expected_response,
@@ -11715,6 +12202,28 @@ def _run_llm_quality(args):
                 ):
                     bot_response = True
                     bot_response_inferred_duplicate_ack = True
+                if (
+                    not args.dry_run
+                    and expected_response
+                    and bot_response_inferred_duplicate_ack
+                    and not outbox_text
+                    and conversation_id
+                ):
+                    recovered_text, _ = _llm_quality_fetch_assistant_reply_from_messages(
+                        db_user,
+                        conversation_id,
+                        message_id,
+                    )
+                    if recovered_text:
+                        outbox_text = recovered_text
+                        bot_response = True
+                        bot_response_recovered_from_messages = True
+                        bot_response_inferred_duplicate_ack = False
+                        _llm_quality_update_dialog_runtime_slots(
+                            dialog_runtime_state,
+                            meta=meta if isinstance(meta, dict) else None,
+                            outbox_text=outbox_text,
+                        )
                 state_settled_from = None
                 if (
                     not args.dry_run
@@ -11982,8 +12491,12 @@ def _run_llm_quality(args):
                             prev_slots,
                             booking_slots,
                         )
-                        if not booking_progressed and expected_reply_matched is True:
-                            booking_progressed = True
+                        booking_progressed = _llm_quality_booking_progress_from_contract(
+                            booking_progressed=booking_progressed,
+                            expected_reply_matched=expected_reply_matched,
+                            meta=meta,
+                            expected_reply_type=expected_reply_type_value,
+                        )
                         if booking_progressed:
                             booking_stats["progressed"] += 1
                     updated_slots = dict(prev_slots) if isinstance(prev_slots, dict) else {}
@@ -12149,6 +12662,12 @@ def _run_llm_quality(args):
                         _record_judge_skip(judge_skip_reason)
 
                 strict_reasons = list(evaluation_reasons or [])
+                strict_reasons = _llm_quality_apply_dry_run_response_contract(
+                    strict_reasons,
+                    dry_run=args.dry_run,
+                    expected_response=expected_response,
+                    bot_response=bot_response,
+                )
                 meta_action = (
                     (meta or {}).get("action")
                     if isinstance(meta, dict)
@@ -12307,6 +12826,7 @@ def _run_llm_quality(args):
                     "outbox_text": outbox_text,
                     "bot_response": bot_response,
                     "bot_response_inferred_duplicate_ack": bot_response_inferred_duplicate_ack,
+                    "bot_response_recovered_from_messages": bot_response_recovered_from_messages,
                     "expected_response": expected_response,
                     "expected_response_reason": expected_reason,
                     "turn_expectations": expectations,
@@ -12376,6 +12896,7 @@ def _run_llm_quality(args):
                     + "\n"
                 )
                 stats["trace_rows_written"] += 1
+                _checkpoint_run_summary()
                 if stats["policy_core_infra_errors"] >= 3:
                     stop_reason = "policy_core_infra_errors"
                     stop_requested = True
@@ -12395,6 +12916,8 @@ def _run_llm_quality(args):
     signal.signal(signal.SIGTERM, previous_sigterm)
     if stop_requested and not stop_reason:
         stop_reason = "stop_requested"
+    if stop_requested:
+        _checkpoint_run_summary(force=True)
 
     if stop_reason:
         print(
@@ -12846,6 +13369,7 @@ def _run_llm_quality(args):
     top_failure_turns = _llm_quality_top_failure_turns(failures, limit=3, sample_limit=3)
     safe_config = {
         "mode": args.mode,
+        "dry_run": bool(args.dry_run),
         "count": len(dialogs),
         "requested_count": args.count,
         "min_turns": args.min_turns,
@@ -12991,6 +13515,8 @@ def _run_llm_quality(args):
             "scenario_artifacts_missing": list((scenario_artifact_status or {}).get("missing") or []),
             "comparison_blocked": comparison_blocked,
             "comparison_block_reasons": comparison_block_reasons,
+            "non_evaluable": bool(args.dry_run),
+            "non_evaluable_reasons": ["dry_run"] if args.dry_run else [],
         },
         "scenario_source": scenario_source,
         "replay_command": replay_command,
@@ -13105,6 +13631,11 @@ def _run_llm_quality(args):
             ensure_ascii=False,
         )
     )
+    if (args.fail_on_thresholds or args.fail_on_regression) and not semantic_status["valid"]:
+        raise SystemExit(
+            "llm-quality: semantic invalid "
+            f"({', '.join(semantic_status.get('reasons') or ['unknown'])})"
+        )
     if args.fail_on_thresholds and blocking_reason_count:
         blocked = ", ".join(
             f"{reason}:{count}" for reason, count in blocking_reasons.get("reasons", {}).items()
@@ -13147,6 +13678,16 @@ def _run_llm_quality_entry(argv):
                 stop_reason=_llm_quality_stop_reason_from_system_exit(code),
                 error_message=str(code),
             )
+        raise
+    except KeyboardInterrupt as exc:
+        _llm_quality_write_failure_artifacts(
+            args=args,
+            run_id=run_id,
+            output_dir=output_dir,
+            started_at=started_at,
+            stop_reason="keyboard_interrupt",
+            error_message=f"{exc.__class__.__name__}:{exc}",
+        )
         raise
     except Exception as exc:
         _llm_quality_write_failure_artifacts(

@@ -29,8 +29,19 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 
 ---
 
+## 0.1 Semantic-First Charter (обязательно)
 
-## 0.1 Проект (что продаем)
+- **LLM-first semantic ownership:** смысл хода (intent/action/slots/fact_refs) определяет один semantic owner — policy-core LLM.
+- **Deterministic only at boundaries:** детерминизм применяется только для LAW/safety, schema validation, capability/protocol gate, idempotency/outbox/state.
+- **Запрет semantic hardcode в core:** phrase/regex branching по user text в core-файлах запрещён как способ управления бизнес-смыслом.
+- **Pack/tenant as data, not code:** доменные различия живут в packs/capabilities/manifests, а не в core-ветках.
+- **Graceful degrade budget:** сбой/недоступность LLM допустимы только в контролируемом degrade-path с reason-code и trace/meta evidence; acceptance оценивает это как исключение, а не основной путь.
+- **Контрактная приёмка:** качество принимается по `action/tool/trace/meta/outcome`, а не по byte-identical тексту ответа.
+
+---
+
+
+## 0.2 Проект (что продаем)
 
 | Что | Ответ |
 |-----|-------|
@@ -67,6 +78,9 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - **Anti Test-Fitting Gate:** запрещено добавлять/усиливать `must_include` как основной oracle без эквивалентных контрактных проверок в `decision_meta/decision_trace`.
 - **Demo-Neutral Gate:** demo-pack (`demo_salon`) используется только как канарейка; runtime-core остаётся pack-agnostic.
 - **Lexicon/Regex Delta Gate:** расширение словарей/regex допустимо только вместе с изменением резолвера и контрактных тестов.
+- **Semantic Ownership Gate:** post-hoc semantic rewrite вне whitelist reason-codes считается нарушением контракта.
+- **Boundary Determinism Gate:** детерминированные ветки не подменяют semantic-owner решение; они только валидируют/блокируют/деградируют контрактно.
+- **Graceful Degrade Gate:** degrade-path должен быть наблюдаемым (`reason_code`, `decision_meta`, `decision_trace`) и не становиться основным маршрутом.
 
 ---
 
@@ -181,13 +195,15 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - менять БД/trace ради evidence (например, чистка `decision_trace`).
 - подгонять поведение под тесты через хардкоды (EVAL = доказательство, не цель).
 - “тихо” менять политику/обещания (REQUIREMENTS) без явного решения.
+- подменять LLM-first семантику keyword/regex логикой в core вместо контрактных resolver/capability механизмов.
 
 ### 6.1 Local-first validation law (обязательно)
 - Любая правка core‑поведения сначала проходит локальный реалистичный контур; без этого PR/приёмка = BLOCKED.
-- Порядок неизменный: `local realism` -> `local deterministic` -> `CI deterministic smoke`.
+- Порядок неизменный: `local realism` -> `local contract checks (deterministic boundaries)` -> `CI deterministic smoke`.
 - CI не заменяет локальную проверку поведения; CI подтверждает воспроизводимость и ловит базовые регрессии.
 - Если нет `OPENAI_API_KEY` (или явного `--judge-api-key`) для LLM quality, статус проверки = `BLOCKED`, а не “упрощённый pass”.
 - Judge key: по умолчанию judge использует `OPENAI_API_KEY`; отдельный ключ задаётся `--judge-api-key`.
+- Deterministic проверки обязаны защищать границы контракта, а не заменять собой semantic reasoning.
 
 ### 6.2 Локальный обязательный контур (core behavior)
 - Не гоняй pytest внутри прод‑контейнера `truffles-api` с прод‑`.env`.
@@ -314,6 +330,12 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 13) **Stage order snapshot** (порядок стадий меняется только сознательно).
 14) **PR Task Package gate** (PR к core без Task Package не мержится).
 15) **Local-first realism gate** (core‑поведение без локального LLM+tools+chaos evidence не принимается).
+
+### P3 — semantic-first architecture
+16) **Single semantic owner per turn** (policy-core LLM определяет смысл, downstream не переопределяет его произвольно).
+17) **No business semantics in core regex/phrases** (доменные смыслы живут в packs/resolvers/capabilities).
+18) **Deterministic boundaries only** (validation/safety/capability/idempotency/outbox, без semantic захвата маршрутизации).
+19) **Graceful degrade observability** (каждый degrade имеет `reason_code` + trace/meta и учитывается в error budget, а не маскируется).
 
 ---
 
