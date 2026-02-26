@@ -57,6 +57,24 @@ Evidence (forensics):
 - В full critical зафиксированы timeout/degrade случаи (`policy_error:deadline_exceeded`, `timeout_degrade`) и `pipeline_ms` до `23521.83` при бюджете `18000ms`.
 - `dedup_db_fallback_rate=1.0` и `dedup_fallback_reason=redis_error` в обоих full-runs (`r2/r3`), что указывает на infra-contract gap.
 
+## Problem Snapshot Addendum (FACT, runtime provenance + anti-loop, 2026-02-26)
+
+Evidence (forensics):
+- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r4-forensic/summary.json`
+- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r4-forensic/problem_turns.json`
+- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r4-runtime18291/summary.json`
+- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r4-runtime18291/problem_turns.json`
+- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r4-runtime18291-postmixfix/summary.json`
+
+Факты:
+- Replay на старом runtime (`:18290`) показал `semantic_valid=false` с `post_llm_semantic_rewrite_budget_exceeded` и `judge_fail`; в traces были override c `reason=info_ref_resolution`.
+- Replay на свежем runtime (`:18291`) из текущего коммита убрал `judge_fail` и критичный semantic override drift; `strict_pass_rate` вырос с `0.9483` до `0.9828`.
+- Остался один fail-turn, классифицированный как ложный `mix_info_booking` для `intent=catalog.service_query` + `tool_decision=missing_slot` (это booking collect, не semantic leak).
+- Длинный replay может зависать в хвосте с `stop_reason=in_progress` и неполным артефактом (`brief.md` отсутствует), что делает run non-canonical и расходует ресурсы.
+- Запуск replay поверх baseline с `baseline_canonical=false` подтверждает цикл "дорогой прогон без права на acceptance", если preflight не fail-closed.
+- В lock run `booking-lock-20260226-envelope-a1-r10` обнаружен security/perf дефект: judge transport через `curl` subprocess включал `Authorization: Bearer ...` в argv процесса (`ps`) и давал дополнительный per-turn overhead.
+- Remediation: judge transport переведен на in-process HTTP request (без subprocess и без секрета в argv); lock до фикса классифицирован forensic-only.
+
 ## Contradictions Found And Resolved In This TP
 
 1. Противоречие: требование "один semantic owner" было не зафиксировано как жесткий контракт.
@@ -79,6 +97,27 @@ Evidence (forensics):
 
 7. Противоречие: изоляция tenant tools/facts описана декларативно, но не закреплена протокольно.
 - Обновление: добавлен capability-contract (tenant manifest + tool protocol gate), где core не может вызвать инструмент/факт вне allowlist текущего tenant.
+
+8. Противоречие: forensic/debug флаги раннера могли попадать в acceptance-контур.
+- Обновление: закреплён fail-closed запрет на acceptance через `--allow-no-code-delta`, `--allow-judge-off`, `--skip-outbox`, `count<10`, либо урезанный coverage без `include_media` и `handoff`.
+
+9. Противоречие: явные info-вопросы в booking-контексте могли деградировать в pricing/service из-за stale service carryover.
+- Обновление: закреплён контракт: explicit `hours/location/parking/contact` не может быть переопределён в `price_query/service_match` без явного price/duration сигнала текущего turn.
+
+10. Противоречие: шаги исполнения были размазаны между волнами и не были зафиксированы как обязательная последовательность.
+- Обновление: добавлен binding `Execution Contract (1..5)` с stop conditions и evidence для каждого шага.
+
+11. Противоречие: runtime provenance проверялся неполно, из-за чего quality-прогоны могли идти на устаревшем container code.
+- Обновление: введён обязательный runtime provenance gate (`base_url -> /admin/version -> git_commit`) с fail-closed при несовпадении ожидаемого fingerprint.
+
+12. Противоречие: lock/replay state мог теряться при раннем останове, что провоцировало повтор неканонических lock-циклов.
+- Обновление: checkpoint/failure summary обязаны сохранять `run_economy + runtime_preflight + lock/replay fingerprint state`; повтор lock при прежнем non-canonical fingerprint блокируется.
+
+13. Противоречие: contract oracle ошибочно помечал booking collect как `mix_info_booking` в `service_query + missing_slot`.
+- Обновление: зафиксирован guard: `catalog.service_query` с `missing_slot/slot_mismatch` не считается mix-leak; это валидный booking collect path.
+
+14. Противоречие: tooling transport нарушал secret hygiene и добавлял лишний runtime overhead.
+- Обновление: введён запрет на передачу API ключей через argv subprocess; judge/tool API вызовы обязаны быть in-process transport с redacted observability.
 
 ## Architecture Charter (binding)
 
@@ -113,6 +152,111 @@ Evidence (forensics):
   3) `Plan (1..16)`.
 - Любой шаг/чек, противоречащий приоритетным секциям, считается невалидным для acceptance.
 
+## Execution Contract (1..5, binding)
+
+1. Governance sync first
+- Синхронизировать канон/пороги до кода: charter, thresholds, acceptance envelope.
+- Stop condition: обнаружен acceptance-hack или конфликт канона.
+
+2. Semantic core remediation
+- Исправлять только семантический корень (single semantic owner + boundary determinism), без phrase-based hotfix.
+- Stop condition: любое post-hoc semantic rewrite вне whitelist reason-code.
+
+3. Deterministic contract lock
+- Зафиксировать детерминированные контрактные тесты на актуальные fail-turn clusters до дорогих LLM run.
+- Stop condition: новый fail-turn не имеет contract test/waiver.
+
+4. Canonical quality chain
+- Запускать только `lock -> replay -> full` на сопоставимых fingerprints и валидных preflight.
+- Stop condition: INVALID/NON-CANONICAL run, interrupted chain, mixed run_economy/judge mode.
+
+5. Evidence handoff
+- Обязательный пакет: `summary.json + brief.md + responses.jsonl + trace_bundle.jsonl + top_failures + exact replay command`.
+- Stop condition: отсутствует любой обязательный evidence-артефакт или FACT без evidence в STATE.
+
+## Execution Addendum (2026-02-26, mandatory)
+
+1. TP precedence
+- Этот TP является главным контрактом исполнения для текущей ветки до закрытия `P13`.
+- Любые локальные решения/фиксы/прогоны, противоречащие TP, считаются `INVALID`.
+
+2. Anti-drift process (all test tooling)
+- Для quality-цепочки обязателен один и тот же процесс: `lock -> replay -> full` без смешивания lanes.
+- Для replay/full обязателен фиксированный `scenarios.json` из lock и `--baseline-summary` lock.
+- Сравнение метрик разрешено только между сопоставимыми fingerprint (`code + scenario + runtime + judge_mode + run_economy`).
+- Повторные lock/replay без изменения fingerprint классифицируются как forensic-only и не обновляют baseline.
+- Нельзя принимать acceptance по partial/non-canonical run (`run_incomplete`, `INVALID`, `NON-CANONICAL`).
+
+3. Manual artifact analysis (MUST)
+- После каждого прогона обязателен ручной аудит всех артефактов:
+  - `summary.json`,
+  - `responses.jsonl`,
+  - `trace_bundle.jsonl`,
+  - `brief.md`.
+- Judge verdict не заменяет ручной аудит; judge используется как вспомогательный оркестр.
+- Если ручной аудит обнаруживает конфликт judge vs contract, это фиксируется как отдельный root-cause и вход в доработку judge/rubric.
+- Стандартная команда post-run аудита:
+  - `python3 ops/diagnose.py llm-quality-audit --run-dir <run_dir> --status done --strict-artifacts`
+- Acceptance запрещен, если `manual_audit.status != done` или `artifact_integrity.valid != true`.
+
+4. Stop-the-line for efficiency
+- Если run перешел в `run_incomplete`/`stop_reason=in_progress`, цепочка останавливается до root-cause фикса.
+- Нельзя компенсировать нестабильный lock множеством новых lock попыток без анализа предыдущих артефактов.
+- Любой новый run до post-run manual audit предыдущего run — нарушение процесса.
+- Runtime preflight обязан применять `manual_audit_gate=block` (или эквивалентный fail-closed guard) и останавливать новый run при `manual_audit_pending:<run_id>`.
+
+5. Throughput firebreak (mandatory)
+- Если в lock-run наблюдается `bot_response` без текстового payload (boolean reply) и прогон уходит в длительное polling-ожидание, run классифицируется как `forensic-only` до устранения причины.
+- Если фактический throughput падает ниже устойчивого минимума (операционно: `dialogs_seen < expected` при длительном wall-time и/или `run_completion_gap`), прерывание run допустимо только после фиксации root-cause в `manual_audit`.
+- После принудительного стопа обязателен полный post-run audit (`summary/responses/trace/brief`) с analyst root-causes и next steps; baseline/comparison для такого run запрещены.
+- Перед следующим lock-run нужно применить remediation на уровне runner/runtime:
+  - минимизировать бессмысленные poll/trace ожидания,
+  - исключить ожидание assistant-message там, где webhook уже дал терминальный contract payload,
+  - сохранять неизменными acceptance-гейты (`judge=all`, `include_media`, `coverage booking,info,interrupt,handoff`, `count>=10`).
+- Любой lock, не завершивший полный dialog-coverage, остаётся non-canonical независимо от частичных pass-метрик.
+
+6. Anti-loop lock gate (mandatory)
+- Повторный lock с тем же `lock_fingerprint` после неканонического lock (`semantic_valid=false` или `run_integrity_valid=false` или `stop_reason in_progress/signal`) блокируется fail-closed.
+- Разблокировка только двумя путями:
+  - есть code/runtime delta (новый fingerprint),
+  - либо явный forensic override (не acceptance lane, baseline update запрещен).
+- Replay/full запрещены, пока не получен первый канонический lock (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`, `manual_audit.done=true`).
+- Любая цепочка, где lock неканоничен, автоматически считается `forensic-only`, даже если replay/full локально были запущены вручную.
+
+7. Canonical completion gate (mandatory)
+- `P10` и `P13` считаются закрытыми только при завершённой цепочке:
+  - lock (canonical) -> replay (canonical) -> full (canonical),
+  - у каждого шага полный пакет артефактов и manual audit.
+- Любой `INVALID`/`INCOMPLETE` шаг в цепочке обнуляет статус closure и возвращает процесс к root-cause remediation.
+
+8. Runtime provenance gate (mandatory)
+- Перед каждым lock/replay/full обязателен preflight runtime identity:
+  - проверить `base_url` + `runtime_fingerprint`,
+  - зафиксировать `/admin/version` (`git_commit`, `build_time`) в `summary`.
+- Несовпадение ожидаемого code/runtime fingerprint -> `INVALID(runtime_commit_mismatch)`, прогон останавливается до исправления runtime.
+- Сравнение baseline разрешено только если runtime provenance сопоставим между lock/replay/full.
+- Commit parity недостаточен при грязном worktree: для изменённых owner-файлов (`decision.py`, `ops/diagnose.py`, related contracts/tests) обязателен hash-parity check между worktree и runtime container перед quality-run.
+- Если hash-parity не соблюдён, run маркируется `forensic-only`; acceptance/baseline/comparison запрещены до rebuild runtime из текущего worktree.
+
+9. Artifact completion gate for interrupted runs (mandatory)
+- Даже при `signal/system_exit/in_progress` runner обязан писать минимальный финальный артефакт-пакет:
+  - `summary.json` с terminal `status`,
+  - `brief.md` c stop_reason,
+  - сохранённый lock/replay fingerprint state.
+- Если пакет неполный, run автоматически маркируется `forensic-only` и не допускается в comparison/baseline.
+- Новый run с тем же lock_fingerprint запрещён до закрытого manual audit предыдущего interrupted run.
+- Повторный lock с тем же fingerprint после non-canonical run допускается только через явный forensic override (`--allow-no-code-delta`) и остаётся вне acceptance lane до canonical lock.
+
+10. Semantic boundary guard for booking/info (mandatory)
+- Явный booking collect turn (`catalog.service_query` + `tool_decision in {missing_slot,slot_mismatch}`) не может классифицироваться как `mix_info_booking`.
+- Для explicit info-intent запрещено переопределение в `price_query/service_match` без явного price/duration сигнала текущего turn.
+- Любое отклонение от этого правила считается semantic contract regression и блокирует acceptance.
+
+11. Secret-safe transport gate (mandatory)
+- Запрещено передавать `OPENAI_API_KEY` или другие секреты в argv subprocess (`ps` visibility).
+- Judge/tool HTTP вызовы должны выполняться in-process transport (или эквивалент с гарантированной secret redaction).
+- Обнаружение секрета в argv/log artifact = `INVALID(secret_exposure_detected)` и stop-the-line до remediation.
+
 ## Invariant
 
 - Не менять продуктовый контракт `FACT/COLLECT/HANDOFF`.
@@ -126,6 +270,10 @@ Evidence (forensics):
 - Timeout/degrade не должен превращать factual запрос в generic collect; только контрактный degrade-path с reason-code.
 - Доля degrade-path событий в acceptance-цепочке не выше `0.05`.
 - Acceptance только по канонической цепочке `lock -> replay -> full` при `run_economy=block` и сопоставимых fingerprint.
+- В booking-контексте explicit info-intent (`hours/location/parking/contact`) не может переезжать в `price_query/service_match` без явного price/duration сигнала текущего turn.
+- Любой fallback/override, меняющий semantic class turn, обязан писать `reason_code` в trace/meta.
+- Runtime provenance (`runtime_fingerprint` + `/admin/version.git_commit`) должен совпадать по всей канонической цепочке.
+- Interrupted run обязан завершаться terminal summary/brief; "вечный in_progress" для acceptance запрещён.
 
 ## Scope
 
@@ -208,256 +356,164 @@ Evidence (forensics):
 - `truffles-api/tests/test_cross_domain_capability_isolation.py`
 - `truffles-api/tests/test_booking_quality_*.py`
 
-## Plan (1..16)
+## Plan (Atomic LLM-First, binding)
 
-1. Stop-the-line + freeze acceptance spend
-- До архитектурного фикса запретить full expensive replay.
-- Разрешены только contract-bound deterministic checks + micro replay на lock scenarios с `judge.enabled=true`.
+### Analysis Gate (обязателен перед каждым пунктом)
+- `AG-1 Evidence`: собрать факты из `summary/responses/trace/meta` по конкретному дефекту.
+- `AG-2 Contract Delta`: зафиксировать, какой поведенческий контракт нарушен (`action/tool/slots/reason_code`).
+- `AG-3 Design Decision`: явно разделить probabilistic (`LLM/resolver`) и deterministic boundary.
+- `AG-4 Risk/Rollback`: описать риск, обратимую миграцию, rollback-команду.
+- `AG-5 Test Matrix`: утвердить набор deterministic + LLM checks до начала кода.
 
-2. Explicit architecture contract for domain resolution
-- Зафиксировать единый интерфейс resolver output:
-  - `intent_class`,
-  - `action_class` (`FACT/COLLECT/HANDOFF`),
-  - `entity_refs` (id-based),
-  - `slot_candidates`,
-  - `confidence`,
-  - `abstain_reason`,
-  - `resolver_id/ruleset_version`.
-- Core-path принимает только этот контракт и не ветвится по пользовательскому тексту.
+### Atomic Work Plan
+1. `P0 Governance Lock`
+- Синхронизировать charter/TP/runner-гейты без противоречий.
+- Зафиксировать dual-lane приемку: semantic vs delivery.
+- Stop-the-line: любой acceptance через debug-режимы/неполный coverage.
 
-3. Remove text-coupling from core (deletions)
-- Удалить/перенести все phrase-dependent ветки из:
-  - `decision.py`,
-  - `booking.py`,
-  - `tool_registry_service.py`,
-  - `info.py`.
-- Вместо них использовать contract flags (`tool_decision`, `expected_reply_type`, `resolver_result`, `policy outcome`).
+2. `P1 Semantic Decision Envelope`
+- Ввести единый `Semantic Decision Envelope` как source of truth turn:
+  - `action_class`, `intent_class`, `tool_action`, `slot_candidates`,
+  - `fact_refs/entity_refs`, `confidence`, `abstain_reason`,
+  - `override_reason_codes`, `resolver_id/version`.
+- Downstream не может менять semantic-class без whitelist reason-code.
 
-4. Introduce bounded resolver layer (semantic-first)
-- Semantic retrieval из pack/БД:
-  - lexical recall (fuzzy/BM25/trigram),
-  - semantic rerank (embedding score),
-  - disambiguation by margin/threshold.
-- Правило: low confidence -> `COLLECT`/`HANDOFF`, не угадывать.
+3. `P2 Structured Policy-Core Adapter`
+- Schema-first structured output для policy-core.
+- Любой schema mismatch/timeout -> controlled degrade с обязательным reason-code.
+- Запрет silent fallback без trace/meta.
 
-5. Lexicon governance (bounded fallback, not primary)
-- Лексикон только fallback для:
-  - safety/legal triggers,
-  - brand aliases/orthography,
-  - rare domain entities.
-- Ввести `lexicon_budget_per_release` и отчет `why semantic failed`.
-- Любой lexicon delta без resolver delta + contract tests -> CI FAIL.
+4. `P3 Semantic Firewall`
+- Реализовать fail-closed: deterministic слой может только `validate/block/replan`.
+- Запрет post-hoc semantic rewrite вне whitelist policy overrides.
+- Каждый override/degrade обязан писать `reason_code`.
 
-6. Hardcode Prevention Gate (CI fail-closed)
-- AST/Semgrep rule-set:
-  - запрет string-list/regex branching по raw text в core-файлах;
-  - разрешенные зоны: resolver/data packs only.
-- Дифф-гейт: новые phrase-matcher конструкции в core = BLOCK.
+5. `P4 Expected-Reply Refactor`
+- Оставить expected-reply как slot-evidence, а не semantic-owner.
+- Исключить захват маршрута `booking -> info` из-за stale expected-reply.
+- Выровнять clear/set контур expected-reply и session memory.
 
-6.1 Quality threshold alignment with charter
-- Синхронизировать thresholds инструмента и ТЗ: `strict_pass_rate >= 0.95`.
-- Для acceptance закрепить деградационный бюджет: `degraded_fallback_rate <= 0.05`.
-- Acceptance-run при `count < 10` или без `include_media`/`handoff` coverage = INVALID.
+6. `P5 Pack Query Engine v2`
+- Hybrid retrieval: lexical recall + semantic rerank + strict tenant/branch filters.
+- Margin-based abstain: низкая уверенность -> `COLLECT/HANDOFF`, без guessing.
+- Добавить provenance bundle (`pack_id/entity_id/source_ref/confidence`).
 
-7. Contract-only tests migration
-- Убрать text-based assertions из core regression tests как primary oracle.
-- Перевести на:
-  - `decision_meta` fields,
-  - `decision_trace` stages/reasons,
-  - tool outcomes/state transitions.
+7. `P6 Capability Manifest + Protocol Gate`
+- Tenant capability manifest (`allowed_tools`, `allowed_fact_scopes`, `handoff_policy`).
+- MCP-compatible protocol gate deny-by-default до фактического вызова инструмента.
+- Runtime не может вызвать tool/fact вне allowlist tenant.
 
-8. Domain pack grounding tests (auto-generated)
-- Из пака генерировать test-cases:
-  - exact forms,
-  - translit,
-  - typo variants,
-  - RU/KZ/mixed paraphrases.
-- Проверять `entity_id` grounding и `no_guess` policy.
+8. `P7 Core De-hardcoding Sweep`
+- Удалить business phrase/regex routing из core (`decision/booking/info/tool_registry`).
+- Оставить в core только boundary validation/safety/idempotency/outbox.
+- Нишевая семантика допускается только в packs/resolver/manifests.
 
-9. Safety/legal deterministic gate hardening
-- Safety/legal triggers должны быть deterministic-first.
-- Проверки: `reason_code`, `policy_section`, `trace stage`.
+9. `P8 Acceptance Engine Split`
+- Ввести два независимых статуса:
+  - `semantic_acceptance`: качество поведения по контракту,
+  - `delivery_acceptance`: транспорт/доставка.
+- `CHATFLOW_BILLING_BLOCKED` классифицировать как `delivery_waiver_billing`,
+  не блокирующий `semantic_acceptance`.
+- Baseline для семантики не должен ломаться из-за billing-blocked в текущем режиме оплаты.
 
-10. Resolver observability contract
-- Добавить в `decision_meta`:
-  - `resolver_id`, `resolver_version`, `resolver_confidence`, `resolver_candidates`, `abstain_reason`.
-- Добавить в trace stage `resolver` с decision path.
+10. `P9 Contract Test Migration`
+- Перевести regression oracle на `decision_meta/decision_trace/action/tool/state`.
+- Текстовые сравнения ответов исключить как primary oracle.
+- Зафиксировать детерминированные тесты на все active fail-turn clusters.
 
-11. Anti-drift replay contract v2
-- Lock/replay только сопоставимыми параметрами.
-- Replay невозможен без:
-  - canonical baseline,
-  - `reset_before_dialog=true`,
-  - `jid_mode=unique`,
-  - runtime commit match.
+11. `P10 Canonical Quality Chain`
+- Acceptance только по `lock -> replay -> full` на сопоставимых fingerprint.
+- Multi-seed drift для контрактных метрик (`action/tool/reason-code drift`).
+- INVALID/INCOMPLETE run не участвует в baseline/comparison.
 
-12. Run-economy anti-burn hardening
-- Блокировать replay при:
-  - non-canonical baseline,
-  - unreadable baseline,
-  - unchanged replay fingerprint без code delta.
-- Отдельно помечать incomplete artifact runs в quarantine.
+12. `P11 Cross-domain Hardening`
+- Проверка pack-agnostic поведения на минимум 2 несалонных capability-pack.
+- Запрет domain-specific branching в runtime core.
 
-13. Runtime behavior stabilization (booking/session memory)
-- Убрать raw datetime carryover.
-- Контрактно выровнять `expected_reply` clear/set paths.
-- На conflict/mismatch отвечать через intent-contract, не через phrase-fitting.
+13. `P12 Canary + Rollback`
+- Stage A: deterministic contracts + micro replay.
+- Stage B: lock/replay/full acceptance.
+- Stage C: canary rollout с stop-the-line при regression.
 
-14. Canary rollout strategy
-- Stage A: contract-bound deterministic checks + micro replay.
-- Stage B: full critical replay.
-- Stage C: production canary percentage.
-- Stop-the-line при regression/semantic drift.
+14. `P13 Evidence + STATE Handoff`
+- Обязательный пакет: `summary`, `brief`, `responses`, `trace_bundle`,
+  top-failures, replay/full commands, contract drift digest.
+- FACT в `STATE.md` только с evidence.
 
-15. Documentation + governance update
-- Зафиксировать в TP/STATE/REPORT:
-  - удаленные hardcode места,
-  - новые CI gates,
-  - новые contract tests,
-  - replay chain evidence.
+## Acceptance Requirements (binding)
 
-16. Acceptance + merge wave
-- PR-A: core/runtime contract refactor + deletion of text-coupling.
-- PR-B: resolver/lexicon governance + CI gates.
-- PR-C: tests/evidence/docs.
-- Каждый PR с отдельным evidence block и reproducible commands.
+### A. Semantic Acceptance
+- `semantic_valid=true`
+- `strict_pass_rate>=0.95`
+- `hard_fail_turns=0`
+- `reason_code` покрывает все override/degrade случаи (`rewrite_reason_coverage=1.0`)
+- Нет несанкционированного semantic rewrite вне whitelist.
+- `judge_fail` блокирует semantic lane только при подтверждённом deterministic semantic contract-fail; standalone judge fail считается advisory и требует manual-audit root-cause.
 
-## Plan Addendum (2026-02-24, execution order)
+### B. Delivery Acceptance
+- Отдельный verdict, не смешивается с semantic baseline.
+- `CHATFLOW_BILLING_BLOCKED` допустим как `delivery_waiver_billing` в текущем режиме
+  (оплата не активна) при обязательной фиксации в evidence.
+- Другие delivery-инциденты классифицируются и учитываются в отдельном error budget lane.
 
-1. P0 Firebreak stabilization (immediate)
-- Зафиксировать single semantic owner на уровне contract tests.
-- Убрать semantic reinterpretation в post-plan ветках (кроме whitelist deterministic overrides).
-- Зафиксировать mandatory reason-code на каждом override/degrade event.
+### C. Canonical Run Integrity
+- Acceptance-run только при:
+  - `run_economy.mode=block`,
+  - `judge.enabled=true`,
+  - `count>=10`,
+  - `include_media=true`,
+  - `scenario_coverage=booking,info,interrupt,handoff`,
+  - сопоставимых `code_fingerprint + scenario_fingerprint`.
+- INVALID/NON-CANONICAL/INCOMPLETE run исключаются из baseline/comparison.
+- Повтор lock с неизменным fingerprint после неканонического lock запрещён (anti-loop gate).
+- Replay/full разрешены только после первого канонического lock и завершённого manual audit этого lock.
+- Обязательный post-run audit gate:
+  - `manual_audit.status=done`,
+  - `artifact_integrity.valid=true`,
+  - root-cause digest заполнен для всех `critical/high` findings.
+- Runtime preflight обязан подтвердить `runtime_commit_match=true` между chain-step и ожидаемым кодом ветки.
 
-2. P0.1 Stochastic robustness hardening
-- Не фиксировать semantic слой в "temperature=0 everywhere"; оставить вероятностный reasoning там, где это улучшает обобщение.
-- Обязать structured output + confidence/abstain для policy-core и interpretation tasks.
-- Добавить reproducibility check по контрактам (`action/tool/trace`) на multi-seed (а не по текстовой идентичности).
+## Testing Methods (binding)
 
-3. P0.2 Honest timeout path
-- Ввести bounded retry policy для timeout.
-- Для factual intent в booking context сначала FACT, затем controlled next-step (без generic collect leak).
+1. `Static Contract Gates`
+- AST/Semgrep запрет бизнес-phrase/regex routing в core.
+- CI fail-closed при новых нарушениях.
 
-4. P1 Pack Query Engine normalization
-- Вынести factual extraction в pack query contract (`intent + query facets -> fact bundle`).
-- Удалить ad-hoc phrase fitting из webhook routing.
+2. `Schema + Contract Unit Tests`
+- Structured-output schema tests для policy-core.
+- Envelope integrity tests (`action/tool/slots/reason_code/provenance`).
 
-5. P1.1 Infra contract hardening
-- Закрыть Redis topology mismatch для llm-quality/local runtime.
-- Включить gate на `dedup_db_fallback_rate` и явный waiver-only процесс при infra инциденте.
+3. `Integration Contract Tests`
+- Webhook -> policy -> protocol gate -> tool -> trace/meta.
+- Проверки на запрет post-hoc semantic rewrite.
 
-6. P2 Acceptance governance lock
-- Единственная acceptance цепочка: `lock -> replay -> full`.
-- Единый `scenario_fingerprint`, `code_fingerprint`, `run_economy=block`.
-- Mixed evidence (`off/warn/block` в одном acceptance окне) запрещён.
+4. `Deterministic Regression Suite`
+- Turn-level tests по контракту для известных fail-clusters.
+- Без byte-identical сравнения ответов.
 
-7. P2.1 Cross-domain scalability hardening
-- Ввести `tool capability manifest` на tenant/pack уровне (`allowed_tools`, `allowed_fact_scopes`, `handoff_policy`).
-- Core router выбирает только из capability-allowlist текущего tenant; любые "чужие" tools/answers блокируются контрактом.
-- Pack Query Engine формирует fact bundle строго из tenant-pack artifacts (compiled), без нишевых fallback в core code.
+5. `LLM Quality Suite`
+- Canonical `lock -> replay -> full`.
+- Multi-seed contract drift report (`seed 7/19/42` минимум).
+- Judge graders должны быть узкими и контрактными (да/нет по `action/tool/trace/meta`); free-form judge summary не может быть единственным блокером acceptance.
 
-8. P2.2 Structured-output semantic arbiter rollout
-- Ввести schema-first contract для результата policy-core (`action/intent/slots/fact_refs/confidence/abstain_reason`).
-- Любой невалидный JSON/schema mismatch переводить в controlled degrade-path с trace reason-code.
-- Удалить оставшиеся post-override semantic rewrites вне whitelist policy overrides.
+6. `Dual-Lane Validation`
+- Semantic lane: contract metrics.
+- Delivery lane: transport metrics + waiver taxonomy.
 
-9. P2.3 MCP-compatible tool protocol rollout
-- Вынести вызов tool-ов через protocol adapter и capability check до фактического вызова.
-- Зафиксировать deny-by-default: неизвестный tool -> blocked + trace reason.
-- Добавить integration tests на "tenant A не может вызвать tool tenant B".
+7. `Cross-domain Capability Suite`
+- Isolation tests tenant A/B + несалонные packs.
 
-10. P2.4 Hybrid retrieval hardening for Pack Query Engine
-- Реализовать strict tenant/branch filters + hybrid recall/rerank + abstain by margin.
-- Добавить provenance в fact bundle (`pack_id`, `entity_id`, `source_ref`, `confidence`).
-- Закрыть legacy lexical-only fallback как primary path.
+## Execution Waves (binding)
 
-11. P2.5 Eval modernization (2025 contract lane)
-- Добавить multi-seed contract stability отчёт (`action/tool/reason-code drift`).
-- Отдельно мерить semantic consistency vs timeout/degrade rates.
-- Зафиксировать acceptance threshold по контрактным метрикам, не по text similarity.
-
-12. P2.6 Timeout budget governance
-- Для long tasks: bounded background/deferred path с прозрачным статусом.
-- Для turn response: hard SLA budget + deterministic degrade contract.
-- Запретить generic collect как default timeout response для factual intent.
-
-## Execution Process (wave discipline)
-
-1. Wave 0 (Governance lock)
-- Цель: убрать противоречия канона/инструмента.
-- Артефакты: синхронизированный `AGENTS.md`, TP charter, acceptance envelope в раннере.
-- Stop condition: любые acceptance-прогоны с мягкими параметрами (`judge off`, `count<10`, no handoff/media).
-
-2. Wave A (Semantic owner remediation, PR-A)
-- Цель: убрать semantic overrides и phrase-branching из core, оставить один semantic owner.
-- Артефакты: code deletions в core + D2 deterministic contract tests + evidence lock/replay.
-- Stop condition: любой новый hardcode/fast-path semantic takeover.
-
-3. Wave B (Capability/protocol hardening, PR-B)
-- Цель: fail-closed tool/fact boundaries для multi-tenant.
-- Артефакты: capability manifest enforcement + protocol gate + cross-domain isolation tests.
-- Stop condition: tool/action вне allowlist проходит в runtime.
-
-4. Wave C (Pack query engine + provenance, PR-C)
-- Цель: hybrid retrieval + abstain-by-margin без lexical-only primary fallback.
-- Артефакты: resolver contract + provenance + abstain tests.
-- Stop condition: core снова зависит от нишевых фраз.
-
-5. Wave D (Acceptance and release)
-- Цель: lock -> replay -> full на одинаковых fingerprint с quality gates.
-- Артефакты: `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl` + top-failures.
-- Stop condition: regression, INVALID run, non-canonical baseline, interrupted chain.
-
-## DoD
-
-- В core-path нет новых raw keyword/regex branching; Hardcode Prevention Gate green.
-- Core regression тесты не используют текстовые подстроки как главный oracle для поведения.
-- Resolver возвращает canonical contract и provenance (`resolver_id/version/confidence`).
-- Low-confidence path всегда fail-safe (`COLLECT`/`HANDOFF`), без guess.
-- Replay/acceptance невозможен на non-canonical/unreadable baseline.
-- Quarantine для incomplete run artifacts работает и отражается в summary/brief.
-- На full critical run: `infra_valid=true`, `semantic_valid=true`, `strict_pass_rate>=0.95`, `judge_fail=0`, `unobserved_turn_count=0`.
-- На full critical run: `degraded_fallback_rate<=0.05` и `rewrite_reason_coverage=1.0`.
-- На acceptance run зафиксирован единый `scenario_fingerprint` и `code_fingerprint` для `lock/replay/full`.
-- `run_economy.mode=block` на всех acceptance звеньях.
-- `judge.enabled=true` для lock/replay/full acceptance run.
-- Для booking coverage fast-path не перехватывает `info/check_booking/media/reschedule` turns в обход semantic-owner.
-- Timeout/degrade path не даёт `generic collect` для factual intent; trace/meta содержит reason-code.
-- `dedup_db_fallback_rate` либо в пределах целевого порога, либо run помечен infra-waiver и исключён из baseline/comparison.
-- Multi-seed acceptance показывает стабильность контрактов (без требования идентичного текста ответа):
-  - стабильность `action/tool/trace reason-code`,
-  - отсутствие роста critical misroute/hard-fail по порогам.
-- Tenant не может выполнить tool/action вне собственного capability manifest.
-- Semantic arbiter output всегда schema-valid; schema violation уходит в controlled degrade с reason-code.
-- В trace зафиксированы `capability_check` и `tool_protocol_decision` до вызова tool.
-- Для factual path есть provenance bundle (`pack_id/entity_id/source_ref/confidence`) и margin-based abstain.
-- Cross-domain regression suite проходит минимум на 2 несалонных capability-pack (smoke-contract уровень).
-
-## Checks
-
-- `python3 -m py_compile ops/diagnose.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/info.py truffles-api/app/routers/webhook/session_memory.py truffles-api/app/services/tool_registry_service.py truffles-api/app/services/pack_runtime_service.py`
-- `ruff check ops/diagnose.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/info.py truffles-api/app/routers/webhook/session_memory.py truffles-api/app/services/tool_registry_service.py truffles-api/app/services/pack_runtime_service.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_scenario_contract_gate.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_calendar_slot_response_contract.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_pack_runtime_service.py`
-- `pytest -q truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_scenario_contract_gate.py truffles-api/tests/test_booking_quality_response_guard.py`
-- `pytest -q truffles-api/tests/test_policy_core_fast_collect_guard.py`
-- `pytest -q truffles-api/tests/test_calendar_slot_response_contract.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_pack_runtime_service.py`
-- `pytest -q truffles-api/tests/test_message_endpoint.py -k "booking or expected_reply or session_memory or policy_core"`
-- `pytest -q truffles-api/tests/test_booking_quality_*.py`
-- `TEST_MODE=1 scripts/llm_quality_guarded.sh --mode lock --run-id booking-lock-<id> --owner-file ops/diagnose.py --owner-file truffles-api/app/routers/webhook/decision.py --quick-check "pytest -q truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_response_guard.py" -- --base-url <local_api> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 42 --reset-before-dialog --jid-mode unique --judge-mode all --fail-on-thresholds --run-economy-gate block`
-- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 42 --reset-before-dialog --jid-mode unique --judge-mode all --fail-on-thresholds --run-economy-gate block --run-id booking-lock-<id>`
-- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file <lock_scenarios> --baseline-summary <lock_summary> --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --fail-on-thresholds --fail-on-regression --run-economy-gate block --max-failures 20 --run-id booking-replay-<id>`
-- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file <lock_scenarios> --baseline-summary <lock_summary> --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --fail-on-thresholds --fail-on-regression --run-economy-gate block --max-failures 20 --run-id booking-full-<id>`
-- `jq '.run_economy.mode, .quality_status.infra_valid, .quality_status.semantic_valid, .judge.enabled, .run_economy.code_fingerprint, .run_economy.scenario_fingerprint' <run_dir>/summary.json`
-- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file <lock_scenarios> --baseline-summary <lock_summary> --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --seed 7 --fail-on-thresholds --fail-on-regression --run-economy-gate block --max-failures 20 --run-id booking-replay-s7-<id>`
-- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file <lock_scenarios> --baseline-summary <lock_summary> --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --seed 19 --fail-on-thresholds --fail-on-regression --run-economy-gate block --max-failures 20 --run-id booking-replay-s19-<id>`
-- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file <lock_scenarios> --baseline-summary <lock_summary> --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --seed 42 --fail-on-thresholds --fail-on-regression --run-economy-gate block --max-failures 20 --run-id booking-replay-s42-<id>`
-- `pytest -q truffles-api/tests/test_tool_capability_manifest.py truffles-api/tests/test_tool_protocol_gate.py`
-- `pytest -q truffles-api/tests/test_pack_query_engine_contract.py truffles-api/tests/test_pack_query_engine_abstain.py`
-- `pytest -q truffles-api/tests/test_cross_domain_capability_isolation.py`
-- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file <lock_scenarios> --baseline-summary <lock_summary> --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --seed 7 --fail-on-thresholds --fail-on-regression --run-economy-gate block --max-failures 20 --emit-contract-drift --run-id booking-contract-s7-<id>`
-- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file <lock_scenarios> --baseline-summary <lock_summary> --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --seed 19 --fail-on-thresholds --fail-on-regression --run-economy-gate block --max-failures 20 --emit-contract-drift --run-id booking-contract-s19-<id>`
+1. `Wave 0`: `P0`-`P1` governance + semantic envelope lock.
+2. `Wave A`: `P2`-`P4` semantic owner remediation.
+3. `Wave B`: `P5`-`P7` retrieval/capability/core de-hardcoding.
+4. `Wave C`: `P8`-`P11` acceptance split + quality chain + cross-domain.
+5. `Wave D`: `P12`-`P13` rollout + evidence closure.
 
 Forensic only (not acceptance):
-- `judge_mode off/critical` сценарии допустимы только как дополнительная диагностика, но не как основание baseline/update acceptance.
+- `judge_mode off/critical` допускается только в diagnostic lane.
+- `--allow-no-code-delta`, `--allow-judge-off`, `--skip-outbox` запрещены для acceptance.
 
 ## Evidence
 
@@ -477,6 +533,8 @@ Forensic only (not acceptance):
   - `<run_dir>/brief.md`
   - `<run_dir>/responses.jsonl`
   - `<run_dir>/trace_bundle.jsonl`
+  - `<run_dir>/manual_audit.md`
+  - `<run_dir>/manual_audit.json`
 - Contract evidence:
   - `decision_meta` sample rows,
   - `decision_trace` sample rows with resolver/policy/tool stages,
@@ -503,10 +561,14 @@ Forensic only (not acceptance):
 - Нельзя принимать DoD без `decision_meta/decision_trace` contract evidence.
 - Нельзя смешивать `run_economy` режимы (`off/warn/block`) в одной acceptance цепочке.
 - Нельзя использовать `judge_mode off` как acceptance доказательство canonical quality.
+- Нельзя блокировать/разрешать semantic acceptance только по standalone `judge_fail` без contract corroboration.
 - Нельзя требовать byte-identical текст ответа как основной acceptance-критерий.
 - Нельзя расширять core под нишевые фразы вместо capability/pack contracts.
 - Нельзя обходить capability manifest прямым вызовом tool из webhook/router слоя.
 - Нельзя делать lexical fallback primary semantic path в Pack Query Engine.
+- Нельзя принимать quality по subset-сценариям (`count<10`) или без полного coverage (`include_media`, `handoff`).
+- Нельзя использовать debug/forensic runner flags (`--allow-no-code-delta`, `--allow-judge-off`, `--skip-outbox`) как acceptance-доказательство.
+- Нельзя маскировать semantic drift ручным приоритетом stale service carryover над explicit текущим info-вопросом.
 
 ## Риски/блокеры
 

@@ -397,6 +397,17 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "reason": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "goal": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "entity_refs": {
+                "type": "array",
+                "items": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "object", "additionalProperties": True},
+                    ]
+                },
+            },
+            "resolver_id": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "resolver_version": {"anyOf": [{"type": "string"}, {"type": "null"}]},
         },
     }
     return {

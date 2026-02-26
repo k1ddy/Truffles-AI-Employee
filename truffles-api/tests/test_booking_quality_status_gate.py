@@ -1,5 +1,6 @@
 import ast
 import hashlib
+import json
 import os
 import re
 import shlex
@@ -33,6 +34,7 @@ def _load_quality_helpers():
         "LLM_QUALITY_HARDCODE_ALLOW_MARKER",
         "LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE",
         "LLM_QUALITY_PROGRESS_SKIP_TAGS",
+        "LLM_QUALITY_REQUIRED_RUN_ARTIFACTS",
     }
     wanted_functions = {
         "_llm_quality_normalize_tool_token",
@@ -45,6 +47,7 @@ def _load_quality_helpers():
         "_llm_quality_is_judge_mode_enabled",
         "_llm_quality_baseline_is_canonical",
         "_llm_quality_build_infra_status",
+        "_llm_quality_build_delivery_acceptance_status",
         "_llm_quality_check_thresholds",
         "_llm_quality_check_regression",
         "_llm_quality_collect_override_reason_codes",
@@ -65,11 +68,18 @@ def _load_quality_helpers():
         "_llm_quality_is_doc_only_changed_file",
         "_llm_quality_build_run_economy_status",
         "_llm_quality_build_replay_command",
+        "_llm_quality_required_artifact_paths",
+        "_llm_quality_collect_artifact_integrity",
+        "_llm_quality_load_json_object",
+        "_llm_quality_resolve_manual_audit_status",
+        "_llm_quality_find_latest_pending_manual_audit",
+        "_llm_quality_build_manual_audit_gate_status",
         "_llm_quality_hq1_normalize_text",
         "_llm_quality_hq1_contains_any",
         "_llm_quality_hq1_has_hallucination_signal",
         "_llm_quality_collect_hq1_classes",
         "_llm_quality_should_expect_booking_progress",
+        "_llm_quality_should_promote_judge_fail",
     }
 
     selected_nodes = []
@@ -84,6 +94,7 @@ def _load_quality_helpers():
     module = ast.Module(body=selected_nodes, type_ignores=[])
     namespace = {
         "hashlib": hashlib,
+        "json": json,
         "os": os,
         "re": re,
         "shlex": shlex,
@@ -231,6 +242,26 @@ def test_infra_status_marks_invalid_on_outbox_delivery_failures():
     assert "outbox_delivery_timeout_turns" in status["reasons"]
     assert "outbox_delivery_failed" in status["reasons"]
     assert "outbox_delivery_timeout" in status["reasons"]
+
+
+def test_delivery_acceptance_marks_waiver_for_billing_blocked():
+    ns = _load_quality_helpers()
+    build_delivery = ns["_llm_quality_build_delivery_acceptance_status"]
+
+    status = build_delivery(
+        {
+            "outbox_delivery_failed_turns": 0,
+            "outbox_delivery_timeout_turns": 0,
+            "delivery_waiver_billing_turns": 2,
+        },
+        failure_counts={"delivery_waiver_billing": 2},
+    )
+
+    assert status["valid"] is True
+    assert status["status"] == "waived"
+    assert status["waived"] is True
+    assert status["waivers"] == ["delivery_waiver_billing"]
+    assert status["counts"]["delivery_waiver_billing_turns"] == 2
 
 
 def test_thresholds_include_degraded_fallback_rate_gate():
@@ -421,6 +452,49 @@ def test_rewrite_governance_uses_discrete_turn_budget_ceiling():
     assert status["valid"] is True
 
 
+def test_rewrite_governance_ignores_semantic_override_audit_without_effective_change():
+    ns = _load_quality_helpers()
+    init_state = ns["_llm_quality_init_rewrite_governance_state"]
+    track = ns["_llm_quality_track_rewrite_governance"]
+    finalize = ns["_llm_quality_finalize_rewrite_governance"]
+
+    state = init_state()
+    track(
+        state,
+        {
+            "policy_core_mode": "policy_core",
+            "llm_policy_core": {
+                "semantic_arbiter": {
+                    "audit": {
+                        "intent_override_count": 1,
+                        "action_changed": False,
+                        "intent_changed": False,
+                        "tool_action_changed": False,
+                        "intent_override_reason_codes": ["contract_validation_failure"],
+                    }
+                },
+                "semantic_intent_overrides": [
+                    {
+                        "reason_code": "contract_validation_failure",
+                        "from_intent": "info",
+                        "to_intent": "master",
+                    }
+                ],
+            },
+        },
+    )
+    status = finalize(
+        state,
+        max_post_llm_semantic_rewrite_rate=0.0,
+        max_keyword_override_rate=0.0,
+    )
+
+    assert status["semantic_intent_override_turns"] == 1
+    assert status["rewrite_turns"] == 0
+    assert "post_llm_semantic_rewrite_budget_exceeded" not in status["blocking_counts"]
+    assert status["valid"] is True
+
+
 def test_collect_blocking_reasons_merges_governance_counts():
     ns = _load_quality_helpers()
     collect = ns["_llm_quality_collect_blocking_reasons"]
@@ -504,6 +578,103 @@ def test_run_economy_allows_replay_with_baseline_and_reset():
 
     assert status["valid"] is True
     assert status["reasons"] == []
+
+
+def test_run_economy_blocks_lock_with_unchanged_non_canonical_fingerprint():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    initial = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    assert initial["valid"] is True
+    lock_fingerprint = initial["lock_fingerprint"]
+    assert isinstance(lock_fingerprint, str) and lock_fingerprint
+
+    blocked = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        previous_lock_state={
+            "lock_fingerprint": lock_fingerprint,
+            "canonical_valid": False,
+            "run_id": "lock-non-canonical",
+        },
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    assert blocked["valid"] is False
+    assert "lock_fingerprint_unchanged_after_non_canonical" in blocked["reasons"]
+
+
+def test_run_economy_allows_lock_with_unchanged_canonical_fingerprint():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    initial = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    lock_fingerprint = initial["lock_fingerprint"]
+    assert isinstance(lock_fingerprint, str) and lock_fingerprint
+
+    allowed = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        previous_lock_state={
+            "lock_fingerprint": lock_fingerprint,
+            "canonical_valid": True,
+            "run_id": "lock-canonical",
+        },
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    assert allowed["valid"] is True
+    assert "lock_fingerprint_unchanged_after_non_canonical" not in allowed["reasons"]
 
 
 def test_run_economy_blocks_replay_with_non_canonical_baseline():
@@ -953,6 +1124,32 @@ def test_hq1_classifier_ignores_media_turn_for_booking_flow_break():
     assert "booking_flow_break" not in classify(record)
 
 
+def test_judge_fail_promotion_requires_semantic_contract_reason():
+    ns = _load_quality_helpers()
+    should_promote = ns["_llm_quality_should_promote_judge_fail"]
+
+    assert (
+        should_promote(
+            judge_result={"verdict": "fail", "reasons": ["wrong_action"]},
+            strict_reasons=["expected_action_mismatch"],
+        )
+        is True
+    )
+
+
+def test_judge_fail_not_promoted_on_delivery_waiver_only():
+    ns = _load_quality_helpers()
+    should_promote = ns["_llm_quality_should_promote_judge_fail"]
+
+    assert (
+        should_promote(
+            judge_result={"verdict": "fail", "reasons": ["billing_block"]},
+            strict_reasons=["delivery_waiver_billing"],
+        )
+        is False
+    )
+
+
 def test_collect_blocking_reasons_merges_hq1_counts():
     ns = _load_quality_helpers()
     collect = ns["_llm_quality_collect_blocking_reasons"]
@@ -973,3 +1170,90 @@ def test_collect_blocking_reasons_includes_unobserved_turn():
 
     assert result["count"] == 2
     assert result["reasons"]["unobserved_turn"] == 2
+
+
+def test_artifact_integrity_marks_missing_required_run_artifacts(tmp_path):
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_artifact_integrity"]
+    required = set(ns["LLM_QUALITY_REQUIRED_RUN_ARTIFACTS"])
+
+    status = collect(str(tmp_path))
+
+    assert status["valid"] is False
+    assert set(status["required"]) == required
+    assert set(status["missing"]) == required
+
+
+def test_artifact_integrity_marks_valid_when_required_run_artifacts_exist(tmp_path):
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_artifact_integrity"]
+    required = ns["LLM_QUALITY_REQUIRED_RUN_ARTIFACTS"]
+
+    for name in required:
+        (tmp_path / name).write_text("ok\n", encoding="utf-8")
+
+    status = collect(str(tmp_path))
+
+    assert status["valid"] is True
+    assert status["missing"] == []
+    assert sorted(status["required"]) == sorted(required)
+
+
+def test_manual_audit_gate_blocks_when_latest_run_is_pending(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_manual_audit_gate_status"]
+
+    run_dir = tmp_path / "run-pending"
+    run_dir.mkdir()
+    summary = {
+        "run_id": "run-pending",
+        "quality_status": {"manual_audit_required": True},
+        "manual_audit": {
+            "required": True,
+            "status": "pending",
+            "path": str(run_dir / "manual_audit.md"),
+            "json_path": str(run_dir / "manual_audit.json"),
+        },
+    }
+    (run_dir / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    gate = build_gate(mode="block", output_dir=str(tmp_path / "run-next"))
+
+    assert gate["valid"] is False
+    assert gate["reasons"] == ["manual_audit_pending:run-pending"]
+    assert gate["pending_run"]["run_id"] == "run-pending"
+
+
+def test_manual_audit_gate_passes_when_pending_run_has_done_audit(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_manual_audit_gate_status"]
+
+    run_dir = tmp_path / "run-audited"
+    run_dir.mkdir()
+    summary = {
+        "run_id": "run-audited",
+        "quality_status": {"manual_audit_required": True},
+        "manual_audit": {
+            "required": True,
+            "status": "pending",
+            "path": str(run_dir / "manual_audit.md"),
+            "json_path": str(run_dir / "manual_audit.json"),
+        },
+    }
+    (run_dir / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (run_dir / "manual_audit.json").write_text(
+        json.dumps({"status": "done"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    gate = build_gate(mode="block", output_dir=str(tmp_path / "run-next"))
+
+    assert gate["valid"] is True
+    assert gate["reasons"] == []
+    assert gate["pending_run"] is None

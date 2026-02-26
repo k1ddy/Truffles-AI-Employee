@@ -953,14 +953,12 @@ def _looks_like_booking_reschedule_request(
         }
     except Exception:
         intent_signals = set()
-    if intent_signals & {
-        "reschedule",
-        "cancel_request",
-        "policy_reschedule",
-        "policy_cancel",
-        "cancel_policy",
-    }:
+    if intent_signals & {"reschedule", "cancel_request"}:
         return True
+    if intent_signals & legacy.INFO_INTENTS:
+        return False
+    if legacy._looks_like_info_query(message_text, client_slug=client_slug):
+        return False
     booking_reference_markers = get_system_lexicon_list("booking_request")
     booking_keyword_markers = get_system_lexicon_list("booking_keywords")
     reschedule_markers = get_system_lexicon_list("booking_reschedule_keywords")
@@ -1732,6 +1730,7 @@ def _handle_booking_interrupt(
     )
 
     from . import _legacy as legacy
+    from .info import _build_info_intent_reply as _build_booking_interrupt_info_reply
 
     booking_state = booking if isinstance(booking, dict) else legacy._get_booking_context(booking_context or {})
     if booking_state.get("active") and all(booking_state.get(key) for key in BOOKING_SLOT_ORDER):
@@ -1974,6 +1973,34 @@ def _handle_booking_interrupt(
                 if isinstance(policy_handler, dict)
                 else None
             )
+            booking_info_set = set(booking_info_intents)
+            non_service_interrupt_priority = [
+                intent_name
+                for intent_name in ("hours", "location", "parking", "contact", "guest_policy")
+                if intent_name in booking_info_set
+            ]
+            strict_non_service_interrupt = bool(
+                non_service_interrupt_priority
+                and not ({"pricing", "duration", "promotions", "master"} & booking_info_set)
+            )
+            if strict_non_service_interrupt and booking_interrupt_text:
+                # Explicit non-service info asks (hours/location/parking/contact) must stay in
+                # info contract and must not be hijacked into stale price/service replies.
+                contract_intent = non_service_interrupt_priority[0]
+                contract_reply, contract_meta = _build_booking_interrupt_info_reply(
+                    contract_intent,
+                    service_query=None,
+                    client_slug=client_slug,
+                    message_text=booking_interrupt_text,
+                )
+                if contract_reply:
+                    info_decision = PackDecision(
+                        action="reply",
+                        response=contract_reply,
+                        intent=contract_intent,
+                        meta=contract_meta if isinstance(contract_meta, dict) else None,
+                    )
+                    info_source = "booking_info_contract"
             if guest_policy_hit:
                 guest_reply, guest_meta = build_info_combined_reply(
                     include_parking=False,

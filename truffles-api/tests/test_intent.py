@@ -517,6 +517,9 @@ class TestPolicyCoreTimeoutRetry:
         schema = response_format["json_schema"]["schema"]
         assert schema["properties"]["tool_args"]["additionalProperties"] is True
         assert schema["properties"]["slots"]["additionalProperties"] == {"type": "string"}
+        assert "entity_refs" in schema["properties"]
+        assert "resolver_id" in schema["properties"]
+        assert "resolver_version" in schema["properties"]
 
 
 class TestPolicyCoreErrorClassification:

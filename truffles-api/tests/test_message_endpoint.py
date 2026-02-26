@@ -3874,7 +3874,12 @@ def test_booking_info_interrupt_with_expected_reply_type_keeps_info_reply():
     }
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("action") == "reply"
-    assert meta.get("action_source") in {"llm_policy_core", "policy_core", "truth_gate"}
+    assert meta.get("action_source") in {
+        "llm_policy_core",
+        "policy_core",
+        "truth_gate",
+        "booking_info_contract",
+    }
     assert meta.get("tool_action") not in {"calendar.list_slots", "calendar.book_slot"}
     assert meta.get("expected_reply_blocked_by_info") is True
     assert meta.get("carryover_ignored") is True
@@ -9046,6 +9051,12 @@ def test_llm_policy_core_info_tool_uses_tool_args_info_refs(monkeypatch):
     ), patch(
         "app.routers.webhook._legacy.semantic_service_match",
         return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.route_dialogue_controller",
+        return_value=None,
+    ), patch(
+        "app.services.ai_service.rewrite_query_for_retrieval",
+        return_value={"rewrite_used": False, "reason": "test"},
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -9201,6 +9212,12 @@ def test_llm_policy_core_info_style_reference_without_pack_refs_routes_to_portfo
     ), patch(
         "app.routers.webhook._legacy.semantic_service_match",
         return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.route_dialogue_controller",
+        return_value=None,
+    ), patch(
+        "app.services.ai_service.rewrite_query_for_retrieval",
+        return_value={"rewrite_used": False, "reason": "test"},
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -9216,6 +9233,7 @@ def test_llm_policy_core_info_style_reference_without_pack_refs_routes_to_portfo
     assert response.success is True
     assert captured_tool_call.get("tool_action") == "catalog.portfolio"
     assert webhook_router.MSG_STYLE_REFERENCE_NEED_MEDIA in (response.bot_response or "")
+    assert webhook_router.MSG_BOOKING_ASK_DATETIME not in (response.bot_response or "")
     meta = saved_message.message_metadata.get("decision_meta", {})
     llm_policy_meta = meta.get("llm_policy_core", {})
     assert llm_policy_meta.get("validated") is True
@@ -9357,6 +9375,12 @@ def test_llm_policy_core_info_style_intent_without_pack_refs_routes_to_portfolio
     ), patch(
         "app.routers.webhook._legacy.semantic_service_match",
         return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.route_dialogue_controller",
+        return_value=None,
+    ), patch(
+        "app.services.ai_service.rewrite_query_for_retrieval",
+        return_value={"rewrite_used": False, "reason": "test"},
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -9372,6 +9396,7 @@ def test_llm_policy_core_info_style_intent_without_pack_refs_routes_to_portfolio
     assert response.success is True
     assert captured_tool_call.get("tool_action") == "catalog.portfolio"
     assert webhook_router.MSG_STYLE_REFERENCE_NEED_MEDIA in (response.bot_response or "")
+    assert webhook_router.MSG_BOOKING_ASK_DATETIME not in (response.bot_response or "")
     meta = saved_message.message_metadata.get("decision_meta", {})
     llm_policy_meta = meta.get("llm_policy_core", {})
     assert llm_policy_meta.get("validated") is True
@@ -9709,6 +9734,169 @@ def test_llm_policy_core_info_single_info_ref_stays_info_in_booking_context(monk
     assert llm_policy_meta.get("validation_error") is None
     assert meta.get("policy_core_mode") == "policy_core"
     assert meta.get("policy_core_degrade_reason") is None
+
+
+def test_booking_interrupt_hours_contract_blocks_price_takeover(monkeypatch):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={
+            "booking": {
+                "active": True,
+                "service": "Женская стрижка",
+            },
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+        },
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Когда у вас работают?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-booking-hours-contract-no-price-takeover",
+                timestamp=1234567906,
+            ),
+        ),
+    )
+
+    policy_payload = {
+        "intent": "info",
+        "action": "fact",
+        "tool_action": "info",
+        "tool_args": {"service_query": "Женская стрижка"},
+        "pack_refs": ["hours"],
+        "language": "ru",
+        "confidence": 0.8,
+        "reason": "hours_info",
+        "goal": "booking",
+        "slots": {
+            "service": "Женская стрижка",
+            "datetime": "",
+            "name": "",
+        },
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+    }
+    policy_result = {
+        "ok": True,
+        "payload": policy_payload,
+        "error": None,
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 11.0,
+    }
+    domain_result = (DomainIntent.IN_DOMAIN, 0.8, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+    price_takeover_decision = SimpleNamespace(
+        action="reply",
+        response="Женская стрижка стоит 5000 тг.",
+        intent="price_query",
+        meta={"info_sections": ["pricing"], "fact_intents": ["price_query"]},
+    )
+    truth_gate_mock = Mock(return_value=price_takeover_decision)
+    service_matcher_mock = Mock(return_value=price_takeover_decision)
+
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core",
+        return_value=policy_result,
+    ), patch(
+        "app.routers.webhook.decision._collect_plan_consult_refs",
+        return_value=([], None),
+    ), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores",
+        return_value=domain_result,
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler",
+        return_value={"truth_gate": truth_gate_mock, "service_matcher": service_matcher_mock},
+    ), patch(
+        "app.routers.webhook.info._build_info_intent_reply",
+        return_value=(
+            "Работаем с 09:00 до 21:00.",
+            {"info_sections": ["hours"], "fact_intents": ["hours"], "fact_source": "truth"},
+        ),
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id",
+        return_value=saved_message,
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match",
+        return_value=None,
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert "09:00" in (response.bot_response or "")
+    assert "5000" not in (response.bot_response or "")
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("intent") == "hours"
+    assert meta.get("source") == "booking_info_contract"
+    assert "hours" in (meta.get("fact_intents") or [])
+    truth_gate_mock.assert_not_called()
+    service_matcher_mock.assert_not_called()
 
 
 def test_llm_policy_core_allows_plan_with_expected_reply(monkeypatch):
@@ -11472,6 +11660,300 @@ def test_llm_policy_core_book_slot_uses_service_query_hint_when_missing(monkeypa
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("service_query_hint_ok") is True
     assert meta.get("service_query_hint_confidence") == 0.93
+
+
+def test_llm_policy_core_list_slots_uses_service_query_hint_when_missing(monkeypatch):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={"booking": {"active": True}},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Я хочу записаться на стрижку завтра",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-policy-core-list-slots-service-hint",
+                timestamp=1234567907,
+            ),
+        ),
+    )
+
+    policy_payload = {
+        "intent": "booking",
+        "action": "collect",
+        "tool_action": "calendar.list_slots",
+        "tool_args": {"start_at": "завтра"},
+        "pack_refs": [],
+        "language": "ru",
+        "confidence": 0.91,
+        "reason": "collect_datetime",
+        "goal": "booking",
+        "slots": {"service": "", "datetime": "завтра"},
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+        "needs_manager": False,
+        "risk_signals": [],
+    }
+    policy_result = {
+        "ok": True,
+        "payload": policy_payload,
+        "error": None,
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 9.0,
+    }
+    domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+    captured_tool_call = {}
+
+    def _fake_execute_tool_action(*_args, **kwargs):
+        captured_tool_call.update(kwargs)
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Свободные слоты: 10:00, 11:00.",
+            error_code=None,
+            decision_meta={"tool_action": "calendar.list_slots", "tool_decision": "ok"},
+            trace={"stage": "tool_registry", "decision": "ok", "tool_action": "calendar.list_slots"},
+            expected_reply_type=None,
+        )
+
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core", return_value=policy_result
+    ), patch("app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook.decision.extract_service_query_hint_llm",
+        return_value={
+            "attempted": True,
+            "ok": True,
+            "service_query": "Стрижка",
+            "confidence": 0.94,
+            "language": "ru",
+            "error": None,
+        },
+    ), patch(
+        "app.services.tool_registry_service.execute_tool_action",
+        side_effect=_fake_execute_tool_action,
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match", return_value=None
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    tool_args = captured_tool_call.get("tool_args", {})
+    assert tool_args.get("service_query") == "Стрижка"
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("service_query_hint_ok") is True
+    assert meta.get("service_query_hint_confidence") == 0.94
+
+
+def test_llm_policy_core_list_slots_uses_booking_service_before_llm_hint(monkeypatch):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={"booking": {"active": True, "service": "Педикюр"}},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Хочу завтра, какие есть окна?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-policy-core-list-slots-booking-service",
+                timestamp=1234567908,
+            ),
+        ),
+    )
+
+    policy_payload = {
+        "intent": "booking",
+        "action": "collect",
+        "tool_action": "calendar.list_slots",
+        "tool_args": {"start_at": "завтра"},
+        "pack_refs": [],
+        "language": "ru",
+        "confidence": 0.91,
+        "reason": "collect_datetime",
+        "goal": "booking",
+        "slots": {"service": "", "datetime": "завтра"},
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+        "needs_manager": False,
+        "risk_signals": [],
+    }
+    policy_result = {
+        "ok": True,
+        "payload": policy_payload,
+        "error": None,
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 9.0,
+    }
+    domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+    captured_tool_call = {}
+
+    def _fake_execute_tool_action(*_args, **kwargs):
+        captured_tool_call.update(kwargs)
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Свободные слоты: 12:00, 13:00.",
+            error_code=None,
+            decision_meta={"tool_action": "calendar.list_slots", "tool_decision": "ok"},
+            trace={"stage": "tool_registry", "decision": "ok", "tool_action": "calendar.list_slots"},
+            expected_reply_type=None,
+        )
+
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core", return_value=policy_result
+    ), patch("app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook.decision.extract_service_query_hint_llm",
+        side_effect=AssertionError(
+            "extract_service_query_hint_llm should not run when booking service is already known"
+        ),
+    ), patch(
+        "app.services.tool_registry_service.execute_tool_action",
+        side_effect=_fake_execute_tool_action,
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match", return_value=None
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    tool_args = captured_tool_call.get("tool_args", {})
+    assert tool_args.get("service_query") == "Педикюр"
 
 
 def test_llm_policy_core_booking_skips_intent_decomp_when_budget_reserved(monkeypatch):
@@ -15753,6 +16235,181 @@ def test_llm_policy_core_list_slots_provider_unavailable_keeps_booking_question(
     assert meta.get("tool_decision") == "provider_unavailable"
 
 
+def test_llm_policy_core_get_booking_capability_blocked_escalates(monkeypatch):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "datetime": "2026-02-18 10:00",
+                "appointment_id": "cb99d242-69ce-4154-b428-797f6e76c0cb",
+            }
+        },
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Проверьте, пожалуйста, мою запись.",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-booking-get-booking-capability-blocked",
+                timestamp=1234567905,
+            ),
+        ),
+    )
+
+    policy_payload = {
+        "intent": "check_booking",
+        "action": "fact",
+        "tool_action": "calendar.get_booking",
+        "tool_args": {"appointment_id": "cb99d242-69ce-4154-b428-797f6e76c0cb"},
+        "pack_refs": [],
+        "slots": {
+            "service": "Маникюр",
+            "datetime": "2026-02-18",
+            "name": "Алина",
+            "appointment_id": "cb99d242-69ce-4154-b428-797f6e76c0cb",
+        },
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": "ru",
+        "confidence": 0.9,
+        "reason": "booking_check",
+        "goal": "booking",
+    }
+    policy_result = {
+        "ok": True,
+        "payload": policy_payload,
+        "error": None,
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 10.0,
+    }
+    domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+    handover = SimpleNamespace(id=uuid4(), status="pending")
+    escalate_result = SimpleNamespace(ok=True, value=handover, error=None)
+
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core", return_value=policy_result
+    ), patch("app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.services.tool_registry_service.execute_tool_action",
+        return_value=SimpleNamespace(
+            handled=True,
+            ok=False,
+            response_text=(
+                "В этом филиале онлайн-календарь для такого запроса отключен. "
+                "Передам менеджеру, чтобы помочь вручную."
+            ),
+            error_code="tool_action_disabled",
+            decision_meta={
+                "tool_action": "calendar.get_booking",
+                "tool_decision": "capability_blocked",
+                "capability_reason": "deny_by_default",
+            },
+            trace={
+                "stage": "tool_registry",
+                "decision": "capability_blocked",
+                "tool_action": "calendar.get_booking",
+            },
+            expected_reply_type=None,
+        ),
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match", return_value=None
+    ), patch(
+        "app.routers.webhook.decision._reuse_active_handover",
+        return_value=(None, False, False),
+    ) as reuse_handover_mock, patch(
+        "app.routers.webhook.decision.escalate_to_pending", return_value=escalate_result
+    ) as escalate_mock, patch(
+        "app.routers.webhook.decision.send_telegram_notification", return_value=True
+    ) as telegram_mock:
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response == webhook_router.MSG_ESCALATED
+    assert reuse_handover_mock.called
+    assert escalate_mock.called
+    assert telegram_mock.called
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("action") == "escalate"
+    assert meta.get("intent") == "check_booking"
+    assert meta.get("source") == "tool_registry"
+    assert meta.get("tool_action") == "calendar.get_booking"
+    assert meta.get("tool_decision") == "capability_blocked"
+    assert meta.get("policy_core_degrade_reason") == "policy_validation:tool_unavailable"
+    assert meta.get("llm_policy_override_reason_code") == "tool_unavailable"
+
+
 def test_booking_verification_reuses_active_handover_before_truth_gate(monkeypatch):
     monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -17308,6 +17965,321 @@ def test_llm_policy_core_service_query_rewrites_to_location_with_reason_code(mon
     assert meta.get("llm_policy_override_reason_code") == "contract_validation_failure"
 
 
+def test_llm_policy_core_service_query_aligns_to_turn_service_hint(monkeypatch):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={
+            "booking": {"active": True, "service": "Уходовая процедура", "datetime": "завтра"},
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+        },
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Мне нужно уточнить, сколько времени займет стрижка.",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-policy-core-service-query-align-turn-hint",
+                timestamp=1234567909,
+            ),
+        ),
+    )
+
+    policy_payload = {
+        "intent": "info",
+        "action": "fact",
+        "tool_action": "catalog.service_query",
+        "tool_args": {"service_query": "Уходовая процедура"},
+        "pack_refs": ["duration"],
+        "language": "ru",
+        "confidence": 0.9,
+        "reason": "duration_info",
+        "goal": "booking",
+        "slots": {"service": "Уходовая процедура", "datetime": "завтра"},
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+    }
+    policy_result = {
+        "ok": True,
+        "payload": policy_payload,
+        "error": None,
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 11.0,
+    }
+    domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+    captured_tool_call = {}
+
+    def _fake_execute_tool_action(*_args, **kwargs):
+        captured_tool_call.update(kwargs)
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Женская стрижка — Обычно 20–60 минут.",
+            error_code=None,
+            decision_meta={
+                "tool_action": "catalog.service_query",
+                "tool_decision": "duration",
+            },
+            trace={
+                "stage": "tool_registry",
+                "decision": "duration",
+                "tool_action": "catalog.service_query",
+            },
+            expected_reply_type=None,
+        )
+
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core",
+        return_value=policy_result,
+    ), patch(
+        "app.routers.webhook.decision._collect_plan_consult_refs",
+        return_value=([], None),
+    ), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores",
+        return_value=domain_result,
+    ), patch(
+        "app.routers.webhook.decision._extract_service_hint",
+        return_value="Женская стрижка",
+    ), patch(
+        "app.services.tool_registry_service.execute_tool_action",
+        side_effect=_fake_execute_tool_action,
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id",
+        return_value=saved_message,
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match",
+        return_value=None,
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    tool_args = captured_tool_call.get("tool_args", {})
+    assert tool_args.get("service_query") == "Женская стрижка"
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("service_query") == "Женская стрижка"
+    assert meta.get("service_query_source") == "turn_service_hint"
+
+
+def test_llm_policy_core_booking_request_blocks_service_query_fact(monkeypatch):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={
+            "booking": {"active": True, "service": "Маникюр"},
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+        },
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Я хотела бы записаться на стрижку и маникюр.",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-policy-core-booking-block-service-query-fact",
+                timestamp=1234567910,
+            ),
+        ),
+    )
+
+    policy_payload = {
+        "intent": "info",
+        "action": "fact",
+        "tool_action": "catalog.service_query",
+        "tool_args": {"service_query": "Стрижка"},
+        "pack_refs": ["pricing"],
+        "language": "ru",
+        "confidence": 0.86,
+        "reason": "service_info",
+        "goal": "booking",
+        "slots": {"service": "Маникюр", "datetime": ""},
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+    }
+    policy_result = {
+        "ok": True,
+        "payload": policy_payload,
+        "error": None,
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 11.0,
+    }
+    domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+    tool_action_mock = Mock(
+        side_effect=AssertionError("catalog.service_query must not run for explicit booking request")
+    )
+
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core",
+        return_value=policy_result,
+    ), patch(
+        "app.routers.webhook.decision._collect_plan_consult_refs",
+        return_value=([], None),
+    ), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores",
+        return_value=domain_result,
+    ), patch(
+        "app.routers.webhook.decision.format_reply_from_truth",
+        return_value="Уточните удобное время для записи.",
+    ), patch(
+        "app.services.tool_registry_service.execute_tool_action",
+        tool_action_mock,
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id",
+        return_value=saved_message,
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match",
+        return_value=None,
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    tool_action_mock.assert_not_called()
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    plan_audit = meta.get("llm_policy_plan_audit", {})
+    assert plan_audit.get("plan_tool_action") == "catalog.service_query"
+    assert plan_audit.get("final_tool_action") == "collect"
+    assert plan_audit.get("override_applied") is True
+    assert "contract_validation_failure" in (plan_audit.get("override_reason_codes") or [])
+
+
 def test_llm_policy_core_catalog_location_passes_parking_info_hint(monkeypatch):
     monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -18050,12 +19022,19 @@ def test_llm_policy_core_catalog_service_reply_normalized_to_master_info_by_sign
     semantic_arbiter = llm_policy_meta.get("semantic_arbiter", {})
     assert semantic_arbiter.get("contract_version") == "v1"
     assert semantic_arbiter.get("source") == "llm_policy_core"
+    assert semantic_arbiter.get("semantic_owner") == "llm_policy_core"
     plan_contract = semantic_arbiter.get("plan", {})
     final_contract = semantic_arbiter.get("final", {})
     assert plan_contract.get("action_class") == "fact"
     assert plan_contract.get("tool_action") == "catalog.service_query"
     assert final_contract.get("action_class") == "fact"
     assert final_contract.get("tool_action") == "catalog.service_query"
+    assert final_contract.get("resolver_id") == "llm_policy_core"
+    assert final_contract.get("resolver_version") == "v1"
+    assert isinstance(final_contract.get("entity_refs"), list)
+    assert llm_policy_meta.get("semantic_owner") == "llm_policy_core"
+    assert llm_policy_meta.get("resolver_id") == "llm_policy_core"
+    assert llm_policy_meta.get("resolver_version") == "v1"
     intent_overrides = llm_policy_meta.get("semantic_intent_overrides") or []
     assert any(
         entry.get("from_intent") == "info"

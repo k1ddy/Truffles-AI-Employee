@@ -19,6 +19,7 @@ class RuntimeCapabilities:
     branch_id: UUID | None
     source: str
     has_records: bool
+    has_tool_policy_records: bool = False
 
 
 _RUNTIME_CAPABILITIES: ContextVar[RuntimeCapabilities | None] = ContextVar(
@@ -61,6 +62,9 @@ def build_runtime_capabilities(
     client_id: UUID | None,
     branch_id: UUID | None,
 ) -> RuntimeCapabilities:
+    def _payload_has_tool_policy(payload: object) -> bool:
+        return isinstance(payload, dict) and "tools" in payload
+
     if not client_id:
         return RuntimeCapabilities(
             payload=CapabilitiesPayload(),
@@ -68,6 +72,7 @@ def build_runtime_capabilities(
             branch_id=branch_id,
             source="missing_client",
             has_records=False,
+            has_tool_policy_records=False,
         )
 
     try:
@@ -94,6 +99,7 @@ def build_runtime_capabilities(
             branch_id=branch_id,
             source="runtime_error",
             has_records=False,
+            has_tool_policy_records=False,
         )
 
     client_payload = (
@@ -107,6 +113,10 @@ def build_runtime_capabilities(
         else None
     )
     has_records = bool(client_payload or branch_payload)
+    has_tool_policy_records = bool(
+        _payload_has_tool_policy(client_payload)
+        or _payload_has_tool_policy(branch_payload)
+    )
 
     merged = merge_capabilities(client_payload, branch_payload)
     try:
@@ -118,6 +128,7 @@ def build_runtime_capabilities(
             branch_id=branch_id,
             source="invalid_payload",
             has_records=has_records,
+            has_tool_policy_records=has_tool_policy_records,
         )
 
     return RuntimeCapabilities(
@@ -126,6 +137,7 @@ def build_runtime_capabilities(
         branch_id=branch_id,
         source="client_capabilities" if has_records else "default",
         has_records=has_records,
+        has_tool_policy_records=has_tool_policy_records,
     )
 
 

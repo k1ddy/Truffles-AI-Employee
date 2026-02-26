@@ -20,6 +20,7 @@ def test_build_runtime_capabilities_missing_client():
     assert runtime.source == "missing_client"
     assert runtime.payload.model_dump() == CapabilitiesPayload().model_dump()
     assert runtime.has_records is False
+    assert runtime.has_tool_policy_records is False
 
 
 def test_build_runtime_capabilities_merges_client_and_branch(monkeypatch):
@@ -50,6 +51,7 @@ def test_build_runtime_capabilities_merges_client_and_branch(monkeypatch):
         branch_id=branch_id,
     )
     assert runtime.has_records is True
+    assert runtime.has_tool_policy_records is False
     assert runtime.source == "client_capabilities"
     assert runtime.payload.features.booking_mode == "confirm_slots"
     assert runtime.payload.providers.availability_provider == "google_calendar"
@@ -113,6 +115,7 @@ def test_build_runtime_capabilities_merges_tool_policy():
 
     assert runtime.payload.tools.allow == ["calendar.*", "catalog.service_query"]
     assert runtime.payload.tools.deny == ["calendar.book_slot"]
+    assert runtime.has_tool_policy_records is True
 
 
 def test_build_runtime_capabilities_merges_fact_scopes_and_handoff_policy():

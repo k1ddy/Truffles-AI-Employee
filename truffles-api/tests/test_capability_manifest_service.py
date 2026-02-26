@@ -68,7 +68,7 @@ def test_tool_protocol_decision_deny_by_default(monkeypatch):
     assert decision.deny_by_default is True
 
 
-def test_tool_protocol_decision_deny_by_default_when_runtime_records_exist(monkeypatch):
+def test_tool_protocol_decision_deny_by_default_when_tool_policy_records_exist(monkeypatch):
     monkeypatch.delenv("TOOL_PROTOCOL_DENY_BY_DEFAULT", raising=False)
     runtime = RuntimeCapabilities(
         payload=CapabilitiesPayload.model_validate({}),
@@ -76,6 +76,7 @@ def test_tool_protocol_decision_deny_by_default_when_runtime_records_exist(monke
         branch_id=None,
         source="client_capabilities",
         has_records=True,
+        has_tool_policy_records=True,
     )
     set_runtime_capabilities(runtime)
     try:
@@ -86,6 +87,27 @@ def test_tool_protocol_decision_deny_by_default_when_runtime_records_exist(monke
     assert decision.allowed is False
     assert decision.reason == "deny_by_default"
     assert decision.deny_by_default is True
+
+
+def test_tool_protocol_decision_allows_when_runtime_records_have_no_tool_policy(monkeypatch):
+    monkeypatch.delenv("TOOL_PROTOCOL_DENY_BY_DEFAULT", raising=False)
+    runtime = RuntimeCapabilities(
+        payload=CapabilitiesPayload.model_validate({}),
+        client_id=uuid4(),
+        branch_id=None,
+        source="client_capabilities",
+        has_records=True,
+        has_tool_policy_records=False,
+    )
+    set_runtime_capabilities(runtime)
+    try:
+        decision = resolve_tool_protocol_decision("catalog.location")
+    finally:
+        set_runtime_capabilities(None)
+
+    assert decision.allowed is True
+    assert decision.reason is None
+    assert decision.deny_by_default is False
 
 
 def test_tool_protocol_decision_allows_without_runtime_records(monkeypatch):

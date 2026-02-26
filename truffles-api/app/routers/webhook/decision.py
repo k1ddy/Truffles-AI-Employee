@@ -4350,6 +4350,63 @@ def _normalize_semantic_refs(refs: list[str] | None) -> list[str]:
     return cleaned
 
 
+def _normalize_semantic_reason_codes(reason_codes: list[str] | None) -> list[str]:
+    if not reason_codes:
+        return []
+    cleaned: list[str] = []
+    for item in reason_codes:
+        normalized = _audit_policy_override_reason_code(item)
+        if normalized and normalized not in cleaned:
+            cleaned.append(normalized)
+    return cleaned
+
+
+def _normalize_semantic_entity_refs(entity_refs: list[Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(entity_refs, list):
+        return []
+    cleaned: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in entity_refs:
+        normalized_entry: dict[str, Any] = {}
+        if isinstance(item, str):
+            token = item.strip()
+            if token:
+                normalized_entry["entity_id"] = token
+        elif isinstance(item, dict):
+            entity_id = item.get("entity_id")
+            if not isinstance(entity_id, str) or not entity_id.strip():
+                fallback_id = item.get("id")
+                if isinstance(fallback_id, str) and fallback_id.strip():
+                    entity_id = fallback_id
+            if isinstance(entity_id, str) and entity_id.strip():
+                normalized_entry["entity_id"] = entity_id.strip()
+            entity_type = item.get("entity_type")
+            if not isinstance(entity_type, str) or not entity_type.strip():
+                fallback_type = item.get("type")
+                if isinstance(fallback_type, str) and fallback_type.strip():
+                    entity_type = fallback_type
+            if isinstance(entity_type, str) and entity_type.strip():
+                normalized_entry["entity_type"] = entity_type.strip().casefold()
+            source_ref = item.get("source_ref")
+            if isinstance(source_ref, str) and source_ref.strip():
+                normalized_entry["source_ref"] = source_ref.strip()
+            confidence = item.get("confidence")
+            if isinstance(confidence, (int, float)):
+                normalized_entry["confidence"] = max(0.0, min(float(confidence), 1.0))
+        if not normalized_entry:
+            continue
+        dedupe_key = (
+            str(normalized_entry.get("entity_id") or ""),
+            str(normalized_entry.get("entity_type") or ""),
+            str(normalized_entry.get("source_ref") or ""),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        cleaned.append(normalized_entry)
+    return cleaned
+
+
 def _normalize_semantic_slots(slots: dict[str, str] | None) -> dict[str, str]:
     if not isinstance(slots, dict):
         return {}
@@ -4374,15 +4431,30 @@ def _build_semantic_arbiter_contract(
     open_questions: list[str] | None,
     needs_manager: bool,
     risk_signals: list[str] | None,
+    entity_refs: list[Any] | None,
+    resolver_id: str | None,
+    resolver_version: str | None,
+    override_reason_codes: list[str] | None,
 ) -> dict[str, Any]:
     confidence_value: float | None = None
     if isinstance(confidence, (int, float)):
         confidence_value = max(0.0, min(float(confidence), 1.0))
+    resolver_id_token = (
+        resolver_id.strip()
+        if isinstance(resolver_id, str) and resolver_id.strip()
+        else None
+    )
+    resolver_version_token = (
+        resolver_version.strip()
+        if isinstance(resolver_version, str) and resolver_version.strip()
+        else None
+    )
     return {
         "intent_class": intent or None,
         "action_class": action or None,
         "tool_action": tool_action or None,
         "fact_refs": _normalize_semantic_refs(pack_refs),
+        "entity_refs": _normalize_semantic_entity_refs(entity_refs),
         "slot_candidates": _normalize_semantic_slots(slots),
         "confidence": confidence_value,
         "abstain_reason": reason or None,
@@ -4390,6 +4462,9 @@ def _build_semantic_arbiter_contract(
         "open_questions": _normalize_semantic_refs(open_questions),
         "needs_manager": bool(needs_manager),
         "risk_signals": _normalize_semantic_refs(risk_signals),
+        "resolver_id": resolver_id_token,
+        "resolver_version": resolver_version_token,
+        "override_reason_codes": _normalize_semantic_reason_codes(override_reason_codes),
     }
 
 
@@ -9012,8 +9087,12 @@ async def _handle_webhook_payload(
     policy_plan_tool_action = None
     policy_override_events: list[dict[str, Any]] = []
     policy_override_reason_missing_detected = False
+    policy_entity_refs: list[dict[str, Any]] = []
+    policy_resolver_id: str | None = "llm_policy_core"
+    policy_resolver_version: str | None = SEMANTIC_ARBITER_CONTRACT_VERSION
     policy_semantic_plan_contract: dict[str, Any] | None = None
     policy_semantic_final_contract: dict[str, Any] | None = None
+    policy_semantic_envelope: dict[str, Any] | None = None
     policy_semantic_intent_overrides: list[dict[str, Any]] = []
     policy_capability_checks: list[dict[str, Any]] = []
     policy_capability_block_reason: str | None = None
@@ -9077,9 +9156,26 @@ async def _handle_webhook_payload(
                 },
             )
 
-    def _sync_semantic_arbiter_meta() -> None:
-        nonlocal policy_semantic_plan_contract, policy_semantic_final_contract
-        if policy_semantic_plan_contract is None and (policy_plan_action or policy_plan_tool_action):
+    def _collect_policy_override_reason_codes() -> list[str]:
+        collected: list[str] = []
+        for event in policy_override_events:
+            if not isinstance(event, dict):
+                continue
+            reason_code = event.get("reason_code")
+            if isinstance(reason_code, str) and reason_code.strip():
+                collected.append(reason_code)
+        return _normalize_semantic_reason_codes(collected)
+
+    def _refresh_semantic_arbiter_envelope(
+        *, build_plan_if_missing: bool = True
+    ) -> dict[str, Any]:
+        nonlocal policy_semantic_plan_contract, policy_semantic_final_contract, policy_semantic_envelope
+        override_reason_codes = _collect_policy_override_reason_codes()
+        if (
+            build_plan_if_missing
+            and policy_semantic_plan_contract is None
+            and (policy_plan_action or policy_plan_tool_action)
+        ):
             # Build late if fast-path metadata was initialized before plan snapshot creation.
             policy_semantic_plan_contract = _build_semantic_arbiter_contract(
                 intent=policy_intent,
@@ -9093,6 +9189,10 @@ async def _handle_webhook_payload(
                 open_questions=policy_open_questions,
                 needs_manager=policy_needs_manager,
                 risk_signals=policy_risk_signals,
+                entity_refs=policy_entity_refs,
+                resolver_id=policy_resolver_id,
+                resolver_version=policy_resolver_version,
+                override_reason_codes=override_reason_codes,
             )
         policy_semantic_final_contract = _build_semantic_arbiter_contract(
             intent=policy_intent,
@@ -9106,6 +9206,10 @@ async def _handle_webhook_payload(
             open_questions=policy_open_questions,
             needs_manager=policy_needs_manager,
             risk_signals=policy_risk_signals,
+            entity_refs=policy_entity_refs,
+            resolver_id=policy_resolver_id,
+            resolver_version=policy_resolver_version,
+            override_reason_codes=override_reason_codes,
         )
         semantic_audit = _build_semantic_arbiter_audit(
             plan_contract=policy_semantic_plan_contract,
@@ -9113,18 +9217,28 @@ async def _handle_webhook_payload(
             override_events=policy_override_events,
             intent_override_events=policy_semantic_intent_overrides,
         )
-        if not isinstance(llm_policy_core_meta, dict):
-            return
-        llm_policy_core_meta["semantic_arbiter"] = {
+        policy_semantic_envelope = {
             "contract_version": SEMANTIC_ARBITER_CONTRACT_VERSION,
             "source": "llm_policy_core",
+            "semantic_owner": "llm_policy_core",
             "plan": policy_semantic_plan_contract,
             "final": policy_semantic_final_contract,
             "audit": semantic_audit,
         }
+        return policy_semantic_envelope
+
+    def _sync_semantic_arbiter_meta() -> None:
+        semantic_envelope = _refresh_semantic_arbiter_envelope(build_plan_if_missing=True)
+        if not isinstance(llm_policy_core_meta, dict):
+            return
+        llm_policy_core_meta["semantic_arbiter"] = semantic_envelope
         llm_policy_core_meta["semantic_intent_overrides"] = list(
             policy_semantic_intent_overrides
         )
+        llm_policy_core_meta["semantic_owner"] = "llm_policy_core"
+        llm_policy_core_meta["resolver_id"] = policy_resolver_id
+        llm_policy_core_meta["resolver_version"] = policy_resolver_version
+        llm_policy_core_meta["entity_refs"] = list(policy_entity_refs)
 
     def _register_policy_override(
         *,
@@ -9133,7 +9247,25 @@ async def _handle_webhook_payload(
         from_action: str | None,
         from_tool_action: str | None,
     ) -> None:
+        nonlocal policy_override_reason_missing_detected
         normalized_reason_code = _audit_policy_override_reason_code(reason_code)
+        if not normalized_reason_code:
+            policy_override_reason_missing_detected = True
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "llm_policy_plan_delta",
+                    "decision": "override_event_missing_reason_guard_block",
+                    "reason_code_raw": reason_code,
+                    "reason": reason,
+                    "plan_action": policy_plan_action,
+                    "plan_tool_action": policy_plan_tool_action,
+                    "from_action": from_action,
+                    "from_tool_action": from_tool_action,
+                    "to_action": policy_action,
+                    "to_tool_action": policy_tool_action,
+                },
+            )
         policy_override_events.append(
             {
                 "reason_code": normalized_reason_code,
@@ -9557,6 +9689,15 @@ async def _handle_webhook_payload(
             if isinstance(raw_needs_manager, bool):
                 policy_needs_manager = raw_needs_manager
             policy_risk_signals = _normalize_plan_refs(policy_payload.get("risk_signals"))
+            policy_entity_refs = _normalize_semantic_entity_refs(
+                policy_payload.get("entity_refs")
+            )
+            raw_resolver_id = policy_payload.get("resolver_id")
+            if isinstance(raw_resolver_id, str) and raw_resolver_id.strip():
+                policy_resolver_id = raw_resolver_id.strip()
+            raw_resolver_version = policy_payload.get("resolver_version")
+            if isinstance(raw_resolver_version, str) and raw_resolver_version.strip():
+                policy_resolver_version = raw_resolver_version.strip()
             policy_semantic_plan_contract = _build_semantic_arbiter_contract(
                 intent=policy_intent,
                 action=policy_plan_action or policy_action,
@@ -9569,6 +9710,10 @@ async def _handle_webhook_payload(
                 open_questions=policy_open_questions,
                 needs_manager=policy_needs_manager,
                 risk_signals=policy_risk_signals,
+                entity_refs=policy_entity_refs,
+                resolver_id=policy_resolver_id,
+                resolver_version=policy_resolver_version,
+                override_reason_codes=_collect_policy_override_reason_codes(),
             )
 
             if not policy_intent:
@@ -9629,7 +9774,15 @@ async def _handle_webhook_payload(
                     policy_validation_error is None
                     and not _plan_outcome_matches_action(policy_action, policy_tool_action)
                 ):
-                    policy_validation_error = "action_tool_mismatch"
+                    if policy_action == "fact" and policy_tool_action == "collect":
+                        # Normalize a common schema-safe mismatch (`fact` + `collect`)
+                        # before fail-closed validation to avoid post-hoc rewrites.
+                        policy_action = "collect"
+                        policy_plan_action = "collect"
+                        policy_action_normalized = True
+                        policy_semantic_plan_contract = None
+                    else:
+                        policy_validation_error = "action_tool_mismatch"
                 if policy_validation_error is None:
                     check_confirm_contract_error = _validate_policy_check_confirm_contract(
                         policy_intent=policy_intent,
@@ -9716,6 +9869,25 @@ async def _handle_webhook_payload(
                                     if isinstance(rescue_reason, str):
                                         normalized_reason = rescue_reason.strip().casefold()
                                         policy_reason = normalized_reason or None
+                                    rescue_entity_refs = _normalize_semantic_entity_refs(
+                                        rescue_payload.get("entity_refs")
+                                    )
+                                    if rescue_entity_refs:
+                                        policy_entity_refs = rescue_entity_refs
+                                    rescue_resolver_id = rescue_payload.get("resolver_id")
+                                    if (
+                                        isinstance(rescue_resolver_id, str)
+                                        and rescue_resolver_id.strip()
+                                    ):
+                                        policy_resolver_id = rescue_resolver_id.strip()
+                                    rescue_resolver_version = rescue_payload.get(
+                                        "resolver_version"
+                                    )
+                                    if (
+                                        isinstance(rescue_resolver_version, str)
+                                        and rescue_resolver_version.strip()
+                                    ):
+                                        policy_resolver_version = rescue_resolver_version.strip()
                                     rescue_slots = _normalize_plan_slot_state(
                                         rescue_payload.get("slots")
                                     )
@@ -10203,24 +10375,14 @@ async def _handle_webhook_payload(
             and policy_tool_action == "consult"
             and bool(info_class_intents)
         )
-        policy_semantic_final_contract = _build_semantic_arbiter_contract(
-            intent=policy_intent,
-            action=policy_action,
-            tool_action=policy_tool_action,
-            pack_refs=policy_pack_refs or resolved_policy_refs,
-            slots=policy_slot_state_validated,
-            confidence=policy_confidence,
-            reason=policy_reason,
-            goal=policy_goal,
-            open_questions=policy_open_questions,
-            needs_manager=policy_needs_manager,
-            risk_signals=policy_risk_signals,
+        policy_semantic_envelope = _refresh_semantic_arbiter_envelope(
+            build_plan_if_missing=False
         )
-        semantic_arbiter_audit = _build_semantic_arbiter_audit(
-            plan_contract=policy_semantic_plan_contract,
-            final_contract=policy_semantic_final_contract,
-            override_events=policy_override_events,
-            intent_override_events=policy_semantic_intent_overrides,
+        semantic_arbiter_audit = (
+            policy_semantic_envelope.get("audit")
+            if isinstance(policy_semantic_envelope, dict)
+            and isinstance(policy_semantic_envelope.get("audit"), dict)
+            else {}
         )
         llm_policy_core_meta = {
             "attempted": policy_result.get("attempted") if isinstance(policy_result, dict) else False,
@@ -10253,13 +10415,11 @@ async def _handle_webhook_payload(
             "capability_block_reason": policy_capability_block_reason,
             "capability_block_scope": policy_capability_block_scope,
             "consult_normalized_to_info": consult_normalized_to_info,
-            "semantic_arbiter": {
-                "contract_version": SEMANTIC_ARBITER_CONTRACT_VERSION,
-                "source": "llm_policy_core",
-                "plan": policy_semantic_plan_contract,
-                "final": policy_semantic_final_contract,
-                "audit": semantic_arbiter_audit,
-            },
+            "semantic_owner": "llm_policy_core",
+            "resolver_id": policy_resolver_id,
+            "resolver_version": policy_resolver_version,
+            "entity_refs": list(policy_entity_refs),
+            "semantic_arbiter": policy_semantic_envelope,
             "semantic_intent_overrides": list(policy_semantic_intent_overrides),
             "memory_summary_used": bool(policy_memory_summary),
             "memory_profile_used": bool(policy_memory_profile),
@@ -10328,6 +10488,10 @@ async def _handle_webhook_payload(
                     if isinstance(policy_memory_profile, dict)
                     else []
                 ),
+                "semantic_owner": "llm_policy_core",
+                "resolver_id": policy_resolver_id,
+                "resolver_version": policy_resolver_version,
+                "entity_refs_count": len(policy_entity_refs),
                 "confidence": policy_confidence,
                 "tool_action": policy_tool_action,
                 "pack_refs": policy_pack_refs or resolved_policy_refs,
@@ -12163,6 +12327,33 @@ async def _handle_webhook_payload(
                     booking_service.strip(),
                     client_slug=payload.client_slug,
                 )
+        if (
+            _semantic_arbitration_enabled()
+            and policy_action == "fact"
+            and policy_tool_action == "catalog.service_query"
+            and booking_wants_flow
+            and isinstance(message_text, str)
+            and message_text.strip()
+            and _is_booking_request(message_text, client_slug=payload.client_slug)
+        ):
+            normalized_turn_text = _normalize_text(message_text)
+            has_info_only_signal = bool(
+                _has_price_signal(normalized_turn_text, message_text)
+                or _has_duration_signal(normalized_turn_text, message_text)
+            )
+            if not has_info_only_signal:
+                previous_action = policy_action
+                previous_tool_action = policy_tool_action
+                policy_action = "collect"
+                policy_tool_action = "collect"
+                policy_pack_refs = []
+                resolved_policy_refs = []
+                _register_policy_override(
+                    reason_code="contract_validation_failure",
+                    reason="booking_request_blocks_service_query_fact",
+                    from_action=previous_action,
+                    from_tool_action=previous_tool_action,
+                )
 
         from app.services.tool_registry_service import (
             execute_tool_action,
@@ -12270,6 +12461,47 @@ async def _handle_webhook_payload(
                         from_action=policy_action,
                         from_tool_action=previous_tool_action,
                     )
+            if policy_tool_action == "catalog.service_query":
+                turn_service_hint = _extract_service_hint(
+                    message_text or "",
+                    payload.client_slug,
+                )
+                if isinstance(turn_service_hint, str) and turn_service_hint.strip():
+                    turn_service_hint = turn_service_hint.strip()
+                    current_service_query = (
+                        policy_service_query.strip()
+                        if isinstance(policy_service_query, str) and policy_service_query.strip()
+                        else None
+                    )
+                    align_to_turn_hint = not current_service_query
+                    if not align_to_turn_hint:
+                        current_tokens = _service_tokens(current_service_query)
+                        hint_tokens = _service_tokens(turn_service_hint)
+                        align_to_turn_hint = bool(
+                            current_tokens and hint_tokens and not (current_tokens & hint_tokens)
+                        )
+                    if align_to_turn_hint:
+                        previous_service_query = current_service_query
+                        policy_service_query = turn_service_hint
+                        policy_tool_args["service_query"] = turn_service_hint
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "service_query_alignment",
+                                "decision": "aligned_to_turn_hint",
+                                "tool_action": "catalog.service_query",
+                                "previous_service_query": previous_service_query,
+                                "service_query": turn_service_hint,
+                            },
+                        )
+                        if saved_message:
+                            _update_message_decision_metadata(
+                                saved_message,
+                                {
+                                    "service_query": turn_service_hint,
+                                    "service_query_source": "turn_service_hint",
+                                },
+                            )
             if not info_sections_hint:
                 info_sections_hint = list(TOOL_INFO_SECTION_MAP.get(policy_tool_action, []))
             if policy_tool_action == "catalog.location":
@@ -12576,6 +12808,26 @@ async def _handle_webhook_payload(
                     )
                 ):
                     policy_tool_args["service_query"] = policy_service_query.strip()
+                elif (
+                    not (
+                        isinstance(policy_tool_args.get("service_query"), str)
+                        and policy_tool_args.get("service_query").strip()
+                    )
+                    and isinstance(merged_slots_for_tool.get("service"), str)
+                    and merged_slots_for_tool.get("service").strip()
+                ):
+                    inferred_service_query = merged_slots_for_tool.get("service").strip()
+                    policy_tool_args["service_query"] = inferred_service_query
+                    policy_service_query = inferred_service_query
+                if not (
+                    isinstance(policy_tool_args.get("service_query"), str)
+                    and policy_tool_args.get("service_query").strip()
+                ):
+                    hinted_service_query = _resolve_service_query_hint()
+                    if isinstance(hinted_service_query, str) and hinted_service_query.strip():
+                        inferred_service_query = hinted_service_query.strip()
+                        policy_tool_args["service_query"] = inferred_service_query
+                        policy_service_query = inferred_service_query
                 turn_datetime_hint = _extract_datetime(
                     message_text or "",
                     client_slug=payload.client_slug,
@@ -12799,6 +13051,10 @@ async def _handle_webhook_payload(
             )
             if verifier_error:
                 verifier_slot = TOOL_VERIFIER_SLOT_BY_FIELD.get(verifier_error_field or "")
+                if policy_tool_action in {"calendar.reschedule", "calendar.cancel"}:
+                    # Reschedule/cancel remains manager-owned on verifier failure,
+                    # even when the first missing field is datetime.
+                    verifier_slot = "booking_reference"
                 verifier_prompt = MSG_FACT_GUARD_CLARIFY
                 verifier_action = "reply"
                 verifier_intent = "policy_verifier"
@@ -13713,6 +13969,127 @@ async def _handle_webhook_payload(
                     and explicit_manager_request_signal
                     and tool_decision in {"not_found", "time_mismatch", "provider_unavailable", "contract_invalid"}
                 )
+                calendar_capability_block_handoff = (
+                    policy_tool_action.startswith("calendar.")
+                    and isinstance(tool_decision, str)
+                    and tool_decision.strip().casefold() == "capability_blocked"
+                )
+                if calendar_capability_block_handoff:
+                    handoff_intent = (
+                        "check_booking"
+                        if policy_tool_action == "calendar.get_booking"
+                        else "booking"
+                    )
+                    if policy_tool_action == "calendar.cancel":
+                        handover_message = message_text or "Онлайн-отмена недоступна, передаю запрос менеджеру."
+                    elif policy_tool_action == "calendar.reschedule":
+                        handover_message = message_text or "Онлайн-перенос недоступен, передаю запрос менеджеру."
+                    elif policy_tool_action == "calendar.get_booking":
+                        handover_message = (
+                            message_text
+                            or "Онлайн-проверка записи недоступна, передаю запрос менеджеру."
+                        )
+                    else:
+                        handover_message = (
+                            message_text
+                            or "Онлайн-календарь недоступен для этого действия, передаю запрос менеджеру."
+                        )
+                    previous_policy_action = policy_action
+                    policy_action = "handoff"
+                    _register_policy_override(
+                        reason_code="tool_unavailable",
+                        reason="calendar_capability_blocked_handoff",
+                        from_action=previous_policy_action,
+                        from_tool_action=policy_tool_action,
+                    )
+                    if saved_message:
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "policy_core_degrade_reason": "policy_validation:tool_unavailable",
+                                "capability_block_scope": "calendar",
+                                "capability_block_reason": (
+                                    (tool_result.decision_meta or {}).get("capability_reason")
+                                    if isinstance(tool_result.decision_meta, dict)
+                                    else None
+                                ),
+                            },
+                        )
+                    _, reused, telegram_sent = _reuse_active_handover(
+                        db=db,
+                        conversation=conversation,
+                        user=user,
+                        message=handover_message,
+                        source="tool_registry",
+                        intent=handoff_intent,
+                    )
+                    if reused:
+                        bot_response = MSG_ESCALATED
+                        result_message = (
+                            "Calendar capability handoff reused, "
+                            f"telegram={'sent' if telegram_sent else 'failed'}"
+                        )
+                    elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
+                        "allow_handover_create", False
+                    ):
+                        _record_escalation_metric("intent")
+                        result = escalate_to_pending(
+                            db=db,
+                            conversation=conversation,
+                            user_message=handover_message,
+                            trigger_type="intent",
+                            trigger_value="calendar_capability_blocked",
+                        )
+                        if result.ok:
+                            handover = result.value
+                            telegram_sent = send_telegram_notification(
+                                db=db,
+                                handover=handover,
+                                conversation=conversation,
+                                user=user,
+                                message=handover_message,
+                            )
+                            bot_response = MSG_ESCALATED
+                            result_message = (
+                                "Calendar capability handoff, "
+                                f"telegram={'sent' if telegram_sent else 'failed'}"
+                            )
+                        else:
+                            bot_response = MSG_AI_ERROR
+                            result_message = "Calendar capability handoff failed"
+                    else:
+                        bot_response = MSG_ESCALATED
+                        result_message = "Calendar capability handoff skipped (already pending)"
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "llm_policy_core_tool",
+                            "decision": "calendar_capability_blocked_handoff",
+                            "state": conversation.state,
+                            "intent": handoff_intent,
+                            "tool_action": policy_tool_action,
+                            "tool_decision": tool_decision,
+                            "expected_reply_contract_reason": contract_followup_reason,
+                            "reason_code": "tool_unavailable",
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="escalate",
+                        intent=handoff_intent,
+                        source="tool_registry",
+                        fast_intent=False,
+                    )
+                    bot_response, sent = _send_and_save(bot_response)
+                    if not sent:
+                        result_message = f"{result_message}; response_send=failed"
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
                 booking_verification_handoff = (
                     booking_verification_lookup_failed
                     or (
@@ -13850,7 +14227,8 @@ async def _handle_webhook_payload(
                     strict=_semantic_arbitration_enabled(),
                 )
                 if (
-                    policy_tool_action in {"catalog.service_query", "catalog.location"}
+                    policy_tool_action
+                    in {"catalog.service_query", "catalog.location", "catalog.portfolio"}
                     and master_request_signal
                     and not has_explicit_location_or_hours
                 ):
@@ -13874,18 +14252,19 @@ async def _handle_webhook_payload(
                         message_text=master_message_text,
                     )
                     if master_reply:
-                        if not _register_policy_intent_override(
-                            reason_code="contract_validation_failure",
-                            reason="master_signal_override",
-                            from_intent=policy_intent,
-                            to_intent="master",
-                            source=policy_tool_action,
-                        ):
-                            return _send_override_reason_missing_clarify(
-                                guard_reason="policy_core_intent_override_missing_reason_clarify",
-                                trace_decision="intent_override_missing_reason_clarify",
-                                trace_source="master_signal_override",
-                            )
+                        if policy_tool_action in {"catalog.service_query", "catalog.location"}:
+                            if not _register_policy_intent_override(
+                                reason_code="contract_validation_failure",
+                                reason="master_signal_override",
+                                from_intent=policy_intent,
+                                to_intent="master",
+                                source=policy_tool_action,
+                            ):
+                                return _send_override_reason_missing_clarify(
+                                    guard_reason="policy_core_intent_override_missing_reason_clarify",
+                                    trace_decision="intent_override_missing_reason_clarify",
+                                    trace_source="master_signal_override",
+                                )
                         context = _get_conversation_context(conversation)
                         preserve_booking_expected = _get_expected_reply_type(context) in {
                             EXPECTED_REPLY_TIME,
@@ -14003,7 +14382,8 @@ async def _handle_webhook_payload(
                     turn_outcome_expected_reason = services_overview_contract.reason
                 suppress_info_followup_prompt = bool(
                     booking_interrupt_prompt
-                    and policy_tool_action in {"catalog.service_query", "catalog.location"}
+                    and policy_tool_action
+                    in {"catalog.service_query", "catalog.location", "catalog.portfolio"}
                     and (
                         not services_overview_followup
                         or not booking_wants_flow
@@ -14013,6 +14393,18 @@ async def _handle_webhook_payload(
                     # FACT/info turns may keep expected_reply contract, but should not leak
                     # booking prompt fragments into the rendered reply body.
                     booking_interrupt_prompt = None
+                if style_reference_text_signal and not has_media:
+                    if booking_wants_flow or policy_tool_action.startswith("calendar."):
+                        # Portfolio/style-reference FACT replies should stay booking-neutral
+                        # in this turn to avoid mix_info_booking contract violations.
+                        if policy_tool_action == "catalog.portfolio":
+                            booking_interrupt_prompt = None
+                        else:
+                            booking_interrupt_prompt = MSG_BOOKING_ASK_DATETIME
+                    elif booking_interrupt_prompt:
+                        # Outside booking/calendar context, suppress extra follow-ups to
+                        # avoid mixing unrelated prompts with style-reference guidance.
+                        booking_interrupt_prompt = None
                 if booking_interrupt_prompt and _should_append_followup_prompt(
                     bot_response,
                     booking_interrupt_prompt,
@@ -14289,6 +14681,26 @@ async def _handle_webhook_payload(
                 primary_info_intent = policy_info_intents[0]
                 direct_info_service_query = policy_service_query
                 direct_info_service_query_source = "policy_service_query"
+                if primary_info_intent in INFO_SERVICE_DEPENDENT_INTENTS and message_text:
+                    turn_service_hint = _extract_service_hint(message_text, payload.client_slug)
+                    if isinstance(turn_service_hint, str) and turn_service_hint.strip():
+                        turn_service_hint = turn_service_hint.strip()
+                        current_service_query = (
+                            direct_info_service_query.strip()
+                            if isinstance(direct_info_service_query, str)
+                            and direct_info_service_query.strip()
+                            else None
+                        )
+                        use_turn_hint = not current_service_query
+                        if not use_turn_hint:
+                            current_tokens = _service_tokens(current_service_query)
+                            hint_tokens = _service_tokens(turn_service_hint)
+                            use_turn_hint = bool(
+                                current_tokens and hint_tokens and not (current_tokens & hint_tokens)
+                            )
+                        if use_turn_hint:
+                            direct_info_service_query = turn_service_hint
+                            direct_info_service_query_source = "turn_service_hint"
                 if (
                     primary_info_intent == "master"
                     and policy_tool_action == "catalog.service_query"
@@ -14304,18 +14716,6 @@ async def _handle_webhook_payload(
                     message_text=message_text,
                 )
                 if direct_info_reply:
-                    if not _register_policy_intent_override(
-                        reason_code="contract_validation_failure",
-                        reason="info_ref_resolution",
-                        from_intent=policy_intent,
-                        to_intent=primary_info_intent,
-                        source=policy_tool_action,
-                    ):
-                        return _send_override_reason_missing_clarify(
-                            guard_reason="policy_core_intent_override_missing_reason_clarify",
-                            trace_decision="intent_override_missing_reason_clarify",
-                            trace_source="info_ref_resolution",
-                        )
                     if primary_info_intent in {"master"}:
                         context = _get_conversation_context(conversation)
                         context = _set_expected_reply_context(

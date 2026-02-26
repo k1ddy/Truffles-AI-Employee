@@ -18,6 +18,9 @@ def test_validate_llm_policy_core_output_valid():
         "confidence": 0.7,
         "reason": "pricing",
         "goal": "info",
+        "entity_refs": [{"entity_id": "svc:manicure", "entity_type": "service"}],
+        "resolver_id": "llm_policy_core",
+        "resolver_version": "v1",
     }
 
     contract, error = validate_llm_policy_core_output(payload)
@@ -26,6 +29,9 @@ def test_validate_llm_policy_core_output_valid():
     assert contract is not None
     assert contract.action == "fact"
     assert contract.tool_action == "info"
+    assert contract.resolver_id == "llm_policy_core"
+    assert contract.resolver_version == "v1"
+    assert contract.entity_refs and contract.entity_refs[0].get("entity_id") == "svc:manicure"
 
 
 def test_validate_llm_policy_core_output_invalid():

@@ -221,6 +221,46 @@ def _normalize_optional_string(value: Any, *, field: str) -> str | None:
     return cleaned or None
 
 
+def _normalize_entity_refs(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("entity_refs_invalid")
+    cleaned: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, str):
+            token = item.strip()
+            if token:
+                cleaned.append({"entity_id": token})
+            continue
+        if not isinstance(item, dict):
+            raise ValueError("entity_refs_invalid")
+        row: dict[str, Any] = {}
+        entity_id = item.get("entity_id")
+        if not isinstance(entity_id, str) or not entity_id.strip():
+            fallback_id = item.get("id")
+            if isinstance(fallback_id, str) and fallback_id.strip():
+                entity_id = fallback_id
+        if isinstance(entity_id, str) and entity_id.strip():
+            row["entity_id"] = entity_id.strip()
+        entity_type = item.get("entity_type")
+        if not isinstance(entity_type, str) or not entity_type.strip():
+            fallback_type = item.get("type")
+            if isinstance(fallback_type, str) and fallback_type.strip():
+                entity_type = fallback_type
+        if isinstance(entity_type, str) and entity_type.strip():
+            row["entity_type"] = entity_type.strip()
+        source_ref = item.get("source_ref")
+        if isinstance(source_ref, str) and source_ref.strip():
+            row["source_ref"] = source_ref.strip()
+        confidence = item.get("confidence")
+        if isinstance(confidence, (int, float)):
+            row["confidence"] = max(0.0, min(float(confidence), 1.0))
+        if row:
+            cleaned.append(row)
+    return cleaned
+
+
 class DialogueControllerOutput(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -368,13 +408,25 @@ class LlmPolicyCoreOutput(BaseModel):
     confidence: float = Field(..., ge=0, le=1)
     reason: str | None = None
     goal: str | None = None
+    entity_refs: list[dict[str, Any]] = Field(default_factory=list)
+    resolver_id: str | None = None
+    resolver_version: str | None = None
 
     @field_validator("intent", "action", "tool_action", mode="before")
     @classmethod
     def _validate_action(cls, value: Any, info) -> str:
         return _normalize_required_string(value, field=info.field_name)
 
-    @field_validator("tool_action", "language", "reason", "goal", "next_question", mode="before")
+    @field_validator(
+        "tool_action",
+        "language",
+        "reason",
+        "goal",
+        "next_question",
+        "resolver_id",
+        "resolver_version",
+        mode="before",
+    )
     @classmethod
     def _validate_optional_fields(cls, value: Any, info) -> str | None:
         return _normalize_optional_string(value, field=info.field_name)
@@ -396,6 +448,11 @@ class LlmPolicyCoreOutput(BaseModel):
     @classmethod
     def _validate_slots(cls, value: Any) -> dict[str, str]:
         return _normalize_slots(value)
+
+    @field_validator("entity_refs", mode="before")
+    @classmethod
+    def _validate_entity_refs(cls, value: Any) -> list[dict[str, Any]]:
+        return _normalize_entity_refs(value)
 
     @field_validator("needs_manager", mode="before")
     @classmethod

@@ -111,16 +111,21 @@ def _resolve_runtime_handoff_policy() -> tuple[str, str]:
     return policy, source
 
 
-def _resolve_runtime_tool_policy() -> tuple[list[str], list[str], str, bool]:
+def _resolve_runtime_tool_policy() -> tuple[list[str], list[str], str, bool, bool]:
     runtime = get_runtime_capabilities()
     if runtime is None:
-        return [], [], "default", False
+        return [], [], "default", False, False
     tools_config = getattr(runtime.payload, "tools", None)
     allow_tokens = _normalize_tool_policy_tokens(getattr(tools_config, "allow", None))
     deny_tokens = _normalize_tool_policy_tokens(getattr(tools_config, "deny", None))
     source = str(getattr(runtime, "source", "") or "runtime")
     has_records = bool(getattr(runtime, "has_records", False))
-    return allow_tokens, deny_tokens, source, has_records
+    has_tool_policy_records = bool(getattr(runtime, "has_tool_policy_records", False))
+    if not has_tool_policy_records and has_records and (allow_tokens or deny_tokens):
+        # Backward-compatible guard for legacy runtime objects built without the
+        # `has_tool_policy_records` flag.
+        has_tool_policy_records = True
+    return allow_tokens, deny_tokens, source, has_records, has_tool_policy_records
 
 
 def resolve_fact_scope_decision(scope_token: str | None) -> FactScopeDecision:
@@ -212,15 +217,22 @@ def resolve_handoff_policy_decision(*, explicit_manager_request: bool) -> Handof
 
 def resolve_tool_protocol_decision(tool_action: str) -> ToolProtocolDecision:
     normalized_action = str(tool_action or "").strip().casefold()
-    allow_tokens, deny_tokens, source, has_records = _resolve_runtime_tool_policy()
+    (
+        allow_tokens,
+        deny_tokens,
+        source,
+        _has_records,
+        has_tool_policy_records,
+    ) = _resolve_runtime_tool_policy()
     enforcement_enabled = _is_env_enabled(
         os.environ.get("TOOL_POLICY_ENFORCEMENT"), default=True
     )
     deny_by_default_env = os.environ.get("TOOL_PROTOCOL_DENY_BY_DEFAULT")
     if deny_by_default_env is None:
-        # If a tenant already has capability records, fail closed unless policy
-        # explicitly allows a tool (allowlist) or denies it with reason.
-        deny_by_default = has_records
+        # Fail closed only when tenant explicitly owns tool policy records.
+        # Non-tool capability records (channels/providers/features) should not
+        # silently block FACT/tools by default.
+        deny_by_default = has_tool_policy_records
     else:
         deny_by_default = _is_env_enabled(deny_by_default_env, default=False)
 
