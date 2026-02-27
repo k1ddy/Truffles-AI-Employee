@@ -172,6 +172,41 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - No-go
 - Риски/блокеры
 
+### 5.1 External Research Gate (обязательно)
+- Для каждой нетривиальной реализации/фикса до начала кода обязателен **ровно один точный web-search**.
+- Search фиксируется в Task Package секции `One web search (mandatory before implementation)`:
+  - точная строка запроса,
+  - дата/время,
+  - открытые источники,
+  - найденные готовые решения,
+  - решение `reuse/integrate/build` и причина,
+  - отклонённые варианты.
+- Дополнительные query запрещены без явного согласования Brain/Top Architect и записи в TP.
+
+### 5.2 Root Cause Gate (обязательно)
+- Фиксы по поведению/надежности начинаются с root-cause, а не с симптома.
+- В Task Package обязательна секция `Root cause (mandatory)`:
+  - symptom,
+  - minimal reproduction,
+  - evidence,
+  - Five Whys (или эквивалентная структурированная RCA),
+  - root cause statement,
+  - fix mechanism.
+- Если root cause не доказан, статус блока = `BLOCKED` до фиксации гипотез и плана проверки.
+
+### 5.3 Reuse-First Gate (обязательно)
+- По умолчанию стратегия: **reuse -> integrate -> configure -> build**.
+- Новая реализация допускается только после явной фиксации в TP, почему reuse/integration не подходят (функционал, лицензия, безопасность, производительность, платформенные ограничения).
+- Конфигурация tenant/branch/env должна оставаться в data/config слоях; runtime-core hardcode запрещён.
+
+### 5.4 Iteration Discipline Gate (обязательно)
+- Каждый дорогой прогон (LLM quality/long suites/load) обязан иметь:
+  - гипотезу,
+  - ожидаемый измеримый эффект,
+  - stop condition.
+- Две подряд итерации без новой evidence => stop-the-line, возврат к RCA/research.
+- Запрещено ослаблять acceptance-гейты/thresholds для «ускорения».
+
 ---
 
 ## 6) Stop-the-line (жёсткие запреты)
@@ -183,6 +218,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Нет tests + live-check + trace/meta там, где они обязательны.
 - Есть предупреждения/ошибки в логах, которые мы игнорируем.
 - Для "экономии времени/токенов" предлагается снизить acceptance-бар, отключить обязательный gate или ослабить контрактный oracle вместо исправления root cause.
+- Для prod-impacting изменения отсутствует staged rollout/canary plan, go/no-go сигналы или проверяемый rollback путь.
 
 **Пакет при CI fail (обязателен):**
 - run URL
@@ -202,6 +238,14 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - подменять LLM-first семантику keyword/regex логикой в core вместо контрактных resolver/capability механизмов.
 - использовать бюджетные ограничения как обоснование для архитектурного/продуктового downgrade.
 - оставлять обходной путь в production как "временный" без owner, срока удаления и отдельного rollback-плана.
+
+### 6.4 Release Safety Gate (обязательно)
+- Любое prod-impacting изменение должно содержать `Release safety` в TP:
+  - стратегия rollout (`canary`/`blue-green`/flags),
+  - go/no-go сигналы,
+  - rollback процедура и проверка.
+- Продвижение rollout без фактических сигналов запрещено.
+- При устойчивой деградации надежности (SLO/error-budget breach) feature rollout останавливается до восстановления baseline.
 
 ### 6.1 Local-first validation law (обязательно)
 - Любая правка core‑поведения сначала проходит локальный реалистичный контур; без этого PR/приёмка = BLOCKED.
@@ -350,6 +394,12 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 19) **Graceful degrade observability** (каждый degrade имеет `reason_code` + trace/meta и учитывается в error budget, а не маскируется).
 20) **No Budget-Driven Quality Downgrade** (бюджет не снижает acceptance-критерии и не меняет целевой контракт продукта).
 21) **No Workaround-as-Architecture** (временный workaround не может становиться default-путем платформы).
+
+### P4 — research-driven execution
+22) **External Research Before Code** (до реализации есть 1 точный search + зафиксированное решение `reuse/integrate/build`).
+23) **Root Cause Before Fix** (фиксы по надежности/поведению подтверждают механизм, а не только симптом).
+24) **Reuse-First by Default** (новая реализация только при явном обосновании невозможности reuse/integration).
+25) **Release Safety as Contract** (prod-impacting блоки без staged rollout + rollback + go/no-go не принимаются).
 
 ---
 

@@ -16,6 +16,23 @@ Date
 - `<command>` -> <result>
 - `<file/path:line>` -> <fact>
 
+## One web search evidence
+- `Query (exact)` -> <value>
+- `Sources opened` -> <list>
+- `Decision` -> <reuse|integrate|build> + reason
+- `What was reused` -> <modules/libs/contracts>
+
+## Root cause validation
+- `Symptom` -> <statement>
+- `Minimal reproduction` -> <command/steps>
+- `Root cause statement` -> <mechanism>
+- `Proof after fix` -> <evidence that mechanism is removed>
+
+## Reuse-first outcome
+- `Internal reuse applied` -> <yes/no + details>
+- `External reuse applied` -> <yes/no + details>
+- `If build-new` -> <why reuse/integration was not viable>
+
 ## Contract delta
 - <какой контракт изменился>
 
@@ -25,8 +42,19 @@ Date
 ## Checks + outcomes
 - `<command>` -> <result>
 
+## Iteration budget outcomes
+- `Planned max runs` -> <N>
+- `Actual runs` -> <N>
+- `Stop condition respected` -> <yes/no>
+- `If exceeded` -> <approved by + reason>
+
 ## Evidence
 - `<path/url>`
+
+## Release safety decision
+- `Strategy used` -> <canary|blue-green|flags|n/a>
+- `Go/no-go signals observed` -> <summary>
+- `Rollback readiness` -> <verified/not required + evidence>
 
 ## Canon/doc sync updates
 - `Updated docs/specs`:
