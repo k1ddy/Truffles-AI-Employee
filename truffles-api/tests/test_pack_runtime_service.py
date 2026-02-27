@@ -54,6 +54,12 @@ def test_get_pack_decision_enriches_resolver_contract(monkeypatch) -> None:
     assert meta.get("resolver_confidence") == 0.88
     assert isinstance(meta.get("resolver_candidates"), list) and meta.get("resolver_candidates")
     assert isinstance(meta.get("resolver_contract"), dict)
+    fact_bundle = meta.get("fact_bundle")
+    assert isinstance(fact_bundle, dict)
+    assert fact_bundle.get("pack_id") == "demo_salon"
+    assert fact_bundle.get("source_ref") == "truth"
+    assert isinstance(meta.get("provenance"), dict)
+    assert meta.get("provenance", {}).get("pack_id") == "demo_salon"
 
 
 def test_get_pack_service_decision_enriches_collect_contract_for_escalation(monkeypatch) -> None:
@@ -76,6 +82,71 @@ def test_get_pack_service_decision_enriches_collect_contract_for_escalation(monk
     assert meta.get("resolver_id") == "pack_runtime.service_matcher"
     assert meta.get("action_class") == "HANDOFF"
     assert meta.get("abstain_reason") in {"missing_service_query", "handoff_required"}
+
+
+def test_has_consult_recommendation_signal_prefers_contract_meta() -> None:
+    decision = PackDecision(
+        action="reply",
+        response="Подберу вариант.",
+        intent="service_match",
+        meta={
+            "consult_recommendation": True,
+            "resolver_contract": {
+                "intent_class": "service_match",
+                "action_class": "FACT",
+                "confidence": 0.9,
+                "abstain_reason": None,
+            },
+        },
+    )
+    assert runtime.has_consult_recommendation_signal(decision) is True
+
+
+def test_is_timeout_fact_fallback_candidate_requires_fact_confidence_margin() -> None:
+    fact_decision = PackDecision(
+        action="reply",
+        response="Салон работает с 9:00 до 21:00.",
+        intent="hours",
+        meta={
+            "resolver_contract": {
+                "intent_class": "hours",
+                "action_class": "FACT",
+                "confidence": 0.83,
+                "abstain_reason": None,
+            }
+        },
+    )
+    assert runtime.is_timeout_fact_fallback_candidate(fact_decision, min_confidence=0.6) is True
+
+    abstain_decision = PackDecision(
+        action="reply",
+        response="Нужно уточнение.",
+        intent="hours",
+        meta={
+            "resolver_contract": {
+                "intent_class": "hours",
+                "action_class": "FACT",
+                "confidence": 0.91,
+                "abstain_reason": "low_confidence_collect",
+            }
+        },
+    )
+    assert runtime.is_timeout_fact_fallback_candidate(abstain_decision, min_confidence=0.6) is False
+
+    low_conf_decision = PackDecision(
+        action="reply",
+        response="Возможно, это по прайсу.",
+        intent="pricing",
+        meta={
+            "resolver_contract": {
+                "intent_class": "pricing",
+                "action_class": "FACT",
+                "confidence": 0.41,
+                "abstain_reason": None,
+            }
+        },
+    )
+    assert runtime.is_timeout_fact_fallback_candidate(low_conf_decision, min_confidence=0.6) is False
 
 
 def test_has_walkin_without_booking_signal_fallback() -> None:

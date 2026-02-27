@@ -367,6 +367,67 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
     schema = {
         "type": "object",
         "additionalProperties": False,
+        "allOf": [
+            {
+                "if": {
+                    "properties": {
+                        "intent": {
+                            "enum": ["master_query", "master"],
+                        },
+                    },
+                    "required": ["intent"],
+                },
+                "then": {
+                    "anyOf": [
+                        {
+                            "properties": {
+                                "slots": {
+                                    "type": "object",
+                                    "properties": {
+                                        "service": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                        },
+                                    },
+                                    "required": ["service"],
+                                },
+                            },
+                        },
+                        {
+                            "properties": {
+                                "tool_args": {
+                                    "type": "object",
+                                    "properties": {
+                                        "service_query": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                        },
+                                    },
+                                    "required": ["service_query"],
+                                },
+                            },
+                        },
+                        {
+                            "properties": {
+                                "action": {"const": "collect"},
+                                "next_question": {"const": "service"},
+                            },
+                            "required": ["action", "next_question"],
+                        },
+                        {
+                            "properties": {
+                                "action": {"const": "collect"},
+                                "open_questions": {
+                                    "type": "array",
+                                    "contains": {"const": "service"},
+                                },
+                            },
+                            "required": ["action", "open_questions"],
+                        },
+                    ],
+                },
+            }
+        ],
         "required": [
             "intent",
             "action",
@@ -397,6 +458,17 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "reason": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "goal": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "entity_refs": {
+                "type": "array",
+                "items": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "object", "additionalProperties": True},
+                    ]
+                },
+            },
+            "resolver_id": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "resolver_version": {"anyOf": [{"type": "string"}, {"type": "null"}]},
         },
     }
     return {
@@ -1269,6 +1341,10 @@ Optional fields: tool_args, pack_refs, slots, next_question, open_questions, nee
 risk_signals, language, reason, goal.
 Use tool_action and pack_refs only from the allowed lists provided in the input.
 slots/open_questions/next_question may only use: service, datetime, name.
+Use intent=master_query only when user explicitly asks about specialists for a concrete service/skill.
+master_query requires slots.service or tool_args.service_query for fact answers.
+If service is missing for master_query, use action=collect, tool_action=collect,
+next_question=service and open_questions must include service.
 """
 
 _CONTROLLER_PROMPT_CACHE: str | None = None

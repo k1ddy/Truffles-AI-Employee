@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from app.routers.webhook import _legacy as legacy
 from app.routers.webhook import decision as decision_router
+from app.routers.webhook import info as info_router
 
 
 def _detect_info_calls(source_path: Path) -> list[ast.Call]:
@@ -159,6 +160,33 @@ def test_expected_reply_info_block_detects_booking_interrupt_info_turns():
         message_text="Сколько длится маникюр на 3 часа?",
         client_slug="demo_salon",
     )
+    assert decision_router._should_block_expected_reply_by_info(
+        expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+        message_text="Где ваш салон?",
+        client_slug="demo_salon",
+    )
+    assert decision_router._should_block_expected_reply_by_info(
+        expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+        message_text="Я отправлю фото своей прически.",
+        client_slug="demo_salon",
+    )
+    assert decision_router._should_block_expected_reply_by_info(
+        expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+        message_text="Проверьте, пожалуйста, мою запись на пятницу.",
+        client_slug="demo_salon",
+    )
+
+
+def test_info_classifier_detects_location_question_where_salon_phrase():
+    intents, meta = info_router._detect_info_class_intents(
+        "Где ваш салон?",
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "location" in intents
+    signals = meta.get("info_signals") if isinstance(meta, dict) else {}
+    assert isinstance(signals, dict) and signals.get("location") is True
 
 
 def test_decision_recomputes_expected_reply_block_after_debounce():

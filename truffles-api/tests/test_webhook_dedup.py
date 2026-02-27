@@ -1,8 +1,10 @@
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 from app.routers import webhook
+from app.routers.webhook import dedup as dedup_module
 
 
 class FakeRedisBuffer:
@@ -169,3 +171,38 @@ async def test_is_duplicate_message_id_reports_db_duplicate_without_redis():
     assert diagnostics["dedup_duplicate"] is True
     db.execute.assert_called_once()
     db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_dedup_gate_fast_test_bypass(monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("LLM_QUALITY_FAST_DEDUP", "1")
+
+    called = {"duplicate_check": False}
+
+    async def _fake_is_duplicate_message_id(*_args, **_kwargs):
+        called["duplicate_check"] = True
+        return True
+
+    monkeypatch.setattr(dedup_module, "is_duplicate_message_id", _fake_is_duplicate_message_id)
+
+    diagnostics = {}
+    response, resolved_message_id = await dedup_module._handle_dedup_gate(
+        db=Mock(),
+        client=SimpleNamespace(id="client-1"),
+        message_id="msg-fast-1",
+        remote_jid="77000000000@s.whatsapp.net",
+        metadata=SimpleNamespace(timestamp=1234567890, messageId="msg-fast-1"),
+        message_text="test",
+        conversation_id=None,
+        resolve_trace_conversation=lambda **_kwargs: None,
+        record_early_trace=lambda *_args, **_kwargs: False,
+        dedup_diagnostics=diagnostics,
+    )
+
+    assert response is None
+    assert resolved_message_id == "msg-fast-1"
+    assert called["duplicate_check"] is False
+    assert diagnostics["dedup_backend"] == "fast_test_bypass"
+    assert diagnostics["dedup_fallback_reason"] == "test_mode_fast_dedup"
+    assert diagnostics["dedup_duplicate"] is False

@@ -116,6 +116,20 @@ def test_parse_booking_datetime_handles_dateparser_timezone_conflict():
     assert parsed is None
 
 
+def test_is_appointment_overlap_integrity_error_detects_constraint_name():
+    exc = Exception('conflicting key value violates exclusion constraint "appointments_no_overlap"')
+    assert booking_router._is_appointment_overlap_integrity_error(exc) is True
+
+
+def test_is_appointment_overlap_integrity_error_detects_nested_orig_message():
+    class _Orig:
+        def __str__(self) -> str:
+            return "DETAIL: conflicting key value violates exclusion constraint"
+
+    wrapped = SimpleNamespace(orig=_Orig())
+    assert booking_router._is_appointment_overlap_integrity_error(wrapped) is True
+
+
 def test_create_booking_appointment_reuses_existing():
     now = datetime(2026, 1, 30, 9, 0, tzinfo=timezone.utc)
     branch_id = uuid4()
@@ -313,9 +327,27 @@ def test_looks_like_booking_reschedule_request_detects_change_time_phrase():
     )
 
 
+def test_looks_like_booking_reschedule_request_detects_change_to_specific_time_phrase():
+    assert booking_router._looks_like_booking_reschedule_request(
+        "Можно поменять на 16:00?"
+    )
+
+
+def test_looks_like_booking_reschedule_request_detects_hypothetical_change_time_phrase():
+    assert booking_router._looks_like_booking_reschedule_request(
+        "Что если я захочу изменить время?"
+    )
+
+
 def test_looks_like_booking_reschedule_request_skips_regular_duration_question():
     assert not booking_router._looks_like_booking_reschedule_request(
         "Сколько длится процедура маникюра?"
+    )
+
+
+def test_looks_like_booking_reschedule_request_detects_cancel_phrase():
+    assert booking_router._looks_like_booking_reschedule_request(
+        "Можете сбросить мою запись?"
     )
 
 
@@ -1135,6 +1167,66 @@ def test_tool_registry_blocks_action_on_allowlist_miss():
     assert result.error_code == "tool_action_disabled"
     assert result.decision_meta.get("tool_decision") == "capability_blocked"
     assert result.decision_meta.get("capability_reason") == "allowlist_miss"
+
+
+def test_tool_registry_blocks_action_when_protocol_deny_by_default(monkeypatch):
+    monkeypatch.setenv("TOOL_PROTOCOL_DENY_BY_DEFAULT", "1")
+    db = Mock()
+    runtime = RuntimeCapabilities(
+        payload=CapabilitiesPayload.model_validate({}),
+        client_id=uuid4(),
+        branch_id=None,
+        source="client_capabilities",
+        has_records=True,
+    )
+    set_runtime_capabilities(runtime)
+    try:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.location",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=None,
+            client_slug="demo_salon",
+            service_query=None,
+        )
+    finally:
+        set_runtime_capabilities(None)
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "tool_action_disabled"
+    assert result.decision_meta.get("tool_decision") == "capability_blocked"
+    assert result.decision_meta.get("capability_reason") == "deny_by_default"
+    assert result.decision_meta.get("tool_protocol_decision") == "blocked"
+
+
+def test_tool_registry_deny_by_default_allows_explicit_allow_token(monkeypatch):
+    monkeypatch.setenv("TOOL_PROTOCOL_DENY_BY_DEFAULT", "1")
+    db = Mock()
+    runtime = RuntimeCapabilities(
+        payload=CapabilitiesPayload.model_validate({"tools": {"allow": ["catalog.location"]}}),
+        client_id=uuid4(),
+        branch_id=None,
+        source="client_capabilities",
+        has_records=True,
+    )
+    set_runtime_capabilities(runtime)
+    try:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.location",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=None,
+            client_slug="demo_salon",
+            service_query=None,
+        )
+    finally:
+        set_runtime_capabilities(None)
+
+    assert result.error_code != "tool_action_disabled"
+    assert result.decision_meta.get("tool_decision") != "capability_blocked"
 
 
 def test_tool_registry_skips_capability_block_when_enforcement_disabled(monkeypatch):

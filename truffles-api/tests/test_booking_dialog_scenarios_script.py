@@ -102,7 +102,7 @@ def test_merge_expectations_sanitizes_handoff_override_without_handoff_tags():
     )
 
     assert expect["action"] is None
-    assert expect["state"] is None
+    assert expect["state"] == "bot_active"
     assert expect["expected_reply"] is True
 
 
@@ -117,6 +117,12 @@ def test_merge_expectations_drops_info_override_without_info_tags():
 
     assert expect["info_sections"] == []
     assert expect["expected_reply"] is True
+
+
+def test_merge_expectations_assigns_default_state_for_weak_tags():
+    expect = _merge_expectations(["noise"], None)
+
+    assert expect["state"] == "bot_active"
 
 
 def test_generate_llm_dialogs_retries_after_json_error(monkeypatch):
@@ -237,6 +243,32 @@ def test_ensure_required_tags_reorders_check_before_confirm():
     )
 
     assert check_idx < confirm_idx
+
+
+def test_required_llm_tags_include_handoff_for_handoff_coverage():
+    required = _module._required_llm_tags(["booking", "info", "interrupt", "handoff"])
+
+    assert "handoff" in required
+
+
+def test_ensure_required_tags_adds_handoff_for_handoff_coverage():
+    ctx = _module._build_context(random.Random(23))
+    turns = [
+        {"kind": "text", "text": "Хочу записаться", "tags": ["booking"], "expect": {}},
+        {"kind": "text", "text": "Можно на 19:00?", "tags": ["time"], "expect": {}},
+        {"kind": "text", "text": "Меня зовут Лена", "tags": ["name"], "expect": {}},
+        {"kind": "text", "text": "Да, подтверждаю.", "tags": ["confirm"], "expect": {}},
+    ]
+
+    enriched = _module._ensure_required_tags(
+        turns,
+        ctx,
+        max_turns=12,
+        coverage=["booking", "info", "interrupt", "handoff"],
+    )
+    tags = {tag for turn in enriched for tag in (turn.get("tags") or [])}
+
+    assert "handoff" in tags
 
 
 def test_call_openai_classifies_quota_error(monkeypatch):

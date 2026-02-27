@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from dataclasses import dataclass
 from typing import Any
 
 from app.services.pack_runtime_default import (
@@ -76,6 +77,373 @@ _WALKIN_WITHOUT_BOOKING_FALLBACK_TERMS = (
     "без предварительной записи",
     "без очереди",
 )
+_MASTER_INTENT_RESOLVER_ID = "pack.master_intent"
+_MASTER_INTENT_RESOLVER_VERSION = "2026-02-27"
+_MASTER_QUERY_DIRECT_TERMS_KEY = "master_query_direct_terms"
+_MASTER_QUERY_PERSON_TERMS_KEY = "master_query_person_terms"
+_MASTER_QUERY_ACTION_TERMS_KEY = "master_query_action_terms"
+_MASTER_QUERY_EXPERIENCE_TERMS_KEY = "master_query_experience_terms"
+_MASTER_QUERY_MISSING_SERVICE_REPLY = (
+    "Podskazhite, po kakoy usluge nuzhno podobrat mastera?"
+)
+_MASTER_QUERY_UNKNOWN_SERVICE_REPLY = (
+    "Po usluge \"{service}\" utochnu dostupnyh masterov u administratora."
+)
+_MASTER_QUERY_REPLY_TEMPLATE = "Po usluge \"{service}\" rabotayut: {specialists}."
+_MASTER_QUERY_COLLECTION_ACTION = "collect"
+_MASTER_QUERY_FACT_ACTION = "reply"
+_MASTER_QUERY_FACT_INTENT = "master"
+_MASTER_QUERY_SERVICE_CLARIFY_REASON = "missing_service_query"
+
+
+@dataclass(frozen=True)
+class MasterIntentResolution:
+    explicit: bool
+    service_query: str | None
+    service_query_source: str
+    needs_service_clarify: bool
+    reason: str | None
+    matched_signals: list[str]
+    resolver_id: str = _MASTER_INTENT_RESOLVER_ID
+    resolver_version: str = _MASTER_INTENT_RESOLVER_VERSION
+
+
+@dataclass(frozen=True)
+class MasterReplyDecision:
+    response: str | None
+    action: str
+    intent: str
+    meta: dict[str, Any]
+
+
+def _coerce_text_token(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    return cleaned
+
+
+def _coerce_text_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        source = value
+    elif isinstance(value, tuple):
+        source = list(value)
+    elif isinstance(value, str):
+        source = [value]
+    else:
+        return []
+    values: list[str] = []
+    seen: set[str] = set()
+    for item in source:
+        token = _coerce_text_token(item)
+        if not token:
+            continue
+        key = token.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(token)
+    return values
+
+
+def _first_signal_hit(normalized_message: str, terms: list[str]) -> str | None:
+    if not normalized_message:
+        return None
+    for term in terms:
+        normalized_term = _normalize_text(term)
+        if normalized_term and normalized_term in normalized_message:
+            return normalized_term
+    return None
+
+
+def _normalize_optional_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    token = value.strip()
+    return token or None
+
+
+def _resolve_master_service_query(
+    *,
+    message_text: str | None,
+    client_slug: str | None,
+    service_query: str | None,
+    intent_decomp: dict[str, Any] | None,
+) -> tuple[str | None, str]:
+    explicit_query = _normalize_optional_text(service_query)
+    if explicit_query:
+        return explicit_query, "input"
+    if isinstance(intent_decomp, dict):
+        decomp_query = _normalize_optional_text(intent_decomp.get("service_query"))
+        if decomp_query:
+            return decomp_query, "intent_decomp"
+    if message_text:
+        semantic_query = get_pack_service_hint(message_text, client_slug=client_slug)
+        semantic_query = _normalize_optional_text(semantic_query)
+        if semantic_query:
+            return semantic_query, "semantic_match"
+    return None, "none"
+
+
+def _master_signal_terms(client_slug: str | None, key: str) -> list[str]:
+    return _coerce_text_list(get_signal_lexicon_list(client_slug, key))
+
+
+def resolve_master_intent(
+    *,
+    message_text: str | None,
+    client_slug: str | None,
+    service_query: str | None = None,
+    intent_decomp: dict[str, Any] | None = None,
+    force_master_intent: bool = False,
+) -> MasterIntentResolution:
+    normalized_message = _normalize_text(message_text or "")
+    direct_terms = _master_signal_terms(client_slug, _MASTER_QUERY_DIRECT_TERMS_KEY)
+    person_terms = _master_signal_terms(client_slug, _MASTER_QUERY_PERSON_TERMS_KEY)
+    action_terms = _master_signal_terms(client_slug, _MASTER_QUERY_ACTION_TERMS_KEY)
+    experience_terms = _master_signal_terms(client_slug, _MASTER_QUERY_EXPERIENCE_TERMS_KEY)
+
+    direct_hit = _first_signal_hit(normalized_message, direct_terms)
+    person_hit = _first_signal_hit(normalized_message, person_terms)
+    action_hit = _first_signal_hit(normalized_message, action_terms)
+    experience_hit = _first_signal_hit(normalized_message, experience_terms)
+
+    explicit = bool(force_master_intent)
+    reason: str | None = "forced_master_intent" if force_master_intent else None
+    matched_signals: list[str] = []
+    if direct_hit:
+        matched_signals.append(direct_hit)
+    if person_hit:
+        matched_signals.append(person_hit)
+    if action_hit:
+        matched_signals.append(action_hit)
+    if experience_hit:
+        matched_signals.append(experience_hit)
+
+    if not explicit:
+        if direct_hit:
+            explicit = True
+            reason = "direct_signal"
+        elif person_hit and (action_hit or experience_hit):
+            explicit = True
+            reason = "person_action_signal"
+
+    resolved_service_query, service_query_source = _resolve_master_service_query(
+        message_text=message_text,
+        client_slug=client_slug,
+        service_query=service_query,
+        intent_decomp=intent_decomp,
+    )
+    return MasterIntentResolution(
+        explicit=explicit,
+        service_query=resolved_service_query,
+        service_query_source=service_query_source,
+        needs_service_clarify=bool(explicit and not resolved_service_query),
+        reason=reason,
+        matched_signals=matched_signals,
+    )
+
+
+def _load_master_catalog(truth: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(truth, dict):
+        return {}
+    catalog = truth.get("masters_catalog")
+    if isinstance(catalog, dict):
+        return catalog
+    return {}
+
+
+def _format_experience_label(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        years = int(value)
+        if years <= 0:
+            return None
+        return f"{years} let opyta"
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _normalize_service_key(value: str) -> str:
+    return _normalize_text(value)
+
+
+def _service_match(target_service: str, candidate_service: str) -> bool:
+    target = _normalize_service_key(target_service)
+    candidate = _normalize_service_key(candidate_service)
+    if not target or not candidate:
+        return False
+    return target == candidate or target in candidate or candidate in target
+
+
+def _extract_master_profiles(catalog: dict[str, Any]) -> list[dict[str, Any]]:
+    entries = catalog.get("specialists")
+    if not isinstance(entries, list):
+        return []
+    profiles: list[dict[str, Any]] = []
+    for row in entries:
+        if not isinstance(row, dict):
+            continue
+        name = _normalize_optional_text(row.get("name"))
+        services = _coerce_text_list(row.get("services"))
+        if not name or not services:
+            continue
+        profile: dict[str, Any] = {
+            "name": name,
+            "services": services,
+        }
+        experience_label = _format_experience_label(
+            row.get("experience_years") if "experience_years" in row else row.get("experience")
+        )
+        if experience_label:
+            profile["experience_label"] = experience_label
+        highlight = _normalize_optional_text(row.get("highlight"))
+        if highlight:
+            profile["highlight"] = highlight
+        profiles.append(profile)
+    return profiles
+
+
+def _render_specialist_line(profile: dict[str, Any]) -> str:
+    name = str(profile.get("name") or "").strip()
+    if not name:
+        return ""
+    parts = [name]
+    experience_label = _normalize_optional_text(profile.get("experience_label"))
+    if experience_label:
+        parts.append(experience_label)
+    highlight = _normalize_optional_text(profile.get("highlight"))
+    if highlight:
+        parts.append(highlight)
+    return " - ".join(parts)
+
+
+def build_master_reply_from_pack(
+    *,
+    client_slug: str | None,
+    message_text: str | None,
+    resolution: MasterIntentResolution,
+) -> MasterReplyDecision | None:
+    if not resolution.explicit and not resolution.service_query:
+        return None
+    truth = load_yaml_truth(client_slug)
+    catalog = _load_master_catalog(truth if isinstance(truth, dict) else {})
+    query_contract = catalog.get("query_contract") if isinstance(catalog, dict) else {}
+    if not isinstance(query_contract, dict):
+        query_contract = {}
+    missing_service_reply = _normalize_optional_text(query_contract.get("missing_service_reply"))
+    if not missing_service_reply:
+        missing_service_reply = _MASTER_QUERY_MISSING_SERVICE_REPLY
+    service_not_found_reply = _normalize_optional_text(query_contract.get("service_not_found_reply"))
+    if not service_not_found_reply:
+        service_not_found_reply = _MASTER_QUERY_UNKNOWN_SERVICE_REPLY
+    reply_template = _normalize_optional_text(query_contract.get("service_reply_template"))
+    if not reply_template:
+        reply_template = _MASTER_QUERY_REPLY_TEMPLATE
+    max_specialists = query_contract.get("max_specialists")
+    if isinstance(max_specialists, bool):
+        max_specialists = None
+    if not isinstance(max_specialists, int) or max_specialists <= 0:
+        max_specialists = 3
+
+    resolved_service = resolution.service_query
+    if not resolved_service and message_text:
+        resolved_service = get_pack_service_hint(message_text, client_slug=client_slug)
+    resolved_service = _normalize_optional_text(resolved_service)
+    if not resolved_service:
+        meta = _build_fact_meta(
+            fact_source="truth",
+            fact_intents=[_MASTER_QUERY_FACT_INTENT],
+            info_sections=[_MASTER_QUERY_FACT_INTENT],
+            meta={
+                "master_query_contract": "masters_catalog.v1",
+                "master_reply_mode": "service_clarify",
+                "clarify_reason": _MASTER_QUERY_SERVICE_CLARIFY_REASON,
+                "service_query": None,
+                "service_query_source": resolution.service_query_source,
+                "master_resolution_reason": resolution.reason,
+                "master_resolution_signals": list(resolution.matched_signals),
+                "master_resolver_id": resolution.resolver_id,
+                "master_resolver_version": resolution.resolver_version,
+            },
+        )
+        return MasterReplyDecision(
+            response=missing_service_reply,
+            action=_MASTER_QUERY_COLLECTION_ACTION,
+            intent=_MASTER_QUERY_FACT_INTENT,
+            meta=meta,
+        )
+
+    canonical_service = get_pack_service_hint(resolved_service, client_slug=client_slug)
+    canonical_service = _normalize_optional_text(canonical_service) or resolved_service
+    profiles = _extract_master_profiles(catalog)
+    matched_profiles = [
+        profile
+        for profile in profiles
+        if any(_service_match(canonical_service, service_name) for service_name in profile["services"])
+    ]
+    if not matched_profiles:
+        fallback_reply = service_not_found_reply.format(service=canonical_service)
+        meta = _build_fact_meta(
+            fact_source="truth",
+            fact_intents=[_MASTER_QUERY_FACT_INTENT],
+            info_sections=[_MASTER_QUERY_FACT_INTENT],
+            meta={
+                "master_query_contract": "masters_catalog.v1",
+                "master_reply_mode": "service_not_found",
+                "service_query": canonical_service,
+                "service_query_source": resolution.service_query_source,
+                "clarify_reason": "master_service_not_found",
+                "master_profiles_count": 0,
+                "master_resolution_reason": resolution.reason,
+                "master_resolution_signals": list(resolution.matched_signals),
+                "master_resolver_id": resolution.resolver_id,
+                "master_resolver_version": resolution.resolver_version,
+            },
+        )
+        return MasterReplyDecision(
+            response=fallback_reply,
+            action=_MASTER_QUERY_COLLECTION_ACTION,
+            intent=_MASTER_QUERY_FACT_INTENT,
+            meta=meta,
+        )
+
+    visible_profiles = matched_profiles[:max_specialists]
+    specialist_lines = [_render_specialist_line(profile) for profile in visible_profiles]
+    specialist_lines = [line for line in specialist_lines if line]
+    if not specialist_lines:
+        return None
+    specialists_text = ", ".join(specialist_lines)
+    reply = reply_template.format(service=canonical_service, specialists=specialists_text)
+    meta = _build_fact_meta(
+        fact_source="truth",
+        fact_intents=[_MASTER_QUERY_FACT_INTENT],
+        info_sections=[_MASTER_QUERY_FACT_INTENT],
+        meta={
+            "master_query_contract": "masters_catalog.v1",
+            "master_reply_mode": "service_match",
+            "service_query": canonical_service,
+            "service_query_source": resolution.service_query_source,
+            "master_profiles_count": len(matched_profiles),
+            "master_profiles": [profile.get("name") for profile in visible_profiles],
+            "master_resolution_reason": resolution.reason,
+            "master_resolution_signals": list(resolution.matched_signals),
+            "master_resolver_id": resolution.resolver_id,
+            "master_resolver_version": resolution.resolver_version,
+        },
+    )
+    return MasterReplyDecision(
+        response=reply,
+        action=_MASTER_QUERY_FACT_ACTION,
+        intent=_MASTER_QUERY_FACT_INTENT,
+        meta=meta,
+    )
 
 
 def _action_class(action: str | None) -> str:
@@ -540,6 +908,7 @@ __all__ = [
     "_normalize_text",
     "build_evening_greeting",
     "build_info_combined_reply",
+    "build_master_reply_from_pack",
     "build_quiet_hours_notice",
     "compose_multi_truth_reply",
     "enrich_pack_decision",
@@ -561,6 +930,9 @@ __all__ = [
     "load_system_lexicons",
     "load_yaml_truth",
     "phrase_match_intent",
+    "resolve_master_intent",
     "semantic_question_type",
     "semantic_service_match",
+    "MasterIntentResolution",
+    "MasterReplyDecision",
 ]

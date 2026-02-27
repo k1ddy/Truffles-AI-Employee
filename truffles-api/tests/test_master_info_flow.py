@@ -30,6 +30,45 @@ def test_detect_info_class_intents_master_signal_who_will_do_procedure():
     assert meta.get("info_signals", {}).get("master") is True
 
 
+def test_detect_info_class_intents_master_signal_for_experience_question():
+    intents, meta = _detect_info_class_intents(
+        "Кто лучше по маникюру и у кого больше опыта?",
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "master" in intents
+    assert meta.get("info_signals", {}).get("master") is True
+    master_resolution = meta.get("master_resolution", {})
+    assert master_resolution.get("needs_service_clarify") is False
+    assert master_resolution.get("service_query") == "Маникюр"
+
+
+def test_detect_info_class_intents_master_signal_for_masters_do_x_question():
+    intents, meta = _detect_info_class_intents(
+        "Какие мастера делают маникюр?",
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "master" in intents
+    assert meta.get("info_signals", {}).get("master") is True
+    master_resolution = meta.get("master_resolution", {})
+    assert master_resolution.get("needs_service_clarify") is False
+    assert master_resolution.get("service_query") == "Маникюр"
+
+
+def test_detect_info_class_intents_services_overview_does_not_trigger_master():
+    intents, meta = _detect_info_class_intents(
+        "Какие услуги вы оказываете?",
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "master" not in intents
+    assert meta.get("info_signals", {}).get("master") is False
+
+
 def test_anchor_group_hit_short_prefix_requires_exact_token_boundary():
     tokens = _tokenize_for_matching("у вас есть мастера которые работают с долгими стрижками")
     assert _anchor_group_hit(tokens, ("работ", "до")) is False
@@ -244,6 +283,21 @@ def test_build_info_intent_reply_master_long_hair_question_focuses_hair_team():
     assert "master" in info_sections
     assert isinstance((meta or {}).get("resolver_id"), str)
     assert isinstance((meta or {}).get("resolver_version"), str)
+
+
+def test_build_info_intent_reply_master_without_service_returns_clarify_collect():
+    reply, meta = _build_info_intent_reply(
+        "master",
+        service_query=None,
+        client_slug="demo_salon",
+        message_text="Кто лучший мастер?",
+    )
+
+    assert isinstance(reply, str) and "по какой услуге" in reply.casefold()
+    assert isinstance(meta, dict)
+    assert meta.get("action_class") == "COLLECT"
+    assert meta.get("clarify_reason") == "missing_service_query"
+    assert meta.get("service_query") is None
 
 
 def test_build_info_intent_reply_emits_resolver_contract_meta():

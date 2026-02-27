@@ -18,6 +18,7 @@ from app.services.pack_runtime_service import (
     _has_price_signal,
     _normalize_text,
     build_info_combined_reply,
+    build_master_reply_from_pack,
     compose_multi_truth_reply,
     ensure_resolver_meta,
     format_reply_from_truth,
@@ -26,6 +27,7 @@ from app.services.pack_runtime_service import (
     get_signal_lexicon_list,
     load_yaml_truth,
     phrase_match_intent,
+    resolve_master_intent,
 )
 
 if TYPE_CHECKING:
@@ -76,6 +78,21 @@ def _has_anchor_prefix(tokens: list[str], prefix: str) -> bool:
 
 def _anchor_group_hit(tokens: list[str], group: tuple[str, ...]) -> bool:
     return all(_has_anchor_prefix(tokens, prefix) for prefix in group)
+
+
+def _lexicon_anchor_groups(client_slug: str | None, key: str) -> list[tuple[str, ...]]:
+    from . import _legacy as legacy
+
+    groups: list[tuple[str, ...]] = []
+    for phrase in _signal_phrase_list(client_slug, key):
+        normalized_phrase = legacy.normalize_for_matching(phrase)
+        if not normalized_phrase:
+            continue
+        group = tuple(_tokenize_for_matching(normalized_phrase))
+        if len(group) < 2 or group in groups:
+            continue
+        groups.append(group)
+    return groups
 
 
 def _resolve_team_focus_key(
@@ -209,6 +226,15 @@ def _detect_info_class_intents(
     location_signal = parking_signal or (
         bool(location_phrases) and any(phrase in normalized for phrase in location_phrases)
     )
+    location_scope_terms = _signal_phrase_list(client_slug, "location_question_scope_terms")
+    location_question_signal = bool(
+        question_like
+        and any(token.startswith("где") for token in tokens)
+        and bool(location_scope_terms)
+        and any(stem in normalized for stem in location_scope_terms)
+    )
+    if location_question_signal:
+        location_signal = True
     if address_hint_signal:
         location_signal = True
     hours_phrases = _signal_phrase_list(client_slug, "hours_keywords")
@@ -245,30 +271,12 @@ def _detect_info_class_intents(
     if duration_signal and any(stem in normalized for stem in hours_stems) and not service_duration_context:
         duration_signal = False
         hours_signal = True
-    master_keywords = _signal_phrase_list(client_slug, "info_master_keywords")
-    master_person_keywords = _signal_phrase_list(client_slug, "info_master_person_keywords")
-    master_action_keywords = _signal_phrase_list(client_slug, "info_master_action_keywords")
-    master_service_keywords = _signal_phrase_list(client_slug, "info_master_service_keywords")
-    master_signal = False
-    if normalized and master_keywords and any(keyword in normalized for keyword in master_keywords):
-        master_signal = True
-    if (
-        not master_signal
-        and master_person_keywords
-        and master_action_keywords
-        and master_service_keywords
-        and any(token in normalized for token in master_person_keywords)
-        and any(token in normalized for token in master_action_keywords)
-        and any(token in normalized for token in master_service_keywords)
-    ):
-        master_signal = True
-    if not master_signal and message_text and client_slug:
-        try:
-            master_signal = "master" in phrase_match_intent(
-                message_text, client_slug=client_slug
-            )
-        except Exception:
-            master_signal = False
+    master_resolution = resolve_master_intent(
+        message_text=message_text,
+        client_slug=client_slug,
+        force_master_intent=False,
+    )
+    master_signal = bool(master_resolution.explicit)
 
     if "location" in anchor_intents and (question_like or short_query or intent_decomp_set):
         location_signal = True
@@ -333,6 +341,16 @@ def _detect_info_class_intents(
         "hours": hours_signal,
         "master": master_signal,
     }
+    if master_signal:
+        meta["master_resolution"] = {
+            "reason": master_resolution.reason,
+            "service_query": master_resolution.service_query,
+            "service_query_source": master_resolution.service_query_source,
+            "needs_service_clarify": master_resolution.needs_service_clarify,
+            "matched_signals": list(master_resolution.matched_signals),
+            "resolver_id": master_resolution.resolver_id,
+            "resolver_version": master_resolution.resolver_version,
+        }
     return intents, meta
 
 
@@ -492,6 +510,7 @@ def _build_info_intent_reply(
             action=resolved_action,
             intent=resolved_intent or intent,
             resolver_id="webhook.info_intent",
+            client_slug=client_slug,
         )
 
     if intent == "contact":
@@ -574,105 +593,23 @@ def _build_info_intent_reply(
         )
         return reply, _resolverize(meta)
     if intent == "master":
-        explicit_team_lookup = bool(
-            normalized
-            and any(
-                marker in normalized
-                for marker in (
-                    "есть ли мастер",
-                    "есть мастер",
-                    "кто делает",
-                    "кто будет делать",
-                    "кто будет проводить",
-                    "кто проведет",
-                    "какой мастер",
-                    "какой специалист",
-                    "кто из мастеров",
-                    "к кому запис",
-                )
-            )
+        resolution = resolve_master_intent(
+            message_text=message_text,
+            client_slug=client_slug,
+            service_query=service_query,
+            force_master_intent=True,
         )
-        service_hint = service_query or (
-            get_pack_service_hint(message_text, client_slug=client_slug) if message_text else None
-        )
-        team_focus = _resolve_team_focus_key(
+        decision = build_master_reply_from_pack(
             client_slug=client_slug,
             message_text=message_text,
-            service_query=service_hint,
+            resolution=resolution,
         )
-        # When the message asks about a concrete service ("короткая стрижка" etc.)
-        # and does not explicitly ask for full team listing, prefer service-context answer.
-        if message_text and not explicit_team_lookup:
-            decision = get_pack_decision(message_text, client_slug=client_slug)
-            if (
-                decision
-                and decision.action == "reply"
-                and decision.intent in {"service_match", "price_query"}
-                and decision.response
-            ):
-                meta = decision.meta if isinstance(decision.meta, dict) else None
-                return decision.response, _resolverize(
-                    meta,
-                    resolved_intent=decision.intent,
-                    resolved_action=decision.action or "reply",
-                )
-        truth = load_yaml_truth(client_slug)
-        team = truth.get("team") if isinstance(truth, dict) else None
-        if isinstance(team, dict):
-            labels = {
-                "nails": "Ногти",
-                "hair": "Волосы",
-                "brows_lashes": "Брови и ресницы",
-                "facial": "Лицо",
-            }
-            if team_focus in labels:
-                focused_text = team.get(team_focus)
-                if isinstance(focused_text, str) and focused_text.strip():
-                    area_label = labels[team_focus]
-                    service_label = (
-                        str(service_hint).strip()
-                        if isinstance(service_hint, str) and str(service_hint).strip()
-                        else "этой услуге"
-                    )
-                    focused_summary = focused_text.strip()
-                    if not focused_summary.endswith((".", "!", "?")):
-                        focused_summary = f"{focused_summary}."
-                    reply = (
-                        f"По услуге «{service_label}» работают мастера направления "
-                        f"«{area_label}»: {focused_summary}"
-                    )
-                    meta = _build_fact_meta(
-                        fact_source="truth",
-                        fact_intents=["master"],
-                        info_sections=["master"],
-                    )
-                    return reply, _resolverize(meta, resolved_intent="master")
-            parts: list[str] = []
-            for key in ("nails", "hair", "brows_lashes", "facial"):
-                value = team.get(key)
-                if not isinstance(value, str):
-                    continue
-                text = value.strip()
-                if text:
-                    parts.append(f"{labels[key]}: {text}")
-            if parts:
-                reply = "По мастерам: " + " ".join(parts)
-                meta = _build_fact_meta(
-                    fact_source="truth",
-                    fact_intents=["master"],
-                    info_sections=["master"],
-                )
-                return reply, _resolverize(meta, resolved_intent="master")
-        fallback = "Можно к конкретному мастеру, если он свободен на выбранное время."
-        meta = _build_fact_meta(
-            fact_source="truth",
-            fact_intents=["master"],
-            info_sections=["master"],
-        )
-        return fallback, _resolverize(
-            meta,
-            resolved_intent="master",
-            resolved_action="collect",
+        if not decision:
+            return None, None
+        return decision.response, _resolverize(
+            decision.meta,
+            resolved_intent=decision.intent or "master",
+            resolved_action=decision.action or "reply",
         )
     if intent == "promotions":
         reply = format_reply_from_truth("promotions", client_slug=client_slug)
@@ -2030,6 +1967,7 @@ def _handle_truth_gate_fallback(
             action=resolver_action,
             intent=decision.intent,
             resolver_id="webhook.truth_gate",
+            client_slug=client_slug,
         )
         decision = PackDecision(
             action=decision.action,

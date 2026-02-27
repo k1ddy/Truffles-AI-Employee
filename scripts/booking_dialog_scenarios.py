@@ -74,6 +74,7 @@ CANONICAL_EXPECT_INFO_SECTIONS = sorted(
 )
 REQUIRED_LLM_TAGS = ["booking", "time", "name"]
 REQUIRED_BOOKING_CONFIRM_TAGS = ["check_booking", "confirm"]
+REQUIRED_HANDOFF_TAGS = ["handoff"]
 DEFAULT_REFERENCE_IMAGE_PATH = "/home/zhan/TrufflesLogoClear.png"
 DEFAULT_REFERENCE_IMAGE_URL = "https://app.chatflow.kz/static/demo/reference.jpg"
 REQUIRED_LLM_TURNS = {
@@ -85,6 +86,11 @@ REQUIRED_LLM_TURNS = {
         "tags": ["check_booking"],
     },
     "confirm": {"text": "Да, подтверждаю.", "tags": ["confirm"]},
+    "handoff": {
+        "text": "Можно связаться с менеджером?",
+        "tags": ["handoff", "human"],
+        "expect": {"action": "handoff", "state": "pending"},
+    },
 }
 
 
@@ -200,6 +206,10 @@ def _required_llm_tags(coverage: list[str] | None) -> list[str]:
     }
     if "booking" in coverage_tokens:
         for tag in REQUIRED_BOOKING_CONFIRM_TAGS:
+            if tag not in required:
+                required.append(tag)
+    if "handoff" in coverage_tokens:
+        for tag in REQUIRED_HANDOFF_TAGS:
             if tag not in required:
                 required.append(tag)
     return required
@@ -605,7 +615,7 @@ def _default_expect() -> dict[str, Any]:
         "action": None,
         "info_sections": [],
         "reply_type": None,
-        "state": None,
+        "state": "bot_active",
         "expected_reply": None,
         "allow_booking_stall": False,
     }
@@ -838,6 +848,11 @@ def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
                 expect["info_sections"].append(section)
     expect["state"] = _sanitize_expect_state_by_tags(tags, expect.get("state"))
     expect["action"] = _sanitize_expect_action_by_tags(tags, expect.get("action"))
+    if expect.get("state") is None:
+        # Scenario contract requires at least one strong oracle field per turn.
+        # Keep state deterministic-by-default while allowing pending/manager
+        # expansion in runtime evaluator based on turn tags.
+        expect["state"] = "bot_active"
     if "media" in tag_set:
         # Style/media turns can legally end in pending with an immediate ack.
         # Keep reply expectation open in generated scenarios.

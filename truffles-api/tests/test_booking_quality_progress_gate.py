@@ -25,12 +25,17 @@ def _load_progress_gate():
             "_llm_quality_should_expect_booking_progress",
             "_llm_quality_normalize_tool_token",
             "_llm_quality_effective_intent",
+            "_llm_quality_value_matches",
+            "_llm_quality_booking_progress_from_contract",
         }:
             selected_nodes.append(node)
     module = ast.Module(body=selected_nodes, type_ignores=[])
     namespace = {}
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
-    return namespace["_llm_quality_should_expect_booking_progress"]
+    return (
+        namespace["_llm_quality_should_expect_booking_progress"],
+        namespace["_llm_quality_booking_progress_from_contract"],
+    )
 
 
 def _load_slots_progress():
@@ -66,7 +71,7 @@ def _load_booking_tool_answered():
     return namespace["_llm_quality_check_booking_tool_answered"]
 
 
-_should_expect_progress = _load_progress_gate()
+_should_expect_progress, _progress_from_contract = _load_progress_gate()
 _slots_progressed = _load_slots_progress()
 _booking_tool_answered = _load_booking_tool_answered()
 
@@ -100,6 +105,51 @@ def test_slots_progress_detects_same_slot_value_as_no_progress():
 
 def test_slots_progress_detects_slot_value_change():
     assert _slots_progressed({"datetime": "15:00"}, {"datetime": "15:30"}) is True
+
+
+def test_progress_from_contract_accepts_expected_reply_transition_for_list_slots():
+    meta = {
+        "intent": "calendar.list_slots",
+        "tool_action": "calendar.list_slots",
+        "tool_decision": "ok",
+        "expected_reply_type": "name",
+    }
+    assert _progress_from_contract(
+        booking_progressed=False,
+        expected_reply_matched=False,
+        meta=meta,
+        expected_reply_type="name",
+    )
+
+
+def test_progress_from_contract_rejects_non_list_slots_intent():
+    meta = {
+        "intent": "catalog.location",
+        "tool_action": "catalog.location",
+        "tool_decision": "ok",
+        "expected_reply_type": "name",
+    }
+    assert not _progress_from_contract(
+        booking_progressed=False,
+        expected_reply_matched=False,
+        meta=meta,
+        expected_reply_type="name",
+    )
+
+
+def test_progress_from_contract_rejects_mismatched_expected_reply_type():
+    meta = {
+        "intent": "calendar.list_slots",
+        "tool_action": "calendar.list_slots",
+        "tool_decision": "ok",
+        "expected_reply_type": "time",
+    }
+    assert not _progress_from_contract(
+        booking_progressed=False,
+        expected_reply_matched=False,
+        meta=meta,
+        expected_reply_type="name",
+    )
 
 
 def test_booking_tool_answered_accepts_time_mismatch_with_requested_time_echo():

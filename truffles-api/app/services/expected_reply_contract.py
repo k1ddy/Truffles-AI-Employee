@@ -188,8 +188,9 @@ def resolve_tool_expected_reply_contract(
                 clear_expected_reply=True,
             )
         if normalized_decision in {"verifier_blocked", "contract_invalid", "not_found", "time_mismatch"}:
+            followup_type = EXPECTED_REPLY_TIME if booking_has_name else EXPECTED_REPLY_NAME
             return ExpectedReplyContractDecision(
-                expected_reply_type=EXPECTED_REPLY_TIME,
+                expected_reply_type=followup_type,
                 reason="calendar_get_booking_collect_reference",
             )
         return None

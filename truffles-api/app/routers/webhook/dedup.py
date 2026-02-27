@@ -56,6 +56,14 @@ def _get_dedup_settings() -> tuple[int, str, float]:
     return ttl_seconds, redis_url, socket_timeout_seconds
 
 
+def _is_fast_dedup_bypass_enabled() -> bool:
+    from . import _legacy as legacy
+
+    test_mode = legacy._is_env_enabled(os.environ.get("TEST_MODE"), default=False)
+    fast_dedup = legacy._is_env_enabled(os.environ.get("LLM_QUALITY_FAST_DEDUP"), default=False)
+    return bool(test_mode and fast_dedup)
+
+
 def _get_debounce_redis(redis_url: str, socket_timeout_seconds: float):
     global _debounce_redis_client, _debounce_redis_url
 
@@ -313,6 +321,25 @@ async def _handle_dedup_gate(
     record_early_trace,
     dedup_diagnostics: dict[str, Any] | None = None,
 ) -> tuple[WebhookResponse | None, str | None]:
+    if _is_fast_dedup_bypass_enabled():
+        if not message_id:
+            from app.services.outbox_service import build_inbound_message_id
+
+            message_id = build_inbound_message_id(
+                None,
+                remote_jid,
+                metadata.timestamp if metadata else None,
+                message_text,
+            )
+            if metadata:
+                metadata.messageId = message_id
+        if isinstance(dedup_diagnostics, dict):
+            dedup_diagnostics["dedup_backend"] = "fast_test_bypass"
+            dedup_diagnostics["dedup_fallback_reason"] = "test_mode_fast_dedup"
+            dedup_diagnostics["dedup_duplicate"] = False
+            dedup_diagnostics["dedup_latency_ms"] = 0.0
+        return None, message_id
+
     if await is_duplicate_message_id(
         db=db,
         client_id=client.id,

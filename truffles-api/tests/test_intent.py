@@ -240,6 +240,31 @@ class TestPolicyCoreTimeoutRetry:
             "expected_reply_type": "time",
         }
 
+    def test_master_query_fact_without_service_fails_schema(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action": "info",
+            "tool_args": {},
+            "pack_refs": ["master"],
+            "language": "ru",
+            "confidence": 0.8,
+            "reason": "master_lookup",
+            "goal": "info",
+            "slots": {"service": "", "datetime": "", "name": ""},
+            "next_question": None,
+            "open_questions": [],
+            "needs_manager": False,
+            "risk_signals": [],
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core("Кто лучший мастер?")
+
+        assert result["ok"] is False
+        assert result["error"] == "invalid_schema"
+
     def test_retries_once_after_timeout_and_succeeds(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.setattr(
@@ -517,6 +542,38 @@ class TestPolicyCoreTimeoutRetry:
         schema = response_format["json_schema"]["schema"]
         assert schema["properties"]["tool_args"]["additionalProperties"] is True
         assert schema["properties"]["slots"]["additionalProperties"] == {"type": "string"}
+        assert "entity_refs" in schema["properties"]
+        assert "resolver_id" in schema["properties"]
+        assert "resolver_version" in schema["properties"]
+        assert isinstance(schema.get("allOf"), list) and schema["allOf"]
+        master_query_contract = schema["allOf"][0]
+        master_intent_enum = (
+            master_query_contract.get("if", {})
+            .get("properties", {})
+            .get("intent", {})
+            .get("enum", [])
+        )
+        assert "master_query" in master_intent_enum
+        assert "master" in master_intent_enum
+        master_query_paths = master_query_contract.get("then", {}).get("anyOf", [])
+        assert any(
+            path.get("properties", {})
+            .get("slots", {})
+            .get("required", [])
+            == ["service"]
+            for path in master_query_paths
+        )
+        assert any(
+            path.get("properties", {})
+            .get("tool_args", {})
+            .get("required", [])
+            == ["service_query"]
+            for path in master_query_paths
+        )
+        assert any(
+            path.get("properties", {}).get("next_question", {}).get("const") == "service"
+            for path in master_query_paths
+        )
 
 
 class TestPolicyCoreErrorClassification:

@@ -42,6 +42,7 @@ def _load_evaluate_turn():
     wanted_functions = {
         "_llm_quality_evaluate_turn",
         "_llm_quality_effective_intent",
+        "_llm_quality_has_catalog_service_choice_info_fallback",
         "_llm_quality_has_general_consult_fallback",
         "_llm_quality_is_booking_confirmation_text",
         "_llm_quality_is_unobserved_turn",
@@ -56,6 +57,9 @@ def _load_evaluate_turn():
         "_llm_quality_has_timeout_degrade_booking_generic",
         "_llm_quality_has_expected_followup_prompt",
         "_llm_quality_normalize_expect_token",
+        "_llm_quality_text_has_billing_block_marker",
+        "_llm_quality_payload_has_billing_block_marker",
+        "_llm_quality_is_delivery_billing_waiver",
         "_llm_quality_outbox_delivery_state",
         "_llm_quality_resolve_outbox_status",
         "_llm_quality_normalize_outbox_status",
@@ -83,6 +87,7 @@ def _load_evaluate_turn():
         "re": re,
         "_llm_quality_value_matches": lambda *_args, **_kwargs: True,
         "_chaos_reply_type_fallback_ok": lambda *_args, **_kwargs: False,
+        "_llm_quality_collect_info_signals": lambda *_args, **_kwargs: (set(), set()),
         "_llm_quality_expected_section_answered": lambda *_args, **_kwargs: (False, set(), set()),
         "_llm_quality_state_matches_expected": lambda *_args, **_kwargs: True,
         "_llm_quality_action_matches_expected": lambda *_args, **_kwargs: True,
@@ -90,6 +95,23 @@ def _load_evaluate_turn():
     }
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
     return namespace["_llm_quality_evaluate_turn"]
+
+
+def _load_dry_run_contract_helper():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+    selected_nodes = []
+    for node in tree.body:
+        if (
+            isinstance(node, ast.FunctionDef)
+            and node.name == "_llm_quality_apply_dry_run_response_contract"
+        ):
+            selected_nodes.append(node)
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {}
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace["_llm_quality_apply_dry_run_response_contract"]
 
 
 def _load_expectation_helpers():
@@ -149,6 +171,24 @@ def _load_duplicate_ack_helpers():
             names = {target.id for target in node.targets if isinstance(target, ast.Name)}
             if {"CHAOS_PENDING_ACTIONS"} & names:
                 selected_nodes.append(node)
+        if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
+            selected_nodes.append(node)
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {"json": json}
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace
+
+
+def _load_message_recovery_helper():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+    wanted_functions = {
+        "_escape_sql_literal",
+        "_llm_quality_fetch_assistant_reply_from_messages",
+    }
+    selected_nodes = []
+    for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
             selected_nodes.append(node)
     module = ast.Module(body=selected_nodes, type_ignores=[])
@@ -254,7 +294,7 @@ def test_booking_slot_stall_not_reported_in_pending_state():
         expected_response=False,
         expected_action=None,
         expected_info_sections=[],
-        expected_reply_type=None,
+        expected_reply_type="service_choice",
         expected_state=None,
         expected_reply=None,
         actual_expected_reply_type=None,
@@ -280,7 +320,7 @@ def test_booking_slot_stall_reported_in_bot_active_state():
         expected_response=True,
         expected_action=None,
         expected_info_sections=[],
-        expected_reply_type=None,
+        expected_reply_type="service_choice",
         expected_state=None,
         expected_reply=None,
         actual_expected_reply_type=None,
@@ -306,7 +346,7 @@ def test_booking_slot_stall_not_reported_for_calendar_get_booking_reply():
         expected_response=True,
         expected_action=None,
         expected_info_sections=[],
-        expected_reply_type=None,
+        expected_reply_type="service_choice",
         expected_state=None,
         expected_reply=None,
         actual_expected_reply_type=None,
@@ -444,6 +484,38 @@ def test_missing_bot_reply_marks_outbox_failed_reason():
     assert "outbox_delivery_timeout" not in reasons
 
 
+def test_missing_bot_reply_uses_delivery_billing_waiver():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "reply", "delivery_error_code": "CHATFLOW_BILLING_BLOCKED"},
+        trace_entries=[{"stage": "transport", "reason": "provider_billing_blocked"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=False,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_summary={"count": 1, "status": "FAILED"},
+        outbox_payload_status="FAILED",
+        outbox_payload={"error": {"code": "CHATFLOW_BILLING_BLOCKED"}},
+    )
+    assert "delivery_waiver_billing" in reasons
+    assert "missing_bot_reply" not in reasons
+    assert "outbox_delivery_failed" not in reasons
+    assert "outbox_delivery_timeout" not in reasons
+
+
 def test_missing_bot_reply_marks_outbox_timeout_reason():
     evaluate_turn = _load_evaluate_turn()
     reasons = evaluate_turn(
@@ -503,6 +575,43 @@ def test_missing_bot_reply_suppressed_on_infra_webhook_error():
     assert "outbox_delivery_timeout" not in reasons
 
 
+def test_dry_run_contract_marks_missing_bot_reply_for_expected_turn():
+    apply_contract = _load_dry_run_contract_helper()
+    reasons = apply_contract(
+        [],
+        dry_run=True,
+        expected_response=True,
+        bot_response=False,
+    )
+
+    assert "missing_bot_reply" in reasons
+
+
+def test_dry_run_contract_keeps_existing_reasons_without_duplicate_missing_reply():
+    apply_contract = _load_dry_run_contract_helper()
+    reasons = apply_contract(
+        ["missing_bot_reply", "judge_fail"],
+        dry_run=True,
+        expected_response=True,
+        bot_response=False,
+    )
+
+    assert reasons.count("missing_bot_reply") == 1
+    assert "judge_fail" in reasons
+
+
+def test_dry_run_contract_is_noop_when_not_dry_run():
+    apply_contract = _load_dry_run_contract_helper()
+    reasons = apply_contract(
+        ["judge_fail"],
+        dry_run=False,
+        expected_response=True,
+        bot_response=False,
+    )
+
+    assert reasons == ["judge_fail"]
+
+
 def test_duplicate_ack_detector_handles_nested_string_payload():
     helpers = _load_duplicate_ack_helpers()
     fn = helpers["_llm_quality_payload_is_duplicate_ack"]
@@ -555,6 +664,81 @@ def test_duplicate_ack_does_not_infer_when_outbox_failed():
         outbox_payload_status="FAILED",
         outbox_summary={"count": 1, "status": "FAILED"},
     )
+
+
+def test_duplicate_ack_does_not_infer_when_transport_trace_is_billing_blocked():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_should_infer_bot_response_from_duplicate_ack"]
+    assert not fn(
+        bot_response=False,
+        expected_response=True,
+        response_payload={"message": "duplicate message_id"},
+        attempts=2,
+        meta={"action": "reply"},
+        meta_error=None,
+        state="bot_active",
+        trace_entries=[{"stage": "transport", "reason": "provider_billing_blocked"}],
+    )
+
+
+def test_duplicate_ack_infers_when_skip_outbox_ignores_transport_trace_block():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_should_infer_bot_response_from_duplicate_ack"]
+    assert fn(
+        bot_response=False,
+        expected_response=True,
+        response_payload={"message": "duplicate message_id"},
+        attempts=2,
+        meta={"action": "reply"},
+        meta_error=None,
+        state="bot_active",
+        trace_entries=[{"stage": "transport", "reason": "provider_billing_blocked"}],
+        ignore_transport_block=True,
+    )
+
+
+def test_message_recovery_helper_returns_assistant_text():
+    helpers = _load_message_recovery_helper()
+    fn = helpers["_llm_quality_fetch_assistant_reply_from_messages"]
+    captured = {}
+
+    def _run_psql_query(_db_user, query):
+        captured["query"] = query
+        return json.dumps({"content": "  Отлично, время подходит. Как вас зовут?  "}), None
+
+    helpers["_run_psql_query"] = _run_psql_query
+    text, error = fn(
+        "postgres",
+        "conv-id",
+        "msg-id",
+        window_seconds=30,
+    )
+
+    assert error is None
+    assert text == "Отлично, время подходит. Как вас зовут?"
+    assert "interval '30 seconds'" in captured["query"]
+
+
+def test_message_recovery_helper_clamps_window_and_handles_empty_payload():
+    helpers = _load_message_recovery_helper()
+    fn = helpers["_llm_quality_fetch_assistant_reply_from_messages"]
+    captured = {}
+
+    def _run_psql_query(_db_user, query):
+        captured["query"] = query
+        return "{}", None
+
+    helpers["_run_psql_query"] = _run_psql_query
+    text, error = fn(
+        "postgres",
+        "conv-id",
+        "msg-id",
+        window_seconds=999,
+    )
+
+    assert error is None
+    assert text is None
+    assert "interval '180 seconds'" in captured["query"]
 
 
 def test_false_booking_confirmation_is_reported_without_calendar_proof():
@@ -785,6 +969,40 @@ def test_calendar_contract_miss_not_reported_for_booking_verification_handoff_in
     assert "calendar_tool_contract_miss" not in reasons
 
 
+def test_calendar_contract_miss_not_reported_for_capability_blocked_handoff():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={
+            "action": "escalate",
+            "intent": "check_booking",
+            "source": "tool_registry",
+            "tool_action": "calendar.get_booking",
+            "tool_decision": "capability_blocked",
+        },
+        trace_entries=[{"stage": "tool_registry", "decision": "capability_blocked"}],
+        state="pending",
+        conv_meta={},
+        handover_meta={"handover_id": "h-2"},
+        bot_response=True,
+        expected_response=False,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Передал менеджеру для ручной проверки записи.",
+        tool_signals={"calendar": {"outcome": "blocked"}},
+    )
+    assert "calendar_tool_contract_miss" not in reasons
+
+
 def test_calendar_contract_miss_not_reported_for_check_booking_prompt():
     evaluate_turn = _load_evaluate_turn()
     reasons = evaluate_turn(
@@ -915,6 +1133,77 @@ def test_expected_reply_fallback_allows_pending_info_reply():
         conv_meta={},
         handover_meta={"status": "active"},
     )
+
+
+def test_evaluate_turn_allows_contract_cleared_expected_reply_mismatch():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "calendar.reschedule",
+            "tool_action": "calendar.reschedule",
+            "tool_decision": "ok",
+            "expected_reply_contract_clear": True,
+            "expected_reply_contract_reason": "calendar_reschedule_resolved",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="name",
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=False,
+        allow_booking_stall=False,
+        outbox_text="Перенос оформлен. Менеджер подтвердит новое время.",
+    )
+
+    assert "expected_reply_type_mismatch" not in reasons
+
+
+def test_evaluate_turn_allows_calendar_list_slots_without_expected_reply_type():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "calendar.list_slots",
+            "tool_action": "calendar.list_slots",
+            "tool_decision": "ok",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="service_choice",
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=False,
+        allow_booking_stall=False,
+        outbox_text="Свободные слоты: Айгерим Болатова: 10:00, 11:00.",
+        tool_signals={"calendar": {"outcome": "success"}},
+    )
+
+    assert "expected_reply_type_mismatch" not in reasons
 
 
 def test_evaluate_turn_flags_slot_date_resolution_miss():
@@ -1101,6 +1390,117 @@ def test_evaluate_turn_does_not_flag_booking_prompt_leak_for_services_overview()
     )
 
     assert "booking_prompt_leak" not in reasons
+
+
+def test_evaluate_turn_does_not_flag_booking_prompt_leak_for_missing_slot_collect():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "catalog.service_query",
+            "tool_action": "catalog.service_query",
+            "tool_decision": "missing_slot",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text=(
+            "На какую услугу хотите записаться? После этого сразу проверю свободное время."
+        ),
+        tool_signals={},
+    )
+
+    assert "booking_prompt_leak" not in reasons
+
+
+def test_evaluate_turn_does_not_flag_mix_info_booking_for_service_query_missing_slot():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "catalog.service_query",
+            "tool_action": "catalog.service_query",
+            "tool_decision": "missing_slot",
+            "expected_reply_type": "service_choice",
+            "expected_reply_reason": "llm_policy_core_tool",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На какую услугу хотите записаться? После этого сразу проверю свободное время.",
+        tool_signals={},
+    )
+
+    assert "mix_info_booking" not in reasons
+
+
+def test_evaluate_turn_allows_service_choice_info_fallback_for_missing_slot():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "catalog.service_query",
+            "tool_action": "catalog.service_query",
+            "tool_decision": "missing_slot",
+            "expected_reply_type": "service_choice",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=["master", "specialist", "service_duration"],
+        expected_reply_type="service_choice",
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="service_choice",
+        info_tags=["master"],
+        info_answered={"master": False, "specialist": False, "service_duration": False},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На какую услугу хотите записаться? После этого сразу проверю свободное время.",
+        tool_signals={},
+    )
+
+    assert "expected_info_section_miss" not in reasons
+    assert "info_section_miss" not in reasons
 
 
 def test_evaluate_turn_flags_requested_date_time_like():

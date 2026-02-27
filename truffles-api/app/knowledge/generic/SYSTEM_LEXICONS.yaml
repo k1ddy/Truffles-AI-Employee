@@ -45,7 +45,9 @@ booking_reschedule_keywords:
     - перезапис
     - сдвин
     - поменять время
+    - поменять на
     - изменить время
+    - изменить на
 booking_cancel_keywords:
   ru:
     - отмен
@@ -79,6 +81,13 @@ consult_intent_cues:
     - как выбрать
     - уход
     - ничего страш
+consult_recommendation_terms:
+  ru:
+    - посовет
+    - рекоменд
+    - что выбрать
+    - какую лучше
+    - какой лучше
 consult_intent_blockers:
   ru:
     - запис
@@ -205,6 +214,37 @@ info_master_service_keywords:
     - сеанс
     - маникюр
     - стриж
+master_query_direct_terms:
+  ru:
+    - кто делает
+    - кто будет делать
+    - кто будет проводить
+    - кто из мастеров
+    - какие мастера
+    - какой мастер
+    - какой специалист
+    - к кому запис
+master_query_person_terms:
+  ru:
+    - мастер
+    - мастера
+    - специалист
+    - специалисты
+    - кто
+master_query_action_terms:
+  ru:
+    - дела
+    - делает
+    - работа
+    - работает
+    - выполняет
+    - проводит
+master_query_experience_terms:
+  ru:
+    - лучше
+    - опытнее
+    - опыт
+    - стаж
 location_keywords:
   ru:
     - адрес
@@ -215,6 +255,12 @@ location_keywords:
     - как добраться
     - как проехать
     - как доехать
+location_question_scope_terms:
+  ru:
+    - салон
+    - адрес
+    - наход
+    - располож
 service_question_keywords:
   ru:
     - делаете
@@ -229,6 +275,13 @@ service_question_keywords:
     - бар ма
     - қызмет көрсет
     - көрсетесіз
+haircut_service_markers:
+  ru:
+    - стриж
+    - челк
+  en:
+    - haircut
+    - bangs
 service_question_location_phrases:
   ru:
     - адрес
@@ -243,6 +296,26 @@ consult_skip_address_phrases:
     - как доехать
     - как пройти
     - остановк
+style_reference_media_terms:
+  ru:
+    - фото
+    - картин
+    - референс
+    - пример
+  en:
+    - photo
+    - picture
+    - reference
+style_reference_send_terms:
+  ru:
+    - отправ
+    - пришл
+    - скин
+    - покаж
+  en:
+    - send
+    - share
+    - upload
 booking_verification_keywords:
   ru:
     - проверь

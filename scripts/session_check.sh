@@ -46,6 +46,10 @@ summary_gate_validate_candidate() {
     echo "${candidate}: infra_or_semantic_invalid"
     return 1
   fi
+  if ! jq -e '(.config.dry_run // false) == false' "$summary_path" >/dev/null 2>&1; then
+    echo "${candidate}: dry_run_non_evaluable"
+    return 1
+  fi
   if ! jq -e '(.judge.enabled // false) == true' "$summary_path" >/dev/null 2>&1; then
     echo "${candidate}: judge_disabled"
     return 1
@@ -111,7 +115,7 @@ enforce_llm_evidence_gate() {
 
   if [[ -z "$valid_summary" ]]; then
     echo "ERROR: Core behavior change requires valid LLM-quality evidence." >&2
-    echo "Expected: infra_valid=true, semantic_valid=true, judge.enabled=true, config.mode=llm, llm openai_preflight valid." >&2
+    echo "Expected: infra_valid=true, semantic_valid=true, config.dry_run=false, judge.enabled=true, config.mode=llm, llm openai_preflight valid." >&2
     for item in "${errors[@]}"; do
       echo "  - $item" >&2
     done

@@ -106,6 +106,11 @@ _TOOL_ARGS_FIELD_KINDS: dict[str, dict[str, str]] = {
     },
 }
 
+_MASTER_QUERY_INTENTS = {"master_query"}
+_MASTER_QUERY_INTENT_ALIASES = {"master": "master_query"}
+_MASTER_QUERY_FACT_TOOL_ACTIONS = {"info", "catalog.service_query"}
+_MASTER_QUERY_COLLECT_TOOL_ACTIONS = {"collect", "catalog.service_query"}
+
 
 def _is_supported_number_value(value: Any) -> bool:
     if isinstance(value, bool):
@@ -219,6 +224,53 @@ def _normalize_optional_string(value: Any, *, field: str) -> str | None:
         raise ValueError(f"{field}_invalid")
     cleaned = value.strip()
     return cleaned or None
+
+
+def _normalize_master_service_value(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _normalize_entity_refs(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("entity_refs_invalid")
+    cleaned: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, str):
+            token = item.strip()
+            if token:
+                cleaned.append({"entity_id": token})
+            continue
+        if not isinstance(item, dict):
+            raise ValueError("entity_refs_invalid")
+        row: dict[str, Any] = {}
+        entity_id = item.get("entity_id")
+        if not isinstance(entity_id, str) or not entity_id.strip():
+            fallback_id = item.get("id")
+            if isinstance(fallback_id, str) and fallback_id.strip():
+                entity_id = fallback_id
+        if isinstance(entity_id, str) and entity_id.strip():
+            row["entity_id"] = entity_id.strip()
+        entity_type = item.get("entity_type")
+        if not isinstance(entity_type, str) or not entity_type.strip():
+            fallback_type = item.get("type")
+            if isinstance(fallback_type, str) and fallback_type.strip():
+                entity_type = fallback_type
+        if isinstance(entity_type, str) and entity_type.strip():
+            row["entity_type"] = entity_type.strip()
+        source_ref = item.get("source_ref")
+        if isinstance(source_ref, str) and source_ref.strip():
+            row["source_ref"] = source_ref.strip()
+        confidence = item.get("confidence")
+        if isinstance(confidence, (int, float)):
+            row["confidence"] = max(0.0, min(float(confidence), 1.0))
+        if row:
+            cleaned.append(row)
+    return cleaned
 
 
 class DialogueControllerOutput(BaseModel):
@@ -368,13 +420,28 @@ class LlmPolicyCoreOutput(BaseModel):
     confidence: float = Field(..., ge=0, le=1)
     reason: str | None = None
     goal: str | None = None
+    entity_refs: list[dict[str, Any]] = Field(default_factory=list)
+    resolver_id: str | None = None
+    resolver_version: str | None = None
 
     @field_validator("intent", "action", "tool_action", mode="before")
     @classmethod
     def _validate_action(cls, value: Any, info) -> str:
-        return _normalize_required_string(value, field=info.field_name)
+        normalized = _normalize_required_string(value, field=info.field_name)
+        if info.field_name == "intent":
+            return _MASTER_QUERY_INTENT_ALIASES.get(normalized, normalized)
+        return normalized
 
-    @field_validator("tool_action", "language", "reason", "goal", "next_question", mode="before")
+    @field_validator(
+        "tool_action",
+        "language",
+        "reason",
+        "goal",
+        "next_question",
+        "resolver_id",
+        "resolver_version",
+        mode="before",
+    )
     @classmethod
     def _validate_optional_fields(cls, value: Any, info) -> str | None:
         return _normalize_optional_string(value, field=info.field_name)
@@ -397,6 +464,11 @@ class LlmPolicyCoreOutput(BaseModel):
     def _validate_slots(cls, value: Any) -> dict[str, str]:
         return _normalize_slots(value)
 
+    @field_validator("entity_refs", mode="before")
+    @classmethod
+    def _validate_entity_refs(cls, value: Any) -> list[dict[str, Any]]:
+        return _normalize_entity_refs(value)
+
     @field_validator("needs_manager", mode="before")
     @classmethod
     def _validate_needs_manager(cls, value: Any) -> bool:
@@ -415,6 +487,35 @@ class LlmPolicyCoreOutput(BaseModel):
         if error:
             raise ValueError(error)
         self.tool_args = normalized or {}
+        return self
+
+    @model_validator(mode="after")
+    def _validate_master_query_contract(self):
+        if self.intent not in _MASTER_QUERY_INTENTS:
+            return self
+
+        slot_service = _normalize_master_service_value(self.slots.get("service"))
+        arg_service = _normalize_master_service_value(self.tool_args.get("service_query"))
+        has_service_query = bool(slot_service or arg_service)
+
+        if self.action == "fact":
+            if self.tool_action not in _MASTER_QUERY_FACT_TOOL_ACTIONS:
+                raise ValueError("master_query_tool_action_invalid")
+            if not has_service_query:
+                raise ValueError("master_query_service_required")
+            return self
+
+        if self.action == "collect":
+            if self.tool_action not in _MASTER_QUERY_COLLECT_TOOL_ACTIONS:
+                raise ValueError("master_query_collect_tool_action_invalid")
+            # Clarify path is valid when service is missing and the model explicitly asks for it.
+            collect_requires_service = bool(
+                self.next_question == "service" or "service" in self.open_questions
+            )
+            if not has_service_query and not collect_requires_service:
+                raise ValueError("master_query_collect_service_clarify_required")
+            return self
+
         return self
 
 

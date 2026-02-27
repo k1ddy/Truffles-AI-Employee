@@ -860,6 +860,37 @@ LLM_QUALITY_BLOCKING_REASONS = (
     "semantic_intent_override_count_mismatch",
     "lexicon_regex_delta_violation",
     "hardcode_core_violation",
+    "manual_audit_gate_violation",
+    "quality_constant_violation",
+    "workaround_register_violation",
+)
+LLM_QUALITY_DELIVERY_WAIVER_REASONS = {
+    "delivery_waiver_billing",
+}
+LLM_QUALITY_REQUIRED_RUN_ARTIFACTS = (
+    "summary.json",
+    "brief.md",
+    "scenarios.json",
+    "responses.jsonl",
+    "trace_bundle.jsonl",
+)
+LLM_QUALITY_MANIFEST_VERSION = 1
+LLM_QUALITY_INDEX_ROOT = "/tmp/booking_quality/_index"
+LLM_QUALITY_MANIFEST_MAX_LATEST = 200
+LLM_QUALITY_MANIFEST_REDACT_KEYS = {
+    "admin_token",
+    "console_token",
+    "judge_api_key",
+    "llm_api_key",
+    "openai_api_key",
+    "webhook_secret",
+}
+LLM_QUALITY_MANIFEST_REDACT_SUBSTRINGS = (
+    "token",
+    "secret",
+    "api_key",
+    "password",
+    "bearer",
 )
 LLM_QUALITY_HQ1_CLASSES = (
     "wrong_action",
@@ -947,6 +978,8 @@ LLM_QUALITY_REASON_LABELS = {
     "unobserved_turn": "expected response has no observed text under duplicate/unknown transport state",
     "outbox_delivery_failed": "expected response but outbox delivery is FAILED",
     "outbox_delivery_timeout": "expected response but outbox did not deliver within wait window",
+    "delivery_waiver_billing": "delivery blocked by provider billing; excluded from semantic acceptance",
+    "manual_audit_gate_violation": "previous run is missing mandatory manual audit; stop new run until audit is completed",
     "unexpected_bot_reply_manager": "bot replied while manager_active",
     "handover_missing": "manager_active but handover missing",
     "info_section_miss": "info request not answered per meta/trace",
@@ -963,6 +996,7 @@ LLM_QUALITY_REASON_LABELS = {
     "stale_booking_carryover": "stale booking carryover phrase leaked into FACT/info response",
     "timeout_degrade_booking_generic": "timeout-degrade returned generic clarify in booking context",
     "run_completion_gap": "run stopped before all scenario turns were executed",
+    "lock_fingerprint_unchanged_after_non_canonical": "lock rerun uses unchanged fingerprint after non-canonical previous lock",
     "trace_response_mismatch": "trace_bundle rows do not match responses rows",
     "run_economy_violation": "run-economy gate detected non-actionable spend pattern",
     "weak_oracle_turn": "scenario turn has no contract expectation (weak oracle)",
@@ -980,6 +1014,8 @@ LLM_QUALITY_REASON_LABELS = {
     "semantic_intent_override_count_mismatch": "semantic intent override audit count mismatches recorded events",
     "lexicon_regex_delta_violation": "lexicon/regex delta without resolver + contract test delta",
     "hardcode_core_violation": "core hardcode gate detected raw keyword/regex branching in core diff",
+    "quality_constant_violation": "quality-constant gate detected acceptance-lane downgrade or debug override",
+    "workaround_register_violation": "WORKAROUND_ID marker found without register contract entry",
     "wrong_action": "HQ1: wrong product outcome (FACT/COLLECT/HANDOFF mismatch)",
     "handoff_miss": "HQ1: manager/handoff intent not escalated to pending",
     "non_actionable_reply": "HQ1: dead-end or non-actionable consultant reply",
@@ -1000,6 +1036,8 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "unobserved_turn": "code",
     "outbox_delivery_failed": "code",
     "outbox_delivery_timeout": "code",
+    "delivery_waiver_billing": "code",
+    "manual_audit_gate_violation": "process",
     "unexpected_bot_reply_manager": "code",
     "handover_missing": "code",
     "info_section_miss": "data",
@@ -1033,6 +1071,8 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "semantic_intent_override_count_mismatch": "canon",
     "lexicon_regex_delta_violation": "canon",
     "hardcode_core_violation": "canon",
+    "quality_constant_violation": "process",
+    "workaround_register_violation": "process",
     "wrong_action": "expectation",
     "handoff_miss": "expectation",
     "non_actionable_reply": "expectation",
@@ -1147,6 +1187,7 @@ LLM_QUALITY_WAIT_DEFAULTS = {
     "generated": {"min_wait": 0.2, "max_wait": 0.4},
     "replay": {"min_wait": 0.0, "max_wait": 0.15},
 }
+LLM_QUALITY_JUDGE_TRANSPORT = "urllib_inprocess"
 
 
 def _chaos_pick(rng, items):
@@ -3024,6 +3065,9 @@ def _llm_quality_has_booking_prompt_leak(
         # `services_overview` legitimately asks the user to choose a service;
         # treat it as contract follow-up, not booking prompt leak.
         return False
+    if tool_decision in {"missing_slot", "slot_mismatch"}:
+        # Booking collect path under service-query/location is contract-valid.
+        return False
     if not isinstance(outbox_text, str):
         return False
     lowered = outbox_text.casefold()
@@ -3093,7 +3137,15 @@ def _llm_quality_has_mix_info_booking(
     if not has_booking_prompt_markers:
         return False
     intent_value = _llm_quality_effective_intent(meta)
+    tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
     if intent_value in LLM_QUALITY_CALENDAR_INTENTS:
+        return False
+    # `catalog.service_query` + `missing_slot` is a normal booking-collect prompt.
+    # Do not treat this as info/FACT + booking mix.
+    if intent_value == "catalog.service_query" and tool_decision_value in {
+        "missing_slot",
+        "slot_mismatch",
+    }:
         return False
     info_sections = meta.get("info_sections")
     has_info_sections = bool(
@@ -3595,6 +3647,25 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         return True
 
     return _llm_quality_check_booking_tool_answered(meta, turn_tags, outbox_text)
+
+
+def _llm_quality_should_promote_judge_fail(*, judge_result, strict_reasons):
+    if not isinstance(judge_result, dict):
+        return False
+    verdict = _llm_quality_normalize_tool_token(judge_result.get("verdict"))
+    if verdict != "fail":
+        return False
+    delivery_waiver_reasons = set(
+        globals().get("LLM_QUALITY_DELIVERY_WAIVER_REASONS") or {"delivery_waiver_billing"}
+    )
+    for reason in strict_reasons or []:
+        token = _llm_quality_normalize_tool_token(reason)
+        if not token:
+            continue
+        if token in delivery_waiver_reasons:
+            continue
+        return True
+    return False
 
 
 def _llm_quality_normalize_expect_token(token: str | None):
@@ -4385,6 +4456,29 @@ def _llm_quality_has_general_consult_fallback(meta, trace_entries):
     return False
 
 
+def _llm_quality_has_catalog_service_choice_info_fallback(
+    *,
+    meta,
+    expected_reply_type,
+    actual_expected_reply_type,
+):
+    if not isinstance(meta, dict):
+        return False
+    intent_value = _llm_quality_effective_intent(meta)
+    tool_action_value = _llm_quality_normalize_tool_token(meta.get("tool_action"))
+    if intent_value != "catalog.service_query" and tool_action_value != "catalog.service_query":
+        return False
+    tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+    if tool_decision_value not in {"missing_slot", "slot_mismatch"}:
+        return False
+    expected_tokens = {
+        _llm_quality_normalize_tool_token(expected_reply_type),
+        _llm_quality_normalize_tool_token(actual_expected_reply_type),
+        _llm_quality_normalize_tool_token(meta.get("expected_reply_type")),
+    }
+    return "service_choice" in expected_tokens
+
+
 def _llm_quality_expected_response(state, meta):
     action = (meta or {}).get("action") if isinstance(meta, dict) else None
     pending_action = (meta or {}).get("pending_action") if isinstance(meta, dict) else None
@@ -4500,13 +4594,65 @@ def _llm_quality_outbox_delivery_state(outbox_payload_status, outbox_summary):
         return "unknown"
     return "missing"
 
+
+def _llm_quality_text_has_billing_block_marker(value):
+    if not isinstance(value, str):
+        return False
+    upper = value.strip().upper()
+    if not upper:
+        return False
+    return "BILLING_BLOCKED" in upper or "CHATFLOW_BILLING_BLOCKED" in upper
+
+
+def _llm_quality_payload_has_billing_block_marker(value):
+    if _llm_quality_text_has_billing_block_marker(value):
+        return True
+    if isinstance(value, dict):
+        for item in value.values():
+            if _llm_quality_payload_has_billing_block_marker(item):
+                return True
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            if _llm_quality_payload_has_billing_block_marker(item):
+                return True
+    return False
+
+
+def _llm_quality_is_delivery_billing_waiver(*, meta=None, trace_entries=None, outbox_payload=None):
+    if isinstance(meta, dict):
+        delivery_error_kind = str(meta.get("delivery_error_kind") or "").strip().lower()
+        delivery_error_code = str(meta.get("delivery_error_code") or "").strip().upper()
+        if delivery_error_kind in {"billing_blocked", "provider_billing_blocked"}:
+            return True
+        if "BILLING_BLOCKED" in delivery_error_code:
+            return True
+    if isinstance(trace_entries, list):
+        for entry in reversed(trace_entries):
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("stage") or "").strip().lower() != "transport":
+                continue
+            reason = str(entry.get("reason") or "").strip().lower()
+            error_code = str(entry.get("error_code") or "").strip().upper()
+            if reason in {"billing_blocked", "provider_billing_blocked"}:
+                return True
+            if "BILLING_BLOCKED" in error_code:
+                return True
+            break
+    if _llm_quality_payload_has_billing_block_marker(outbox_payload):
+        return True
+    return False
+
 def _llm_quality_has_bot_reply(
     *,
     outbox_summary,
     outbox_payload_status,
     outbox_text,
     inline_response_text,
+    inline_response_observed=False,
 ):
+    if bool(inline_response_observed):
+        return True
     if isinstance(inline_response_text, str) and inline_response_text.strip():
         return True
     delivery_state = _llm_quality_outbox_delivery_state(outbox_payload_status, outbox_summary)
@@ -4862,6 +5008,9 @@ def _llm_quality_collect_semantic_intent_override_audit(meta):
         "missing_reason": False,
         "unknown_reason": False,
         "count_mismatch": False,
+        "action_changed": False,
+        "intent_changed": False,
+        "tool_action_changed": False,
     }
     if not isinstance(meta, dict):
         return result
@@ -4871,6 +5020,10 @@ def _llm_quality_collect_semantic_intent_override_audit(meta):
 
     semantic_arbiter = llm_policy_core.get("semantic_arbiter")
     semantic_audit = semantic_arbiter.get("audit") if isinstance(semantic_arbiter, dict) else None
+    if isinstance(semantic_audit, dict):
+        result["action_changed"] = bool(semantic_audit.get("action_changed"))
+        result["intent_changed"] = bool(semantic_audit.get("intent_changed"))
+        result["tool_action_changed"] = bool(semantic_audit.get("tool_action_changed"))
     audit_count_raw = semantic_audit.get("intent_override_count") if isinstance(semantic_audit, dict) else 0
     try:
         audit_count = max(int(audit_count_raw), 0)
@@ -4955,7 +5108,7 @@ def _llm_quality_track_rewrite_governance(state, meta):
     if policy_core_mode in {"policy_core", "degraded_fallback"}:
         state["policy_core_turns"] = int(state.get("policy_core_turns", 0) or 0) + 1
 
-    reason_codes = _llm_quality_collect_override_reason_codes(meta)
+    meta_reason_codes = _llm_quality_collect_override_reason_codes(meta)
     semantic_override_audit = _llm_quality_collect_semantic_intent_override_audit(meta)
     semantic_audit_count = int(semantic_override_audit.get("audit_count") or 0)
     semantic_reason_codes = [
@@ -4963,15 +5116,42 @@ def _llm_quality_track_rewrite_governance(state, meta):
         for code in (semantic_override_audit.get("reason_codes") or [])
         if isinstance(code, str) and code.strip()
     ]
-    reason_codes = list(dict.fromkeys([*reason_codes, *semantic_reason_codes]))
-    missing_reason = bool(meta.get("llm_policy_override_reason_missing")) or bool(
+    semantic_action_changed = bool(semantic_override_audit.get("action_changed"))
+    semantic_intent_changed = bool(semantic_override_audit.get("intent_changed"))
+    semantic_tool_action_changed = bool(semantic_override_audit.get("tool_action_changed"))
+    semantic_effective_change = bool(
+        semantic_action_changed or semantic_intent_changed or semantic_tool_action_changed
+    )
+
+    meta_missing_reason = bool(meta.get("llm_policy_override_reason_missing")) or bool(
         meta.get("llm_policy_override_reason_missing_detected")
     )
     semantic_missing_reason = bool(semantic_override_audit.get("missing_reason"))
     semantic_unknown_reason = bool(semantic_override_audit.get("unknown_reason"))
     semantic_count_mismatch = bool(semantic_override_audit.get("count_mismatch"))
-    missing_reason = bool(missing_reason or semantic_missing_reason)
-    rewrite_turn = bool(reason_codes) or missing_reason or semantic_audit_count > 0
+    semantic_rewrite_turn = bool(
+        semantic_audit_count > 0
+        and (
+            semantic_effective_change
+            or semantic_missing_reason
+            or semantic_unknown_reason
+            or semantic_count_mismatch
+        )
+    )
+    reason_codes = list(
+        dict.fromkeys(
+            [
+                *meta_reason_codes,
+                *(semantic_reason_codes if semantic_rewrite_turn else []),
+            ]
+        )
+    )
+    missing_reason = bool(meta_missing_reason or (semantic_rewrite_turn and semantic_missing_reason))
+    rewrite_turn = bool(meta_reason_codes) or meta_missing_reason or semantic_rewrite_turn
+    if semantic_audit_count > 0:
+        state["semantic_intent_override_turns"] = int(
+            state.get("semantic_intent_override_turns", 0) or 0
+        ) + 1
     if not rewrite_turn:
         return
 
@@ -4981,24 +5161,20 @@ def _llm_quality_track_rewrite_governance(state, meta):
             state.get("rewrite_reason_missing_turns", 0) or 0
         ) + 1
 
-    if semantic_audit_count > 0:
-        state["semantic_intent_override_turns"] = int(
-            state.get("semantic_intent_override_turns", 0) or 0
-        ) + 1
-    if semantic_missing_reason:
+    if semantic_missing_reason and semantic_rewrite_turn:
         state["semantic_intent_override_reason_missing_turns"] = int(
             state.get("semantic_intent_override_reason_missing_turns", 0) or 0
         ) + 1
-    if semantic_unknown_reason:
+    if semantic_unknown_reason and semantic_rewrite_turn:
         state["semantic_intent_override_reason_unknown_turns"] = int(
             state.get("semantic_intent_override_reason_unknown_turns", 0) or 0
         ) + 1
-    if semantic_count_mismatch:
+    if semantic_count_mismatch and semantic_rewrite_turn:
         state["semantic_intent_override_count_mismatch_turns"] = int(
             state.get("semantic_intent_override_count_mismatch_turns", 0) or 0
         ) + 1
 
-    unknown_reason = semantic_unknown_reason
+    unknown_reason = bool(semantic_unknown_reason and semantic_rewrite_turn)
     keyword_override = False
     reason_counts = state.setdefault("reason_counts", {})
     for code in reason_codes:
@@ -5458,12 +5634,34 @@ def _llm_quality_build_run_economy_status(
     runtime_commit=None,
     judge_mode=None,
     previous_replay_fingerprint=None,
+    previous_lock_state=None,
+    current_output_dir=None,
     changed_files=None,
     baseline_preflight=None,
+    run_mode=None,
+    dialog_count=None,
+    min_turns=None,
+    max_turns=None,
+    include_media=False,
+    scenario_coverage=None,
 ):
     mode = str(mode or "off").strip().casefold()
     if mode not in {"off", "warn", "block"}:
         mode = "block"
+    previous_lock_payload = previous_lock_state if isinstance(previous_lock_state, dict) else {}
+    if not previous_lock_payload and isinstance(current_output_dir, str) and current_output_dir.strip():
+        previous_lock_payload = (
+            _llm_quality_find_latest_lock_fingerprint_status(
+                os.path.dirname(os.path.abspath(os.path.expanduser(current_output_dir.strip()))),
+                current_output_dir=current_output_dir,
+            )
+            or {}
+        )
+    previous_lock_fingerprint_clean = (
+        str(previous_lock_payload.get("lock_fingerprint") or "").strip() or None
+    )
+    previous_lock_canonical = previous_lock_payload.get("canonical_valid")
+    previous_lock_run_id = str(previous_lock_payload.get("run_id") or "").strip() or None
     if mode == "off":
         return {
             "mode": mode,
@@ -5479,12 +5677,16 @@ def _llm_quality_build_run_economy_status(
             "scenario_fingerprint": None,
             "baseline_fingerprint": None,
             "replay_fingerprint": None,
+            "lock_fingerprint": None,
             "previous_replay_fingerprint": (
                 str(previous_replay_fingerprint).strip()
                 if isinstance(previous_replay_fingerprint, str)
                 and str(previous_replay_fingerprint).strip()
                 else None
             ),
+            "previous_lock_fingerprint": previous_lock_fingerprint_clean,
+            "previous_lock_canonical": previous_lock_canonical,
+            "previous_lock_run_id": previous_lock_run_id,
             "baseline_checked": bool(
                 isinstance(baseline_preflight, dict) and baseline_preflight.get("checked")
             ),
@@ -5562,6 +5764,7 @@ def _llm_quality_build_run_economy_status(
         baseline_fingerprint = hashlib.sha256(str(baseline_token).encode("utf-8")).hexdigest()
 
     replay_fingerprint = None
+    lock_fingerprint = None
     if is_replay:
         replay_parts = [
             f"scenario:{scenario_fingerprint or 'none'}",
@@ -5573,6 +5776,28 @@ def _llm_quality_build_run_economy_status(
             f"reset_before_dialog:{bool(reset_before_dialog)}",
         ]
         replay_fingerprint = hashlib.sha256("|".join(replay_parts).encode("utf-8")).hexdigest()
+    else:
+        coverage_tokens = []
+        if isinstance(scenario_coverage, str) and scenario_coverage.strip():
+            coverage_tokens = sorted(
+                {
+                    token.strip().casefold()
+                    for token in scenario_coverage.split(",")
+                    if token and token.strip()
+                }
+            )
+        lock_parts = [
+            f"code:{code_fingerprint or 'none'}",
+            f"runtime:{str(runtime_commit or '').strip().casefold() or 'none'}",
+            f"judge:{str(judge_mode or '').strip().casefold() or 'none'}",
+            f"mode:{str(run_mode or '').strip().casefold() or 'none'}",
+            f"count:{int(dialog_count or 0)}",
+            f"min_turns:{int(min_turns or 0)}",
+            f"max_turns:{int(max_turns or 0)}",
+            f"include_media:{bool(include_media)}",
+            f"coverage:{','.join(coverage_tokens) if coverage_tokens else 'none'}",
+        ]
+        lock_fingerprint = hashlib.sha256("|".join(lock_parts).encode("utf-8")).hexdigest()
 
     previous_replay_fingerprint_clean = (
         str(previous_replay_fingerprint).strip()
@@ -5621,6 +5846,14 @@ def _llm_quality_build_run_economy_status(
             and not allow_no_code_delta
         ):
             reasons.append("replay_fingerprint_unchanged")
+    elif (
+        previous_lock_fingerprint_clean
+        and lock_fingerprint
+        and lock_fingerprint == previous_lock_fingerprint_clean
+        and previous_lock_canonical is False
+        and not allow_no_code_delta
+    ):
+        reasons.append("lock_fingerprint_unchanged_after_non_canonical")
     elif not non_doc_files and not allow_no_code_delta:
         reasons.append("full_run_without_code_delta")
 
@@ -5643,12 +5876,576 @@ def _llm_quality_build_run_economy_status(
         "scenario_fingerprint": scenario_fingerprint,
         "baseline_fingerprint": baseline_fingerprint,
         "replay_fingerprint": replay_fingerprint,
+        "lock_fingerprint": lock_fingerprint,
         "previous_replay_fingerprint": previous_replay_fingerprint_clean,
+        "previous_lock_fingerprint": previous_lock_fingerprint_clean,
+        "previous_lock_canonical": previous_lock_canonical,
+        "previous_lock_run_id": previous_lock_run_id,
         "baseline_checked": baseline_checked,
         "baseline_canonical": baseline_canonical,
         "baseline_canonical_reason": baseline_canonical_reason,
         "baseline_load_error": baseline_load_error,
     }
+
+
+def _llm_quality_build_quality_constant_status(
+    *,
+    mode,
+    lane,
+    scenarios_file,
+    run_mode,
+    count,
+    include_media,
+    scenario_coverage,
+    judge_mode,
+    run_economy_gate,
+    manual_audit_gate,
+    tool_evidence_policy,
+    fail_on_thresholds,
+    fail_on_regression,
+    allow_weak_oracle,
+    allow_incomplete_run_artifacts,
+    allow_judge_off,
+    allow_no_code_delta,
+    skip_outbox,
+    update_baseline,
+):
+    normalized_mode = str(mode or "off").strip().casefold()
+    if normalized_mode not in {"off", "warn", "block"}:
+        normalized_mode = "block"
+    lane_requested = str(lane or "auto").strip().casefold()
+    if lane_requested not in {"auto", "dev", "acceptance"}:
+        lane_requested = "auto"
+
+    lane_effective = lane_requested
+    if lane_effective == "auto":
+        lane_effective = (
+            "acceptance"
+            if bool(update_baseline or fail_on_thresholds or fail_on_regression)
+            else "dev"
+        )
+
+    coverage_values = _llm_quality_parse_coverage_tokens(scenario_coverage)
+    if isinstance(coverage_values, set):
+        coverage_token_set = set(coverage_values)
+    elif isinstance(coverage_values, (list, tuple)):
+        coverage_token_set = {
+            str(token).strip().casefold() for token in coverage_values if str(token).strip()
+        }
+    elif coverage_values is None:
+        coverage_token_set = set()
+    else:
+        coverage_token_set = {str(coverage_values).strip().casefold()}
+    coverage_tokens = sorted(coverage_token_set)
+    required_coverage = ("booking", "info", "interrupt", "handoff")
+    missing_coverage = [token for token in required_coverage if token not in coverage_token_set]
+    judge_enabled = _llm_quality_is_judge_mode_enabled(judge_mode)
+    reasons = []
+    is_replay = bool(scenarios_file)
+
+    if lane_effective == "acceptance":
+        if not bool(fail_on_thresholds):
+            reasons.append("acceptance_requires_fail_on_thresholds")
+        if is_replay and not bool(fail_on_regression):
+            reasons.append("acceptance_requires_fail_on_regression_replay")
+        if not judge_enabled:
+            reasons.append("acceptance_requires_judge_mode")
+        if str(run_mode or "").strip().casefold() != "llm":
+            reasons.append("acceptance_requires_llm_mode")
+        if int(count or 0) < 10:
+            reasons.append("acceptance_requires_count_gte_10")
+        if not bool(include_media):
+            reasons.append("acceptance_requires_include_media")
+        for token in missing_coverage:
+            reasons.append(f"acceptance_missing_coverage:{token}")
+        if str(run_economy_gate or "").strip().casefold() != "block":
+            reasons.append("acceptance_requires_run_economy_block")
+        if str(manual_audit_gate or "").strip().casefold() != "block":
+            reasons.append("acceptance_requires_manual_audit_block")
+        if str(tool_evidence_policy or "").strip().casefold() != "strict":
+            reasons.append("acceptance_requires_tool_evidence_strict")
+        if bool(allow_weak_oracle):
+            reasons.append("acceptance_disallows_allow_weak_oracle")
+        if bool(allow_incomplete_run_artifacts):
+            reasons.append("acceptance_disallows_allow_incomplete_run_artifacts")
+        if bool(allow_judge_off):
+            reasons.append("acceptance_disallows_allow_judge_off")
+        if bool(allow_no_code_delta):
+            reasons.append("acceptance_disallows_allow_no_code_delta")
+        if bool(skip_outbox):
+            reasons.append("acceptance_disallows_skip_outbox")
+    elif bool(update_baseline):
+        reasons.append("dev_lane_disallows_update_baseline")
+
+    enforced = normalized_mode == "block"
+    valid = not reasons if enforced else True
+    return {
+        "mode": normalized_mode,
+        "valid": valid,
+        "enforced": enforced,
+        "reasons": reasons,
+        "lane_requested": lane_requested,
+        "lane_effective": lane_effective,
+        "is_replay": is_replay,
+        "coverage_tokens": coverage_tokens,
+        "required_coverage": list(required_coverage),
+        "missing_coverage": missing_coverage,
+        "judge_enabled": judge_enabled,
+    }
+
+
+def _llm_quality_collect_workaround_marker_hits(*, repo_root, changed_files):
+    hits = []
+    pattern = re.compile(
+        r"(?:#|//|--)\s*WORKAROUND_ID\s*[:=]\s*([A-Za-z0-9][A-Za-z0-9._-]{1,127})",
+        re.IGNORECASE,
+    )
+    normalized_files = sorted(
+        {
+            str(path or "").strip().replace("\\", "/")
+            for path in (changed_files or [])
+            if str(path or "").strip()
+        }
+    )
+    for rel_path in normalized_files:
+        abs_path = os.path.abspath(os.path.join(repo_root, rel_path))
+        if not os.path.isfile(abs_path):
+            continue
+        try:
+            with open(abs_path, "r", encoding="utf-8", errors="ignore") as handle:
+                content = handle.read()
+        except Exception:
+            continue
+        for match in pattern.finditer(content):
+            workaround_id = str(match.group(1) or "").strip()
+            if not workaround_id:
+                continue
+            line = content.count("\n", 0, match.start()) + 1
+            hits.append(
+                {
+                    "path": rel_path,
+                    "line": int(line),
+                    "workaround_id": workaround_id,
+                }
+            )
+    deduped = {}
+    for item in hits:
+        key = (
+            str(item.get("path") or "").strip(),
+            int(item.get("line") or 0),
+            str(item.get("workaround_id") or "").strip(),
+        )
+        if key in deduped:
+            continue
+        deduped[key] = item
+    ordered = sorted(
+        deduped.values(),
+        key=lambda row: (
+            str(row.get("workaround_id") or ""),
+            str(row.get("path") or ""),
+            int(row.get("line") or 0),
+        ),
+    )
+    return ordered
+
+
+def _llm_quality_collect_workaround_register_ids(payload):
+    ids = set()
+    stack = [payload]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            candidate = (
+                current.get("id")
+                or current.get("workaround_id")
+                or current.get("workaroundId")
+            )
+            if isinstance(candidate, str) and candidate.strip():
+                ids.add(candidate.strip())
+            for value in current.values():
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+        elif isinstance(current, list):
+            for item in current:
+                if isinstance(item, (dict, list)):
+                    stack.append(item)
+    return sorted(ids)
+
+
+def _llm_quality_build_workaround_register_status(
+    *,
+    mode,
+    repo_root,
+    base_ref,
+    register_path,
+    changed_files=None,
+):
+    normalized_mode = str(mode or "off").strip().casefold()
+    if normalized_mode not in {"off", "warn", "block"}:
+        normalized_mode = "block"
+    default_register_path = "docs/WORKAROUND_REGISTER.json"
+    register_path_raw = str(register_path or "").strip() or default_register_path
+    register_path_abs = (
+        os.path.abspath(os.path.expanduser(register_path_raw))
+        if os.path.isabs(register_path_raw)
+        else os.path.abspath(os.path.join(repo_root, register_path_raw))
+    )
+    gate_status = {
+        "mode": normalized_mode,
+        "valid": True,
+        "enforced": normalized_mode == "block",
+        "reasons": [],
+        "scan_warnings": [],
+        "changed_files": [],
+        "changed_files_count": 0,
+        "marker_hits": [],
+        "marker_count": 0,
+        "marker_ids": [],
+        "register_path": register_path_abs,
+        "register_exists": os.path.exists(register_path_abs),
+        "register_load_error": None,
+        "registered_ids": [],
+        "missing_ids": [],
+    }
+    if normalized_mode == "off":
+        return gate_status
+
+    scan_warnings = []
+    if changed_files is None:
+        changed_files, scan_warnings = _llm_quality_collect_git_changed_files(
+            repo_root, base_ref
+        )
+    normalized_files = sorted(
+        {
+            str(path or "").strip().replace("\\", "/")
+            for path in (changed_files or [])
+            if str(path or "").strip()
+        }
+    )
+    marker_hits = _llm_quality_collect_workaround_marker_hits(
+        repo_root=repo_root,
+        changed_files=normalized_files,
+    )
+    marker_ids = sorted(
+        {
+            str(row.get("workaround_id") or "").strip()
+            for row in marker_hits
+            if str(row.get("workaround_id") or "").strip()
+        }
+    )
+
+    register_load_error = None
+    register_payload = None
+    registered_ids = []
+    missing_ids = []
+    if marker_ids:
+        if not os.path.exists(register_path_abs):
+            register_load_error = "missing"
+        else:
+            try:
+                with open(register_path_abs, "r", encoding="utf-8") as handle:
+                    register_payload = json.load(handle)
+            except Exception:
+                register_load_error = "parse_error"
+        if register_load_error is None:
+            registered_ids = _llm_quality_collect_workaround_register_ids(register_payload)
+            registered_set = {str(item).strip() for item in registered_ids if str(item).strip()}
+            missing_ids = [workaround_id for workaround_id in marker_ids if workaround_id not in registered_set]
+
+    reasons = []
+    if marker_ids and register_load_error == "missing":
+        reasons.append("workaround_register_missing")
+    elif marker_ids and register_load_error == "parse_error":
+        reasons.append("workaround_register_parse_error")
+    for workaround_id in missing_ids:
+        reasons.append(f"workaround_id_unregistered:{workaround_id}")
+
+    gate_status.update(
+        {
+            "valid": (not reasons) if gate_status.get("enforced") else True,
+            "reasons": reasons,
+            "scan_warnings": scan_warnings,
+            "changed_files": normalized_files,
+            "changed_files_count": len(normalized_files),
+            "marker_hits": marker_hits[:50],
+            "marker_count": len(marker_hits),
+            "marker_ids": marker_ids,
+            "register_exists": os.path.exists(register_path_abs),
+            "register_load_error": register_load_error,
+            "registered_ids": registered_ids,
+            "missing_ids": missing_ids,
+        }
+    )
+    return gate_status
+
+
+def _llm_quality_load_json_object(path):
+    normalized = os.path.abspath(os.path.expanduser(str(path or "").strip() or "."))
+    if not os.path.exists(normalized):
+        return None
+    try:
+        with open(normalized, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _llm_quality_resolve_manual_audit_status(run_dir):
+    normalized_dir = os.path.abspath(os.path.expanduser(str(run_dir or "").strip() or "."))
+    summary_path = os.path.join(normalized_dir, "summary.json")
+    summary = _llm_quality_load_json_object(summary_path) or {}
+    quality_status = summary.get("quality_status") if isinstance(summary, dict) else {}
+    if not isinstance(quality_status, dict):
+        quality_status = {}
+    manual_meta = summary.get("manual_audit") if isinstance(summary, dict) else {}
+    if not isinstance(manual_meta, dict):
+        manual_meta = {}
+    manual_required = bool(
+        quality_status.get("manual_audit_required")
+        or manual_meta.get("required")
+    )
+    run_id = str(summary.get("run_id") or "").strip() if isinstance(summary, dict) else ""
+    if not run_id:
+        run_id = os.path.basename(normalized_dir)
+    manual_audit_path = manual_meta.get("path") or os.path.join(normalized_dir, "manual_audit.md")
+    manual_audit_json_path = (
+        manual_meta.get("json_path") or os.path.join(normalized_dir, "manual_audit.json")
+    )
+    manual_audit_status = str(manual_meta.get("status") or "").strip().casefold()
+    manual_audit_json = _llm_quality_load_json_object(manual_audit_json_path)
+    if isinstance(manual_audit_json, dict):
+        status_token = str(manual_audit_json.get("status") or "").strip().casefold()
+        if status_token:
+            manual_audit_status = status_token
+    manual_done = manual_audit_status in {"done", "completed", "pass", "passed"}
+    if not manual_required:
+        manual_done = True
+    summary_mtime = os.path.getmtime(summary_path) if os.path.exists(summary_path) else 0.0
+    return {
+        "run_id": run_id,
+        "run_dir": normalized_dir,
+        "summary_path": summary_path,
+        "summary_mtime": float(summary_mtime),
+        "manual_audit_required": manual_required,
+        "manual_audit_status": manual_audit_status or None,
+        "manual_audit_done": manual_done,
+        "manual_audit_path": manual_audit_path,
+        "manual_audit_json_path": manual_audit_json_path,
+        "manual_audit_command": manual_meta.get("command"),
+    }
+
+
+def _llm_quality_sync_manual_audit_summary(
+    *,
+    run_dir,
+    status=None,
+    manual_audit_path=None,
+    manual_audit_json_path=None,
+):
+    normalized_dir = os.path.abspath(os.path.expanduser(str(run_dir or "").strip() or "."))
+    summary_path = os.path.join(normalized_dir, "summary.json")
+    summary = _llm_quality_load_json_object(summary_path)
+    if not isinstance(summary, dict):
+        return False
+
+    manual_meta = summary.get("manual_audit")
+    if not isinstance(manual_meta, dict):
+        manual_meta = {}
+    quality_status = summary.get("quality_status")
+    if not isinstance(quality_status, dict):
+        quality_status = {}
+
+    current_status = (
+        str(
+            status
+            or manual_meta.get("status")
+            or quality_status.get("manual_audit_status")
+            or "pending"
+        )
+        .strip()
+        .casefold()
+    )
+    if not current_status:
+        current_status = "pending"
+
+    command = manual_meta.get("command")
+    if not command:
+        command = (
+            "python3 ops/diagnose.py llm-quality-audit "
+            f"--run-dir {shlex.quote(normalized_dir)} "
+            "--status done "
+            "--strict-artifacts"
+        )
+    resolved_manual_audit_path = (
+        manual_audit_path
+        or manual_meta.get("path")
+        or os.path.join(normalized_dir, "manual_audit.md")
+    )
+    resolved_manual_audit_json_path = (
+        manual_audit_json_path
+        or manual_meta.get("json_path")
+        or os.path.join(normalized_dir, "manual_audit.json")
+    )
+    run_id = str(summary.get("run_id") or "").strip() or os.path.basename(normalized_dir)
+    before = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+    manual_meta["required"] = True
+    manual_meta["status"] = current_status
+    manual_meta["run_id"] = run_id
+    manual_meta["path"] = resolved_manual_audit_path
+    manual_meta["json_path"] = resolved_manual_audit_json_path
+    manual_meta["command"] = command
+    summary["manual_audit"] = manual_meta
+
+    quality_status["manual_audit_required"] = True
+    quality_status["manual_audit_status"] = current_status
+    quality_status["manual_audit_path"] = resolved_manual_audit_path
+    quality_status["manual_audit_command"] = command
+    summary["quality_status"] = quality_status
+
+    after = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+    if before == after:
+        return False
+
+    with open(summary_path, "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, ensure_ascii=False, indent=2)
+
+    brief_path = summary.get("brief_path")
+    if not isinstance(brief_path, str) or not brief_path.strip():
+        brief_path = os.path.join(normalized_dir, "brief.md")
+    brief_writer = globals().get("_llm_quality_write_brief")
+    if callable(brief_writer):
+        try:
+            brief_writer(brief_path, summary)
+        except Exception:
+            pass
+    return True
+
+
+def _llm_quality_resolve_lock_run_canonical(summary):
+    if not isinstance(summary, dict):
+        return None
+    quality_status = summary.get("quality_status")
+    if not isinstance(quality_status, dict):
+        return None
+    infra_valid = quality_status.get("infra_valid")
+    semantic_valid = quality_status.get("semantic_valid")
+    run_integrity_valid = quality_status.get("run_integrity_valid")
+    if infra_valid is False or semantic_valid is False or run_integrity_valid is False:
+        return False
+    stop_reason = str(summary.get("stop_reason") or "").strip().casefold()
+    if stop_reason in {"in_progress", "signal_15"}:
+        return False
+    if infra_valid is True and semantic_valid is True and run_integrity_valid is True:
+        return True
+    return None
+
+
+def _llm_quality_find_latest_lock_fingerprint_status(output_root, current_output_dir=None):
+    normalized_root = os.path.abspath(os.path.expanduser(str(output_root or "").strip() or "."))
+    if not os.path.isdir(normalized_root):
+        return None
+    current_dir = (
+        os.path.abspath(os.path.expanduser(str(current_output_dir).strip()))
+        if isinstance(current_output_dir, str) and str(current_output_dir).strip()
+        else None
+    )
+    latest = None
+    for entry in os.scandir(normalized_root):
+        if not entry.is_dir():
+            continue
+        if entry.name.startswith("."):
+            continue
+        if current_dir and os.path.abspath(entry.path) == current_dir:
+            continue
+        summary_path = os.path.join(entry.path, "summary.json")
+        if not os.path.exists(summary_path):
+            continue
+        summary = _llm_quality_load_json_object(summary_path) or {}
+        run_economy = summary.get("run_economy")
+        if not isinstance(run_economy, dict):
+            continue
+        if run_economy.get("is_replay"):
+            continue
+        lock_fingerprint = str(run_economy.get("lock_fingerprint") or "").strip()
+        if not lock_fingerprint:
+            continue
+        summary_mtime = os.path.getmtime(summary_path)
+        candidate = {
+            "run_id": str(summary.get("run_id") or "").strip() or entry.name,
+            "run_dir": os.path.abspath(entry.path),
+            "summary_path": summary_path,
+            "summary_mtime": float(summary_mtime),
+            "lock_fingerprint": lock_fingerprint,
+            "canonical_valid": _llm_quality_resolve_lock_run_canonical(summary),
+            "stop_reason": summary.get("stop_reason"),
+        }
+        if latest is None or candidate["summary_mtime"] > latest["summary_mtime"]:
+            latest = candidate
+    return latest
+
+
+def _llm_quality_find_latest_pending_manual_audit(output_root, current_output_dir=None):
+    normalized_root = os.path.abspath(os.path.expanduser(str(output_root or "").strip() or "."))
+    if not os.path.isdir(normalized_root):
+        return None
+    current_dir = (
+        os.path.abspath(os.path.expanduser(str(current_output_dir).strip()))
+        if isinstance(current_output_dir, str) and str(current_output_dir).strip()
+        else None
+    )
+    pending = []
+    for entry in os.scandir(normalized_root):
+        if not entry.is_dir():
+            continue
+        if current_dir and os.path.abspath(entry.path) == current_dir:
+            continue
+        if entry.name.startswith("."):
+            continue
+        summary_path = os.path.join(entry.path, "summary.json")
+        if not os.path.exists(summary_path):
+            continue
+        status = _llm_quality_resolve_manual_audit_status(entry.path)
+        if not status.get("manual_audit_required"):
+            continue
+        if status.get("manual_audit_done"):
+            continue
+        pending.append(status)
+    if not pending:
+        return None
+    pending.sort(key=lambda item: item.get("summary_mtime") or 0.0, reverse=True)
+    return pending[0]
+
+
+def _llm_quality_build_manual_audit_gate_status(*, mode, output_dir):
+    normalized_mode = str(mode or "off").strip().casefold()
+    if normalized_mode not in {"off", "warn", "block"}:
+        normalized_mode = "block"
+    normalized_output_dir = os.path.abspath(
+        os.path.expanduser(str(output_dir or "").strip() or ".")
+    )
+    gate_status = {
+        "mode": normalized_mode,
+        "valid": True,
+        "enforced": normalized_mode == "block",
+        "reasons": [],
+        "output_root": os.path.dirname(normalized_output_dir),
+        "pending_run": None,
+    }
+    if normalized_mode == "off":
+        return gate_status
+    pending = _llm_quality_find_latest_pending_manual_audit(
+        gate_status["output_root"], current_output_dir=normalized_output_dir
+    )
+    if not pending:
+        return gate_status
+    run_id = str(pending.get("run_id") or "").strip() or "unknown"
+    gate_status["pending_run"] = pending
+    gate_status["reasons"] = [f"manual_audit_pending:{run_id}"]
+    if gate_status["enforced"]:
+        gate_status["valid"] = False
+    return gate_status
 
 
 def _llm_quality_collect_blocking_reasons(failure_counts, extra_counts=None):
@@ -5848,6 +6645,10 @@ def _llm_quality_next_step_for_reason(reason):
         "unobserved_turn": "inspect transport observability (turn_outcome + outbox state) and fail run as INVALID",
         "outbox_delivery_failed": "inspect outbox last_error/provider status and retry/backoff policy",
         "outbox_delivery_timeout": "increase poll/outbox wait for replay and verify worker/outbox process timing",
+        "delivery_waiver_billing": "classify as delivery waiver and keep semantic acceptance on contract checks",
+        "manual_audit_gate_violation": "complete manual audit for previous run (manual_audit.md/json) before starting a new run",
+        "quality_constant_violation": "run acceptance lane with full canonical envelope (judge/media/coverage/gates) or switch explicitly to dev lane",
+        "workaround_register_violation": "register WORKAROUND_ID in workaround register with owner/expiry/removal condition before rerun",
         "false_booking_confirmation": "verify booking confirmation text against appointment_id and calendar outcome",
         "calendar_tool_contract_miss": "inspect tool_signals.calendar + appointment_status before confirming booking",
         "requested_date_time_like": "fix runtime date normalization so requested_date stores only date/relative-date tokens",
@@ -5861,6 +6662,7 @@ def _llm_quality_next_step_for_reason(reason):
         "timeout_degrade_booking_generic": "replace timeout generic clarify with booking-safe slot prompt when booking context is active",
         "run_economy_violation": "avoid full/replay spend without code delta + baseline; use lock/replay loop with reset-before-dialog",
         "run_completion_gap": "stop run as INVALID and rerun from lock scenarios until all expected turns are executed",
+        "lock_fingerprint_unchanged_after_non_canonical": "apply root-cause fix that changes lock fingerprint (or explicit forensic override) before next lock",
         "trace_response_mismatch": "fail run as INVALID and inspect trace write path for missing inbound records",
         "weak_oracle_turn": "add at least one explicit expectation per scenario turn (action/reply_type/info/state/reply)",
         "incomplete_run_artifact": "discard incomplete run from baseline/comparison and regenerate with full summary+brief artifacts",
@@ -5956,6 +6758,8 @@ def _llm_quality_write_brief(path, summary):
     stop_reason = (summary or {}).get("stop_reason")
     scenario_source = (summary or {}).get("scenario_source") or {}
     replay_command = (summary or {}).get("replay_command")
+    manual_audit = (summary or {}).get("manual_audit") or {}
+    artifact_integrity = (summary or {}).get("artifact_integrity") or {}
     lines = [
         "# LLM Quality Brief",
         "",
@@ -5979,11 +6783,16 @@ def _llm_quality_write_brief(path, summary):
         f"- scenarios_path: `{summary.get('scenarios_path')}`",
         f"- responses_path: `{summary.get('responses_path')}`",
         f"- trace_bundle_path: `{summary.get('trace_bundle_path')}`",
+        f"- artifacts_valid: `{artifact_integrity.get('valid')}`",
     ]
     if scenario_source.get("path"):
         lines.append(f"- scenario_source_path: `{scenario_source.get('path')}`")
     if stop_reason:
         lines.append(f"- stop_reason: `{stop_reason}`")
+    if manual_audit:
+        lines.append(f"- manual_audit_status: `{manual_audit.get('status')}`")
+        lines.append(f"- manual_audit_path: `{manual_audit.get('path')}`")
+        lines.append(f"- manual_audit_command: `{manual_audit.get('command')}`")
     lines.extend(["", "## Top Failures"])
     if top_failure_turns:
         for row in top_failure_turns:
@@ -6025,8 +6834,411 @@ def _llm_quality_default_output_dir(run_id, explicit_output_dir=None):
     return os.path.abspath(os.path.join("/tmp/booking_quality", run_token))
 
 
+def _llm_quality_manifest_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _llm_quality_manifest_coerce(value):
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, (list, tuple, set)):
+        return [_llm_quality_manifest_coerce(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            str(key): _llm_quality_manifest_coerce(val) for key, val in value.items()
+        }
+    return str(value)
+
+
+def _llm_quality_manifest_should_redact(key):
+    if not isinstance(key, str):
+        return False
+    if key in LLM_QUALITY_MANIFEST_REDACT_KEYS:
+        return True
+    lowered = key.casefold()
+    return any(token in lowered for token in LLM_QUALITY_MANIFEST_REDACT_SUBSTRINGS)
+
+
+def _llm_quality_manifest_args(args):
+    if args is None:
+        return {}
+    payload = {}
+    for key, value in vars(args).items():
+        if _llm_quality_manifest_should_redact(key):
+            payload[key] = "<redacted>"
+        else:
+            payload[key] = _llm_quality_manifest_coerce(value)
+    return payload
+
+
+def _llm_quality_manifest_mode(args, run_id, run_economy_status):
+    mode = None
+    source = "inferred"
+    if isinstance(run_economy_status, dict):
+        if run_economy_status.get("is_replay"):
+            mode = "replay"
+            source = "run_economy"
+    if mode is None and args is not None:
+        if getattr(args, "scenarios_file", None):
+            mode = "replay"
+            source = "scenarios_file"
+    if mode is None and isinstance(run_id, str):
+        lowered = run_id.casefold()
+        if "full" in lowered:
+            mode = "full"
+            source = "run_id"
+        elif "replay" in lowered:
+            mode = "replay"
+            source = "run_id"
+        elif "lock" in lowered:
+            mode = "lock"
+            source = "run_id"
+    if mode is None:
+        mode = "lock"
+    return mode, source
+
+
+def _llm_quality_manifest_status(summary, artifact_integrity):
+    if not isinstance(summary, dict):
+        return "unknown"
+    stop_reason = str(summary.get("stop_reason") or "").strip()
+    quality_status = summary.get("quality_status") or {}
+    infra_valid = summary.get("infra_valid")
+    if infra_valid is None:
+        infra_valid = quality_status.get("infra_valid")
+    semantic_valid = summary.get("semantic_valid")
+    if semantic_valid is None:
+        semantic_valid = quality_status.get("semantic_valid")
+    run_integrity_valid = quality_status.get("run_integrity_valid")
+    if run_integrity_valid is None:
+        run_integrity_valid = summary.get("run_integrity_valid")
+    if not isinstance(artifact_integrity, dict):
+        artifact_integrity = {}
+    artifact_valid = artifact_integrity.get("valid")
+    if stop_reason in {"in_progress", "system_exit"}:
+        return "incomplete"
+    if artifact_valid is False:
+        return "incomplete"
+    if run_integrity_valid is False:
+        return "incomplete"
+    if stop_reason == "early_failure":
+        return "failed"
+    if infra_valid is False or semantic_valid is False:
+        return "invalid"
+    if infra_valid is True and semantic_valid is True and run_integrity_valid is True:
+        return "canonical"
+    return "completed"
+
+
+def _llm_quality_build_command_from_args(
+    args,
+    *,
+    run_id=None,
+    output_dir=None,
+    allow_output_overwrite=False,
+    allow_incomplete_artifacts=False,
+):
+    if args is None:
+        return None
+    cmd = ["python3", "ops/diagnose.py", "llm-quality"]
+
+    def add(flag, value):
+        if value is None or value == "":
+            return
+        cmd.extend([flag, str(value)])
+
+    def add_bool(flag, value):
+        if value:
+            cmd.append(flag)
+
+    add("--base-url", getattr(args, "base_url", None))
+    add("--client-slug", getattr(args, "client_slug", None))
+    add("--branch-slug", getattr(args, "branch_slug", None))
+    add("--count", getattr(args, "count", None))
+    add("--seed", getattr(args, "seed", None))
+    add("--scenarios-file", getattr(args, "scenarios_file", None))
+    add("--mode", getattr(args, "mode", None))
+    add("--min-turns", getattr(args, "min_turns", None))
+    add("--max-turns", getattr(args, "max_turns", None))
+    add_bool("--include-media", getattr(args, "include_media", False))
+    add("--media-mode", getattr(args, "media_mode", None))
+    add("--media-kind", getattr(args, "media_kind", None))
+    add("--scenario-coverage", getattr(args, "scenario_coverage", None))
+    add("--batch-size", getattr(args, "batch_size", None))
+    add("--retry-count", getattr(args, "retry_count", None))
+    add("--retry-backoff", getattr(args, "retry_backoff", None))
+    add("--min-wait", getattr(args, "min_wait", None))
+    add("--max-wait", getattr(args, "max_wait", None))
+    add("--allowlist-jids", getattr(args, "allowlist_jids", None))
+    add("--remote-jid", getattr(args, "remote_jid", None))
+    add("--jid-mode", getattr(args, "jid_mode", None))
+    add_bool("--allow-non-allowlist", getattr(args, "allow_non_allowlist", False))
+    add("--timeout-profile", getattr(args, "timeout_profile", None))
+    add("--timeout", getattr(args, "timeout", None))
+    add("--poll-timeout", getattr(args, "poll_timeout", None))
+    add("--poll-interval", getattr(args, "poll_interval", None))
+    add("--trace-timeout", getattr(args, "trace_timeout", None))
+    add("--trace-interval", getattr(args, "trace_interval", None))
+    add_bool("--skip-outbox", getattr(args, "skip_outbox", False))
+    add("--outbox-wait", getattr(args, "outbox_wait", None))
+    add("--manager-mode", getattr(args, "manager_mode", None))
+    add("--manager-channel", getattr(args, "manager_channel", None))
+    add("--manager-actions", getattr(args, "manager_actions", None))
+    add("--manager-wait", getattr(args, "manager_wait", None))
+    add("--pending-mode", getattr(args, "pending_mode", None))
+    add("--ack-text", getattr(args, "ack_text", None))
+    add("--tool-hooks", getattr(args, "tool_hooks", None))
+    add("--tool-confirm-text", getattr(args, "tool_confirm_text", None))
+    add("--tool-cancel-text", getattr(args, "tool_cancel_text", None))
+    add("--tool-calendar-text", getattr(args, "tool_calendar_text", None))
+    add("--tool-hook-wait", getattr(args, "tool_hook_wait", None))
+    add("--tool-hook-limit", getattr(args, "tool_hook_limit", None))
+    add("--tool-evidence-policy", getattr(args, "tool_evidence_policy", None))
+    add_bool("--reset-before-dialog", getattr(args, "reset_before_dialog", False))
+    add("--console-base-url", getattr(args, "console_base_url", None))
+    add("--console-env", getattr(args, "console_env", None))
+    add("--console-client-id", getattr(args, "console_client_id", None))
+    add("--console-mode", getattr(args, "console_mode", None))
+    add("--output-dir", output_dir or getattr(args, "output_dir", None))
+    add_bool("--allow-output-overwrite", allow_output_overwrite or getattr(args, "allow_output_overwrite", False))
+    add("--run-id", run_id or getattr(args, "run_id", None))
+    add("--brief-file", getattr(args, "brief_file", None))
+    add("--expected-runtime-commit", getattr(args, "expected_runtime_commit", None))
+    add("--baseline-summary", getattr(args, "baseline_summary", None))
+    add_bool("--update-baseline", getattr(args, "update_baseline", False))
+    add_bool("--append-history", getattr(args, "append_history", False))
+    add("--history-max", getattr(args, "history_max", None))
+    add_bool("--fail-on-thresholds", getattr(args, "fail_on_thresholds", False))
+    add_bool("--fail-on-regression", getattr(args, "fail_on_regression", False))
+    add("--max-failures", getattr(args, "max_failures", None))
+    add("--regression-tolerance", getattr(args, "regression_tolerance", None))
+    add("--max-post-llm-semantic-rewrite-rate", getattr(args, "max_post_llm_semantic_rewrite_rate", None))
+    add("--max-keyword-override-rate", getattr(args, "max_keyword_override_rate", None))
+    add("--lexicon-regex-delta-gate", getattr(args, "lexicon_regex_delta_gate", None))
+    add("--delta-gate-base-ref", getattr(args, "delta_gate_base_ref", None))
+    add("--hardcode-core-gate", getattr(args, "hardcode_core_gate", None))
+    add("--hardcode-core-base-ref", getattr(args, "hardcode_core_base_ref", None))
+    add("--run-economy-gate", getattr(args, "run_economy_gate", None))
+    add("--run-economy-base-ref", getattr(args, "run_economy_base_ref", None))
+    add("--manual-audit-gate", getattr(args, "manual_audit_gate", None))
+    add_bool("--allow-no-code-delta", getattr(args, "allow_no_code_delta", False))
+    add("--judge-mode", getattr(args, "judge_mode", None))
+    add("--judge-sample", getattr(args, "judge_sample", None))
+    add("--judge-model", getattr(args, "judge_model", None))
+    add("--judge-base-url", getattr(args, "judge_base_url", None))
+    add("--judge-timeout", getattr(args, "judge_timeout", None))
+    add("--judge-max-tokens", getattr(args, "judge_max_tokens", None))
+    add("--judge-seed", getattr(args, "judge_seed", None))
+    add("--judge-cache-file", getattr(args, "judge_cache_file", None))
+    add("--judge-cache-max-entries", getattr(args, "judge_cache_max_entries", None))
+    add_bool("--judge-no-redact", not getattr(args, "judge_redact", True))
+    add_bool("--allow-judge-off", getattr(args, "allow_judge_off", False))
+    add_bool("--dry-run", getattr(args, "dry_run", False))
+    if allow_incomplete_artifacts:
+        cmd.append("--allow-incomplete-run-artifacts")
+    return " ".join(shlex.quote(part) for part in cmd)
+
+
+def _llm_quality_update_artifact_index(manifest):
+    if not isinstance(manifest, dict):
+        return
+    try:
+        os.makedirs(LLM_QUALITY_INDEX_ROOT, exist_ok=True)
+    except Exception:
+        return
+    finished_at = manifest.get("finished_at") or manifest.get("started_at") or _llm_quality_manifest_now()
+    finished_text = str(finished_at)
+    if finished_text.endswith("Z"):
+        finished_text = finished_text[:-1] + "+00:00"
+    try:
+        finished_dt = datetime.fromisoformat(finished_text)
+    except Exception:
+        finished_dt = datetime.now(timezone.utc)
+    date_bucket = finished_dt.strftime("%Y-%m-%d")
+    hour_bucket = finished_dt.strftime("%H")
+    by_hour_dir = os.path.join(LLM_QUALITY_INDEX_ROOT, "by_hour", date_bucket, hour_bucket)
+    by_mode_dir = os.path.join(LLM_QUALITY_INDEX_ROOT, "by_mode", str(manifest.get("mode") or "unknown"))
+    latest_by_mode_dir = os.path.join(LLM_QUALITY_INDEX_ROOT, "latest_by_mode")
+    os.makedirs(by_hour_dir, exist_ok=True)
+    os.makedirs(by_mode_dir, exist_ok=True)
+    os.makedirs(latest_by_mode_dir, exist_ok=True)
+    run_id = str(manifest.get("run_id") or "unknown")
+    hour_path = os.path.join(by_hour_dir, f"{run_id}.json")
+    mode_path = os.path.join(by_mode_dir, f"{run_id}.json")
+    latest_mode_path = os.path.join(latest_by_mode_dir, f"{manifest.get('mode') or 'unknown'}.json")
+    for path in (hour_path, mode_path, latest_mode_path):
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(manifest, handle, ensure_ascii=False, indent=2)
+        except Exception:
+            continue
+    latest_path = os.path.join(LLM_QUALITY_INDEX_ROOT, "latest.json")
+    entry = {
+        "run_id": run_id,
+        "mode": manifest.get("mode"),
+        "status": manifest.get("status"),
+        "finished_at": manifest.get("finished_at"),
+        "output_dir": manifest.get("output_dir"),
+        "summary_path": (manifest.get("artifacts") or {}).get("summary"),
+        "manifest_path": (manifest.get("artifacts") or {}).get("manifest"),
+    }
+    latest = []
+    if os.path.exists(latest_path):
+        try:
+            with open(latest_path, "r", encoding="utf-8") as handle:
+                latest = json.load(handle)
+        except Exception:
+            latest = []
+    if not isinstance(latest, list):
+        latest = []
+    latest = [item for item in latest if isinstance(item, dict) and item.get("run_id") != run_id]
+    latest.insert(0, entry)
+    latest = latest[:LLM_QUALITY_MANIFEST_MAX_LATEST]
+    with open(latest_path, "w", encoding="utf-8") as handle:
+        json.dump(latest, handle, ensure_ascii=False, indent=2)
+
+
+def _llm_quality_write_run_manifest(
+    *,
+    args,
+    run_id,
+    output_dir,
+    summary=None,
+    run_economy_status=None,
+    runtime_preflight=None,
+    stop_reason=None,
+):
+    output_dir = _llm_quality_default_output_dir(run_id, output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    summary_path = os.path.join(output_dir, "summary.json")
+    if summary is None and os.path.exists(summary_path):
+        try:
+            with open(summary_path, "r", encoding="utf-8") as handle:
+                summary = json.load(handle)
+        except Exception:
+            summary = {}
+    if summary is None:
+        summary = {}
+    if not isinstance(run_economy_status, dict):
+        run_economy_status = summary.get("run_economy") if isinstance(summary.get("run_economy"), dict) else {}
+    if not isinstance(runtime_preflight, dict):
+        runtime_preflight = summary.get("runtime_preflight") if isinstance(summary.get("runtime_preflight"), dict) else {}
+    artifact_integrity = summary.get("artifact_integrity") if isinstance(summary.get("artifact_integrity"), dict) else _llm_quality_collect_artifact_integrity(output_dir)
+    mode, mode_source = _llm_quality_manifest_mode(args, run_id, run_economy_status)
+    manual_audit = summary.get("manual_audit") if isinstance(summary.get("manual_audit"), dict) else {}
+    resolved_manual_audit = _llm_quality_resolve_manual_audit_status(output_dir)
+    manual_audit_status = (
+        resolved_manual_audit.get("manual_audit_status")
+        or manual_audit.get("status")
+        or (summary.get("quality_status") or {}).get("manual_audit_status")
+    )
+    status = _llm_quality_manifest_status(summary, artifact_integrity)
+    command = _llm_quality_build_command_from_args(args, run_id=run_id, output_dir=output_dir)
+    resume_command = None
+    if status in {"incomplete", "failed"}:
+        resume_command = _llm_quality_build_command_from_args(
+            args,
+            run_id=run_id,
+            output_dir=output_dir,
+            allow_output_overwrite=True,
+            allow_incomplete_artifacts=True,
+        )
+    manifest = {
+        "manifest_version": LLM_QUALITY_MANIFEST_VERSION,
+        "run_id": run_id,
+        "mode": mode,
+        "mode_source": mode_source,
+        "status": status,
+        "stop_reason": summary.get("stop_reason") or stop_reason,
+        "started_at": summary.get("started_at"),
+        "finished_at": summary.get("finished_at"),
+        "output_dir": output_dir,
+        "infra_valid": summary.get("infra_valid") or (summary.get("quality_status") or {}).get("infra_valid"),
+        "semantic_valid": summary.get("semantic_valid") or (summary.get("quality_status") or {}).get("semantic_valid"),
+        "run_integrity_valid": (summary.get("quality_status") or {}).get("run_integrity_valid"),
+        "manual_audit_status": manual_audit_status,
+        "artifact_integrity_valid": artifact_integrity.get("valid"),
+        "artifact_integrity_missing": artifact_integrity.get("missing"),
+        "artifacts": {
+            "summary": summary.get("summary_path") or summary_path,
+            "brief": summary.get("brief_path") or os.path.join(output_dir, "brief.md"),
+            "scenarios": summary.get("scenarios_path") or os.path.join(output_dir, "scenarios.json"),
+            "responses": summary.get("responses_path") or os.path.join(output_dir, "responses.jsonl"),
+            "trace_bundle": summary.get("trace_bundle_path") or os.path.join(output_dir, "trace_bundle.jsonl"),
+            "manual_audit": (
+                resolved_manual_audit.get("manual_audit_path")
+                or manual_audit.get("path")
+                or os.path.join(output_dir, "manual_audit.md")
+            ),
+            "manual_audit_json": (
+                resolved_manual_audit.get("manual_audit_json_path")
+                or manual_audit.get("json_path")
+                or os.path.join(output_dir, "manual_audit.json")
+            ),
+            "manifest": os.path.join(output_dir, "run_manifest.json"),
+        },
+        "args": _llm_quality_manifest_args(args),
+        "command": command,
+        "resume_command": resume_command,
+        "replay_command": summary.get("replay_command"),
+        "run_economy": run_economy_status,
+        "runtime_preflight": runtime_preflight,
+    }
+    manifest_path = os.path.join(output_dir, "run_manifest.json")
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, ensure_ascii=False, indent=2)
+    _llm_quality_update_artifact_index(manifest)
+    return manifest
+
+
+def _llm_quality_required_artifact_paths(output_dir):
+    normalized_dir = os.path.abspath(os.path.expanduser(str(output_dir or "").strip() or "."))
+    return {
+        artifact: os.path.join(normalized_dir, artifact)
+        for artifact in LLM_QUALITY_REQUIRED_RUN_ARTIFACTS
+    }
+
+
+def _llm_quality_collect_artifact_integrity(output_dir):
+    paths = _llm_quality_required_artifact_paths(output_dir)
+    missing = [name for name, path in paths.items() if not os.path.exists(path)]
+    return {
+        "required": list(paths.keys()),
+        "paths": paths,
+        "missing": missing,
+        "valid": not missing,
+    }
+
+
+def _llm_quality_manual_audit_descriptor(*, run_id, output_dir):
+    normalized_dir = _llm_quality_default_output_dir(run_id, output_dir)
+    run_token = str(run_id or "").strip() or "llm-quality-unknown"
+    command = (
+        "python3 ops/diagnose.py llm-quality-audit "
+        f"--run-dir {shlex.quote(normalized_dir)} "
+        "--status done "
+        "--strict-artifacts"
+    )
+    return {
+        "required": True,
+        "status": "pending",
+        "run_id": run_token,
+        "path": os.path.join(normalized_dir, "manual_audit.md"),
+        "json_path": os.path.join(normalized_dir, "manual_audit.json"),
+        "command": command,
+    }
+
+
 def _llm_quality_replay_fingerprint_state_path():
     return "/tmp/booking_quality/.run_economy_replay_state.json"
+
+
+def _llm_quality_lock_fingerprint_state_path():
+    return "/tmp/booking_quality/.run_economy_lock_state.json"
 
 
 def _llm_quality_load_replay_fingerprint_state(path):
@@ -6052,6 +7264,48 @@ def _llm_quality_save_replay_fingerprint_state(path, payload):
         json.dump(payload if isinstance(payload, dict) else {}, handle, ensure_ascii=False, indent=2)
 
 
+def _llm_quality_persist_lock_state_from_run_economy(
+    *,
+    lock_state_path,
+    run_economy_status,
+    run_id,
+    summary_path,
+    saved_at,
+    stop_reason,
+    runtime_commit=None,
+    judge_mode=None,
+    infra_valid=False,
+    semantic_valid=False,
+    run_integrity_valid=False,
+    blocking_reason_count=0,
+):
+    if not isinstance(run_economy_status, dict):
+        return
+    if run_economy_status.get("is_replay"):
+        return
+    lock_fingerprint = str(run_economy_status.get("lock_fingerprint") or "").strip()
+    if not lock_fingerprint:
+        return
+    _llm_quality_save_replay_fingerprint_state(
+        lock_state_path,
+        {
+            "run_id": run_id,
+            "saved_at": saved_at,
+            "summary_path": summary_path,
+            "lock_fingerprint": lock_fingerprint,
+            "code_fingerprint": run_economy_status.get("code_fingerprint"),
+            "runtime_commit": runtime_commit,
+            "judge_mode": judge_mode,
+            "canonical_valid": bool(infra_valid and semantic_valid and run_integrity_valid),
+            "infra_valid": bool(infra_valid),
+            "semantic_valid": bool(semantic_valid),
+            "run_integrity_valid": bool(run_integrity_valid),
+            "stop_reason": stop_reason,
+            "blocking_reason_count": int(blocking_reason_count or 0),
+        },
+    )
+
+
 def _llm_quality_stop_reason_from_system_exit(code):
     if isinstance(code, int):
         return "system_exit" if code not in (0, None) else None
@@ -6070,6 +7324,10 @@ def _llm_quality_stop_reason_from_system_exit(code):
             return "invalid_scenario_contract_preflight"
         if "run economy gate failed" in lowered:
             return "invalid_run_economy_preflight"
+        if "quality constant gate failed" in lowered:
+            return "invalid_quality_constant_preflight"
+        if "workaround register gate failed" in lowered:
+            return "invalid_workaround_register_preflight"
         return "invalid_preflight"
     if "signal_" in text:
         return text
@@ -6084,6 +7342,9 @@ def _llm_quality_write_failure_artifacts(
     started_at,
     stop_reason,
     error_message,
+    run_economy_status=None,
+    runtime_preflight=None,
+    lock_state_path=None,
 ):
     output_dir = _llm_quality_default_output_dir(run_id, output_dir)
     os.makedirs(output_dir, exist_ok=True)
@@ -6105,9 +7366,19 @@ def _llm_quality_write_failure_artifacts(
     else:
         summary_payload = {}
 
+    if not isinstance(run_economy_status, dict):
+        existing_run_economy = summary_payload.get("run_economy")
+        if isinstance(existing_run_economy, dict):
+            run_economy_status = existing_run_economy
+    if not isinstance(runtime_preflight, dict):
+        existing_runtime_preflight = summary_payload.get("runtime_preflight")
+        if isinstance(existing_runtime_preflight, dict):
+            runtime_preflight = existing_runtime_preflight
+
     minimal_counts = {
         "turns_hard_failed": int(((summary_payload.get("metrics") or {}).get("counts") or {}).get("turns_hard_failed") or 0)
     }
+    manual_audit = _llm_quality_manual_audit_descriptor(run_id=run_id, output_dir=output_dir)
     summary = {
         "run_id": run_id,
         "started_at": started_dt.isoformat(),
@@ -6119,6 +7390,7 @@ def _llm_quality_write_failure_artifacts(
         "responses_path": os.path.join(output_dir, "responses.jsonl"),
         "trace_bundle_path": os.path.join(output_dir, "trace_bundle.jsonl"),
         "brief_path": brief_path,
+        "manual_audit": manual_audit,
         "infra_valid": False,
         "semantic_valid": False,
         "scenario_source": {
@@ -6143,6 +7415,14 @@ def _llm_quality_write_failure_artifacts(
             "hardcode_core_base_ref": getattr(args, "hardcode_core_base_ref", None),
             "run_economy_gate": getattr(args, "run_economy_gate", None),
             "run_economy_base_ref": getattr(args, "run_economy_base_ref", None),
+            "manual_audit_gate": getattr(args, "manual_audit_gate", None),
+            "quality_constant_gate": getattr(args, "quality_constant_gate", None),
+            "quality_lane": getattr(args, "quality_lane", None),
+            "workaround_register_gate": getattr(args, "workaround_register_gate", None),
+            "workaround_register_base_ref": getattr(
+                args, "workaround_register_base_ref", None
+            ),
+            "workaround_register_path": getattr(args, "workaround_register_path", None),
             "expected_runtime_commit": getattr(args, "expected_runtime_commit", None),
         },
         "metrics": {"counts": minimal_counts, "rates": {}, "stages": {}},
@@ -6159,8 +7439,13 @@ def _llm_quality_write_failure_artifacts(
             "unobserved_turn_count": 0,
             "weak_oracle_turn_count": 0,
             "suppressed_missed_question_count": 0,
+            "judge_fail_advisory_turn_count": 0,
             "run_integrity_valid": False,
             "run_integrity_reasons": ["run_incomplete"],
+            "manual_audit_required": True,
+            "manual_audit_status": manual_audit.get("status"),
+            "manual_audit_path": manual_audit.get("path"),
+            "manual_audit_command": manual_audit.get("command"),
         },
         "blocking_reasons": {"count": 1, "reasons": {"early_failure": 1}},
         "unobserved_turn_count": 0,
@@ -6176,9 +7461,48 @@ def _llm_quality_write_failure_artifacts(
         "top_failure_turns": [],
         "error": str(error_message or ""),
     }
+    if isinstance(run_economy_status, dict):
+        summary["run_economy"] = run_economy_status
+    if isinstance(runtime_preflight, dict):
+        summary["runtime_preflight"] = runtime_preflight
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
     _llm_quality_write_brief(brief_path, summary)
+    summary["artifact_integrity"] = _llm_quality_collect_artifact_integrity(output_dir)
+    summary["quality_status"]["artifact_integrity_valid"] = summary["artifact_integrity"]["valid"]
+    summary["quality_status"]["artifact_integrity_missing"] = list(
+        summary["artifact_integrity"]["missing"]
+    )
+    with open(summary_path, "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, ensure_ascii=False, indent=2)
+    _llm_quality_write_brief(brief_path, summary)
+    _llm_quality_persist_lock_state_from_run_economy(
+        lock_state_path=lock_state_path or _llm_quality_lock_fingerprint_state_path(),
+        run_economy_status=run_economy_status,
+        run_id=run_id,
+        summary_path=summary_path,
+        saved_at=finished_dt.isoformat(),
+        stop_reason=stop_reason or "early_failure",
+        runtime_commit=(
+            runtime_preflight.get("runtime_commit")
+            if isinstance(runtime_preflight, dict)
+            else None
+        ),
+        judge_mode=getattr(args, "judge_mode", None),
+        infra_valid=False,
+        semantic_valid=False,
+        run_integrity_valid=False,
+        blocking_reason_count=1,
+    )
+    _llm_quality_write_run_manifest(
+        args=args,
+        run_id=run_id,
+        output_dir=output_dir,
+        summary=summary,
+        run_economy_status=run_economy_status,
+        runtime_preflight=runtime_preflight,
+        stop_reason=stop_reason or "early_failure",
+    )
 
 
 def _llm_quality_write_checkpoint_summary(
@@ -6194,10 +7518,14 @@ def _llm_quality_write_checkpoint_summary(
     scenario_source,
     stop_reason=None,
     interrupted=False,
+    run_economy_status=None,
+    runtime_preflight=None,
+    lock_state_path=None,
 ):
     output_dir = _llm_quality_default_output_dir(run_id, output_dir)
     os.makedirs(output_dir, exist_ok=True)
     summary_path = os.path.join(output_dir, "summary.json")
+    brief_path = os.path.join(output_dir, "brief.md")
     started_dt = started_at if isinstance(started_at, datetime) else datetime.now(timezone.utc)
     finished_dt = datetime.now(timezone.utc)
     duration_s = round((finished_dt - started_dt).total_seconds(), 2)
@@ -6209,6 +7537,7 @@ def _llm_quality_write_checkpoint_summary(
     semantic_reasons = ["run_incomplete"]
     if dry_run:
         semantic_reasons.append("comparison_blocked:dry_run")
+    manual_audit = _llm_quality_manual_audit_descriptor(run_id=run_id, output_dir=output_dir)
     summary = {
         "run_id": run_id,
         "started_at": started_dt.isoformat(),
@@ -6222,6 +7551,7 @@ def _llm_quality_write_checkpoint_summary(
         "responses_path": responses_path,
         "trace_bundle_path": trace_bundle_path,
         "scenario_source": scenario_source,
+        "manual_audit": manual_audit,
         "config": {
             "mode": getattr(args, "mode", None),
             "dry_run": dry_run,
@@ -6231,6 +7561,14 @@ def _llm_quality_write_checkpoint_summary(
             "reset_before_dialog": bool(getattr(args, "reset_before_dialog", False)),
             "jid_mode": getattr(args, "jid_mode", None),
             "baseline_summary": getattr(args, "baseline_summary", None),
+            "manual_audit_gate": getattr(args, "manual_audit_gate", None),
+            "quality_constant_gate": getattr(args, "quality_constant_gate", None),
+            "quality_lane": getattr(args, "quality_lane", None),
+            "workaround_register_gate": getattr(args, "workaround_register_gate", None),
+            "workaround_register_base_ref": getattr(
+                args, "workaround_register_base_ref", None
+            ),
+            "workaround_register_path": getattr(args, "workaround_register_path", None),
         },
         "infra_valid": False,
         "semantic_valid": False,
@@ -6265,11 +7603,55 @@ def _llm_quality_write_checkpoint_summary(
             "comparison_block_reasons": ["dry_run"] if dry_run else [],
             "non_evaluable": dry_run,
             "non_evaluable_reasons": ["dry_run"] if dry_run else [],
+            "manual_audit_required": True,
+            "manual_audit_status": manual_audit.get("status"),
+            "manual_audit_path": manual_audit.get("path"),
+            "manual_audit_command": manual_audit.get("command"),
         },
         "blocking_reasons": {"count": 1, "reasons": {"run_incomplete": 1}},
     }
+    if isinstance(run_economy_status, dict):
+        summary["run_economy"] = run_economy_status
+    if isinstance(runtime_preflight, dict):
+        summary["runtime_preflight"] = runtime_preflight
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
+    _llm_quality_write_brief(brief_path, summary)
+    summary["artifact_integrity"] = _llm_quality_collect_artifact_integrity(output_dir)
+    summary["quality_status"]["artifact_integrity_valid"] = summary["artifact_integrity"]["valid"]
+    summary["quality_status"]["artifact_integrity_missing"] = list(
+        summary["artifact_integrity"]["missing"]
+    )
+    with open(summary_path, "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, ensure_ascii=False, indent=2)
+    _llm_quality_write_brief(brief_path, summary)
+    _llm_quality_persist_lock_state_from_run_economy(
+        lock_state_path=lock_state_path or _llm_quality_lock_fingerprint_state_path(),
+        run_economy_status=run_economy_status,
+        run_id=run_id,
+        summary_path=summary_path,
+        saved_at=finished_dt.isoformat(),
+        stop_reason=stop_reason or "in_progress",
+        runtime_commit=(
+            runtime_preflight.get("runtime_commit")
+            if isinstance(runtime_preflight, dict)
+            else None
+        ),
+        judge_mode=getattr(args, "judge_mode", None),
+        infra_valid=False,
+        semantic_valid=False,
+        run_integrity_valid=False,
+        blocking_reason_count=1,
+    )
+    _llm_quality_write_run_manifest(
+        args=args,
+        run_id=run_id,
+        output_dir=output_dir,
+        summary=summary,
+        run_economy_status=run_economy_status,
+        runtime_preflight=runtime_preflight,
+        stop_reason=stop_reason or "in_progress",
+    )
 
 
 def _llm_quality_redact_text(text: str | None) -> str | None:
@@ -6426,59 +7808,46 @@ def _llm_quality_call_judge(
     endpoint = f"{base_url.rstrip('/')}/v1/chat/completions"
     body = None
     payload_json = json.dumps(payload, ensure_ascii=False)
-    connect_timeout = max(1.0, min(float(timeout), 5.0))
-    max_time = max(1.0, float(timeout))
-    curl_cmd = [
-        "curl",
-        "-sS",
-        "--fail",
-        "--connect-timeout",
-        str(connect_timeout),
-        "--max-time",
-        str(max_time),
-        "-H",
-        "Content-Type: application/json",
-        "-H",
-        f"Authorization: Bearer {api_key}",
-        "-d",
-        payload_json,
+    request_timeout = max(1.0, float(timeout))
+    request_data = payload_json.encode("utf-8")
+    req = urllib.request.Request(
         endpoint,
-    ]
+        data=request_data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": f"truffles-llm-quality/{LLM_QUALITY_JUDGE_TRANSPORT}",
+        },
+    )
     try:
-        result = subprocess.run(
-            curl_cmd,
-            capture_output=True,
-            text=True,
-            timeout=max_time + 2.0,
-        )
-    except FileNotFoundError:
-        data = payload_json.encode("utf-8")
-        req = urllib.request.Request(
-            endpoint,
-            data=data,
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"judge_request_timeout:{max_time}s") from exc
-    else:
-        if result.returncode != 0:
-            stderr = (result.stderr or "").strip()
-            if len(stderr) > 240:
-                stderr = f"{stderr[:240]}..."
-            raise RuntimeError(f"judge_request_failed: rc={result.returncode} err={stderr}")
+        with urllib.request.urlopen(req, timeout=request_timeout) as resp:
+            raw_body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        error_body = ""
         try:
-            body = json.loads(result.stdout or "")
-        except Exception as exc:
-            raw = (result.stdout or "").strip()
-            if len(raw) > 240:
-                raw = f"{raw[:240]}..."
-            raise RuntimeError(f"judge_response_parse_failed: {raw}") from exc
+            error_body = (exc.read() or b"").decode("utf-8", errors="replace").strip()
+        except Exception:
+            error_body = ""
+        if len(error_body) > 240:
+            error_body = f"{error_body[:240]}..."
+        raise RuntimeError(
+            f"judge_request_failed:http_{exc.code}:{error_body or exc.reason}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"judge_request_failed:url_error:{exc.reason}") from exc
+    except socket.timeout as exc:
+        raise RuntimeError(f"judge_request_timeout:{request_timeout}s") from exc
+    except TimeoutError as exc:
+        raise RuntimeError(f"judge_request_timeout:{request_timeout}s") from exc
+
+    try:
+        body = json.loads(raw_body or "")
+    except Exception as exc:
+        raw = (raw_body or "").strip()
+        if len(raw) > 240:
+            raw = f"{raw[:240]}..."
+        raise RuntimeError(f"judge_response_parse_failed: {raw}") from exc
     content = body["choices"][0]["message"]["content"]
     return _llm_quality_parse_llm_json(content)
 
@@ -7171,6 +8540,51 @@ def _llm_quality_build_infra_status(
     return {"valid": not reasons, "reasons": reasons}
 
 
+def _llm_quality_build_delivery_acceptance_status(stats, failure_counts=None):
+    reasons = []
+    failed_turns = int((stats or {}).get("outbox_delivery_failed_turns") or 0)
+    timeout_turns = int((stats or {}).get("outbox_delivery_timeout_turns") or 0)
+    failed_reasons = int((failure_counts or {}).get("outbox_delivery_failed") or 0)
+    timeout_reasons = int((failure_counts or {}).get("outbox_delivery_timeout") or 0)
+    waived_billing_turns = int(
+        (stats or {}).get("delivery_waiver_billing_turns")
+        or (failure_counts or {}).get("delivery_waiver_billing")
+        or 0
+    )
+
+    if failed_turns > 0:
+        reasons.append("outbox_delivery_failed_turns")
+    if timeout_turns > 0:
+        reasons.append("outbox_delivery_timeout_turns")
+    if failed_reasons > 0:
+        reasons.append("outbox_delivery_failed")
+    if timeout_reasons > 0:
+        reasons.append("outbox_delivery_timeout")
+
+    valid = not reasons
+    waivers = ["delivery_waiver_billing"] if waived_billing_turns > 0 else []
+    if not valid:
+        status = "fail"
+    elif waivers:
+        status = "waived"
+    else:
+        status = "pass"
+    return {
+        "status": status,
+        "valid": valid,
+        "reasons": reasons,
+        "waived": bool(waivers),
+        "waivers": waivers,
+        "counts": {
+            "failed_turns": failed_turns,
+            "timeout_turns": timeout_turns,
+            "failed_reasons": failed_reasons,
+            "timeout_reasons": timeout_reasons,
+            "delivery_waiver_billing_turns": waived_billing_turns,
+        },
+    }
+
+
 def _llm_quality_compute_delta(current, baseline):
     if isinstance(current, (int, float)) and isinstance(baseline, (int, float)):
         return round(current - baseline, 6)
@@ -7376,6 +8790,7 @@ def _llm_quality_evaluate_turn(
     booking_progressed,
     allow_booking_stall,
     outbox_text=None,
+    outbox_payload=None,
     tool_signals=None,
     outbox_summary=None,
     outbox_payload_status=None,
@@ -7414,6 +8829,22 @@ def _llm_quality_evaluate_turn(
             expected_reply_type, actual_expected_reply_type, meta, conv_meta, trace_entries
         ):
             fallback_ok = True
+        elif isinstance(meta, dict):
+            intent_value = _llm_quality_effective_intent(meta)
+            tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+            if (
+                expected_reply_type in {"service_choice", "time", "name"}
+                and actual_expected_reply_type is None
+                and intent_value == "calendar.list_slots"
+                and tool_decision_value in {"ok", "conflict"}
+            ):
+                fallback_ok = True
+            # Runtime may intentionally clear stale expected-reply contracts
+            # (for example after resolved calendar reschedule/cancel flows).
+            clear_flag = meta.get("expected_reply_contract_clear")
+            clear_reason = str(meta.get("expected_reply_contract_reason") or "").strip()
+            if clear_flag is True and clear_reason:
+                fallback_ok = True
         if not fallback_ok:
             reasons.append("expected_reply_type_mismatch")
     # Scenario fixtures may carry stale `expected_reply=false` even when runtime
@@ -7442,6 +8873,11 @@ def _llm_quality_evaluate_turn(
         handover_meta=handover_meta,
     ):
         reasons.append("expected_reply_mismatch")
+    catalog_service_choice_info_fallback = _llm_quality_has_catalog_service_choice_info_fallback(
+        meta=meta,
+        expected_reply_type=expected_reply_type,
+        actual_expected_reply_type=actual_expected_reply_type,
+    )
     if expected_info_sections:
         skip_expected_info_check = (
             state in {"pending", "manager_active"}
@@ -7457,6 +8893,8 @@ def _llm_quality_evaluate_turn(
                 expected_info_sections, meta, trace_entries
             )
             if not expected_answered and _llm_quality_has_general_consult_fallback(meta, trace_entries):
+                expected_answered = True
+            if not expected_answered and catalog_service_choice_info_fallback:
                 expected_answered = True
         if not expected_answered:
             reasons.append("expected_info_section_miss")
@@ -7494,14 +8932,22 @@ def _llm_quality_evaluate_turn(
             } and state not in LLM_QUALITY_KNOWN_STATES:
                 suppress_missing_reply = True
         if not suppress_missing_reply:
-            reasons.append("missing_bot_reply")
             delivery_state = _llm_quality_outbox_delivery_state(
                 outbox_payload_status, outbox_summary
             )
-            if delivery_state == "failed":
-                reasons.append("outbox_delivery_failed")
-            elif delivery_state in {"pending", "unknown"}:
-                reasons.append("outbox_delivery_timeout")
+            billing_delivery_waiver = _llm_quality_is_delivery_billing_waiver(
+                meta=meta,
+                trace_entries=trace_entries,
+                outbox_payload=outbox_payload,
+            )
+            if delivery_state == "failed" and billing_delivery_waiver:
+                reasons.append("delivery_waiver_billing")
+            else:
+                reasons.append("missing_bot_reply")
+                if delivery_state == "failed":
+                    reasons.append("outbox_delivery_failed")
+                elif delivery_state in {"pending", "unknown"}:
+                    reasons.append("outbox_delivery_timeout")
     if state == "manager_active" and bot_response:
         reasons.append("unexpected_bot_reply_manager")
     if state == "manager_active" and not handover_meta:
@@ -7511,6 +8957,7 @@ def _llm_quality_evaluate_turn(
         and not any(info_answered.values())
         and state not in {"pending", "manager_active"}
         and not _llm_quality_has_general_consult_fallback(meta, trace_entries)
+        and not catalog_service_choice_info_fallback
     ):
         reasons.append("info_section_miss")
     booking_stall_ignored = False
@@ -8300,6 +9747,45 @@ def _parse_llm_quality_args(argv):
         help="Base ref used to scan changed files for run-economy gate.",
     )
     parser.add_argument(
+        "--manual-audit-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_MANUAL_AUDIT_GATE", "block"),
+        help="Stop or warn when previous run is missing mandatory manual audit artifacts.",
+    )
+    parser.add_argument(
+        "--quality-constant-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_CONSTANT_GATE", "block"),
+        help=(
+            "Fail-closed lane gate: acceptance runs must keep full canonical envelope "
+            "without debug downgrades."
+        ),
+    )
+    parser.add_argument(
+        "--quality-lane",
+        choices=["auto", "dev", "acceptance"],
+        default=os.environ.get("LLM_QUALITY_LANE", "auto"),
+        help="Operating lane for this run (auto infers from fail/update flags).",
+    )
+    parser.add_argument(
+        "--workaround-register-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_WORKAROUND_REGISTER_GATE", "block"),
+        help="Require WORKAROUND_ID markers in changed files to be registered.",
+    )
+    parser.add_argument(
+        "--workaround-register-base-ref",
+        default=os.environ.get("LLM_QUALITY_WORKAROUND_REGISTER_BASE_REF", "origin/main"),
+        help="Base ref used to scan changed files for workaround markers.",
+    )
+    parser.add_argument(
+        "--workaround-register-path",
+        default=os.environ.get(
+            "LLM_QUALITY_WORKAROUND_REGISTER_PATH", "docs/WORKAROUND_REGISTER.json"
+        ),
+        help="JSON register path that tracks active workaround IDs.",
+    )
+    parser.add_argument(
         "--allow-no-code-delta",
         action="store_true",
         help="Allow full run with doc-only/empty diff (debug-only override).",
@@ -8420,6 +9906,62 @@ def _parse_llm_quality_gates_args(argv):
         action="store_true",
         help="Allow empty/doc-only diff for full-run run-economy check.",
     )
+    parser.add_argument(
+        "--quality-constant-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_CONSTANT_GATE", "block"),
+        help="Fail-closed lane gate for acceptance/dev envelope consistency.",
+    )
+    parser.add_argument(
+        "--quality-lane",
+        choices=["auto", "dev", "acceptance"],
+        default=os.environ.get("LLM_QUALITY_LANE", "auto"),
+        help="Operating lane token used by quality-constant gate.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["template", "llm"],
+        default="llm",
+        help="Run mode token used by quality-constant gate.",
+    )
+    parser.add_argument("--count", type=int, default=10)
+    parser.add_argument("--include-media", action="store_true")
+    parser.add_argument("--scenario-coverage", default="booking,info,interrupt,handoff")
+    parser.add_argument("--fail-on-thresholds", action="store_true")
+    parser.add_argument("--fail-on-regression", action="store_true")
+    parser.add_argument("--update-baseline", action="store_true")
+    parser.add_argument("--allow-weak-oracle", action="store_true")
+    parser.add_argument("--allow-incomplete-run-artifacts", action="store_true")
+    parser.add_argument("--allow-judge-off", action="store_true")
+    parser.add_argument("--skip-outbox", action="store_true")
+    parser.add_argument(
+        "--tool-evidence-policy",
+        choices=["off", "auto", "strict"],
+        default=os.environ.get("LLM_QUALITY_TOOL_EVIDENCE_POLICY", "strict"),
+    )
+    parser.add_argument(
+        "--manual-audit-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_MANUAL_AUDIT_GATE", "block"),
+    )
+    parser.add_argument(
+        "--workaround-register-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_WORKAROUND_REGISTER_GATE", "block"),
+        help="Require WORKAROUND_ID markers in changed files to be registered.",
+    )
+    parser.add_argument(
+        "--workaround-register-base-ref",
+        default=os.environ.get("LLM_QUALITY_WORKAROUND_REGISTER_BASE_REF", "origin/main"),
+        help="Base ref used for workaround marker scan.",
+    )
+    parser.add_argument(
+        "--workaround-register-path",
+        default=os.environ.get(
+            "LLM_QUALITY_WORKAROUND_REGISTER_PATH", "docs/WORKAROUND_REGISTER.json"
+        ),
+        help="JSON register path with active workaround IDs.",
+    )
     parser.add_argument("--output", default=None, help="Optional JSON output file path.")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
     return parser.parse_args(argv)
@@ -8453,6 +9995,415 @@ def _parse_llm_quality_matrix_args(argv):
     args, llm_quality_args = parser.parse_known_args(argv)
     args.llm_quality_args = list(llm_quality_args or [])
     return args
+
+
+def _parse_llm_quality_audit_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py llm-quality-audit",
+        description=(
+            "Post-run artifact audit for llm-quality. Produces manual_audit.md/json "
+            "and enforces artifact completeness when requested."
+        ),
+    )
+    parser.add_argument("--run-dir", required=True, help="Run output directory with summary/responses/trace.")
+    parser.add_argument("--output", default=None, help="Manual audit markdown path (default: <run_dir>/manual_audit.md).")
+    parser.add_argument(
+        "--json-output",
+        default=None,
+        help="Manual audit JSON path (default: <run_dir>/manual_audit.json).",
+    )
+    parser.add_argument(
+        "--analyst",
+        default=(os.environ.get("SESSION_AGENT") or os.environ.get("USER") or "unknown"),
+        help="Analyst id/name recorded in audit.",
+    )
+    parser.add_argument("--status", choices=["pending", "done"], default="pending")
+    parser.add_argument("--notes", default=None, help="Manual analyst notes.")
+    parser.add_argument(
+        "--root-cause",
+        action="append",
+        default=[],
+        help="Manual root-cause item (repeatable).",
+    )
+    parser.add_argument(
+        "--next-step",
+        action="append",
+        default=[],
+        help="Manual next action item (repeatable).",
+    )
+    parser.add_argument(
+        "--strict-artifacts",
+        action="store_true",
+        help="Exit 2 when required run artifacts are missing.",
+    )
+    parser.add_argument(
+        "--fail-on-findings",
+        action="store_true",
+        help="Exit 2 when audit produced critical/high findings.",
+    )
+    parser.add_argument("--pretty", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _llm_quality_load_json_payload(path):
+    if not isinstance(path, str) or not path.strip() or not os.path.exists(path):
+        return None, "missing"
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle), None
+    except Exception as exc:
+        return None, f"parse_error:{exc}"
+
+
+def _llm_quality_load_jsonl_payload(path):
+    rows = []
+    if not isinstance(path, str) or not path.strip() or not os.path.exists(path):
+        return rows, "missing"
+    parse_errors = 0
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            row_text = line.strip()
+            if not row_text:
+                continue
+            try:
+                row = json.loads(row_text)
+            except Exception:
+                parse_errors += 1
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    if parse_errors:
+        return rows, f"parse_errors:{parse_errors}"
+    return rows, None
+
+
+def _run_llm_quality_audit(args):
+    run_dir = os.path.abspath(os.path.expanduser(str(args.run_dir or "").strip()))
+    os.makedirs(run_dir, exist_ok=True)
+    artifact_integrity = _llm_quality_collect_artifact_integrity(run_dir)
+    artifact_paths = artifact_integrity.get("paths") or {}
+    summary_path = artifact_paths.get("summary.json") or os.path.join(run_dir, "summary.json")
+    brief_path = artifact_paths.get("brief.md") or os.path.join(run_dir, "brief.md")
+    responses_path = artifact_paths.get("responses.jsonl") or os.path.join(run_dir, "responses.jsonl")
+    trace_path = artifact_paths.get("trace_bundle.jsonl") or os.path.join(run_dir, "trace_bundle.jsonl")
+    scenarios_path = artifact_paths.get("scenarios.json") or os.path.join(run_dir, "scenarios.json")
+
+    summary_payload, summary_error = _llm_quality_load_json_payload(summary_path)
+    scenarios_payload, scenarios_error = _llm_quality_load_json_payload(scenarios_path)
+    response_rows, responses_error = _llm_quality_load_jsonl_payload(responses_path)
+    trace_rows, trace_error = _llm_quality_load_jsonl_payload(trace_path)
+
+    findings = []
+    if artifact_integrity.get("missing"):
+        findings.append(
+            {
+                "id": "artifact_missing",
+                "severity": "critical",
+                "details": f"missing={','.join(artifact_integrity['missing'])}",
+                "evidence": "run artifacts incomplete",
+                "next_step": "rerun canonical chain and require full summary+brief+scenarios+responses+trace_bundle",
+            }
+        )
+    if summary_error and summary_error != "missing":
+        findings.append(
+            {
+                "id": "summary_parse_error",
+                "severity": "critical",
+                "details": summary_error,
+                "evidence": summary_path,
+                "next_step": "repair summary artifact generation before baseline comparison",
+            }
+        )
+    if responses_error and responses_error != "missing":
+        findings.append(
+            {
+                "id": "responses_parse_error",
+                "severity": "high",
+                "details": responses_error,
+                "evidence": responses_path,
+                "next_step": "fix JSONL serialization integrity in run writer",
+            }
+        )
+    if trace_error and trace_error != "missing":
+        findings.append(
+            {
+                "id": "trace_parse_error",
+                "severity": "high",
+                "details": trace_error,
+                "evidence": trace_path,
+                "next_step": "fix trace_bundle serialization and rerun",
+            }
+        )
+
+    summary_quality = (
+        (summary_payload or {}).get("quality_status")
+        if isinstance(summary_payload, dict)
+        else {}
+    )
+    stop_reason = (summary_payload or {}).get("stop_reason") if isinstance(summary_payload, dict) else None
+    infra_valid = bool((summary_payload or {}).get("infra_valid")) if isinstance(summary_payload, dict) else False
+    semantic_valid = bool((summary_payload or {}).get("semantic_valid")) if isinstance(summary_payload, dict) else False
+    run_integrity_reasons = list((summary_quality or {}).get("run_integrity_reasons") or [])
+    if "run_incomplete" in run_integrity_reasons or stop_reason == "in_progress":
+        findings.append(
+            {
+                "id": "run_incomplete",
+                "severity": "critical",
+                "details": f"stop_reason={stop_reason}; run_integrity_reasons={run_integrity_reasons}",
+                "evidence": summary_path,
+                "next_step": "do not use run for baseline; rerun canonical lock with stable runtime budget",
+            }
+        )
+    if isinstance(summary_payload, dict) and not infra_valid:
+        findings.append(
+            {
+                "id": "infra_invalid",
+                "severity": "high",
+                "details": ",".join((summary_quality or {}).get("infra_reasons") or []),
+                "evidence": summary_path,
+                "next_step": "close infra blockers before any replay/full acceptance",
+            }
+        )
+    if isinstance(summary_payload, dict) and not semantic_valid:
+        findings.append(
+            {
+                "id": "semantic_invalid",
+                "severity": "high",
+                "details": ",".join((summary_quality or {}).get("semantic_reasons") or []),
+                "evidence": summary_path,
+                "next_step": "analyze failing turns and contract drift before baseline update",
+            }
+        )
+
+    pipeline_over_budget = 0
+    judge_eval_conflicts = 0
+    dialogs_seen = set()
+    max_turn_seen = 0
+    for row in response_rows:
+        if not isinstance(row, dict):
+            continue
+        dialog_index = row.get("dialog_index")
+        if isinstance(dialog_index, int):
+            dialogs_seen.add(dialog_index)
+        turn_index = row.get("turn_index")
+        if isinstance(turn_index, int):
+            max_turn_seen = max(max_turn_seen, turn_index)
+        meta = row.get("decision_meta") if isinstance(row.get("decision_meta"), dict) else {}
+        timing = meta.get("timing") if isinstance(meta.get("timing"), dict) else {}
+        pipeline_ms = timing.get("pipeline_ms")
+        budget_ms = timing.get("pipeline_budget_ms")
+        if isinstance(pipeline_ms, (int, float)) and isinstance(budget_ms, (int, float)) and pipeline_ms > budget_ms:
+            pipeline_over_budget += 1
+        evaluation = row.get("evaluation") if isinstance(row.get("evaluation"), dict) else {}
+        judge = row.get("judge") if isinstance(row.get("judge"), dict) else {}
+        strict_ok = evaluation.get("strict_ok")
+        verdict = judge.get("verdict")
+        if strict_ok is True and verdict == "fail":
+            judge_eval_conflicts += 1
+        if strict_ok is False and verdict == "pass":
+            judge_eval_conflicts += 1
+
+    if pipeline_over_budget > 0:
+        findings.append(
+            {
+                "id": "pipeline_budget_exceeded",
+                "severity": "high",
+                "details": f"turns={pipeline_over_budget}",
+                "evidence": responses_path,
+                "next_step": "reduce per-turn pipeline latency or increase timeout profile only in forensic lane",
+            }
+        )
+    if judge_eval_conflicts > 0:
+        findings.append(
+            {
+                "id": "judge_eval_conflict",
+                "severity": "medium",
+                "details": f"turns={judge_eval_conflicts}",
+                "evidence": responses_path,
+                "next_step": "review conflicting turns manually and refine judge prompt/rules",
+            }
+        )
+
+    expected_dialogs = None
+    if isinstance(summary_payload, dict):
+        expected_dialogs = (
+            ((summary_payload.get("config") or {}).get("count"))
+            if isinstance(summary_payload.get("config"), dict)
+            else None
+        )
+    elif isinstance(scenarios_payload, dict):
+        dialogs = scenarios_payload.get("dialogs")
+        if isinstance(dialogs, list):
+            expected_dialogs = len(dialogs)
+
+    if isinstance(expected_dialogs, int) and expected_dialogs > 0 and len(dialogs_seen) < expected_dialogs:
+        findings.append(
+            {
+                "id": "dialog_coverage_gap",
+                "severity": "high",
+                "details": f"dialogs_seen={len(dialogs_seen)}/{expected_dialogs}",
+                "evidence": responses_path,
+                "next_step": "rerun canonical chain with fixed runtime stability; partial dialog set is non-canonical",
+            }
+        )
+
+    severity_rank = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+    findings = sorted(
+        findings,
+        key=lambda item: severity_rank.get(str(item.get("severity")), 0),
+        reverse=True,
+    )
+
+    inferred_root_causes = []
+    finding_ids = {str(item.get("id")) for item in findings}
+    if "artifact_missing" in finding_ids or "run_incomplete" in finding_ids:
+        inferred_root_causes.append("chain_not_completed_or_interrupted")
+    if "pipeline_budget_exceeded" in finding_ids:
+        inferred_root_causes.append("runtime_pipeline_latency_budget_exceeded")
+    if "judge_eval_conflict" in finding_ids:
+        inferred_root_causes.append("judge_oracle_alignment_gap")
+    if "dialog_coverage_gap" in finding_ids:
+        inferred_root_causes.append("non_canonical_partial_dialog_execution")
+
+    analyst_root_causes = [str(item).strip() for item in (args.root_cause or []) if str(item).strip()]
+    analyst_next_steps = [str(item).strip() for item in (args.next_step or []) if str(item).strip()]
+    notes = str(args.notes or "").strip()
+    status = str(args.status or "pending").strip().lower()
+    generated_at = datetime.now(timezone.utc).isoformat()
+    run_id = (
+        (summary_payload or {}).get("run_id")
+        if isinstance(summary_payload, dict)
+        else os.path.basename(run_dir.rstrip("/"))
+    )
+    if not isinstance(run_id, str) or not run_id.strip():
+        run_id = os.path.basename(run_dir.rstrip("/"))
+
+    md_output = args.output or os.path.join(run_dir, "manual_audit.md")
+    json_output = args.json_output or os.path.join(run_dir, "manual_audit.json")
+    md_output = os.path.abspath(os.path.expanduser(md_output))
+    json_output = os.path.abspath(os.path.expanduser(json_output))
+    os.makedirs(os.path.dirname(md_output), exist_ok=True)
+    os.makedirs(os.path.dirname(json_output), exist_ok=True)
+
+    lines = [
+        "# LLM Quality Manual Audit",
+        "",
+        f"- run_id: `{run_id}`",
+        f"- generated_at: `{generated_at}`",
+        f"- analyst: `{args.analyst}`",
+        f"- status: `{status}`",
+        f"- run_dir: `{run_dir}`",
+        "",
+        "## Artifact Integrity",
+        f"- valid: `{artifact_integrity.get('valid')}`",
+        f"- missing: `{artifact_integrity.get('missing')}`",
+        f"- summary_path: `{summary_path}`",
+        f"- brief_path: `{brief_path}`",
+        f"- scenarios_path: `{scenarios_path}`",
+        f"- responses_path: `{responses_path}`",
+        f"- trace_bundle_path: `{trace_path}`",
+        "",
+        "## Automated Findings (Must Be Manually Confirmed)",
+    ]
+    if findings:
+        for item in findings:
+            lines.append(
+                f"- [{item.get('severity')}] `{item.get('id')}`: {item.get('details')} | evidence: {item.get('evidence')} | next: {item.get('next_step')}"
+            )
+    else:
+        lines.append("- none")
+
+    lines.extend(
+        [
+            "",
+            "## Run Snapshot",
+            f"- infra_valid: `{infra_valid}`",
+            f"- semantic_valid: `{semantic_valid}`",
+            f"- stop_reason: `{stop_reason}`",
+            f"- run_integrity_reasons: `{run_integrity_reasons}`",
+            f"- responses_rows: `{len(response_rows)}`",
+            f"- trace_rows: `{len(trace_rows)}`",
+            f"- dialogs_seen: `{sorted(dialogs_seen)}`",
+            f"- max_turn_seen: `{max_turn_seen}`",
+            f"- expected_dialogs: `{expected_dialogs}`",
+            "",
+            "## Manual Review Checklist (MUST)",
+            "- [ ] Reviewed `summary.json` fields and acceptance lanes manually.",
+            "- [ ] Reviewed `responses.jsonl` (at least first/middle/last failing or risky turns).",
+            "- [ ] Reviewed `trace_bundle.jsonl` for reason_code and boundary semantics.",
+            "- [ ] Verified judge verdict alignment with contract evidence.",
+            "- [ ] Captured true root causes and concrete follow-up actions (no workaround).",
+            "",
+            "## Root Causes",
+            f"- inferred: `{inferred_root_causes}`",
+            f"- analyst: `{analyst_root_causes}`",
+            "",
+            "## Next Steps",
+            f"- analyst: `{analyst_next_steps}`",
+            "",
+            "## Notes",
+            f"- {notes or '(none)'}",
+            "",
+        ]
+    )
+    with open(md_output, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
+
+    payload = {
+        "command": "llm-quality-audit",
+        "run_id": run_id,
+        "run_dir": run_dir,
+        "generated_at": generated_at,
+        "analyst": args.analyst,
+        "status": status,
+        "artifact_integrity": artifact_integrity,
+        "summary_error": summary_error,
+        "scenarios_error": scenarios_error,
+        "responses_error": responses_error,
+        "trace_error": trace_error,
+        "snapshot": {
+            "infra_valid": infra_valid,
+            "semantic_valid": semantic_valid,
+            "stop_reason": stop_reason,
+            "run_integrity_reasons": run_integrity_reasons,
+            "responses_rows": len(response_rows),
+            "trace_rows": len(trace_rows),
+            "dialogs_seen": sorted(dialogs_seen),
+            "max_turn_seen": max_turn_seen,
+            "expected_dialogs": expected_dialogs,
+        },
+        "findings": findings,
+        "inferred_root_causes": inferred_root_causes,
+        "analyst_root_causes": analyst_root_causes,
+        "analyst_next_steps": analyst_next_steps,
+        "notes": notes,
+        "manual_audit_markdown": md_output,
+        "manual_audit_json": json_output,
+    }
+    with open(json_output, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+    summary_updated = _llm_quality_sync_manual_audit_summary(
+        run_dir=run_dir,
+        status=status,
+        manual_audit_path=md_output,
+        manual_audit_json_path=json_output,
+    )
+    if summary_updated:
+        _llm_quality_write_run_manifest(
+            args=None,
+            run_id=run_id,
+            output_dir=run_dir,
+        )
+
+    print(json.dumps(payload, ensure_ascii=False, indent=2 if args.pretty else None))
+    highest_severity = max((severity_rank.get(str(item.get("severity")), 0) for item in findings), default=0)
+    if args.strict_artifacts and artifact_integrity.get("missing"):
+        return 2
+    if args.fail_on_findings and highest_severity >= severity_rank["high"]:
+        return 2
+    return 0
+
 
 def _parse_explain_args(argv):
     parser = argparse.ArgumentParser(
@@ -9408,6 +11359,7 @@ def _llm_quality_retry_outbox_for_expected_reply(
     outbox_text,
     outbox_wait_seconds,
     poll_interval,
+    inline_response_observed=False,
 ):
     if (
         not expected_response
@@ -9442,6 +11394,7 @@ def _llm_quality_retry_outbox_for_expected_reply(
             outbox_payload_status=retry_status,
             outbox_text=retry_text,
             inline_response_text=inline_response_text,
+            inline_response_observed=inline_response_observed,
         )
         if retry_bot_response:
             return retry_summary, retry_payload, retry_status, retry_text, True
@@ -9481,6 +11434,7 @@ def _llm_quality_should_infer_bot_response_from_duplicate_ack(
     outbox_payload_status=None,
     outbox_summary=None,
     trace_entries=None,
+    ignore_transport_block=False,
 ):
     if bot_response or not expected_response:
         return False
@@ -9504,7 +11458,7 @@ def _llm_quality_should_infer_bot_response_from_duplicate_ack(
         return False
     if "BILLING_BLOCKED" in delivery_error_code or "AUTH" in delivery_error_code:
         return False
-    if isinstance(trace_entries, list):
+    if not ignore_transport_block and isinstance(trace_entries, list):
         for entry in reversed(trace_entries):
             if not isinstance(entry, dict):
                 continue
@@ -10814,6 +12768,32 @@ def _run_llm_quality(args):
         args.output_dir or os.path.join("/tmp/booking_quality", run_id),
         allow_overwrite=bool(getattr(args, "allow_output_overwrite", False)),
     )
+    manual_audit_gate_status = _llm_quality_build_manual_audit_gate_status(
+        mode=getattr(args, "manual_audit_gate", "block"),
+        output_dir=output_dir,
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_manual_audit_gate_preflight",
+                "mode": manual_audit_gate_status.get("mode"),
+                "valid": manual_audit_gate_status.get("valid"),
+                "enforced": manual_audit_gate_status.get("enforced"),
+                "reasons": manual_audit_gate_status.get("reasons"),
+                "pending_run": manual_audit_gate_status.get("pending_run"),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if (
+        manual_audit_gate_status.get("enforced")
+        and not manual_audit_gate_status.get("valid", True)
+    ):
+        reason_tokens = manual_audit_gate_status.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - manual audit gate failed "
+            f"({','.join(reason_tokens)})"
+        )
     base_url = args.base_url.rstrip("/")
     runtime_preflight = _llm_quality_runtime_fingerprint_preflight(
         base_url=base_url,
@@ -11252,6 +13232,8 @@ def _run_llm_quality(args):
         previous_replay_fingerprint = (
             str(replay_state_payload.get("replay_fingerprint") or "").strip() or None
         )
+    lock_state_path = _llm_quality_lock_fingerprint_state_path()
+    lock_state_payload = _llm_quality_load_replay_fingerprint_state(lock_state_path)
     baseline_preflight = _llm_quality_preflight_baseline_summary(args.baseline_summary)
     run_economy_status = _llm_quality_build_run_economy_status(
         mode=args.run_economy_gate,
@@ -11265,7 +13247,15 @@ def _run_llm_quality(args):
         runtime_commit=runtime_preflight.get("runtime_commit"),
         judge_mode=judge_mode,
         previous_replay_fingerprint=previous_replay_fingerprint,
+        previous_lock_state=lock_state_payload,
+        current_output_dir=output_dir,
         baseline_preflight=baseline_preflight,
+        run_mode=args.mode,
+        dialog_count=args.count,
+        min_turns=args.min_turns,
+        max_turns=args.max_turns,
+        include_media=bool(args.include_media),
+        scenario_coverage=args.scenario_coverage,
     )
     print(
         json.dumps(
@@ -11282,6 +13272,12 @@ def _run_llm_quality(args):
                 "previous_replay_fingerprint": run_economy_status.get(
                     "previous_replay_fingerprint"
                 ),
+                "lock_fingerprint": run_economy_status.get("lock_fingerprint"),
+                "previous_lock_fingerprint": run_economy_status.get(
+                    "previous_lock_fingerprint"
+                ),
+                "previous_lock_canonical": run_economy_status.get("previous_lock_canonical"),
+                "previous_lock_run_id": run_economy_status.get("previous_lock_run_id"),
                 "baseline_preflight": baseline_preflight,
             },
             ensure_ascii=False,
@@ -11291,6 +13287,81 @@ def _run_llm_quality(args):
         reason_tokens = run_economy_status.get("reasons") or ["unknown"]
         raise SystemExit(
             "llm-quality: INVALID RUN - run economy gate failed "
+            f"({','.join(reason_tokens)})"
+        )
+    quality_constant_status = _llm_quality_build_quality_constant_status(
+        mode=args.quality_constant_gate,
+        lane=args.quality_lane,
+        scenarios_file=args.scenarios_file,
+        run_mode=args.mode,
+        count=args.count,
+        include_media=bool(args.include_media),
+        scenario_coverage=args.scenario_coverage,
+        judge_mode=judge_mode,
+        run_economy_gate=args.run_economy_gate,
+        manual_audit_gate=args.manual_audit_gate,
+        tool_evidence_policy=args.tool_evidence_policy,
+        fail_on_thresholds=bool(args.fail_on_thresholds),
+        fail_on_regression=bool(args.fail_on_regression),
+        allow_weak_oracle=bool(args.allow_weak_oracle),
+        allow_incomplete_run_artifacts=bool(args.allow_incomplete_run_artifacts),
+        allow_judge_off=bool(args.allow_judge_off),
+        allow_no_code_delta=bool(args.allow_no_code_delta),
+        skip_outbox=bool(args.skip_outbox),
+        update_baseline=bool(args.update_baseline),
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_quality_constant_preflight",
+                "mode": quality_constant_status.get("mode"),
+                "valid": quality_constant_status.get("valid"),
+                "enforced": quality_constant_status.get("enforced"),
+                "reasons": quality_constant_status.get("reasons"),
+                "lane_requested": quality_constant_status.get("lane_requested"),
+                "lane_effective": quality_constant_status.get("lane_effective"),
+                "missing_coverage": quality_constant_status.get("missing_coverage"),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if (
+        quality_constant_status.get("enforced")
+        and not quality_constant_status.get("valid", True)
+    ):
+        reason_tokens = quality_constant_status.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - quality constant gate failed "
+            f"({','.join(reason_tokens)})"
+        )
+    workaround_register_status = _llm_quality_build_workaround_register_status(
+        mode=args.workaround_register_gate,
+        repo_root=_llm_quality_repo_root(),
+        base_ref=args.workaround_register_base_ref,
+        register_path=args.workaround_register_path,
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_workaround_register_preflight",
+                "mode": workaround_register_status.get("mode"),
+                "valid": workaround_register_status.get("valid"),
+                "enforced": workaround_register_status.get("enforced"),
+                "reasons": workaround_register_status.get("reasons"),
+                "register_path": workaround_register_status.get("register_path"),
+                "marker_count": workaround_register_status.get("marker_count"),
+                "missing_ids": workaround_register_status.get("missing_ids"),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if (
+        workaround_register_status.get("enforced")
+        and not workaround_register_status.get("valid", True)
+    ):
+        reason_tokens = workaround_register_status.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - workaround register gate failed "
             f"({','.join(reason_tokens)})"
         )
 
@@ -11339,8 +13410,10 @@ def _run_llm_quality(args):
         "unobserved_turns": 0,
         "outbox_delivery_failed_turns": 0,
         "outbox_delivery_timeout_turns": 0,
+        "delivery_waiver_billing_turns": 0,
         "weak_oracle_turns": 0,
         "suppressed_missed_question_count": 0,
+        "judge_fail_advisory_turns": 0,
         "policy_core_turns": 0,
         "policy_core_degraded_turns": 0,
         "policy_core_infra_errors": 0,
@@ -11431,6 +13504,7 @@ def _run_llm_quality(args):
     judge_stats = {
         "enabled": judge_enabled,
         "mode": judge_mode if judge_enabled else "off",
+        "transport": LLM_QUALITY_JUDGE_TRANSPORT if judge_enabled else "disabled",
         "required": judge_required,
         "api_key_source": judge_api_key_source if judge_enabled else None,
         "sample": args.judge_sample,
@@ -11875,6 +13949,8 @@ def _run_llm_quality(args):
     interrupted = False
     checkpoint_interval_turns = 1 if args.dry_run else 5
     last_checkpoint_turn = -1
+    progress_heartbeat_interval_seconds = 20.0
+    last_progress_heartbeat_monotonic = time.monotonic()
 
     previous_sigint = signal.getsignal(signal.SIGINT)
     previous_sigterm = signal.getsignal(signal.SIGTERM)
@@ -11911,12 +13987,45 @@ def _run_llm_quality(args):
             scenario_source=scenario_source,
             stop_reason=stop_reason,
             interrupted=interrupted,
+            run_economy_status=run_economy_status,
+            runtime_preflight=runtime_preflight,
+            lock_state_path=lock_state_path,
         )
         last_checkpoint_turn = turns_done
+
+    def _emit_progress_heartbeat(
+        event,
+        *,
+        dialog_idx=None,
+        turn_idx=None,
+        force=False,
+        extra=None,
+    ):
+        nonlocal last_progress_heartbeat_monotonic
+        now_monotonic = time.monotonic()
+        if not force and (
+            now_monotonic - last_progress_heartbeat_monotonic
+            < progress_heartbeat_interval_seconds
+        ):
+            return
+        payload = {
+            "stage": "llm_quality_progress",
+            "event": str(event),
+            "run_id": run_id,
+            "dialog_index": dialog_idx,
+            "turn_index": turn_idx,
+            "turns_done": int(stats.get("turns") or 0),
+            "turns_strict_failed": int(stats.get("turns_strict_failed") or 0),
+        }
+        if isinstance(extra, dict):
+            payload.update(extra)
+        print(json.dumps(payload, ensure_ascii=False))
+        last_progress_heartbeat_monotonic = now_monotonic
 
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
     _checkpoint_run_summary(force=True)
+    _emit_progress_heartbeat("run_start", force=True)
 
     with open(responses_path, "w", encoding="utf-8") as responses_handle, open(
         trace_bundle_path, "w", encoding="utf-8"
@@ -11924,6 +14033,12 @@ def _run_llm_quality(args):
         for dialog_idx, dialog in enumerate(dialogs, start=1):
             if stop_requested:
                 break
+            _emit_progress_heartbeat(
+                "dialog_start",
+                dialog_idx=dialog_idx,
+                force=True,
+                extra={"dialog_turns_expected": len(dialog.get("turns") or [])},
+            )
             dialog_runtime_state = {"slot_candidates": []}
             remote_jid = args.remote_jid or _llm_quality_pick_jid(
                 allowlist_jids, dialog_idx - 1, rng, jid_mode_effective, run_id=run_id
@@ -11946,6 +14061,11 @@ def _run_llm_quality(args):
                 if stop_requested:
                     break
                 stats["turns"] += 1
+                _emit_progress_heartbeat(
+                    "turn_start",
+                    dialog_idx=dialog_idx,
+                    turn_idx=turn_idx,
+                )
                 if args.dry_run:
                     wait_seconds = 0
                 else:
@@ -11991,6 +14111,7 @@ def _run_llm_quality(args):
                 attempts = 0
                 response_payload = None
                 inline_response_text = None
+                inline_response_observed = False
                 conversation_id_hint = None
                 if not args.dry_run:
                     response_status, response_body, response_error, attempts = _send_webhook_payload_with_retry(
@@ -12007,7 +14128,16 @@ def _run_llm_quality(args):
                         except Exception:
                             response_payload = None
                     if isinstance(response_payload, dict):
-                        inline_response_text = response_payload.get("bot_response")
+                        inline_response_value = response_payload.get("bot_response")
+                        if isinstance(inline_response_value, str):
+                            inline_response_text = inline_response_value
+                        if (
+                            isinstance(inline_response_value, bool)
+                            and inline_response_value
+                        ):
+                            success_value = response_payload.get("success")
+                            if success_value is not False:
+                                inline_response_observed = True
                         if not isinstance(inline_response_text, str):
                             inline_response_text = None
                         hint_value = response_payload.get("conversation_id")
@@ -12163,6 +14293,7 @@ def _run_llm_quality(args):
                     outbox_payload_status=outbox_payload_status,
                     outbox_text=outbox_text,
                     inline_response_text=inline_response_text,
+                    inline_response_observed=inline_response_observed,
                 )
                 expected_response, expected_reason = _llm_quality_expected_response(state, meta)
                 if not args.dry_run and not args.skip_outbox:
@@ -12185,6 +14316,7 @@ def _run_llm_quality(args):
                         outbox_text=outbox_text,
                         outbox_wait_seconds=outbox_wait_seconds,
                         poll_interval=args.poll_interval,
+                        inline_response_observed=inline_response_observed,
                     )
                 bot_response_inferred_duplicate_ack = False
                 bot_response_recovered_from_messages = False
@@ -12199,6 +14331,7 @@ def _run_llm_quality(args):
                     outbox_payload_status=outbox_payload_status,
                     outbox_summary=outbox_summary,
                     trace_entries=trace_entries,
+                    ignore_transport_block=args.skip_outbox,
                 ):
                     bot_response = True
                     bot_response_inferred_duplicate_ack = True
@@ -12531,6 +14664,7 @@ def _run_llm_quality(args):
                         booking_progressed=booking_progressed,
                         allow_booking_stall=allow_booking_stall,
                         outbox_text=outbox_text,
+                        outbox_payload=outbox_payload,
                         tool_signals=tool_signals,
                         outbox_summary=outbox_summary,
                         outbox_payload_status=outbox_payload_status,
@@ -12685,24 +14819,44 @@ def _run_llm_quality(args):
                 )
                 if suppress_judge_fail:
                     stats["suppressed_missed_question_count"] += 1
+                judge_fail_advisory = False
                 if (
                     isinstance(judge_result, dict)
                     and judge_result.get("verdict") == "fail"
                     and not suppress_judge_fail
-                    and "judge_fail" not in strict_reasons
                 ):
-                    strict_reasons.append("judge_fail")
+                    promote_judge_fail = _llm_quality_should_promote_judge_fail(
+                        judge_result=judge_result,
+                        strict_reasons=strict_reasons,
+                    )
+                    if promote_judge_fail and "judge_fail" not in strict_reasons:
+                        strict_reasons.append("judge_fail")
+                    elif not promote_judge_fail:
+                        judge_fail_advisory = True
+                        stats["judge_fail_advisory_turns"] += 1
                 strict_reasons = list(dict.fromkeys(strict_reasons))
-                if "unobserved_turn" in strict_reasons:
-                    stats["unobserved_turns"] += 1
-                if "outbox_delivery_failed" in strict_reasons:
-                    stats["outbox_delivery_failed_turns"] += 1
-                if "outbox_delivery_timeout" in strict_reasons:
-                    stats["outbox_delivery_timeout_turns"] += 1
-                hard_reasons = [
-                    reason for reason in strict_reasons if reason in LLM_QUALITY_HARD_FAIL_REASONS
+                semantic_strict_reasons = [
+                    reason
+                    for reason in strict_reasons
+                    if reason not in LLM_QUALITY_DELIVERY_WAIVER_REASONS
                 ]
-                strict_ok = not strict_reasons
+                delivery_waiver_reasons = [
+                    reason for reason in strict_reasons if reason in LLM_QUALITY_DELIVERY_WAIVER_REASONS
+                ]
+                if "unobserved_turn" in semantic_strict_reasons:
+                    stats["unobserved_turns"] += 1
+                if "outbox_delivery_failed" in semantic_strict_reasons:
+                    stats["outbox_delivery_failed_turns"] += 1
+                if "outbox_delivery_timeout" in semantic_strict_reasons:
+                    stats["outbox_delivery_timeout_turns"] += 1
+                if "delivery_waiver_billing" in delivery_waiver_reasons:
+                    stats["delivery_waiver_billing_turns"] += 1
+                hard_reasons = [
+                    reason
+                    for reason in semantic_strict_reasons
+                    if reason in LLM_QUALITY_HARD_FAIL_REASONS
+                ]
+                strict_ok = not semantic_strict_reasons
                 if strict_ok:
                     stats["turns_strict_passed"] += 1
                 else:
@@ -12847,6 +15001,9 @@ def _run_llm_quality(args):
                         "reasons": evaluation_reasons,
                         "strict_ok": strict_ok,
                         "strict_reasons": strict_reasons,
+                        "semantic_strict_reasons": semantic_strict_reasons,
+                        "delivery_waiver_reasons": delivery_waiver_reasons,
+                        "judge_fail_advisory": judge_fail_advisory,
                         "hard_fail": bool(hard_reasons),
                         "hard_reasons": hard_reasons,
                     },
@@ -12897,6 +15054,12 @@ def _run_llm_quality(args):
                 )
                 stats["trace_rows_written"] += 1
                 _checkpoint_run_summary()
+                _emit_progress_heartbeat(
+                    "turn_committed",
+                    dialog_idx=dialog_idx,
+                    turn_idx=turn_idx,
+                    extra={"trace_rows_written": int(stats.get("trace_rows_written") or 0)},
+                )
                 if stats["policy_core_infra_errors"] >= 3:
                     stop_reason = "policy_core_infra_errors"
                     stop_requested = True
@@ -12977,8 +15140,10 @@ def _run_llm_quality(args):
             "unobserved_turns": stats["unobserved_turns"],
             "outbox_delivery_failed_turns": stats["outbox_delivery_failed_turns"],
             "outbox_delivery_timeout_turns": stats["outbox_delivery_timeout_turns"],
+            "delivery_waiver_billing_turns": stats["delivery_waiver_billing_turns"],
             "weak_oracle_turns": stats["weak_oracle_turns"],
             "suppressed_missed_question_count": stats["suppressed_missed_question_count"],
+            "judge_fail_advisory_turns": stats["judge_fail_advisory_turns"],
             "policy_core_turns": stats["policy_core_turns"],
             "policy_core_degraded_turns": stats["policy_core_degraded_turns"],
             "policy_core_infra_errors": stats["policy_core_infra_errors"],
@@ -12998,6 +15163,7 @@ def _run_llm_quality(args):
         "dedup": dedup_stats,
         "suppression": {
             "suppressed_missed_question_count": stats["suppressed_missed_question_count"],
+            "judge_fail_advisory_turns": stats["judge_fail_advisory_turns"],
         },
         "rates": {},
     }
@@ -13225,6 +15391,30 @@ def _run_llm_quality(args):
             len(run_economy_status.get("reasons") or []),
             1,
         )
+    if (
+        not manual_audit_gate_status.get("valid", True)
+        and manual_audit_gate_status.get("mode") in {"warn", "block"}
+    ):
+        process_blocking_counts["manual_audit_gate_violation"] = max(
+            len(manual_audit_gate_status.get("reasons") or []),
+            1,
+        )
+    if (
+        not quality_constant_status.get("valid", True)
+        and quality_constant_status.get("mode") in {"warn", "block"}
+    ):
+        process_blocking_counts["quality_constant_violation"] = max(
+            len(quality_constant_status.get("reasons") or []),
+            1,
+        )
+    if (
+        not workaround_register_status.get("valid", True)
+        and workaround_register_status.get("mode") in {"warn", "block"}
+    ):
+        process_blocking_counts["workaround_register_violation"] = max(
+            len(workaround_register_status.get("reasons") or []),
+            1,
+        )
     missing_scenario_artifacts = list((scenario_artifact_status or {}).get("missing") or [])
     if missing_scenario_artifacts:
         process_blocking_counts["incomplete_run_artifact"] = len(missing_scenario_artifacts)
@@ -13331,6 +15521,10 @@ def _run_llm_quality(args):
         runtime_preflight=runtime_preflight,
         failure_counts=failure_counts,
     )
+    delivery_acceptance = _llm_quality_build_delivery_acceptance_status(
+        stats,
+        failure_counts=failure_counts,
+    )
     comparison_enforced = bool(args.fail_on_regression)
     comparison_block_reasons = []
     if args.dry_run:
@@ -13406,6 +15600,13 @@ def _run_llm_quality(args):
         "hardcode_core_base_ref": args.hardcode_core_base_ref,
         "run_economy_gate": args.run_economy_gate,
         "run_economy_base_ref": args.run_economy_base_ref,
+        "manual_audit_gate": args.manual_audit_gate,
+        "quality_constant_gate": args.quality_constant_gate,
+        "quality_lane_requested": quality_constant_status.get("lane_requested"),
+        "quality_lane_effective": quality_constant_status.get("lane_effective"),
+        "workaround_register_gate": args.workaround_register_gate,
+        "workaround_register_base_ref": args.workaround_register_base_ref,
+        "workaround_register_path": workaround_register_status.get("register_path"),
         "allow_no_code_delta": bool(args.allow_no_code_delta),
         "judge_mode": judge_mode,
         "judge_required": judge_required,
@@ -13413,6 +15614,7 @@ def _run_llm_quality(args):
         "judge_api_key_source": judge_api_key_source if judge_enabled else None,
         "judge_sample": args.judge_sample,
         "judge_model": args.judge_model if judge_enabled else None,
+        "judge_transport": LLM_QUALITY_JUDGE_TRANSPORT if judge_enabled else "disabled",
         "judge_max_tokens": args.judge_max_tokens if judge_enabled else None,
         "judge_cache_file": judge_cache_file if judge_enabled else None,
         "judge_cache_max_entries": args.judge_cache_max_entries if judge_enabled else None,
@@ -13421,6 +15623,7 @@ def _run_llm_quality(args):
         "runtime_expected_commit_source": runtime_preflight.get("expected_source"),
         "runtime_commit": runtime_preflight.get("runtime_commit"),
     }
+    manual_audit = _llm_quality_manual_audit_descriptor(run_id=run_id, output_dir=output_dir)
     summary = {
         "run_id": run_id,
         "started_at": started_at.isoformat(),
@@ -13449,12 +15652,18 @@ def _run_llm_quality(args):
         "suppressed_missed_question_count": int(
             metrics.get("suppression", {}).get("suppressed_missed_question_count") or 0
         ),
+        "judge_fail_advisory_turn_count": int(
+            metrics.get("suppression", {}).get("judge_fail_advisory_turns") or 0
+        ),
         "blocking_reasons": blocking_reasons,
         "process_blocking_counts": process_blocking_counts,
         "rewrite_governance": rewrite_governance,
         "lexicon_regex_delta_gate": lexicon_regex_delta_gate,
         "hardcode_core_gate": hardcode_core_gate,
         "run_economy": run_economy_status,
+        "manual_audit_gate": manual_audit_gate_status,
+        "quality_constant_gate": quality_constant_status,
+        "workaround_register_gate": workaround_register_status,
         "top_failures": top_failures,
         "top_failure_turns": top_failure_turns,
         "failures": failures,
@@ -13468,11 +15677,31 @@ def _run_llm_quality(args):
         "openai_preflight": openai_preflight,
         "infra_valid": infra_status["valid"],
         "semantic_valid": semantic_status["valid"],
+        "semantic_acceptance": {
+            "status": "pass" if semantic_status["valid"] else "fail",
+            "valid": semantic_status["valid"],
+            "reasons": semantic_status["reasons"],
+        },
+        "delivery_acceptance": delivery_acceptance,
         "quality_status": {
             "infra_valid": infra_status["valid"],
             "infra_reasons": infra_status["reasons"],
             "semantic_valid": semantic_status["valid"],
             "semantic_reasons": semantic_status["reasons"],
+            "semantic_acceptance": {
+                "status": "pass" if semantic_status["valid"] else "fail",
+                "valid": semantic_status["valid"],
+                "reasons": semantic_status["reasons"],
+            },
+            "delivery_acceptance": delivery_acceptance,
+            "delivery_valid": delivery_acceptance.get("valid"),
+            "delivery_status": delivery_acceptance.get("status"),
+            "delivery_reasons": delivery_acceptance.get("reasons"),
+            "delivery_waived": delivery_acceptance.get("waived"),
+            "delivery_waivers": delivery_acceptance.get("waivers"),
+            "delivery_waiver_billing_turns": (
+                (delivery_acceptance.get("counts") or {}).get("delivery_waiver_billing_turns")
+            ),
             "blocking_reason_count": blocking_reason_count,
             "blocking_reasons": blocking_reasons.get("reasons", {}),
             "process_blocking_counts": process_blocking_counts,
@@ -13482,6 +15711,9 @@ def _run_llm_quality(args):
             "weak_oracle_turn_count": int(stats.get("weak_oracle_turns") or 0),
             "suppressed_missed_question_count": int(
                 metrics.get("suppression", {}).get("suppressed_missed_question_count") or 0
+            ),
+            "judge_fail_advisory_turn_count": int(
+                metrics.get("suppression", {}).get("judge_fail_advisory_turns") or 0
             ),
             "rewrite_governance_valid": rewrite_governance.get("valid", True),
             "rewrite_governance_reasons": rewrite_governance.get("reasons", []),
@@ -13501,6 +15733,29 @@ def _run_llm_quality(args):
             "run_economy_gate_valid": run_economy_status.get("valid", True),
             "run_economy_gate_enforced": run_economy_status.get("enforced", False),
             "run_economy_gate_reasons": run_economy_status.get("reasons", []),
+            "manual_audit_gate_valid": manual_audit_gate_status.get("valid", True),
+            "manual_audit_gate_enforced": manual_audit_gate_status.get("enforced", False),
+            "manual_audit_gate_reasons": manual_audit_gate_status.get("reasons", []),
+            "quality_constant_gate_valid": quality_constant_status.get("valid", True),
+            "quality_constant_gate_enforced": quality_constant_status.get("enforced", False),
+            "quality_constant_gate_reasons": quality_constant_status.get("reasons", []),
+            "quality_lane_requested": quality_constant_status.get("lane_requested"),
+            "quality_lane_effective": quality_constant_status.get("lane_effective"),
+            "quality_lane_missing_coverage": quality_constant_status.get("missing_coverage", []),
+            "workaround_register_gate_valid": workaround_register_status.get("valid", True),
+            "workaround_register_gate_enforced": workaround_register_status.get(
+                "enforced", False
+            ),
+            "workaround_register_gate_reasons": workaround_register_status.get(
+                "reasons", []
+            ),
+            "workaround_register_path": workaround_register_status.get("register_path"),
+            "workaround_register_marker_count": workaround_register_status.get(
+                "marker_count", 0
+            ),
+            "workaround_register_missing_ids": workaround_register_status.get(
+                "missing_ids", []
+            ),
             "tool_evidence_valid": tool_evidence_status.get("valid"),
             "tool_evidence_reasons": tool_evidence_status.get("reasons"),
             "scenario_contract_valid": scenario_contract.get("valid"),
@@ -13517,12 +15772,17 @@ def _run_llm_quality(args):
             "comparison_block_reasons": comparison_block_reasons,
             "non_evaluable": bool(args.dry_run),
             "non_evaluable_reasons": ["dry_run"] if args.dry_run else [],
+            "manual_audit_required": True,
+            "manual_audit_status": manual_audit.get("status"),
+            "manual_audit_path": manual_audit.get("path"),
+            "manual_audit_command": manual_audit.get("command"),
         },
         "scenario_source": scenario_source,
         "replay_command": replay_command,
         "stop_reason": stop_reason,
         "interrupted": interrupted,
         "brief_path": brief_path,
+        "manual_audit": manual_audit,
         "taxonomy": {
             "counts": taxonomy_counts,
             "by_reason": {
@@ -13559,6 +15819,14 @@ def _run_llm_quality(args):
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
     _llm_quality_write_brief(brief_path, summary)
+    summary["artifact_integrity"] = _llm_quality_collect_artifact_integrity(output_dir)
+    summary["quality_status"]["artifact_integrity_valid"] = summary["artifact_integrity"]["valid"]
+    summary["quality_status"]["artifact_integrity_missing"] = list(
+        summary["artifact_integrity"]["missing"]
+    )
+    with open(summary_path, "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, ensure_ascii=False, indent=2)
+    _llm_quality_write_brief(brief_path, summary)
     if run_economy_status.get("is_replay") and run_economy_status.get("replay_fingerprint"):
         _llm_quality_save_replay_fingerprint_state(
             replay_state_path,
@@ -13575,6 +15843,39 @@ def _run_llm_quality(args):
                 "jid_mode": jid_mode_effective,
             },
         )
+    if (not run_economy_status.get("is_replay")) and run_economy_status.get("lock_fingerprint"):
+        _llm_quality_save_replay_fingerprint_state(
+            lock_state_path,
+            {
+                "run_id": run_id,
+                "saved_at": finished_at.isoformat(),
+                "summary_path": summary_path,
+                "lock_fingerprint": run_economy_status.get("lock_fingerprint"),
+                "code_fingerprint": run_economy_status.get("code_fingerprint"),
+                "runtime_commit": runtime_preflight.get("runtime_commit"),
+                "judge_mode": judge_mode,
+                "canonical_valid": bool(
+                    infra_status.get("valid")
+                    and semantic_status.get("valid")
+                    and run_integrity_status.get("valid")
+                ),
+                "infra_valid": bool(infra_status.get("valid")),
+                "semantic_valid": bool(semantic_status.get("valid")),
+                "run_integrity_valid": bool(run_integrity_status.get("valid")),
+                "stop_reason": stop_reason,
+                "blocking_reason_count": int(blocking_reason_count or 0),
+            },
+        )
+
+    _llm_quality_write_run_manifest(
+        args=args,
+        run_id=run_id,
+        output_dir=output_dir,
+        summary=summary,
+        run_economy_status=run_economy_status,
+        runtime_preflight=runtime_preflight,
+        stop_reason=stop_reason,
+    )
 
     history_entry = {
         "run_id": run_id,
@@ -13586,6 +15887,7 @@ def _run_llm_quality(args):
         "judge": judge_stats.get("counts"),
         "infra_valid": infra_status["valid"],
         "semantic_valid": semantic_status["valid"],
+        "delivery_status": delivery_acceptance.get("status"),
     }
     baseline_update_block_reasons = []
     if args.update_baseline:
@@ -13742,6 +16044,9 @@ def _run_llm_quality_gates(args):
         args.run_economy_base_ref
     )
     baseline_preflight = _llm_quality_preflight_baseline_summary(args.baseline_summary)
+    lock_state_payload = _llm_quality_load_replay_fingerprint_state(
+        _llm_quality_lock_fingerprint_state_path()
+    )
     run_economy_gate = _llm_quality_build_run_economy_status(
         mode=args.run_economy_gate,
         repo_root=repo_root,
@@ -13754,15 +16059,57 @@ def _run_llm_quality_gates(args):
         runtime_commit=args.runtime_commit,
         judge_mode=args.judge_mode,
         previous_replay_fingerprint=args.previous_replay_fingerprint,
+        previous_lock_state=lock_state_payload,
         changed_files=run_economy_changed,
         baseline_preflight=baseline_preflight,
+        run_mode=getattr(args, "mode", None),
+        dialog_count=getattr(args, "count", None),
+        min_turns=getattr(args, "min_turns", None),
+        max_turns=getattr(args, "max_turns", None),
+        include_media=bool(getattr(args, "include_media", False)),
+        scenario_coverage=getattr(args, "scenario_coverage", None),
     )
     _merge_scan_warnings(run_economy_gate, run_economy_scan_warnings)
+    quality_constant_gate = _llm_quality_build_quality_constant_status(
+        mode=args.quality_constant_gate,
+        lane=args.quality_lane,
+        scenarios_file=args.scenarios_file,
+        run_mode=args.mode,
+        count=args.count,
+        include_media=bool(args.include_media),
+        scenario_coverage=args.scenario_coverage,
+        judge_mode=args.judge_mode,
+        run_economy_gate=args.run_economy_gate,
+        manual_audit_gate=args.manual_audit_gate,
+        tool_evidence_policy=args.tool_evidence_policy,
+        fail_on_thresholds=bool(args.fail_on_thresholds),
+        fail_on_regression=bool(args.fail_on_regression),
+        allow_weak_oracle=bool(args.allow_weak_oracle),
+        allow_incomplete_run_artifacts=bool(args.allow_incomplete_run_artifacts),
+        allow_judge_off=bool(args.allow_judge_off),
+        allow_no_code_delta=bool(args.allow_no_code_delta),
+        skip_outbox=bool(args.skip_outbox),
+        update_baseline=bool(args.update_baseline),
+    )
+
+    workaround_changed, workaround_scan_warnings = _collect_changed_files(
+        args.workaround_register_base_ref
+    )
+    workaround_register_gate = _llm_quality_build_workaround_register_status(
+        mode=args.workaround_register_gate,
+        repo_root=repo_root,
+        base_ref=args.workaround_register_base_ref,
+        register_path=args.workaround_register_path,
+        changed_files=workaround_changed,
+    )
+    _merge_scan_warnings(workaround_register_gate, workaround_scan_warnings)
 
     gate_statuses = {
         "lexicon_regex_delta_gate": lexicon_regex_delta_gate,
         "hardcode_core_gate": hardcode_core_gate,
         "run_economy_gate": run_economy_gate,
+        "quality_constant_gate": quality_constant_gate,
+        "workaround_register_gate": workaround_register_gate,
     }
     blocking_reasons = []
     warn_reasons = []
@@ -20891,6 +23238,8 @@ if len(sys.argv) > 1 and sys.argv[1] == "chaos-sim":
 if len(sys.argv) > 1 and sys.argv[1] == "llm-quality":
     _run_llm_quality_entry(sys.argv[2:])
     raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-audit":
+    raise SystemExit(_run_llm_quality_audit(_parse_llm_quality_audit_args(sys.argv[2:])))
 if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-gates":
     raise SystemExit(_run_llm_quality_gates(_parse_llm_quality_gates_args(sys.argv[2:])))
 if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-matrix":

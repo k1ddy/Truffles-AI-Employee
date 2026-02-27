@@ -84,6 +84,7 @@ API_START_TIMEOUT=60
 KEEP_LOCAL_API=0
 API_PID=""
 API_LOG=""
+OPENAI_API_KEY_SOURCE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -269,31 +270,103 @@ EOF
 }
 
 ensure_openai_key() {
-  if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+  local aliases=(
+    OPENAI_API_KEY
+    OPENAI_KEY
+    OPENAI_API_TOKEN
+    OPENAI_TOKEN
+    LLM_API_KEY
+    OPENAI_JUDGE_API_KEY
+    JUDGE_API_KEY
+  )
+  local alias value source_prefix
+
+  _adopt_openai_alias() {
+    source_prefix="$1"
+    for alias in "${aliases[@]}"; do
+      value="${!alias:-}"
+      if [[ -z "$value" ]]; then
+        continue
+      fi
+      export OPENAI_API_KEY="$value"
+      if [[ "$alias" == "OPENAI_API_KEY" ]]; then
+        OPENAI_API_KEY_SOURCE="${source_prefix}"
+      else
+        OPENAI_API_KEY_SOURCE="${source_prefix}:${alias}"
+      fi
+      return 0
+    done
+    return 1
+  }
+
+  if _adopt_openai_alias "env:OPENAI_API_KEY"; then
+    log "openai key source: ${OPENAI_API_KEY_SOURCE}"
     return 0
   fi
+
+  local env_file=""
+  for env_file in \
+    "${TRUFFLES_API_ENV_FILE:-}" \
+    "${ENV_FILE:-}" \
+    "truffles-api/.env" \
+    ".env" \
+    "/home/zhan/truffles-main/truffles-api/.env" \
+    "/home/zhan/truffles-main/.env" \
+    "/home/zhan/infrastructure/.env"; do
+    if [[ -z "${env_file}" || ! -f "${env_file}" ]]; then
+      continue
+    fi
+    local source_rc=0
+    set +e
+    set +u
+    set -a
+    # shellcheck disable=SC1090
+    source "${env_file}"
+    source_rc=$?
+    set +a
+    set -u
+    set -e
+    if [[ "${source_rc}" -ne 0 ]]; then
+      continue
+    fi
+    if _adopt_openai_alias "env_file:${env_file}"; then
+      log "openai key source: ${OPENAI_API_KEY_SOURCE}"
+      return 0
+    fi
+  done
+
   if ! command -v docker >/dev/null 2>&1; then
-    echo "[fatal] docker not available and OPENAI_API_KEY is empty" >&2
+    echo "[fatal] docker not available and OPENAI_API_KEY aliases unresolved (env/env_file/container)" >&2
     exit 1
   fi
-  local key
-  key="$(docker exec -i truffles-api /bin/sh -lc 'printf %s "${OPENAI_API_KEY:-}"' 2>/dev/null || true)"
-  if [[ -z "$key" ]]; then
-    echo "[fatal] missing OPENAI_API_KEY (env and truffles-api container)" >&2
-    exit 1
-  fi
-  export OPENAI_API_KEY="$key"
+  for alias in "${aliases[@]}"; do
+    value="$(docker exec -i truffles-api /bin/sh -lc "printf %s \"\${${alias}:-}\"" 2>/dev/null || true)"
+    if [[ -z "$value" ]]; then
+      continue
+    fi
+    export OPENAI_API_KEY="$value"
+    if [[ "$alias" == "OPENAI_API_KEY" ]]; then
+      OPENAI_API_KEY_SOURCE="container:truffles-api"
+    else
+      OPENAI_API_KEY_SOURCE="container:truffles-api:${alias}"
+    fi
+    log "openai key source: ${OPENAI_API_KEY_SOURCE}"
+    return 0
+  done
+  echo "[fatal] missing OPENAI_API_KEY aliases (env/env_file/container)" >&2
+  exit 1
 }
 
 assert_canonical_baseline() {
   local summary="$1"
-  local infra semantic judge_enabled
+  local infra semantic judge_enabled dry_run
   infra="$(jq -r '.infra_valid // false' "$summary")"
   semantic="$(jq -r '.semantic_valid // false' "$summary")"
   judge_enabled="$(jq -r '.judge.enabled // false' "$summary")"
-  if [[ "$infra" != "true" || "$semantic" != "true" || "$judge_enabled" != "true" ]]; then
+  dry_run="$(jq -r '.config.dry_run // false' "$summary")"
+  if [[ "$infra" != "true" || "$semantic" != "true" || "$judge_enabled" != "true" || "$dry_run" != "false" ]]; then
     echo "[fatal] baseline is not canonical: ${summary}" >&2
-    jq -c '{infra_valid, semantic_valid, judge_enabled:(.judge.enabled // false), quality_status}' "$summary" >&2 || true
+    jq -c '{infra_valid, semantic_valid, dry_run:(.config.dry_run // false), judge_enabled:(.judge.enabled // false), quality_status}' "$summary" >&2 || true
     exit 1
   fi
 }
@@ -319,6 +392,7 @@ for path in glob.glob("/tmp/booking_quality/*/summary.json"):
         payload.get("infra_valid") is True
         and payload.get("semantic_valid") is True
         and judge.get("enabled") is True
+        and bool((payload.get("config") or {}).get("dry_run")) is False
     ):
         mtime = os.path.getmtime(path)
         if mtime > best_mtime:
