@@ -125,7 +125,7 @@ enforce_llm_evidence_gate() {
 
 session_meta_value() {
   local key="$1"
-  grep -E "^- ${key}: " "$session_file" | head -n1 | sed "s/^- ${key}: //"
+  grep -E "^- ${key}: " "$session_file" | head -n1 | sed "s/^- ${key}: //" || true
 }
 
 resolve_repo_path() {
@@ -178,6 +178,62 @@ enforce_zero_context_gate_if_required() {
     cmd+=(--graph "$graph_path")
   fi
   "${cmd[@]}"
+}
+
+require_tp_section_in_file() {
+  local file="$1"
+  local section="$2"
+  if ! rg -Fq "## ${section}" "$file"; then
+    echo "ERROR: Task Package missing section '## ${section}' in ${file}." >&2
+    exit 1
+  fi
+}
+
+require_tp_token_in_file() {
+  local file="$1"
+  local token="$2"
+  if ! rg -Fq "$token" "$file"; then
+    echo "ERROR: Task Package missing token '${token}' in ${file}." >&2
+    exit 1
+  fi
+}
+
+enforce_research_driven_tp_gate() {
+  local mode
+  mode=$(session_meta_value "research_gate")
+  if [[ -z "$mode" || "$mode" == "off" || "$mode" == "optional" ]]; then
+    return 0
+  fi
+  if [[ "$mode" != "required" ]]; then
+    echo "ERROR: Unsupported research_gate mode '${mode}' in ${session_file}." >&2
+    exit 1
+  fi
+
+  local tp_file="$repo_root/$task_package"
+  local required_sections=(
+    "One web search (mandatory before implementation)"
+    "Root cause (mandatory)"
+    "Reuse-first plan (mandatory)"
+    "Token / run budget (mandatory for expensive suites)"
+    "Release safety (mandatory for non-doc changes)"
+  )
+  local section
+  for section in "${required_sections[@]}"; do
+    require_tp_section_in_file "$tp_file" "$section"
+  done
+
+  local required_tokens=(
+    "Query (exact):"
+    "Five Whys"
+    "Internal reuse:"
+    "External reuse:"
+    "Max full runs:"
+    "Strategy:"
+  )
+  local token
+  for token in "${required_tokens[@]}"; do
+    require_tp_token_in_file "$tp_file" "$token"
+  done
 }
 
 if [[ "$branch" == "HEAD" ]]; then
@@ -291,6 +347,8 @@ if [[ -n "$tp_placeholders" ]]; then
   echo "$tp_placeholders" >&2
   exit 1
 fi
+
+enforce_research_driven_tp_gate
 
 index_file="$repo_root/docs/SESSION_INDEX.md"
 if [[ ! -f "$index_file" ]]; then

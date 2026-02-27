@@ -83,6 +83,9 @@ tp_required_sections=(
   "Название/цель"
   "Canon refs"
   "FACT pre-check (before implementation)"
+  "One web search (mandatory before implementation)"
+  "Root cause (mandatory)"
+  "Reuse-first plan (mandatory)"
   "Invariant"
   "Scope"
   "Out of scope"
@@ -91,9 +94,12 @@ tp_required_sections=(
   "DoD"
   "Checks"
   "Evidence"
+  "Token / run budget (mandatory for expensive suites)"
+  "Release safety (mandatory for non-doc changes)"
   "Doc sync plan (after implementation)"
   "Rollback"
   "No-go"
+  "Risks/Blockers"
   "Handoff (for zero-context next agent)"
 )
 
@@ -101,10 +107,15 @@ report_required_sections=(
   "Block identity"
   "Input baseline (FACT)"
   "FACT pre-check evidence (before changes)"
+  "One web search evidence"
+  "Root cause validation"
+  "Reuse-first outcome"
   "Contract delta"
   "Implemented changes"
   "Checks + outcomes"
+  "Iteration budget outcomes"
   "Evidence"
+  "Release safety decision"
   "Canon/doc sync updates"
   "Residual GAP / Risks"
   "Handoff (for zero-context next agent)"
@@ -122,6 +133,18 @@ done
 for token in '`BLOCK_ID`' '`DEPENDS_ON`' '`UNLOCKS`'; do
   require_token "$TP_PATH" "$token"
   require_token "$REPORT_PATH" "$token"
+done
+
+for file in "$TP_PATH" "$REPORT_PATH"; do
+  if rg -n "<[^>]+>" "$file" >/dev/null; then
+    echo "ERROR: Unresolved placeholders found in ${file}" >&2
+    rg -n "<[^>]+>" "$file" >&2 || true
+    exit 1
+  fi
+done
+
+for token in "Query (exact)" "Five Whys" "Decision:" "Max full runs" "Strategy:"; do
+  require_token "$TP_PATH" "$token"
 done
 
 if [[ -n "$GRAPH_PATH" ]]; then
