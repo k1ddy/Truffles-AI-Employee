@@ -235,14 +235,14 @@ Evidence:
 - Judge verdict не заменяет ручной аудит; judge используется как вспомогательный оркестр.
 - Если ручной аудит обнаруживает конфликт judge vs contract, это фиксируется как отдельный root-cause и вход в доработку judge/rubric.
 - Стандартная команда post-run аудита:
-  - `python3 ops/diagnose.py llm-quality-audit --run-dir <run_dir> --status done --strict-artifacts`
+  - `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/booking-lock-20260227-a1 --status done --strict-artifacts`
 - Acceptance запрещен, если `manual_audit.status != done` или `artifact_integrity.valid != true`.
 
 4. Stop-the-line for efficiency
 - Если run перешел в `run_incomplete`/`stop_reason=in_progress`, цепочка останавливается до root-cause фикса.
 - Нельзя компенсировать нестабильный lock множеством новых lock попыток без анализа предыдущих артефактов.
 - Любой новый run до post-run manual audit предыдущего run — нарушение процесса.
-- Runtime preflight обязан применять `manual_audit_gate=block` (или эквивалентный fail-closed guard) и останавливать новый run при `manual_audit_pending:<run_id>`.
+- Runtime preflight обязан применять `manual_audit_gate=block` (или эквивалентный fail-closed guard) и останавливать новый run при `manual_audit_pending:booking-lock-20260227-a1`.
 
 5. Throughput firebreak (mandatory)
 - Если в lock-run наблюдается `bot_response` без текстового payload (boolean reply) и прогон уходит в длительное polling-ожидание, run классифицируется как `forensic-only` до устранения причины.
@@ -663,12 +663,12 @@ Forensic only (not acceptance):
   - `/tmp/booking_quality_firebreak/summary.json`
   - `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r38/summary.json`
 - Quality run artifacts:
-  - `<run_dir>/summary.json`
-  - `<run_dir>/brief.md`
-  - `<run_dir>/responses.jsonl`
-  - `<run_dir>/trace_bundle.jsonl`
-  - `<run_dir>/manual_audit.md`
-  - `<run_dir>/manual_audit.json`
+  - `/tmp/booking_quality/RUN_ID/summary.json`
+  - `/tmp/booking_quality/RUN_ID/brief.md`
+  - `/tmp/booking_quality/RUN_ID/responses.jsonl`
+  - `/tmp/booking_quality/RUN_ID/trace_bundle.jsonl`
+  - `/tmp/booking_quality/RUN_ID/manual_audit.md`
+  - `/tmp/booking_quality/RUN_ID/manual_audit.json`
 - Contract evidence:
   - `decision_meta` sample rows,
   - `decision_trace` sample rows with resolver/policy/tool stages,

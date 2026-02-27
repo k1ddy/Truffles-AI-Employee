@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Brain | Top Architect | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-02-19-llm-first-firebreak-program.md
+- task_package: docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md
 - branch: fix/llm-first-firebreak-2026-02-19
 - worktree: /home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19
 - base_ref: origin/main
@@ -64,6 +64,9 @@
   - L1 no-judge: `booking-replay-20260224-contractized-a1-micro1-nojudge-r1` => `infra_valid=true`, `semantic_valid=true`, `blocking_reason_count=0`, `hq1_bad_turn_count=0`.
   - L2 critical: `booking-replay-20260224-contractized-a1-micro1-critical-r2` => `infra_valid=true`, `semantic_valid=true`, `judge.counts.fail=0`, `blocking_reason_count=0`, `hq1_bad_turn_count=0`.
   - Captured before/after blocking-set delta against historical failing critical run `booking-human-critical-hq1-l2-contract-first-a1-r1`: `blocking_reason_count 22 -> 0`, `judge_fail 6 -> 0`, `handoff_miss 1 -> 0`, `non_actionable_reply 1 -> 0`, `booking_flow_break 6 -> 0`.
+  - Continued under `TP-2026-02-21-consultant-contract-first-remediation-a1.md`; fixed PR `#826` red unit test by extending AST loader in `test_booking_quality_response_guard.py` (missing helper + signal collector stub).
+  - Implemented semantic remediation packet for master-intent contract in PR `#826`: resolver/pack/schema/runtime updates plus contract tests for `master_query` vs `service_query` routing.
+  - Pushed commits `b41de28e` (unit test repair) and `407f6c86` (master-intent resolver + pack-backed facts), then re-ran deterministic suites locally (`340 + 422` passed, `ruff` clean).
 - next:
   - Re-canonicalize `/tmp/booking_quality/blocking_scenarios_human.json` (remove `weak_oracle_turn`) so HQ1 full scenario set can pass scenario-contract preflight without waivers.
   - Re-run HQ1 full chain (`L1` no-judge + `L2` critical) on re-canonicalized human scenarios with same runtime parity and replay isolation flags.
@@ -187,4 +190,15 @@
   - 2026-02-25 PR#825 red-fix: restored missing `pack_runtime_service` export used by `decision.py` (`is_timeout_fact_fallback_candidate`) and sanitized session/report doc image tags to pass gitleaks.
   - python3 -m py_compile truffles-api/app/services/pack_runtime_service.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/response.py
   - pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core_timeout_fact_fallback or llm_policy_core" (`77 passed`)
-- last_updated: 2026-02-25T11:48:00+05:00
+  - PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/826
+  - CI failure root cause (run `22478077025`, job `65109355720`): `NameError: _llm_quality_has_catalog_service_choice_info_fallback` in AST-loaded unit context.
+  - pytest -q truffles-api/tests/test_booking_quality_response_guard.py (`53 passed`)
+  - ruff check truffles-api/tests/test_booking_quality_response_guard.py
+  - pytest -q truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_intent.py truffles-api/tests/test_message_endpoint.py (`340 passed`)
+  - pytest -q truffles-api/tests/test_booking_appointments.py truffles-api/tests/test_llm_policy_core.py truffles-api/tests/test_intent.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_pack_runtime_service.py (`422 passed`)
+  - ruff check truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/info.py truffles-api/app/schemas/intent.py truffles-api/app/services/intent_service.py truffles-api/app/services/pack_runtime_service.py truffles-api/tests/test_booking_appointments.py truffles-api/tests/test_intent.py truffles-api/tests/test_llm_policy_core.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_message_endpoint.py
+  - Commits: `b41de28e`, `407f6c86`
+  - PR evidence comments:
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/826#issuecomment-3971402246
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/826#issuecomment-3971433650
+- last_updated: 2026-02-27T13:08:30+05:00
