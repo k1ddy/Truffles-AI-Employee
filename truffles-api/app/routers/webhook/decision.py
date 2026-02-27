@@ -385,6 +385,7 @@ from app.services.pack_runtime_service import (
     is_timeout_fact_fallback_candidate,
     load_system_lexicons,
     load_yaml_truth,
+    resolve_master_intent,
     semantic_question_type,
     semantic_service_match,
 )
@@ -9179,8 +9180,8 @@ async def _handle_webhook_payload(
             # Build late if fast-path metadata was initialized before plan snapshot creation.
             policy_semantic_plan_contract = _build_semantic_arbiter_contract(
                 intent=policy_intent,
-                action=policy_plan_action or policy_action,
-                tool_action=policy_plan_tool_action or policy_tool_action,
+                action=policy_plan_action,
+                tool_action=policy_plan_tool_action,
                 pack_refs=policy_pack_refs,
                 slots=policy_slot_state_validated,
                 confidence=policy_confidence,
@@ -9700,8 +9701,8 @@ async def _handle_webhook_payload(
                 policy_resolver_version = raw_resolver_version.strip()
             policy_semantic_plan_contract = _build_semantic_arbiter_contract(
                 intent=policy_intent,
-                action=policy_plan_action or policy_action,
-                tool_action=policy_plan_tool_action or policy_tool_action,
+                action=policy_plan_action,
+                tool_action=policy_plan_tool_action,
                 pack_refs=policy_pack_refs,
                 slots=policy_slot_state_validated,
                 confidence=policy_confidence,
@@ -9777,10 +9778,16 @@ async def _handle_webhook_payload(
                     if policy_action == "fact" and policy_tool_action == "collect":
                         # Normalize a common schema-safe mismatch (`fact` + `collect`)
                         # before fail-closed validation to avoid post-hoc rewrites.
+                        previous_action = policy_action
+                        previous_tool_action = policy_tool_action
                         policy_action = "collect"
-                        policy_plan_action = "collect"
                         policy_action_normalized = True
-                        policy_semantic_plan_contract = None
+                        _register_policy_override(
+                            reason_code="contract_validation_failure",
+                            reason="action_tool_mismatch_normalized",
+                            from_action=previous_action,
+                            from_tool_action=previous_tool_action,
+                        )
                     else:
                         policy_validation_error = "action_tool_mismatch"
                 if policy_validation_error is None:
@@ -10294,15 +10301,30 @@ async def _handle_webhook_payload(
                     plan_slots=policy_slot_state_validated,
                 )
                 booking_last_question = None
+                booking_name_value = None
                 if isinstance(booking, dict):
                     raw_last_question = booking.get("last_question")
                     if isinstance(raw_last_question, str) and raw_last_question.strip():
                         booking_last_question = raw_last_question.strip().casefold()
-                name_turn_signal = bool(
-                    (
-                        isinstance(policy_slot_state_validated.get("name"), str)
-                        and policy_slot_state_validated.get("name").strip()
+                    raw_booking_name = booking.get("name")
+                    if isinstance(raw_booking_name, str) and raw_booking_name.strip():
+                        booking_name_value = raw_booking_name.strip()
+                plan_name_value = (
+                    policy_slot_state_validated.get("name")
+                    if isinstance(policy_slot_state_validated.get("name"), str)
+                    else None
+                )
+                if isinstance(plan_name_value, str):
+                    plan_name_value = plan_name_value.strip() or None
+                name_changed_from_context = bool(
+                    plan_name_value
+                    and (
+                        not booking_name_value
+                        or _normalize_text(plan_name_value) != _normalize_text(booking_name_value)
                     )
+                )
+                name_turn_signal = bool(
+                    name_changed_from_context
                     or _detect_explicit_name_provided(
                         message_text,
                         client_slug=payload.client_slug,
@@ -11356,13 +11378,13 @@ async def _handle_webhook_payload(
             collect_prompt = _combine_sidecar(MSG_STYLE_REFERENCE_NEED_MEDIA, collect_prompt)
 
         context = _get_conversation_context(conversation)
+        booking_state_for_collect = dict(booking) if isinstance(booking, dict) else {}
         if collect_slot:
-            booking_state = dict(booking) if isinstance(booking, dict) else {}
-            if not booking_state.get("active"):
-                booking_state["active"] = True
-                booking_state["started_at"] = now.isoformat()
-            booking_state["last_question"] = collect_slot
-            context = _set_booking_context(context, booking_state)
+            if not booking_state_for_collect.get("active"):
+                booking_state_for_collect["active"] = True
+                booking_state_for_collect["started_at"] = now.isoformat()
+            booking_state_for_collect["last_question"] = collect_slot
+            context = _set_booking_context(context, booking_state_for_collect)
             expected_reply_slot = _expected_reply_for_booking_question(collect_slot)
             if expected_reply_slot:
                 context = _set_expected_reply_context(
@@ -11374,6 +11396,103 @@ async def _handle_webhook_payload(
                     now=now,
                 )
             _set_conversation_context(conversation, context)
+
+        collect_reschedule_signal = bool(
+            collect_slot in {"service", "datetime", "name"}
+            and message_text
+            and _looks_like_booking_reschedule_request(
+                message_text,
+                client_slug=payload.client_slug,
+            )
+        )
+        collect_has_booking_reference = _booking_has_reference(booking_state_for_collect)
+        if collect_reschedule_signal and not collect_has_booking_reference:
+            handover_message = message_text or "Клиент просит изменить время записи."
+            _, reused, telegram_sent = _reuse_active_handover(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message=handover_message,
+                source="policy_core_degraded_collect",
+                intent="reschedule",
+            )
+            if reused:
+                bot_response = MSG_ESCALATED
+                result_message = (
+                    f"Policy core degraded collect reschedule handoff reused, "
+                    f"telegram={'sent' if telegram_sent else 'failed'}"
+                )
+            elif (
+                conversation.state == ConversationState.BOT_ACTIVE.value
+                and routing.get("allow_handover_create", False)
+            ):
+                _record_escalation_metric("intent")
+                result = escalate_to_pending(
+                    db=db,
+                    conversation=conversation,
+                    user_message=handover_message,
+                    trigger_type="intent",
+                    trigger_value="reschedule",
+                )
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=handover_message,
+                    )
+                    bot_response = MSG_ESCALATED
+                    result_message = (
+                        f"Policy core degraded collect reschedule handoff, "
+                        f"telegram={'sent' if telegram_sent else 'failed'}"
+                    )
+                else:
+                    bot_response = MSG_AI_ERROR
+                    result_message = "Policy core degraded collect reschedule handoff failed"
+            else:
+                bot_response = MSG_ESCALATED
+                result_message = (
+                    "Policy core degraded collect reschedule handoff skipped (already pending)"
+                )
+            _apply_policy_guard_override(
+                final_action="handoff",
+                final_tool_action="handoff",
+                reason_code=policy_guard_reason_code,
+                reason="policy_core_degraded_reschedule_handoff",
+            )
+            _sync_policy_plan_audit(emit_trace=True)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "degraded_collect_reschedule_handoff",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                    "missing_slot": collect_slot,
+                    "missing_slot_original": original_collect_slot,
+                    "info_query_override": info_query_override,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="escalate",
+                intent="reschedule",
+                source="booking_verification",
+                fast_intent=False,
+            )
+            bot_response, sent = _send_and_save(bot_response)
+            if not sent:
+                result_message = f"{result_message}; response_send=failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
 
         _apply_policy_guard_override(
             final_action="collect",
@@ -14206,21 +14325,23 @@ async def _handle_webhook_payload(
                         conversation_id=conversation.id,
                         bot_response=bot_response,
                     )
-                master_request_signal = "master" in info_sections
-                if not master_request_signal and message_text:
-                    detected_master_intents, detected_master_meta = _detect_info_class_intents(
-                        message_text,
-                        intent_decomp_set=set(),
-                        client_slug=payload.client_slug,
-                    )
-                    if "master" in detected_master_intents:
-                        master_request_signal = True
-                    elif isinstance(detected_master_meta, dict):
-                        info_signals = detected_master_meta.get("info_signals")
-                        master_request_signal = bool(
-                            isinstance(info_signals, dict)
-                            and info_signals.get("master")
-                        )
+                master_service_query = policy_service_query
+                master_service_query_source = "policy_service_query"
+                if (
+                    policy_tool_action == "catalog.service_query"
+                    and isinstance(raw_service_query_text, str)
+                    and raw_service_query_text.strip()
+                ):
+                    master_service_query = raw_service_query_text.strip()
+                    master_service_query_source = "tool_args_raw"
+                master_resolution = resolve_master_intent(
+                    message_text=message_text,
+                    client_slug=payload.client_slug,
+                    service_query=master_service_query,
+                    intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
+                    force_master_intent=False,
+                )
+                master_request_signal = bool("master" in info_sections or master_resolution.explicit)
                 has_explicit_location_or_hours = _has_explicit_location_or_hours_request(
                     message_text,
                     client_slug=payload.client_slug,
@@ -14232,15 +14353,9 @@ async def _handle_webhook_payload(
                     and master_request_signal
                     and not has_explicit_location_or_hours
                 ):
-                    master_service_query = policy_service_query
-                    master_service_query_source = "policy_service_query"
-                    if (
-                        policy_tool_action == "catalog.service_query"
-                        and isinstance(raw_service_query_text, str)
-                        and raw_service_query_text.strip()
-                    ):
-                        master_service_query = raw_service_query_text.strip()
-                        master_service_query_source = "tool_args_raw"
+                    if master_resolution.service_query:
+                        master_service_query = master_resolution.service_query
+                        master_service_query_source = master_resolution.service_query_source
                     master_message_text = message_text
                     saved_message_content = getattr(saved_message, "content", None) if saved_message else None
                     if isinstance(saved_message_content, str) and saved_message_content.strip():
@@ -14281,20 +14396,27 @@ async def _handle_webhook_payload(
                             )
                         if saved_message and isinstance(master_meta, dict):
                             _update_message_decision_metadata(saved_message, master_meta)
+                        master_action = "collect" if master_resolution.needs_service_clarify else "reply"
+                        if isinstance(master_meta, dict):
+                            action_class = master_meta.get("action_class")
+                            if isinstance(action_class, str) and action_class.strip().upper() == "COLLECT":
+                                master_action = "collect"
                         _record_decision_trace(
                             conversation,
                             {
                                 "stage": "info_class",
-                                "decision": "reply",
+                                "decision": master_action,
                                 "intent": "master",
                                 "source": "llm_policy_core",
                                 "service_query_source": master_service_query_source,
                                 "service_query": master_service_query or "",
+                                "master_resolution_reason": master_resolution.reason,
+                                "master_resolution_signals": list(master_resolution.matched_signals),
                             },
                         )
                         _record_message_decision_meta(
                             saved_message,
-                            action="reply",
+                            action=master_action,
                             intent="master",
                             source="llm_policy_core",
                             fast_intent=False,
@@ -14484,6 +14606,109 @@ async def _handle_webhook_payload(
                     if sent
                     else "LLM policy core tool response failed"
                 )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+
+        policy_reschedule_guard_signal = bool(
+            booking_wants_flow
+            and message_text
+            and _looks_like_booking_reschedule_request(
+                message_text,
+                client_slug=payload.client_slug,
+            )
+        )
+        if policy_reschedule_guard_signal:
+            policy_booking_state = dict(booking) if isinstance(booking, dict) else {}
+            for slot_key, value in policy_slot_state_validated.items():
+                if not policy_booking_state.get(slot_key):
+                    policy_booking_state[slot_key] = value
+            policy_has_booking_reference = _booking_has_reference(policy_booking_state)
+            tool_actions_with_reference_flow = {
+                "handoff",
+                "collect",
+                "booking",
+                "calendar.get_booking",
+                "calendar.list_slots",
+                "calendar.book_slot",
+                "calendar.reschedule",
+                "calendar.cancel",
+            }
+            if (
+                not policy_has_booking_reference
+                and policy_tool_action not in tool_actions_with_reference_flow
+            ):
+                handover_message = message_text or "Клиент просит изменить время записи."
+                _, reused, telegram_sent = _reuse_active_handover(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message=handover_message,
+                    source="llm_policy_core_guard",
+                    intent="reschedule",
+                )
+                if reused:
+                    bot_response = MSG_ESCALATED
+                    result_message = (
+                        "LLM policy core reschedule guard handoff reused, "
+                        f"telegram={'sent' if telegram_sent else 'failed'}"
+                    )
+                elif (
+                    conversation.state == ConversationState.BOT_ACTIVE.value
+                    and routing.get("allow_handover_create", False)
+                ):
+                    _record_escalation_metric("intent")
+                    result = escalate_to_pending(
+                        db=db,
+                        conversation=conversation,
+                        user_message=handover_message,
+                        trigger_type="intent",
+                        trigger_value="reschedule",
+                    )
+                    if result.ok:
+                        handover = result.value
+                        telegram_sent = send_telegram_notification(
+                            db=db,
+                            handover=handover,
+                            conversation=conversation,
+                            user=user,
+                            message=handover_message,
+                        )
+                        bot_response = MSG_ESCALATED
+                        result_message = (
+                            "LLM policy core reschedule guard handoff, "
+                            f"telegram={'sent' if telegram_sent else 'failed'}"
+                        )
+                    else:
+                        bot_response = MSG_AI_ERROR
+                        result_message = "LLM policy core reschedule guard handoff failed"
+                else:
+                    bot_response = MSG_ESCALATED
+                    result_message = "LLM policy core reschedule guard handoff skipped (already pending)"
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "booking",
+                        "decision": "policy_reschedule_guard_handoff",
+                        "state": conversation.state,
+                        "source": "llm_policy_core",
+                        "tool_action": policy_tool_action,
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="escalate",
+                    intent="reschedule",
+                    source="booking_verification",
+                    fast_intent=False,
+                )
+                bot_response, sent = _send_and_save(bot_response)
+                if not sent:
+                    result_message = f"{result_message}; response_send=failed"
                 db.commit()
                 return WebhookResponse(
                     success=True,

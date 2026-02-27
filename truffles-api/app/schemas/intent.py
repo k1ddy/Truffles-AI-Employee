@@ -106,6 +106,11 @@ _TOOL_ARGS_FIELD_KINDS: dict[str, dict[str, str]] = {
     },
 }
 
+_MASTER_QUERY_INTENTS = {"master_query"}
+_MASTER_QUERY_INTENT_ALIASES = {"master": "master_query"}
+_MASTER_QUERY_FACT_TOOL_ACTIONS = {"info", "catalog.service_query"}
+_MASTER_QUERY_COLLECT_TOOL_ACTIONS = {"collect", "catalog.service_query"}
+
 
 def _is_supported_number_value(value: Any) -> bool:
     if isinstance(value, bool):
@@ -217,6 +222,13 @@ def _normalize_optional_string(value: Any, *, field: str) -> str | None:
         return None
     if not isinstance(value, str):
         raise ValueError(f"{field}_invalid")
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _normalize_master_service_value(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
     cleaned = value.strip()
     return cleaned or None
 
@@ -415,7 +427,10 @@ class LlmPolicyCoreOutput(BaseModel):
     @field_validator("intent", "action", "tool_action", mode="before")
     @classmethod
     def _validate_action(cls, value: Any, info) -> str:
-        return _normalize_required_string(value, field=info.field_name)
+        normalized = _normalize_required_string(value, field=info.field_name)
+        if info.field_name == "intent":
+            return _MASTER_QUERY_INTENT_ALIASES.get(normalized, normalized)
+        return normalized
 
     @field_validator(
         "tool_action",
@@ -472,6 +487,35 @@ class LlmPolicyCoreOutput(BaseModel):
         if error:
             raise ValueError(error)
         self.tool_args = normalized or {}
+        return self
+
+    @model_validator(mode="after")
+    def _validate_master_query_contract(self):
+        if self.intent not in _MASTER_QUERY_INTENTS:
+            return self
+
+        slot_service = _normalize_master_service_value(self.slots.get("service"))
+        arg_service = _normalize_master_service_value(self.tool_args.get("service_query"))
+        has_service_query = bool(slot_service or arg_service)
+
+        if self.action == "fact":
+            if self.tool_action not in _MASTER_QUERY_FACT_TOOL_ACTIONS:
+                raise ValueError("master_query_tool_action_invalid")
+            if not has_service_query:
+                raise ValueError("master_query_service_required")
+            return self
+
+        if self.action == "collect":
+            if self.tool_action not in _MASTER_QUERY_COLLECT_TOOL_ACTIONS:
+                raise ValueError("master_query_collect_tool_action_invalid")
+            # Clarify path is valid when service is missing and the model explicitly asks for it.
+            collect_requires_service = bool(
+                self.next_question == "service" or "service" in self.open_questions
+            )
+            if not has_service_query and not collect_requires_service:
+                raise ValueError("master_query_collect_service_clarify_required")
+            return self
+
         return self
 
 

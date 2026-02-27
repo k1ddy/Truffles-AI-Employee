@@ -18,6 +18,7 @@ from app.services.pack_runtime_service import (
     _has_price_signal,
     _normalize_text,
     build_info_combined_reply,
+    build_master_reply_from_pack,
     compose_multi_truth_reply,
     ensure_resolver_meta,
     format_reply_from_truth,
@@ -26,6 +27,7 @@ from app.services.pack_runtime_service import (
     get_signal_lexicon_list,
     load_yaml_truth,
     phrase_match_intent,
+    resolve_master_intent,
 )
 
 if TYPE_CHECKING:
@@ -269,30 +271,12 @@ def _detect_info_class_intents(
     if duration_signal and any(stem in normalized for stem in hours_stems) and not service_duration_context:
         duration_signal = False
         hours_signal = True
-    master_keywords = _signal_phrase_list(client_slug, "info_master_keywords")
-    master_person_keywords = _signal_phrase_list(client_slug, "info_master_person_keywords")
-    master_action_keywords = _signal_phrase_list(client_slug, "info_master_action_keywords")
-    master_service_keywords = _signal_phrase_list(client_slug, "info_master_service_keywords")
-    master_signal = False
-    if normalized and master_keywords and any(keyword in normalized for keyword in master_keywords):
-        master_signal = True
-    if (
-        not master_signal
-        and master_person_keywords
-        and master_action_keywords
-        and master_service_keywords
-        and any(token in normalized for token in master_person_keywords)
-        and any(token in normalized for token in master_action_keywords)
-        and any(token in normalized for token in master_service_keywords)
-    ):
-        master_signal = True
-    if not master_signal and message_text and client_slug:
-        try:
-            master_signal = "master" in phrase_match_intent(
-                message_text, client_slug=client_slug
-            )
-        except Exception:
-            master_signal = False
+    master_resolution = resolve_master_intent(
+        message_text=message_text,
+        client_slug=client_slug,
+        force_master_intent=False,
+    )
+    master_signal = bool(master_resolution.explicit)
 
     if "location" in anchor_intents and (question_like or short_query or intent_decomp_set):
         location_signal = True
@@ -357,6 +341,16 @@ def _detect_info_class_intents(
         "hours": hours_signal,
         "master": master_signal,
     }
+    if master_signal:
+        meta["master_resolution"] = {
+            "reason": master_resolution.reason,
+            "service_query": master_resolution.service_query,
+            "service_query_source": master_resolution.service_query_source,
+            "needs_service_clarify": master_resolution.needs_service_clarify,
+            "matched_signals": list(master_resolution.matched_signals),
+            "resolver_id": master_resolution.resolver_id,
+            "resolver_version": master_resolution.resolver_version,
+        }
     return intents, meta
 
 
@@ -599,219 +593,23 @@ def _build_info_intent_reply(
         )
         return reply, _resolverize(meta)
     if intent == "master":
-        service_hint_text = (
-            str(service_query).strip() if isinstance(service_query, str) and str(service_query).strip() else None
+        resolution = resolve_master_intent(
+            message_text=message_text,
+            client_slug=client_slug,
+            service_query=service_query,
+            force_master_intent=True,
         )
-
-        def _with_master_observability(
-            meta_payload: dict | None,
-            *,
-            reply_mode: str,
-            long_hair_signal: bool,
-            long_hair_phrase: str | None = None,
-            long_hair_anchor_fallback: bool = False,
-            long_hair_candidates: list[str] | None = None,
-            long_hair_phrases_count: int | None = None,
-        ) -> dict:
-            payload = dict(meta_payload or {})
-            payload["master_reply_mode"] = reply_mode
-            payload["master_long_hair_signal"] = bool(long_hair_signal)
-            payload["master_long_hair_phrase"] = long_hair_phrase or ""
-            payload["master_long_hair_anchor_fallback"] = bool(long_hair_anchor_fallback)
-            payload["master_long_hair_phrases_count"] = (
-                int(long_hair_phrases_count) if isinstance(long_hair_phrases_count, int) else 0
-            )
-            payload["master_long_hair_candidates"] = (
-                list(long_hair_candidates) if isinstance(long_hair_candidates, list) else []
-            )
-            payload["master_service_hint"] = service_hint_text or ""
-            return payload
-
-        explicit_team_lookup = bool(
-            normalized
-            and any(
-                marker in normalized
-                for marker in (
-                    "есть ли мастер",
-                    "есть мастер",
-                    "кто делает",
-                    "кто будет делать",
-                    "кто будет проводить",
-                    "кто проведет",
-                    "какой мастер",
-                    "какой специалист",
-                    "кто из мастеров",
-                    "к кому запис",
-                )
-            )
-        )
-        service_hint = service_hint_text or (
-            get_pack_service_hint(message_text, client_slug=client_slug) if message_text else None
-        )
-        long_haircut_phrases = _signal_phrase_list(client_slug, "master_long_haircut_phrases")
-        long_haircut_phrase_candidates: list[str] = []
-        for phrase in long_haircut_phrases:
-            normalized_phrase = legacy.normalize_for_matching(phrase)
-            if normalized_phrase and normalized_phrase not in long_haircut_phrase_candidates:
-                long_haircut_phrase_candidates.append(normalized_phrase)
-        long_haircut_candidates = [normalized]
-        if isinstance(service_hint, str) and service_hint.strip():
-            normalized_hint = legacy.normalize_for_matching(service_hint)
-            if normalized_hint:
-                long_haircut_candidates.append(normalized_hint)
-        long_haircut_phrase = None
-        if long_haircut_candidates and long_haircut_phrase_candidates:
-            for candidate in long_haircut_candidates:
-                if not candidate:
-                    continue
-                for phrase in long_haircut_phrase_candidates:
-                    if phrase in candidate:
-                        long_haircut_phrase = phrase
-                        break
-                if long_haircut_phrase:
-                    break
-        long_hair_anchor_fallback = False
-        if not long_haircut_phrase and long_haircut_candidates:
-            long_hair_anchor_groups = _lexicon_anchor_groups(
-                client_slug,
-                "master_long_haircut_anchor_groups",
-            )
-            for candidate in long_haircut_candidates:
-                candidate_tokens = _tokenize_for_matching(candidate)
-                if not candidate_tokens:
-                    continue
-                if any(_anchor_group_hit(candidate_tokens, group) for group in long_hair_anchor_groups):
-                    long_hair_anchor_fallback = True
-                    long_haircut_phrase = "anchor:long_hair"
-                    break
-        long_haircut_signal = bool(long_haircut_phrase)
-        if long_haircut_signal:
-            meta = _build_fact_meta(
-                fact_source="truth",
-                fact_intents=["master"],
-                info_sections=["master"],
-            )
-            reply = (
-                "По стрижкам на длинные волосы работают мастера направления «Волосы». "
-                "Подскажите желаемую длину или форму, и подберу подходящего мастера."
-            )
-            return reply, _resolverize(
-                _with_master_observability(
-                    meta,
-                    reply_mode="long_haircut",
-                    long_hair_signal=True,
-                    long_hair_phrase=long_haircut_phrase,
-                    long_hair_anchor_fallback=long_hair_anchor_fallback,
-                    long_hair_candidates=long_haircut_candidates,
-                    long_hair_phrases_count=len(long_haircut_phrase_candidates),
-                ),
-                resolved_intent="master",
-            )
-        team_focus = _resolve_team_focus_key(
+        decision = build_master_reply_from_pack(
             client_slug=client_slug,
             message_text=message_text,
-            service_query=service_hint,
+            resolution=resolution,
         )
-        # When the message asks about a concrete service ("короткая стрижка" etc.)
-        # and does not explicitly ask for full team listing, prefer service-context answer.
-        if message_text and not explicit_team_lookup:
-            decision = get_pack_decision(message_text, client_slug=client_slug)
-            if (
-                decision
-                and decision.action == "reply"
-                and decision.intent in {"service_match", "price_query"}
-                and decision.response
-            ):
-                meta = decision.meta if isinstance(decision.meta, dict) else None
-                return decision.response, _resolverize(
-                    meta,
-                    resolved_intent=decision.intent,
-                    resolved_action=decision.action or "reply",
-                )
-        truth = load_yaml_truth(client_slug)
-        team = truth.get("team") if isinstance(truth, dict) else None
-        if isinstance(team, dict):
-            labels = {
-                "nails": "Ногти",
-                "hair": "Волосы",
-                "brows_lashes": "Брови и ресницы",
-                "facial": "Лицо",
-            }
-            if team_focus in labels:
-                focused_text = team.get(team_focus)
-                if isinstance(focused_text, str) and focused_text.strip():
-                    area_label = labels[team_focus]
-                    service_label = (
-                        str(service_hint).strip()
-                        if isinstance(service_hint, str) and str(service_hint).strip()
-                        else "этой услуге"
-                    )
-                    focused_summary = focused_text.strip()
-                    if not focused_summary.endswith((".", "!", "?")):
-                        focused_summary = f"{focused_summary}."
-                    reply = (
-                        f"По услуге «{service_label}» работают мастера направления "
-                        f"«{area_label}»: {focused_summary}"
-                    )
-                meta = _build_fact_meta(
-                    fact_source="truth",
-                    fact_intents=["master"],
-                    info_sections=["master"],
-                )
-                return reply, _resolverize(
-                    _with_master_observability(
-                        meta,
-                        reply_mode="team_focus",
-                        long_hair_signal=False,
-                        long_hair_anchor_fallback=False,
-                        long_hair_candidates=long_haircut_candidates,
-                        long_hair_phrases_count=len(long_haircut_phrase_candidates),
-                    ),
-                    resolved_intent="master",
-                )
-            parts: list[str] = []
-            for key in ("nails", "hair", "brows_lashes", "facial"):
-                value = team.get(key)
-                if not isinstance(value, str):
-                    continue
-                text = value.strip()
-                if text:
-                    parts.append(f"{labels[key]}: {text}")
-            if parts:
-                reply = "По мастерам: " + " ".join(parts)
-                meta = _build_fact_meta(
-                    fact_source="truth",
-                    fact_intents=["master"],
-                    info_sections=["master"],
-                )
-                return reply, _resolverize(
-                    _with_master_observability(
-                        meta,
-                        reply_mode="team_overview",
-                        long_hair_signal=False,
-                        long_hair_anchor_fallback=False,
-                        long_hair_candidates=long_haircut_candidates,
-                        long_hair_phrases_count=len(long_haircut_phrase_candidates),
-                    ),
-                    resolved_intent="master",
-                )
-        fallback = "Можно к конкретному мастеру, если он свободен на выбранное время."
-        meta = _build_fact_meta(
-            fact_source="truth",
-            fact_intents=["master"],
-            info_sections=["master"],
-        )
-        return fallback, _resolverize(
-            _with_master_observability(
-                meta,
-                reply_mode="fallback",
-                long_hair_signal=False,
-                long_hair_anchor_fallback=False,
-                long_hair_candidates=long_haircut_candidates,
-                long_hair_phrases_count=len(long_haircut_phrase_candidates),
-            ),
-            resolved_intent="master",
-            resolved_action="collect",
+        if not decision:
+            return None, None
+        return decision.response, _resolverize(
+            decision.meta,
+            resolved_intent=decision.intent or "master",
+            resolved_action=decision.action or "reply",
         )
     if intent == "promotions":
         reply = format_reply_from_truth("promotions", client_slug=client_slug)

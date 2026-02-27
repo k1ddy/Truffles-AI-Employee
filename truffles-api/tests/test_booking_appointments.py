@@ -116,6 +116,20 @@ def test_parse_booking_datetime_handles_dateparser_timezone_conflict():
     assert parsed is None
 
 
+def test_is_appointment_overlap_integrity_error_detects_constraint_name():
+    exc = Exception('conflicting key value violates exclusion constraint "appointments_no_overlap"')
+    assert booking_router._is_appointment_overlap_integrity_error(exc) is True
+
+
+def test_is_appointment_overlap_integrity_error_detects_nested_orig_message():
+    class _Orig:
+        def __str__(self) -> str:
+            return "DETAIL: conflicting key value violates exclusion constraint"
+
+    wrapped = SimpleNamespace(orig=_Orig())
+    assert booking_router._is_appointment_overlap_integrity_error(wrapped) is True
+
+
 def test_create_booking_appointment_reuses_existing():
     now = datetime(2026, 1, 30, 9, 0, tzinfo=timezone.utc)
     branch_id = uuid4()
@@ -310,6 +324,18 @@ def test_resolve_booking_info_intents_uses_parking_signal_with_expected_reply_sh
 def test_looks_like_booking_reschedule_request_detects_change_time_phrase():
     assert booking_router._looks_like_booking_reschedule_request(
         "Я хочу изменить время на утро."
+    )
+
+
+def test_looks_like_booking_reschedule_request_detects_change_to_specific_time_phrase():
+    assert booking_router._looks_like_booking_reschedule_request(
+        "Можно поменять на 16:00?"
+    )
+
+
+def test_looks_like_booking_reschedule_request_detects_hypothetical_change_time_phrase():
+    assert booking_router._looks_like_booking_reschedule_request(
+        "Что если я захочу изменить время?"
     )
 
 

@@ -45,7 +45,9 @@ booking_reschedule_keywords:
     - перезапис
     - сдвин
     - поменять время
+    - поменять на
     - изменить время
+    - изменить на
 booking_cancel_keywords:
   ru:
     - отмен
@@ -212,6 +214,37 @@ info_master_service_keywords:
     - сеанс
     - маникюр
     - стриж
+master_query_direct_terms:
+  ru:
+    - кто делает
+    - кто будет делать
+    - кто будет проводить
+    - кто из мастеров
+    - какие мастера
+    - какой мастер
+    - какой специалист
+    - к кому запис
+master_query_person_terms:
+  ru:
+    - мастер
+    - мастера
+    - специалист
+    - специалисты
+    - кто
+master_query_action_terms:
+  ru:
+    - дела
+    - делает
+    - работа
+    - работает
+    - выполняет
+    - проводит
+master_query_experience_terms:
+  ru:
+    - лучше
+    - опытнее
+    - опыт
+    - стаж
 location_keywords:
   ru:
     - адрес

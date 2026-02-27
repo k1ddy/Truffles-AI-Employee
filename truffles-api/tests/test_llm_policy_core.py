@@ -85,6 +85,94 @@ def test_validate_llm_policy_core_output_rejects_invalid_catalog_info_refs_type(
     assert "tool_args_type_invalid:info_refs" in error
 
 
+def test_validate_llm_policy_core_output_accepts_master_query_fact_with_service():
+    payload = {
+        "intent": "master_query",
+        "action": "fact",
+        "tool_action": "catalog.service_query",
+        "tool_args": {"service_query": "маникюр"},
+        "pack_refs": ["master"],
+        "slots": {"service": "маникюр"},
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "confidence": 0.91,
+    }
+
+    contract, error = validate_llm_policy_core_output(payload)
+
+    assert error is None
+    assert contract is not None
+    assert contract.intent == "master_query"
+    assert contract.tool_action == "catalog.service_query"
+    assert contract.tool_args.get("service_query") == "маникюр"
+
+
+def test_validate_llm_policy_core_output_rejects_master_query_fact_without_service():
+    payload = {
+        "intent": "master_query",
+        "action": "fact",
+        "tool_action": "info",
+        "tool_args": {},
+        "pack_refs": ["master"],
+        "slots": {"service": ""},
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "confidence": 0.82,
+    }
+
+    contract, error = validate_llm_policy_core_output(payload)
+
+    assert contract is None
+    assert error is not None
+    assert "master_query_service_required" in error
+
+
+def test_validate_llm_policy_core_output_accepts_master_query_collect_service_clarify():
+    payload = {
+        "intent": "master_query",
+        "action": "collect",
+        "tool_action": "collect",
+        "tool_args": {},
+        "pack_refs": [],
+        "slots": {"service": ""},
+        "next_question": "service",
+        "open_questions": ["service"],
+        "needs_manager": False,
+        "risk_signals": [],
+        "confidence": 0.76,
+    }
+
+    contract, error = validate_llm_policy_core_output(payload)
+
+    assert error is None
+    assert contract is not None
+    assert contract.action == "collect"
+    assert contract.next_question == "service"
+
+
+def test_validate_llm_policy_core_output_normalizes_legacy_master_intent_alias():
+    payload = {
+        "intent": "master",
+        "action": "fact",
+        "tool_action": "info",
+        "tool_args": {"service_query": "стрижка"},
+        "pack_refs": ["master"],
+        "slots": {"service": "стрижка"},
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "confidence": 0.88,
+    }
+
+    contract, error = validate_llm_policy_core_output(payload)
+
+    assert error is None
+    assert contract is not None
+    assert contract.intent == "master_query"
+
+
 def test_validate_llm_plan_output_rejects_invalid_tool_args_shape():
     payload = {
         "outcome": "fact",
