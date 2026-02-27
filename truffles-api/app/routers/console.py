@@ -108,11 +108,6 @@ from app.schemas.console import (
     ConsoleCapabilitiesPatchRequest,
     ConsoleCapabilitiesRecord,
     ConsoleCapabilitiesResponse,
-    ConsolePolicyRegistryMutationResponse,
-    ConsolePolicyRegistryPublishRequest,
-    ConsolePolicyRegistryResponse,
-    ConsolePolicyRegistryRollbackRequest,
-    ConsolePolicyVersionRecord,
     ConsoleCase,
     ConsoleCaseActionResponse,
     ConsoleCaseActionSync,
@@ -245,6 +240,11 @@ from app.schemas.console import (
     ConsoleOwnerOperationRollbackRequest,
     ConsoleOwnerOperationRollbackResponse,
     ConsoleOwnerOperationSettingsPatch,
+    ConsolePolicyRegistryMutationResponse,
+    ConsolePolicyRegistryPublishRequest,
+    ConsolePolicyRegistryResponse,
+    ConsolePolicyRegistryRollbackRequest,
+    ConsolePolicyVersionRecord,
     ConsoleProviderLifecycleItem,
     ConsoleProviderLifecycleListResponse,
     ConsoleProviderOpsQueueItem,
@@ -303,13 +303,6 @@ from app.services.capabilities_service import (
     merge_capabilities,
     merge_capabilities_layers,
     payload_to_dict,
-)
-from app.services.policy_registry_service import (
-    POLICY_REGISTRY_SCHEMA_VERSION,
-    get_latest_policy_version,
-    list_policy_history,
-    publish_policy_version,
-    rollback_policy_version,
 )
 from app.services.chatflow_service import get_instance_id, send_bot_response
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
@@ -459,6 +452,13 @@ from app.services.pack_compiler_service import (
     build_compiled_pack_meta,
     extract_compiled_artifacts,
     parse_compiled_at,
+)
+from app.services.policy_registry_service import (
+    POLICY_REGISTRY_SCHEMA_VERSION,
+    get_latest_policy_version,
+    list_policy_history,
+    publish_policy_version,
+    rollback_policy_version,
 )
 from app.services.provider_error_policy import classify_provider_error
 from app.services.reference_branch_selection import (
