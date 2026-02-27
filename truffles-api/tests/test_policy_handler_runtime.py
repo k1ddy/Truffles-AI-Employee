@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from app.routers.webhook import _legacy as legacy
 from app.routers.webhook import policy
+from app.schemas.capabilities import CapabilitiesPayload
 
 
 def _noop_truth_gate(*_args, **_kwargs):
@@ -112,3 +113,55 @@ def test_resolve_hard_law_sections_fallback_excludes_payment_info():
     assert "payment_info" not in sections
     assert "medical" in sections
     assert "legal" in sections
+
+
+def test_get_policy_pack_applies_runtime_operational_overrides(monkeypatch):
+    runtime = SimpleNamespace(
+        payload=CapabilitiesPayload.model_validate(
+            {"policy_overrides": {"payment_info": {"response": "Оплата по счету"}}}
+        )
+    )
+    monkeypatch.setattr(policy, "get_runtime_capabilities", lambda: runtime)
+    client = SimpleNamespace(
+        config={
+            "policy_pack": {
+                "hard_law": {"sections": ["medical"]},
+                "payment_info": {
+                    "intent": "payment",
+                    "keywords": ["счет"],
+                    "response": "Старый ответ",
+                },
+            }
+        }
+    )
+
+    resolved = policy._get_policy_pack(client, client_slug="demo_salon")
+
+    assert resolved is not None
+    assert resolved["payment_info"]["response"] == "Оплата по счету"
+
+
+def test_get_policy_pack_ignores_runtime_override_for_hard_law_section(monkeypatch):
+    runtime = SimpleNamespace(
+        payload=CapabilitiesPayload.model_validate(
+            {"policy_overrides": {"payment_info": {"response": "Новый ответ"}}}
+        )
+    )
+    monkeypatch.setattr(policy, "get_runtime_capabilities", lambda: runtime)
+    client = SimpleNamespace(
+        config={
+            "policy_pack": {
+                "hard_law": {"sections": ["payment_info"]},
+                "payment_info": {
+                    "intent": "payment",
+                    "keywords": ["счет"],
+                    "response": "Старый ответ",
+                },
+            }
+        }
+    )
+
+    resolved = policy._get_policy_pack(client, client_slug="demo_salon")
+
+    assert resolved is not None
+    assert resolved["payment_info"]["response"] == "Старый ответ"

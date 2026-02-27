@@ -182,3 +182,30 @@ def test_capabilities_payload_normalizes_fact_scopes_and_handoff_policy():
 def test_capabilities_payload_rejects_invalid_fact_scope_token():
     with pytest.raises(ValidationError):
         CapabilitiesPayload.model_validate({"allowed_fact_scopes": ["info scope"]})
+
+
+def test_capabilities_payload_normalizes_policy_overrides():
+    payload = CapabilitiesPayload.model_validate(
+        {
+            "policy_overrides": {
+                "payment_info": {"response": "  Оплата только по счету  "},
+                "discounts": {"response": "  Скидки по акциям недели  "},
+            }
+        }
+    )
+
+    assert payload.policy_overrides.payment_info is not None
+    assert payload.policy_overrides.payment_info.response == "Оплата только по счету"
+    assert payload.policy_overrides.discounts is not None
+    assert payload.policy_overrides.discounts.response == "Скидки по акциям недели"
+
+
+def test_capabilities_payload_rejects_hard_law_override_section():
+    with pytest.raises(ValidationError):
+        CapabilitiesPayload.model_validate(
+            {
+                "policy_overrides": {
+                    "hard_law": {"response": "override"},
+                }
+            }
+        )

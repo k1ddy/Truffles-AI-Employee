@@ -64,6 +64,28 @@ class CapabilityTools(BaseModel):
         return normalized or None
 
 
+class CapabilityPolicySectionOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    response: Optional[str] = None
+
+    @field_validator("response", mode="before")
+    @classmethod
+    def normalize_response(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
+class CapabilityPolicyOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Operational policy sections. hard_law is intentionally excluded.
+    payment_info: Optional[CapabilityPolicySectionOverride] = None
+    discounts: Optional[CapabilityPolicySectionOverride] = None
+
+
 class CapabilitiesPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -72,6 +94,7 @@ class CapabilitiesPayload(BaseModel):
     providers: CapabilityProviders = Field(default_factory=CapabilityProviders)
     features: CapabilityFeatures = Field(default_factory=CapabilityFeatures)
     tools: CapabilityTools = Field(default_factory=CapabilityTools)
+    policy_overrides: CapabilityPolicyOverrides = Field(default_factory=CapabilityPolicyOverrides)
     allowed_fact_scopes: Optional[list[str]] = None
     handoff_policy: Optional[Literal["allow", "manager_request_only", "deny"]] = None
 
