@@ -20722,6 +20722,7 @@ async def get_onboarding_contract(
         "read",
         message="Only owner/admin can access provisioning",
     )
+    _require_platform_admin(context)
 
     if branch_id:
         branch = (
@@ -20833,6 +20834,7 @@ async def patch_onboarding_contract(
         "write",
         message="Only owner/admin can manage onboarding contract",
     )
+    _require_platform_admin(context)
     if body.payment_status is not None and context.role != "platform_admin":
         raise ConsoleAPIError(
             403,
@@ -20933,6 +20935,7 @@ async def get_webhook_secret(
         "read",
         message="Only owner/admin can access provisioning",
     )
+    _require_platform_admin(context)
 
     branch = _resolve_branch_for_onboarding(context, branch_id=branch_id)
     if not branch.instance_id:
@@ -20991,6 +20994,7 @@ async def run_onboarding_autopilot(
         "write",
         message="Only owner/admin can run onboarding autopilot",
     )
+    _require_platform_admin(context)
 
     now = datetime.now(timezone.utc)
     actions: list[str] = []
