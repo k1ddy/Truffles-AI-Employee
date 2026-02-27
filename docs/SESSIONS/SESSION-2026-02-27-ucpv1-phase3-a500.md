@@ -1,0 +1,37 @@
+# SESSION 2026-02-27-ucpv1-phase3-a500 — Session 2026-02-27-ucpv1-phase3-a500
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase3-a500.md
+- block_id: UCPV1-PHASE3
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- branch: feat/2026-02-27-ucpv1-phase3-a500
+- worktree: /home/zhan/worktrees/2026-02-27-ucpv1-phase3-a500
+- base_ref: origin/main
+- scope: UCPV1 Phase3 Domain Catalog + Capabilities v2 implementation: domain registry CRUD, domain capability templates, and effective capabilities merge layering `global -> domain -> client -> branch`.
+- done:
+  - Session created in dedicated worktree/branch for `UCPV1-PHASE3`.
+  - Phase3 Task Package and initial report created with analysis gate and baseline facts.
+  - Added domain registry DB layer (`domain_capability_templates`) with migration + ORM model.
+  - Added platform-admin domain catalog CRUD endpoints in console router.
+  - Added domain capability template layer to effective capabilities merge path.
+  - Added deterministic tests for domain catalog access/validation/merge precedence.
+  - Synced `SPECS/CONTROL_PLANE.md` and updated `docs/BLOCK_GRAPH.yaml` (`UCPV1-PHASE3: passed`).
+  - Finalized phase report with checks/evidence and verdict `Passed`.
+- next:
+  - Hand off to `UCPV1-PHASE4` with new TP/report in zero-context mode.
+  - Keep rollout compatibility watch for tenants without `domain_slug`.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase3-a500.md
+  - docs/REPORTS/2026-02-22-universal-control-plane-v1-phase3-a500.md
+  - truffles-api/migrations/043_add_domain_capability_templates.sql
+  - truffles-api/app/models/domain_capability_template.py
+  - truffles-api/app/services/capabilities_service.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/tests/test_console_domain_catalog.py
+  - SPECS/CONTROL_PLANE.md
+  - docs/BLOCK_GRAPH.yaml
+- last_updated: 2026-02-27

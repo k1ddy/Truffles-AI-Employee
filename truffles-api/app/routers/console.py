@@ -46,6 +46,7 @@ from app.models import (
     ConsoleOpsJob,
     Conversation,
     ConversationHumanLock,
+    DomainCapabilityTemplate,
     Handover,
     KnowledgeVersion,
     LearnedResponse,
@@ -120,6 +121,9 @@ from app.schemas.console import (
     ConsoleConfirmationCreateRequest,
     ConsoleConfirmationResponse,
     ConsoleDataTrustSummaryResponse,
+    ConsoleDomainCatalogItem,
+    ConsoleDomainCatalogListResponse,
+    ConsoleDomainCatalogUpsertRequest,
     ConsoleErrorResponse,
     ConsoleFleetAttentionItem,
     ConsoleFleetAttentionResponse,
@@ -285,7 +289,11 @@ from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
 from app.services.alert_service import alert_warning
 from app.services.audit_service import AuditEvent, record_audit_event
-from app.services.capabilities_service import merge_capabilities, payload_to_dict
+from app.services.capabilities_service import (
+    merge_capabilities,
+    merge_capabilities_layers,
+    payload_to_dict,
+)
 from app.services.chatflow_service import get_instance_id, send_bot_response
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
@@ -20325,6 +20333,99 @@ def _serialize_capabilities_record(record: ClientCapability) -> ConsoleCapabilit
     )
 
 
+def _normalize_optional_domain_slug_token(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().lower()
+    if not cleaned:
+        return None
+    if not re.match(r"^[a-z0-9_-]+$", cleaned):
+        return None
+    return cleaned
+
+
+def _get_domain_capability_template_record(
+    db: Session,
+    *,
+    domain_slug: Optional[str],
+    active_only: bool = True,
+) -> Optional[DomainCapabilityTemplate]:
+    normalized_domain_slug = _normalize_optional_domain_slug_token(domain_slug)
+    if not normalized_domain_slug:
+        return None
+    query = db.query(DomainCapabilityTemplate).filter(
+        DomainCapabilityTemplate.domain_slug == normalized_domain_slug
+    )
+    if active_only:
+        query = query.filter(DomainCapabilityTemplate.status == "active")
+    return query.first()
+
+
+def _serialize_domain_capability_template(
+    record: DomainCapabilityTemplate,
+) -> ConsoleDomainCatalogItem:
+    try:
+        payload = CapabilitiesPayload.model_validate(record.capability_template_json or {})
+    except ValidationError as exc:
+        raise ConsoleAPIError(
+            500,
+            "DOMAIN_CAPABILITY_TEMPLATE_INVALID",
+            "Stored domain capability template payload is invalid",
+        ) from exc
+    return ConsoleDomainCatalogItem(
+        id=record.id,
+        domain_slug=record.domain_slug,
+        title=record.title,
+        summary=record.summary,
+        schema_version=record.schema_version,
+        status=record.status,
+        capability_template=payload,
+        metadata=record.metadata_json or {},
+        created_by=record.created_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
+def _resolve_capabilities_domain_slug(
+    client_payload: dict[str, Any] | None,
+    branch_payload: dict[str, Any] | None,
+) -> Optional[str]:
+    for payload in (branch_payload, client_payload):
+        if isinstance(payload, dict):
+            domain_slug = _normalize_optional_domain_slug_token(payload.get("domain_slug"))
+            if domain_slug:
+                return domain_slug
+    return None
+
+
+def _build_effective_capabilities_payload(
+    db: Session,
+    *,
+    client_payload: dict[str, Any] | None,
+    branch_payload: dict[str, Any] | None,
+) -> tuple[CapabilitiesPayload, Optional[DomainCapabilityTemplate]]:
+    domain_slug = _resolve_capabilities_domain_slug(
+        client_payload=client_payload,
+        branch_payload=branch_payload,
+    )
+    domain_record = _get_domain_capability_template_record(
+        db,
+        domain_slug=domain_slug,
+        active_only=True,
+    )
+    domain_payload = domain_record.capability_template_json if domain_record else None
+    merged_payload = merge_capabilities_layers(
+        {},
+        domain_payload,
+        client_payload,
+        branch_payload,
+    )
+    if domain_slug and not merged_payload.get("domain_slug"):
+        merged_payload["domain_slug"] = domain_slug
+    return CapabilitiesPayload.model_validate(merged_payload), domain_record
+
+
 @router.get(
     "/admin/capabilities",
     response_model=ConsoleCapabilitiesResponse,
@@ -20377,8 +20478,10 @@ async def get_capabilities(
         if branch_record and branch_record.status == "active"
         else None
     )
-    effective_payload = CapabilitiesPayload.model_validate(
-        merge_capabilities(client_payload, branch_payload)
+    effective_payload, _domain_record = _build_effective_capabilities_payload(
+        db,
+        client_payload=client_payload,
+        branch_payload=branch_payload,
     )
 
     return ConsoleCapabilitiesResponse(
@@ -20786,8 +20889,10 @@ async def get_onboarding_contract(
         if branch_capability_record and branch_capability_record.status == "active"
         else None
     )
-    effective_capabilities = CapabilitiesPayload.model_validate(
-        merge_capabilities(client_capability_payload, branch_capability_payload)
+    effective_capabilities, _domain_record = _build_effective_capabilities_payload(
+        db,
+        client_payload=client_capability_payload,
+        branch_payload=branch_capability_payload,
     )
     capability_mismatches = []
     if client_capability_payload or branch_capability_payload:
@@ -21538,6 +21643,160 @@ async def run_onboarding_autopilot(
         ),
         actions=actions,
     )
+
+
+@router.get(
+    "/admin/domain-catalog",
+    response_model=ConsoleDomainCatalogListResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def list_domain_catalog(
+    request: Request,
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleDomainCatalogListResponse:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    query = db.query(DomainCapabilityTemplate)
+    if status:
+        normalized_status = status.strip().lower()
+        if normalized_status not in {"active", "disabled", "all"}:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "status must be active|disabled|all")
+        if normalized_status != "all":
+            query = query.filter(DomainCapabilityTemplate.status == normalized_status)
+    items = query.order_by(DomainCapabilityTemplate.domain_slug.asc()).all()
+    return ConsoleDomainCatalogListResponse(
+        items=[_serialize_domain_capability_template(item) for item in items]
+    )
+
+
+@router.put(
+    "/admin/domain-catalog/{domain_slug}",
+    response_model=ConsoleDomainCatalogItem,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def upsert_domain_catalog(
+    domain_slug: str,
+    body: ConsoleDomainCatalogUpsertRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleDomainCatalogItem:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage domain catalog",
+    )
+    _require_platform_admin(context)
+
+    normalized_domain_slug = _normalize_slug(domain_slug, "domain_slug")
+    title = _normalize_required_text(body.title, "title")
+    summary = _normalize_optional_text(body.summary)
+    schema_version = body.schema_version or CAPABILITIES_SCHEMA_VERSION
+    if schema_version != CAPABILITIES_SCHEMA_VERSION:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported domain capability schema_version")
+    status_value = body.status or "active"
+
+    template_payload = body.capability_template or CapabilitiesPayload()
+    if (
+        template_payload.domain_slug is not None
+        and template_payload.domain_slug != normalized_domain_slug
+    ):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "capability_template.domain_slug must match path domain_slug")
+    template_dict = payload_to_dict(template_payload)
+    template_dict["domain_slug"] = normalized_domain_slug
+    normalized_template = CapabilitiesPayload.model_validate(template_dict)
+    metadata_json = body.metadata or {}
+
+    record = _get_domain_capability_template_record(
+        db,
+        domain_slug=normalized_domain_slug,
+        active_only=False,
+    )
+    if record:
+        record.title = title
+        record.summary = summary
+        record.schema_version = schema_version
+        record.status = status_value
+        record.capability_template_json = payload_to_dict(normalized_template)
+        record.metadata_json = metadata_json
+    else:
+        record = DomainCapabilityTemplate(
+            domain_slug=normalized_domain_slug,
+            title=title,
+            summary=summary,
+            schema_version=schema_version,
+            status=status_value,
+            capability_template_json=payload_to_dict(normalized_template),
+            metadata_json=metadata_json,
+            created_by=context.agent.id,
+        )
+        db.add(record)
+        db.flush()
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="domain_capability_template_upserted",
+        entity_type="domain_capability_template",
+        entity_id=record.id,
+        payload={
+            "domain_slug": normalized_domain_slug,
+            "status": record.status,
+            "schema_version": record.schema_version,
+        },
+    )
+    db.commit()
+    return _serialize_domain_capability_template(record)
+
+
+@router.delete(
+    "/admin/domain-catalog/{domain_slug}",
+    response_model=ConsoleDomainCatalogItem,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def disable_domain_catalog(
+    domain_slug: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleDomainCatalogItem:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage domain catalog",
+    )
+    _require_platform_admin(context)
+
+    normalized_domain_slug = _normalize_slug(domain_slug, "domain_slug")
+    record = _get_domain_capability_template_record(
+        db,
+        domain_slug=normalized_domain_slug,
+        active_only=False,
+    )
+    if not record:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Domain catalog entry not found")
+
+    record.status = "disabled"
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="domain_capability_template_disabled",
+        entity_type="domain_capability_template",
+        entity_id=record.id,
+        payload={"domain_slug": normalized_domain_slug},
+    )
+    db.commit()
+    return _serialize_domain_capability_template(record)
 
 
 @router.get(
