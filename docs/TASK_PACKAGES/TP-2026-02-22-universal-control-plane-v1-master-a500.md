@@ -20,61 +20,82 @@ Universal Control Plane v1: привести платформу к управл�
 - Tenant isolation fail-closed: без валидного tenant-context нет read/write действия.
 - Любое управленческое действие в Console auditable (actor/scope/reason/diff/time).
 - Подключение новой ниши делается только через packs/config/capabilities, без hardcode в core.
+- Quality constant: бюджет/время не уменьшают acceptance criteria и обязательные quality gates.
 
 ## Scope
-- Program-level ТЗ и фазы реализации для Universal Control Plane v1.
+- Program-level ТЗ и delivery map для Universal Control Plane v1.
 - FACT/GAP аудит по ключевым блокам (tenant, RBAC, capabilities, onboarding, policy governance, tools/providers, knowledge, SLA/SLO, compliance).
-- Документирование целевого контракта, Analysis Gates, migration waves и phase-by-phase implementation path.
-- Запуск реализации Phase 1 (analysis + contract hardening bootstrap) в рамках текущей сессии.
+- Документирование целевого контракта, Analysis Gates, migration waves и atomized block-by-block implementation path.
 
 ## Out of scope
 - Big-bang rewrite LLM/runtime.
 - Изменение продуктовых обещаний вне канона.
 - Ручные прод-правки без contract-first и evidence.
 
+## Program block map (atomic queue)
+
+| Business block | Implementation block ID | Depends on | Expected outcome |
+|---|---|---|---|
+| B01 Tenant Core & Data Isolation | `UCPV1-PHASE2-SLICE2-IMPL2` (finishing block) | `UCPV1-GATES-SANITARY` | Все remaining `/admin/*` пути нормализованы по tenant+role guard без cross-tenant drift |
+| B02 RBAC & Governance Model | `UCPV1-PHASE2-SLICE2-IMPL2` (finishing block) | `UCPV1-GATES-SANITARY` | Серверный RBAC консистентен для Platform Admin first во всех provisioning/governance endpoints |
+| B03 Domain Catalog + Capabilities v2 | `UCPV1-PHASE3` | `UCPV1-PHASE2-SLICE2-IMPL2` | Новая ниша создается через Console без изменений в core-коде |
+| B04 Onboarding State Machine v2 | `UCPV1-PHASE4` | `UCPV1-PHASE3` | Go-live блокируется при обязательных blockers, workflow полностью серверный |
+| B05 Policy Governance Split | `UCPV1-PHASE5` | `UCPV1-PHASE4` | Hard-law versioned и доступен только Platform Admin; branch override только operational/SLA |
+| B06 Tool Registry Certification | `UCPV1-PHASE6` | `UCPV1-PHASE5` | Несертифицированные инструменты не могут активироваться в effective capabilities |
+| B07 Provider/Channel Control | `UCPV1-PHASE7` | `UCPV1-PHASE6` | Явный lifecycle каналов и deterministic degrade при provider issues |
+| B08 Knowledge Studio + Pack Compiler | `UCPV1-PHASE8` | `UCPV1-PHASE7` | Draft->Validate->Publish->Rollback контур обязателен и auditable |
+| B09 Runtime Pack-Agnostic Decoupling | `UCPV1-PHASE9` | `UCPV1-PHASE8` | Runtime core не зависит напрямую от demo packs |
+| B10 SLA/SLO Engine | `UCPV1-PHASE10` | `UCPV1-PHASE9` | SLA-профили управляют routing/escalation/alerts предсказуемо и проверяемо |
+| B11 Compliance KZ Lifecycle | `UCPV1-PHASE11` | `UCPV1-PHASE10` | Retention/delete/export lifecycle автоматизирован с audit trail |
+| B12 Control Tower | `UCPV1-PHASE12` | `UCPV1-PHASE11` | Platform Admin управляет fleet через Console без CLI как default |
+| B13 Migration Program | `UCPV1-PHASE13` | `UCPV1-PHASE12` | Канареечная миграция до fleet с wave rollback gates |
+
 ## Touch-list (planned)
 - `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-master-a500.md`
 - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
+- `docs/BLOCK_GRAPH.yaml`
 - `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase1-a500.md`
 - `SPECS/CONTROL_PLANE.md` (if canon gaps must be formalized)
 - `SPECS/MULTI_TENANT.md` (if contract clarifications required)
-- `truffles-api/app/services/*` + `truffles-api/app/routers/console.py` (Phase 1 scoped implementation only)
-- `truffles-api/tests/*` (Phase 1 scoped tests)
+- `truffles-api/app/services/*` + `truffles-api/app/routers/console.py` (phase-scoped implementation only)
+- `truffles-api/tests/*` (phase-scoped tests)
 
 ## Plan (1..N)
 1. Session bootstrap in dedicated worktree + hooks + governance checks.
-2. Создать master-ТЗ документ (program contract + phases + analysis gates + DoD/evidence/rollback/no-go).
-3. Выполнить FACT/GAP baseline-аудит по крупным блокам с привязкой к текущему коду/докам.
-4. Сформировать отдельный Task Package на Phase 1 (contract hardening bootstrap).
-5. Реализовать Phase 1 в рамках допустимого scope (без broad rewrite).
-6. Прогнать проверки, собрать evidence и зафиксировать handoff для следующих фаз.
+2. Build/refresh FACT baseline for current block from code/tests/evidence (not docs-only).
+3. Run analysis gate for selected block and produce block-specific TP/Report.
+4. Implement only one full block end-to-end in scoped files.
+5. Run deterministic + required realism checks from block TP.
+6. Update `BLOCK_GRAPH`, `STATE.md`, block Report, and session artifacts for zero-context handoff.
+7. Pre-create/refresh next block TP+Report pointers to avoid manual bootstrap by next agent.
 
 ## DoD
-- Master-ТЗ документ создан в repo и покрывает все major blocks + Analysis Gate protocol.
-- Есть формализованный phase map (Phase 1..N) с acceptance criteria и rollback.
-- Запущена Phase 1: минимум один реальный deliverable в коде/контрактах + тесты.
-- Итог содержит FACT/GAP + риски + next implementation steps по фазам.
+- Master ТЗ фиксирует полный атомарный план по B01..B13 и ожидаемые outcomes.
+- Очередь выполнения отражена в `docs/BLOCK_GRAPH.yaml` с корректными зависимостями.
+- Каждый completed block имеет evidence-backed Report (`Verdict=Passed`) и doc sync.
+- Нет пересечения с параллельными треками и нет изменений в чужих worktree.
 
 ## Checks
 - `scripts/session_check.sh`
-- `rg -n "Universal Control Plane v1|Analysis Gate|Phase" docs/TASK_PACKAGES docs/REPORTS`
-- Phase 1 checks (будут уточнены в phase package): pytest/lint/contract checks по затронутому scope.
+- `python3 - <<'PY'\nimport yaml, pathlib\npath = pathlib.Path('docs/BLOCK_GRAPH.yaml')\nyaml.safe_load(path.read_text(encoding='utf-8'))\nprint('BLOCK_GRAPH parse: OK')\nPY`
+- `rg -n "Full atomic business-block plan|Program block map|UCPV1-PHASE13" docs/REPORTS docs/TASK_PACKAGES docs/BLOCK_GRAPH.yaml`
+- Phase-specific checks from active block TP.
 
 ## Evidence
-- Master-ТЗ документ.
-- FACT/GAP report с ссылками на файлы/контракты.
-- Diff + test outputs + trace/audit evidence (для Phase 1 кодовых изменений).
-- Session log + index update.
+- Master TP update (this file).
+- Master report update with atomic outcomes and current queue.
+- Updated dependency graph (`docs/BLOCK_GRAPH.yaml`).
+- Session log + index update for current session when block work is executed.
 
 ## Rollback
-- Для doc-этапа: revert commit.
-- Для Phase 1 кода: revert phase commit + disable via feature/config gates where applicable.
+- For docs-only sync: revert commit.
+- For phase code changes: revert block commit + disable by feature/config gate where applicable.
 
 ## No-go
-- Начинать код без phase-specific analysis package.
+- Начинать код блока без FACT pre-check и analysis gate.
 - Ослаблять hard-law/policy/tenant guards.
 - Делать runtime client-specific hardcode под новую нишу.
-- Считать Phase закрытой без тестов и evidence.
+- Закрывать блок без tests + evidence + doc sync.
 
 ## Branch / Worktree / Merge / Cleanup
 - Branch: `feat/2026-02-22-universal-control-plane-v1-a500`
@@ -91,9 +112,10 @@ Universal Control Plane v1: привести платформу к управл�
 - P1-9 policy rules-as-data
 - P2-14 PR Task Package gate
 - P2-15 local-first realism gate
+- P3-16..21 semantic-first + no quality downgrade + no workaround-as-architecture
 
 ## Риски/блокеры
 - Историческая demo-coupling в runtime fallback paths.
 - Частично завершенный org/RBAC wiring и консольные legacy path.
-- Большой blast radius при попытке сделать много фаз в один PR.
-- Требуется strict wave migration и feature gating.
+- Большой blast radius при попытке сделать несколько бизнес-блоков в одном PR.
+- Drift code/docs если пропускать обязательный FACT pre-check перед каждым блоком.

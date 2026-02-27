@@ -65,7 +65,116 @@ blocks:
     depends_on:
       - UCPV1-GATES-SANITARY
     status: planned
-    task_package: null
-    report: null
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase2-slice2-impl2-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase2-slice2-impl2-a500.md
     unlocks:
       - UCPV1-PHASE3
+
+  - block_id: UCPV1-PHASE3
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE2-SLICE2-IMPL2
+    status: planned
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase3-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase3-a500.md
+    unlocks:
+      - UCPV1-PHASE4
+
+  - block_id: UCPV1-PHASE4
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE3
+    status: planned
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase4-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase4-a500.md
+    unlocks:
+      - UCPV1-PHASE5
+
+  - block_id: UCPV1-PHASE5
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE4
+    status: planned
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase5-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase5-a500.md
+    unlocks:
+      - UCPV1-PHASE6
+
+  - block_id: UCPV1-PHASE6
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE5
+    status: planned
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase6-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase6-a500.md
+    unlocks:
+      - UCPV1-PHASE7
+
+  - block_id: UCPV1-PHASE7
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE6
+    status: planned
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase7-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase7-a500.md
+    unlocks:
+      - UCPV1-PHASE8
+
+  - block_id: UCPV1-PHASE8
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE7
+    status: planned
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase8-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase8-a500.md
+    unlocks:
+      - UCPV1-PHASE9
+
+  - block_id: UCPV1-PHASE9
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE8
+    status: planned
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase9-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase9-a500.md
+    unlocks:
+      - UCPV1-PHASE10
+
+  - block_id: UCPV1-PHASE10
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE9
+    status: planned
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase10-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase10-a500.md
+    unlocks:
+      - UCPV1-PHASE11
+
+  - block_id: UCPV1-PHASE11
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE10
+    status: planned
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md
+    unlocks:
+      - UCPV1-PHASE12
+
+  - block_id: UCPV1-PHASE12
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE11
+    status: planned
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase12-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase12-a500.md
+    unlocks:
+      - UCPV1-PHASE13
+
+  - block_id: UCPV1-PHASE13
+    parent_block_id: UCPV1
+    depends_on:
+      - UCPV1-PHASE12
+    status: planned
+    task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md
+    report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md
+    unlocks: []

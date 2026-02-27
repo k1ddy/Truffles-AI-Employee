@@ -26,6 +26,7 @@
 - Без валидного tenant context действия в runtime/console не выполняются.
 - Любая write/change операция остается auditable.
 - Подключение новых ниш без изменения decision core.
+- Quality-constant: бюджет/время не ослабляют acceptance и обязательные gate-проверки.
 
 ## 4) Architecture target (control-plane view)
 
@@ -41,15 +42,16 @@
 - `Ops plane`: SLA/SLO, drift alerts, remediation actions, evidence links.
 
 ### 4.3 Runtime contract
-- LLM plan + deterministic safety.
+- LLM plan + deterministic safety boundaries.
 - Tool-first execution.
 - Decision meta/trace mandatory on inbound.
+- No semantic hardcode in core routing.
 
-## 5) Program phases and mandatory analysis gate
+## 5) Delivery protocol (mandatory for every block)
 
-Каждый phase выполняется только через analysis gate.
+### 5.1 Analysis gate checklist
 
-### Analysis gate checklist (for every major block)
+Каждый блок проходит analysis gate до кода:
 1. FACT snapshot (current code/API/data/tests/evidence).
 2. Contract delta (schema/API/RBAC/policy changes).
 3. Dependency map (blast radius).
@@ -58,60 +60,73 @@
 6. Verification plan (unit/integration/e2e/negative/anti-drift).
 7. Observability plan (decision_meta/trace/audit/outbox signals).
 8. Rollback protocol.
-9. Phase DoD.
+9. Block DoD.
 10. Explicit approval to implement.
 
-### Phase map
+### 5.2 Execution law for zero-context agents
 
-- `Phase 1`: Governance bootstrap and contract hardening.
-- `Phase 2`: Tenant/RBAC hardening and canonical context consistency.
-- `Phase 3`: Domain catalog + capabilities/domain profiles for any niche.
-- `Phase 4`: Onboarding state machine + go-live gates + reference integrity.
-- `Phase 5`: Policy governance split (hard-law vs operational) + override enforcement.
-- `Phase 6`: Tool/provider certification lifecycle and drift controls.
-- `Phase 7`: Knowledge studio maturity + pack-agnostic runtime boundary hardening.
-- `Phase 8`: SLA/SLO multi-level engine + control-tower operations.
-- `Phase 9`: KZ retention, deletion lifecycle, compliance automation.
-- `Phase 10`: Fleet migration waves (canary -> cohort -> full fleet) with rollback gates.
+- Один блок = одна worktree = одна ветка = один TP = один Report.
+- Перед кодом обязателен FACT pre-check по коду и тестам, а не только по документам.
+- Параллельные треки в репозитории не трогать.
+- `main` не использовать как рабочую директорию изменений.
+- Блок закрыт только при `Passed` + checks + evidence + doc sync.
 
-## 6) Execution status
+## 6) Full atomic business-block plan (with expected outcomes)
 
-- `Phase 1` completed: capabilities write governance locked to `platform_admin` with tests and canon sync.
-- `Phase 2` slice 1 completed: tenant hierarchy write (`companies/clients/lifecycle`) locked to `platform_admin` with tests and canon sync.
-- `Phase 2` slice 2 analysis completed: remaining `/admin/*` role-boundary map and priority queue fixed for implementation wave.
-- `Phase 2` slice 2 implementation wave 1 completed: governance catalog reads (`onboarding-blueprints`, `reference-packs`) locked to `platform_admin`.
-- Next in queue: `Phase 2` slice 2 implementation wave 2 (remaining provisioning/admin role-boundary normalization).
+| Business block | Implementation blocks | Current status | Expected business result | Expected implementation result (DoD) |
+|---|---|---|---|---|
+| B01 Tenant Core & Data Isolation | `UCPV1-PHASE2-SLICE1`, `UCPV1-PHASE2-SLICE2-*` | in_progress | Нет cross-tenant чтений/записей, tenant-context обязателен | Все критичные `/admin/*` write/read пути fail-closed без tenant-context; negative tests green |
+| B02 RBAC & Governance Model | `UCPV1-PHASE1`, `UCPV1-PHASE2-SLICE2-*` | in_progress | Права ролей прозрачны и стабильны для Platform Admin first | Серверный RBAC source-of-truth; несанкционированные действия получают deterministic `403/400` |
+| B03 Domain Catalog + Capabilities v2 | `UCPV1-PHASE3` | planned | Новая ниша подключается без core-кода | Domain registry CRUD + capability templates + effective merge по scope + schema validation |
+| B04 Onboarding State Machine v2 | `UCPV1-PHASE4` | planned | Go-live воспроизводим и управляем в Console | Branch не уходит в live при незакрытых blockers; preflight/approve/reject/waive серверные |
+| B05 Policy Governance Split | `UCPV1-PHASE5` | planned | Hard-law отделен от operational policy | Versioned policy registry; hard-law only Platform Admin; branch override только operational/SLA |
+| B06 Tool Registry Certification | `UCPV1-PHASE6` | planned | Подключение инструментов безопасно и управляемо | Несертифицированный tool не попадает в effective capabilities; scope rules + health checks |
+| B07 Provider/Channel Control (WA-first) | `UCPV1-PHASE7` | planned | Каналы управляются предсказуемо при деградации провайдера | Provider lifecycle registry + explicit branch channel status + safe degrade mode |
+| B08 Knowledge Studio + Pack Compiler | `UCPV1-PHASE8` | planned | Контент управляется через Draft->Validate->Publish->Rollback | Publish блокируется при нарушении minimum data contract; rollback one-click |
+| B09 Runtime Pack-Agnostic Decoupling | `UCPV1-PHASE9` | planned | Runtime независим от demo-пака | Нет прямых demo imports в core runtime; adapter boundaries + neutral fallback |
+| B10 SLA/SLO Engine (Multi-level) | `UCPV1-PHASE10` | planned | SLA/SLO профили реально влияют на runtime и escalation | Policy-driven thresholds + predictable actions + auditability on each violation |
+| B11 Compliance KZ Retention/Lifecycle | `UCPV1-PHASE11` | planned | KZ boundary и lifecycle соблюдаются автоматически | Retention/delete/export jobs с owner+TTL+audit trail по каждому data class |
+| B12 Control Tower for Platform Admin | `UCPV1-PHASE12` | planned | Fleet управляется через Console без CLI как основного пути | Risk queue + readiness board + drift board + action center с evidence links |
+| B13 Migration Program (Current -> Target) | `UCPV1-PHASE13` | planned | Переход без stop-the-world | Waves (`canary -> cohort -> fleet`) с pass/fail gates и rollback triggers |
 
-## 7) Program-level DoD
+## 7) Execution status (FACT)
 
-- Каждый phase имеет evidence-backed close report.
-- Нет client-specific hardcode в core behavior.
-- All critical gates are enforceable in API (not UI-only).
-- Control Plane supports onboarding новых ниш через config/pack contracts.
+Completed in this program chain:
+- `UCPV1-PHASE1` passed.
+- `UCPV1-PHASE2-SLICE1` passed.
+- `UCPV1-PHASE2-SLICE2-ANALYSIS` passed.
+- `UCPV1-PHASE2-SLICE2-IMPL1` passed.
+- `UCPV1-GATES-SANITARY` passed.
 
-## 8) No-go constraints
+Current queue head:
+- `UCPV1-PHASE2-SLICE2-IMPL2` (planned, next execution block).
 
-- No bypass for hard-law/safety gates.
-- No cross-tenant implicit access.
-- No branch override of hard-law policy blocks.
-- No acceptance without deterministic checks + evidence.
+## 8) Program-level DoD
 
-## 9) Risks to manage
+- Каждый бизнес-блок проходит analysis gate до начала реализации.
+- Каждый бизнес-блок имеет отдельные TP/Report с фиксированным BLOCK_ID и зависимостями.
+- Контракты (API/schema/roles/policy/capabilities) задокументированы и покрыты тестами.
+- Нет hardcode под конкретного клиента/нишу в core runtime.
+- Все production-critical изменения подтверждены evidence (`tests + traces + audit + SQL/API snapshots`).
 
-- Legacy demo-coupling in runtime fallback paths.
-- Existing mixed role assumptions (owner/admin write scopes).
-- Large blast radius of console router changes.
-- Operational drift if migration waves skip gating.
+## 9) No-go constraints
 
-## 10) Deliverables
+- Нельзя ослаблять hard-law/safety/tenant guards ради скорости.
+- Нельзя обходить обязательные gates и выдавать "упрощенный pass".
+- Нельзя смешивать текущий блок с параллельными задачами других треков.
+- Нельзя закрывать блок без проверки фактической реализации и doc sync.
+
+## 10) Risks and blockers to monitor
+
+- Legacy demo-coupling в runtime fallback paths.
+- Остаточные смешанные role assumptions в части `/admin/*`.
+- Большой blast radius console-router изменений без блоковой декомпозиции.
+- Drift между кодом и документами при пропуске FACT pre-check и post-sync.
+
+## 11) Deliverables and canonical links
 
 - Master program TP: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-master-a500.md`
 - Master report (this doc): `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
-- Phase-1 TP: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase1-a500.md`
-- Phase-1 report: `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase1-a500.md`
-- Phase-2 TP (slice 1): `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase2-a500.md`
-- Phase-2 report (slice 1): `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase2-a500.md`
-- Phase-2 TP (slice 2 analysis): `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase2-slice2-a500.md`
-- Phase-2 report (slice 2 analysis): `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase2-slice2-analysis-a500.md`
-- Phase-2 TP (slice 2 implementation wave 1): `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase2-slice2-impl1-a500.md`
-- Phase-2 report (slice 2 implementation wave 1): `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase2-slice2-impl1-a500.md`
+- Dependency graph: `docs/BLOCK_GRAPH.yaml`
+- Zero-context templates: `docs/TASK_PACKAGES/TP_TEMPLATE_ZERO_CONTEXT.md`, `docs/REPORTS/REPORT_TEMPLATE_ZERO_CONTEXT.md`
+- Program entrypoint evidence: `STATE.md` NOW block for UCPV1 chain
