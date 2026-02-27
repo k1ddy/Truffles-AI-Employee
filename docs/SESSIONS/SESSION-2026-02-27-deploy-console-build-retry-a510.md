@@ -1,0 +1,27 @@
+# SESSION 2026-02-27-deploy-console-build-retry-a510 — Session 2026-02-27-deploy-console-build-retry-a510
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-27-deploy-console-build-retry-a510.md
+- block_id: n/a
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- branch: feat/2026-02-27-deploy-console-build-retry-a510
+- worktree: /home/zhan/worktrees/2026-02-27-deploy-console-build-retry-a510
+- base_ref: origin/main
+- scope: Deploy reliability hotfix: retry/backoff for `console-web` build+restart path to tolerate transient Docker Hub DNS failures.
+- done:
+  - Session created.
+  - Captured failing run root-cause: `22488503592` / job `65146223446` / step `Deploy to VPS` (`node:18-alpine` metadata resolve DNS fail).
+  - Prepared dedicated TP for this incident.
+  - Implemented retry/backoff for `docker compose build/up console-web` in `scripts/restart_console_web.sh` with strict fail after max attempts.
+  - Verified script syntax (`bash -n`) and session gate (`scripts/session_check.sh`).
+- next:
+  - Commit/push branch and open PR.
+  - Watch CI deploy on PR/main merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-27-deploy-console-build-retry-a510.md
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22488503592/job/65146223446
+- last_updated: 2026-02-27

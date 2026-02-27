@@ -29,11 +29,46 @@ if [[ -z "${EXPECTED_GIT_COMMIT:-}" ]]; then
 fi
 BUILD_TIME=${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
 VERIFY_CONSOLE_BUILD=${VERIFY_CONSOLE_BUILD:-1}
+CONSOLE_BUILD_MAX_ATTEMPTS=${CONSOLE_BUILD_MAX_ATTEMPTS:-3}
+CONSOLE_BUILD_RETRY_DELAY_SECONDS=${CONSOLE_BUILD_RETRY_DELAY_SECONDS:-5}
+
+if ! [[ "${CONSOLE_BUILD_MAX_ATTEMPTS}" =~ ^[0-9]+$ ]] || (( CONSOLE_BUILD_MAX_ATTEMPTS < 1 )); then
+  echo "ERROR: CONSOLE_BUILD_MAX_ATTEMPTS must be integer >= 1, got '${CONSOLE_BUILD_MAX_ATTEMPTS}'" >&2
+  exit 1
+fi
+
+if ! [[ "${CONSOLE_BUILD_RETRY_DELAY_SECONDS}" =~ ^[0-9]+$ ]] || (( CONSOLE_BUILD_RETRY_DELAY_SECONDS < 1 )); then
+  echo "ERROR: CONSOLE_BUILD_RETRY_DELAY_SECONDS must be integer >= 1, got '${CONSOLE_BUILD_RETRY_DELAY_SECONDS}'" >&2
+  exit 1
+fi
 
 export GIT_COMMIT="${EXPECTED_GIT_COMMIT}" BUILD_TIME
 
-docker compose -f "$compose_file" build console-web
-docker compose -f "$compose_file" up -d console-web
+attempt=1
+while true; do
+  echo "Console web restart attempt ${attempt}/${CONSOLE_BUILD_MAX_ATTEMPTS}..."
+  build_ok=0
+
+  if docker compose -f "$compose_file" build console-web; then
+    if docker compose -f "$compose_file" up -d console-web; then
+      build_ok=1
+    fi
+  fi
+
+  if (( build_ok == 1 )); then
+    break
+  fi
+
+  if (( attempt >= CONSOLE_BUILD_MAX_ATTEMPTS )); then
+    echo "ERROR: console-web restart failed after ${CONSOLE_BUILD_MAX_ATTEMPTS} attempts" >&2
+    exit 1
+  fi
+
+  sleep_seconds=$((CONSOLE_BUILD_RETRY_DELAY_SECONDS * attempt))
+  echo "WARN: console-web restart attempt ${attempt} failed; retrying in ${sleep_seconds}s..." >&2
+  attempt=$((attempt + 1))
+  sleep "${sleep_seconds}"
+done
 
 if [[ "$VERIFY_CONSOLE_BUILD" == "1" ]]; then
   actual_commit="$(docker exec truffles-console-web /bin/sh -lc 'printf "%s" "${NEXT_PUBLIC_BUILD_SHA:-unknown}"')"
