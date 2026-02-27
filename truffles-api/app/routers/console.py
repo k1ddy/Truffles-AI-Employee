@@ -61,6 +61,7 @@ from app.models import (
     TenantsFleetClientProjection,
     TenantsFleetPrewarmJob,
     TenantsWeeklySnapshot,
+    ToolRegistryEntry,
     User,
 )
 from app.models import (
@@ -285,6 +286,9 @@ from app.schemas.console import (
     ConsoleTenantsWeeklySnapshotListResponse,
     ConsoleTenantsWeeklySnapshotPayload,
     ConsoleTenantsWeeklySnapshotRecord,
+    ConsoleToolRegistryItem,
+    ConsoleToolRegistryListResponse,
+    ConsoleToolRegistryUpsertRequest,
     ConsoleWebhookSecretResponse,
 )
 from app.schemas.console import (
@@ -476,6 +480,14 @@ from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_return as state_manager_return
 from app.services.state_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
+from app.services.tool_certification_service import (
+    TOOL_CERTIFICATION_CERTIFIED,
+    TOOL_HEALTH_HEALTHY,
+    TOOL_REGISTRY_SCHEMA_VERSION,
+    TOOL_REGISTRY_STATUS_ACTIVE,
+    TOOL_SCOPE_VALUES,
+    validate_tool_allow_tokens_for_scope,
+)
 from app.services.webhook_secret_service import derive_webhook_secret_from_instance
 
 router = APIRouter(prefix="/console/v1", tags=["console"])
@@ -20378,6 +20390,68 @@ def _serialize_policy_version_record(record: ClientPolicyVersion) -> ConsolePoli
     )
 
 
+def _normalize_tool_registry_action(value: str) -> str:
+    token = str(value or "").strip().casefold()
+    if not token:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "tool_action required")
+    if not re.match(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$", token):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "tool_action must be '<group>.<action>'")
+    return token
+
+
+def _normalize_tool_registry_scopes(scopes: Any) -> list[str]:
+    if scopes is None:
+        return list(TOOL_SCOPE_VALUES)
+    if not isinstance(scopes, list):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "allowed_scopes must be list")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in scopes:
+        scope_token = str(item or "").strip().casefold()
+        if scope_token not in TOOL_SCOPE_VALUES:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "allowed_scopes must contain client|branch")
+        if scope_token in seen:
+            continue
+        seen.add(scope_token)
+        normalized.append(scope_token)
+    if not normalized:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "allowed_scopes cannot be empty")
+    return normalized
+
+
+def _get_tool_registry_entry_record(
+    db: Session,
+    *,
+    tool_action: str,
+    active_only: bool = False,
+) -> Optional[ToolRegistryEntry]:
+    query = db.query(ToolRegistryEntry).filter(ToolRegistryEntry.tool_action == tool_action)
+    if active_only:
+        query = query.filter(ToolRegistryEntry.status == TOOL_REGISTRY_STATUS_ACTIVE)
+    return query.first()
+
+
+def _serialize_tool_registry_entry(record: ToolRegistryEntry) -> ConsoleToolRegistryItem:
+    allowed_scopes_raw = record.allowed_scopes_json
+    allowed_scopes = _normalize_tool_registry_scopes(allowed_scopes_raw)
+    return ConsoleToolRegistryItem(
+        id=record.id,
+        tool_action=record.tool_action,
+        tool_group=record.tool_group,
+        title=record.title,
+        summary=record.summary,
+        schema_version=record.schema_version,
+        status=record.status,
+        certification_status=record.certification_status,
+        health_status=record.health_status,
+        allowed_scopes=allowed_scopes,
+        metadata=record.metadata_json or {},
+        created_by=record.created_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
 def _normalize_optional_domain_slug_token(value: Any) -> Optional[str]:
     if not isinstance(value, str):
         return None
@@ -20607,6 +20681,15 @@ async def patch_capabilities(
         branch_id=body.branch_id,
     )
     payload_dict = payload_to_dict(body.payload)
+    tools_payload = payload_dict.get("tools") if isinstance(payload_dict.get("tools"), dict) else {}
+    allow_tokens = tools_payload.get("allow") if isinstance(tools_payload, dict) else None
+    allow_valid, allow_error = validate_tool_allow_tokens_for_scope(
+        db,
+        allow_tokens=allow_tokens if isinstance(allow_tokens, list) else None,
+        scope=body.scope,
+    )
+    if not allow_valid:
+        raise ConsoleAPIError(400, "INVALID_PARAM", allow_error or "Invalid tools.allow policy")
     status_value = body.status or (record.status if record else "active")
 
     if record:
@@ -20830,6 +20913,133 @@ async def rollback_policy_registry(
         record=_serialize_policy_version_record(record),
         from_version_id=source_record.id,
     )
+
+
+@router.get(
+    "/admin/tool-registry",
+    response_model=ConsoleToolRegistryListResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def list_tool_registry(
+    request: Request,
+    status: Optional[str] = Query(None),
+    certification_status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleToolRegistryListResponse:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    query = db.query(ToolRegistryEntry)
+    if status:
+        normalized_status = status.strip().lower()
+        if normalized_status not in {"active", "disabled", "all"}:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "status must be active|disabled|all")
+        if normalized_status != "all":
+            query = query.filter(ToolRegistryEntry.status == normalized_status)
+    if certification_status:
+        normalized_certification = certification_status.strip().lower()
+        if normalized_certification not in {"certified", "uncertified", "all"}:
+            raise ConsoleAPIError(
+                400,
+                "INVALID_PARAM",
+                "certification_status must be certified|uncertified|all",
+            )
+        if normalized_certification != "all":
+            query = query.filter(ToolRegistryEntry.certification_status == normalized_certification)
+    items = query.order_by(ToolRegistryEntry.tool_action.asc()).all()
+    return ConsoleToolRegistryListResponse(
+        items=[_serialize_tool_registry_entry(item) for item in items]
+    )
+
+
+@router.put(
+    "/admin/tool-registry/{tool_action}",
+    response_model=ConsoleToolRegistryItem,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def upsert_tool_registry(
+    tool_action: str,
+    body: ConsoleToolRegistryUpsertRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleToolRegistryItem:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage tool registry",
+    )
+    _require_platform_admin(context)
+
+    normalized_tool_action = _normalize_tool_registry_action(tool_action)
+    tool_group = normalized_tool_action.partition(".")[0]
+    schema_version = body.schema_version or TOOL_REGISTRY_SCHEMA_VERSION
+    if schema_version != TOOL_REGISTRY_SCHEMA_VERSION:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported tool registry schema_version")
+    status_value = body.status or TOOL_REGISTRY_STATUS_ACTIVE
+    certification_status_value = body.certification_status or TOOL_CERTIFICATION_CERTIFIED
+    health_status_value = body.health_status or TOOL_HEALTH_HEALTHY
+    allowed_scopes = _normalize_tool_registry_scopes(body.allowed_scopes)
+    metadata_json = body.metadata or {}
+    title = _normalize_optional_text(body.title)
+    summary = _normalize_optional_text(body.summary)
+
+    record = _get_tool_registry_entry_record(
+        db,
+        tool_action=normalized_tool_action,
+        active_only=False,
+    )
+    if record:
+        record.tool_group = tool_group
+        record.title = title
+        record.summary = summary
+        record.schema_version = schema_version
+        record.status = status_value
+        record.certification_status = certification_status_value
+        record.health_status = health_status_value
+        record.allowed_scopes_json = allowed_scopes
+        record.metadata_json = metadata_json
+    else:
+        record = ToolRegistryEntry(
+            tool_action=normalized_tool_action,
+            tool_group=tool_group,
+            title=title,
+            summary=summary,
+            schema_version=schema_version,
+            status=status_value,
+            certification_status=certification_status_value,
+            health_status=health_status_value,
+            allowed_scopes_json=allowed_scopes,
+            metadata_json=metadata_json,
+            created_by=context.agent.id,
+        )
+        db.add(record)
+        db.flush()
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="tool_registry_entry_upserted",
+        entity_type="tool_registry_entry",
+        entity_id=record.id,
+        payload={
+            "tool_action": normalized_tool_action,
+            "status": record.status,
+            "certification_status": record.certification_status,
+            "health_status": record.health_status,
+            "allowed_scopes": list(allowed_scopes),
+            "schema_version": record.schema_version,
+        },
+    )
+    db.commit()
+    return _serialize_tool_registry_entry(record)
 
 
 def _get_latest_onboarding_contract(

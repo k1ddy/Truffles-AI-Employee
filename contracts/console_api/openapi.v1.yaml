@@ -4805,57 +4805,208 @@ paths:
       - console
       summary: Get Policy Registry
       operationId: get_policy_registry_console_v1_admin_policy_registry_get
+      parameters:
+      - name: scope
+        in: query
+        required: false
+        schema:
+          enum:
+          - client
+          - branch
+          type: string
+          default: client
+          title: Scope
+      - name: branch_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 20
+          title: Limit
       responses:
         '200':
           description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsolePolicyRegistryResponse'
         '403':
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
           description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/policy-registry/publish:
     post:
       tags:
       - console
       summary: Publish Policy Registry
       operationId: publish_policy_registry_console_v1_admin_policy_registry_publish_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsolePolicyRegistryPublishRequest'
+        required: true
       responses:
         '200':
           description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsolePolicyRegistryMutationResponse'
         '403':
+          description: Forbidden
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
-          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/policy-registry/rollback:
     post:
       tags:
       - console
       summary: Rollback Policy Registry
       operationId: rollback_policy_registry_console_v1_admin_policy_registry_rollback_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsolePolicyRegistryRollbackRequest'
+        required: true
       responses:
         '200':
           description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsolePolicyRegistryMutationResponse'
         '400':
+          description: Bad Request
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
-          description: Bad Request
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/tool-registry:
+    get:
+      tags:
+      - console
+      summary: List Tool Registry
+      operationId: list_tool_registry_console_v1_admin_tool_registry_get
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      - name: certification_status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Certification Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleToolRegistryListResponse'
         '403':
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
           description: Forbidden
-        '404':
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/tool-registry/{tool_action}:
+    put:
+      tags:
+      - console
+      summary: Upsert Tool Registry
+      operationId: upsert_tool_registry_console_v1_admin_tool_registry__tool_action__put
+      parameters:
+      - name: tool_action
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Tool Action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleToolRegistryUpsertRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleToolRegistryItem'
+        '403':
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
-          description: Not Found
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/onboarding-contract:
     get:
       tags:
@@ -5854,7 +6005,7 @@ components:
       required:
       - items
       title: BookingsListResponse
-    CapabilitiesPayload:
+    CapabilitiesPayload-Input:
       properties:
         domain_slug:
           anyOf:
@@ -5869,6 +6020,44 @@ components:
           $ref: '#/components/schemas/CapabilityFeatures'
         tools:
           $ref: '#/components/schemas/CapabilityTools'
+        policy_overrides:
+          $ref: '#/components/schemas/CapabilityPolicyOverrides'
+        allowed_fact_scopes:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Allowed Fact Scopes
+        handoff_policy:
+          anyOf:
+          - type: string
+            enum:
+            - allow
+            - manager_request_only
+            - deny
+          - type: 'null'
+          title: Handoff Policy
+      additionalProperties: false
+      type: object
+      title: CapabilitiesPayload
+    CapabilitiesPayload-Output:
+      properties:
+        domain_slug:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Slug
+        channels:
+          $ref: '#/components/schemas/CapabilityChannels'
+        providers:
+          $ref: '#/components/schemas/CapabilityProviders'
+        features:
+          $ref: '#/components/schemas/CapabilityFeatures'
+        tools:
+          $ref: '#/components/schemas/CapabilityTools'
+        policy_overrides:
+          $ref: '#/components/schemas/CapabilityPolicyOverrides'
         allowed_fact_scopes:
           anyOf:
           - items:
@@ -5936,6 +6125,29 @@ components:
       additionalProperties: false
       type: object
       title: CapabilityFeatures
+    CapabilityPolicyOverrides:
+      properties:
+        payment_info:
+          anyOf:
+          - $ref: '#/components/schemas/CapabilityPolicySectionOverride'
+          - type: 'null'
+        discounts:
+          anyOf:
+          - $ref: '#/components/schemas/CapabilityPolicySectionOverride'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      title: CapabilityPolicyOverrides
+    CapabilityPolicySectionOverride:
+      properties:
+        response:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Response
+      additionalProperties: false
+      type: object
+      title: CapabilityPolicySectionOverride
     CapabilityProviders:
       properties:
         availability_provider:
@@ -7442,7 +7654,7 @@ components:
           - type: 'null'
           title: Schema Version
         payload:
-          $ref: '#/components/schemas/CapabilitiesPayload'
+          $ref: '#/components/schemas/CapabilitiesPayload-Input'
       type: object
       required:
       - scope
@@ -7480,7 +7692,7 @@ components:
           type: string
           title: Schema Version
         payload:
-          $ref: '#/components/schemas/CapabilitiesPayload'
+          $ref: '#/components/schemas/CapabilitiesPayload-Output'
         created_by:
           anyOf:
           - type: string
@@ -7519,7 +7731,7 @@ components:
           - type: 'null'
           title: Branch Id
         effective:
-          $ref: '#/components/schemas/CapabilitiesPayload'
+          $ref: '#/components/schemas/CapabilitiesPayload-Output'
         client_capabilities:
           anyOf:
           - $ref: '#/components/schemas/ConsoleCapabilitiesRecord'
@@ -8228,7 +8440,7 @@ components:
           - disabled
           title: Status
         capability_template:
-          $ref: '#/components/schemas/CapabilitiesPayload'
+          $ref: '#/components/schemas/CapabilitiesPayload-Output'
         metadata:
           type: object
           title: Metadata
@@ -8294,7 +8506,7 @@ components:
           title: Status
         capability_template:
           anyOf:
-          - $ref: '#/components/schemas/CapabilitiesPayload'
+          - $ref: '#/components/schemas/CapabilitiesPayload-Input'
           - type: 'null'
         metadata:
           anyOf:
@@ -10941,7 +11153,7 @@ components:
           title: Domain Slug
         purchased:
           anyOf:
-          - $ref: '#/components/schemas/CapabilitiesPayload'
+          - $ref: '#/components/schemas/CapabilitiesPayload-Input'
           - type: 'null'
         purchased_services:
           anyOf:
@@ -11075,7 +11287,7 @@ components:
           type: string
           title: Summary
         payload:
-          $ref: '#/components/schemas/CapabilitiesPayload'
+          $ref: '#/components/schemas/CapabilitiesPayload-Output'
         go_live_blockers_profile:
           items:
             type: string
@@ -12668,6 +12880,198 @@ components:
       - reminder_2_minutes
       - escalation_timeout_minutes
       title: ConsoleOwnerOperationSettingsPatch
+    ConsolePolicyRegistryMutationResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        record:
+          $ref: '#/components/schemas/ConsolePolicyVersionRecord'
+        from_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: From Version Id
+      type: object
+      required:
+      - success
+      - record
+      title: ConsolePolicyRegistryMutationResponse
+    ConsolePolicyRegistryPublishRequest:
+      properties:
+        scope:
+          type: string
+          enum:
+          - client
+          - branch
+          title: Scope
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        schema_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Schema Version
+        reason:
+          type: string
+          title: Reason
+        payload:
+          $ref: '#/components/schemas/CapabilityPolicyOverrides'
+      type: object
+      required:
+      - scope
+      - reason
+      - payload
+      title: ConsolePolicyRegistryPublishRequest
+    ConsolePolicyRegistryResponse:
+      properties:
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        scope:
+          type: string
+          enum:
+          - client
+          - branch
+          title: Scope
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        active:
+          anyOf:
+          - $ref: '#/components/schemas/ConsolePolicyVersionRecord'
+          - type: 'null'
+        history:
+          items:
+            $ref: '#/components/schemas/ConsolePolicyVersionRecord'
+          type: array
+          title: History
+          default: []
+      type: object
+      required:
+      - client_id
+      - scope
+      title: ConsolePolicyRegistryResponse
+    ConsolePolicyRegistryRollbackRequest:
+      properties:
+        scope:
+          type: string
+          enum:
+          - client
+          - branch
+          title: Scope
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        target_version_id:
+          type: string
+          format: uuid
+          title: Target Version Id
+        reason:
+          type: string
+          title: Reason
+      type: object
+      required:
+      - scope
+      - target_version_id
+      - reason
+      title: ConsolePolicyRegistryRollbackRequest
+    ConsolePolicyVersionRecord:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        scope:
+          type: string
+          enum:
+          - client
+          - branch
+          title: Scope
+        status:
+          type: string
+          enum:
+          - published
+          - archived
+          title: Status
+        schema_version:
+          type: string
+          title: Schema Version
+        version_number:
+          type: integer
+          title: Version Number
+        payload:
+          $ref: '#/components/schemas/CapabilityPolicyOverrides'
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+        source_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Source Version Id
+        created_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Created By
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+        published_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Published By
+        published_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Published At
+      type: object
+      required:
+      - id
+      - client_id
+      - scope
+      - status
+      - schema_version
+      - version_number
+      - payload
+      title: ConsolePolicyVersionRecord
     ConsoleProviderLifecycleItem:
       properties:
         client_id:
@@ -14348,6 +14752,159 @@ components:
       - week_key
       - snapshot
       title: ConsoleTenantsWeeklySnapshotRecord
+    ConsoleToolRegistryItem:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        tool_action:
+          type: string
+          title: Tool Action
+        tool_group:
+          type: string
+          title: Tool Group
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Summary
+        schema_version:
+          type: string
+          title: Schema Version
+        status:
+          type: string
+          enum:
+          - active
+          - disabled
+          title: Status
+        certification_status:
+          type: string
+          enum:
+          - certified
+          - uncertified
+          title: Certification Status
+        health_status:
+          type: string
+          enum:
+          - healthy
+          - degraded
+          - down
+          title: Health Status
+        allowed_scopes:
+          items:
+            type: string
+            enum:
+            - client
+            - branch
+          type: array
+          title: Allowed Scopes
+          default: []
+        metadata:
+          type: object
+          title: Metadata
+          default: {}
+        created_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Created By
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - id
+      - tool_action
+      - tool_group
+      - schema_version
+      - status
+      - certification_status
+      - health_status
+      title: ConsoleToolRegistryItem
+    ConsoleToolRegistryListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleToolRegistryItem'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: ConsoleToolRegistryListResponse
+    ConsoleToolRegistryUpsertRequest:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Summary
+        schema_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Schema Version
+        status:
+          anyOf:
+          - type: string
+            enum:
+            - active
+            - disabled
+          - type: 'null'
+          title: Status
+        certification_status:
+          anyOf:
+          - type: string
+            enum:
+            - certified
+            - uncertified
+          - type: 'null'
+          title: Certification Status
+        health_status:
+          anyOf:
+          - type: string
+            enum:
+            - healthy
+            - degraded
+            - down
+          - type: 'null'
+          title: Health Status
+        allowed_scopes:
+          anyOf:
+          - items:
+              type: string
+              enum:
+              - client
+              - branch
+            type: array
+          - type: 'null'
+          title: Allowed Scopes
+        metadata:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Metadata
+      type: object
+      title: ConsoleToolRegistryUpsertRequest
     ConsoleWebhookSecretResponse:
       properties:
         client_id:
@@ -14392,7 +14949,7 @@ components:
           - type: 'null'
           title: Domain Slug
         purchased:
-          $ref: '#/components/schemas/CapabilitiesPayload'
+          $ref: '#/components/schemas/CapabilitiesPayload-Input'
         provider_binding:
           $ref: '#/components/schemas/OnboardingProviderBindingPayload'
       additionalProperties: false
@@ -14406,7 +14963,7 @@ components:
           - type: 'null'
           title: Domain Slug
         purchased:
-          $ref: '#/components/schemas/CapabilitiesPayload'
+          $ref: '#/components/schemas/CapabilitiesPayload-Output'
         provider_binding:
           $ref: '#/components/schemas/OnboardingProviderBindingPayload'
       additionalProperties: false

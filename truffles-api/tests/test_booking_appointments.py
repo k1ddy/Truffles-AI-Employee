@@ -1169,6 +1169,50 @@ def test_tool_registry_blocks_action_on_allowlist_miss():
     assert result.decision_meta.get("capability_reason") == "allowlist_miss"
 
 
+def test_tool_registry_blocks_action_when_certification_is_uncertified(monkeypatch):
+    db = Mock()
+    runtime = RuntimeCapabilities(
+        payload=CapabilitiesPayload.model_validate({"tools": {"allow": ["catalog.location"]}}),
+        client_id=uuid4(),
+        branch_id=None,
+        source="client_capabilities",
+        has_records=True,
+    )
+    monkeypatch.setattr(
+        tool_registry_service,
+        "resolve_tool_certification_decision",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            allowed=False,
+            reason="certification:uncertified",
+            source="tool_registry",
+            certification_status="uncertified",
+            health_status="healthy",
+            registry_status="active",
+            allowed_scopes=("client", "branch"),
+        ),
+    )
+    set_runtime_capabilities(runtime)
+    try:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.location",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=None,
+            client_slug="demo_salon",
+            service_query=None,
+        )
+    finally:
+        set_runtime_capabilities(None)
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "tool_action_disabled"
+    assert result.decision_meta.get("tool_decision") == "capability_blocked"
+    assert result.decision_meta.get("capability_reason") == "certification:uncertified"
+    assert result.decision_meta.get("tool_registry_decision") == "blocked"
+
+
 def test_tool_registry_blocks_action_when_protocol_deny_by_default(monkeypatch):
     monkeypatch.setenv("TOOL_PROTOCOL_DENY_BY_DEFAULT", "1")
     db = Mock()

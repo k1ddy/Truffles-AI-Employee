@@ -856,3 +856,38 @@ async def test_patch_capabilities_platform_admin_allowed(monkeypatch):
     db.add.assert_called_once()
     db.commit.assert_called_once()
     assert len(audit_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_patch_capabilities_rejects_uncertified_allow_tokens(monkeypatch):
+    db = Mock()
+    body = ConsoleCapabilitiesPatchRequest(
+        scope="client",
+        payload=CapabilitiesPayload.model_validate({"tools": {"allow": ["calendar.*"]}}),
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(role="platform_admin"),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_get_latest_capability", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "validate_tool_allow_tokens_for_scope",
+        lambda *_args, **_kwargs: (
+            False,
+            "tools.allow token 'calendar.*' includes blocked action 'calendar.list_slots' (certification:uncertified)",
+        ),
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.patch_capabilities(
+            request=Mock(),
+            body=body,
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "certification:uncertified" in exc_info.value.message
