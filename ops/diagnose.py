@@ -861,6 +861,8 @@ LLM_QUALITY_BLOCKING_REASONS = (
     "lexicon_regex_delta_violation",
     "hardcode_core_violation",
     "manual_audit_gate_violation",
+    "quality_constant_violation",
+    "workaround_register_violation",
 )
 LLM_QUALITY_DELIVERY_WAIVER_REASONS = {
     "delivery_waiver_billing",
@@ -1012,6 +1014,8 @@ LLM_QUALITY_REASON_LABELS = {
     "semantic_intent_override_count_mismatch": "semantic intent override audit count mismatches recorded events",
     "lexicon_regex_delta_violation": "lexicon/regex delta without resolver + contract test delta",
     "hardcode_core_violation": "core hardcode gate detected raw keyword/regex branching in core diff",
+    "quality_constant_violation": "quality-constant gate detected acceptance-lane downgrade or debug override",
+    "workaround_register_violation": "WORKAROUND_ID marker found without register contract entry",
     "wrong_action": "HQ1: wrong product outcome (FACT/COLLECT/HANDOFF mismatch)",
     "handoff_miss": "HQ1: manager/handoff intent not escalated to pending",
     "non_actionable_reply": "HQ1: dead-end or non-actionable consultant reply",
@@ -1067,6 +1071,8 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "semantic_intent_override_count_mismatch": "canon",
     "lexicon_regex_delta_violation": "canon",
     "hardcode_core_violation": "canon",
+    "quality_constant_violation": "process",
+    "workaround_register_violation": "process",
     "wrong_action": "expectation",
     "handoff_miss": "expectation",
     "non_actionable_reply": "expectation",
@@ -5882,6 +5888,297 @@ def _llm_quality_build_run_economy_status(
     }
 
 
+def _llm_quality_build_quality_constant_status(
+    *,
+    mode,
+    lane,
+    scenarios_file,
+    run_mode,
+    count,
+    include_media,
+    scenario_coverage,
+    judge_mode,
+    run_economy_gate,
+    manual_audit_gate,
+    tool_evidence_policy,
+    fail_on_thresholds,
+    fail_on_regression,
+    allow_weak_oracle,
+    allow_incomplete_run_artifacts,
+    allow_judge_off,
+    allow_no_code_delta,
+    skip_outbox,
+    update_baseline,
+):
+    normalized_mode = str(mode or "off").strip().casefold()
+    if normalized_mode not in {"off", "warn", "block"}:
+        normalized_mode = "block"
+    lane_requested = str(lane or "auto").strip().casefold()
+    if lane_requested not in {"auto", "dev", "acceptance"}:
+        lane_requested = "auto"
+
+    lane_effective = lane_requested
+    if lane_effective == "auto":
+        lane_effective = (
+            "acceptance"
+            if bool(update_baseline or fail_on_thresholds or fail_on_regression)
+            else "dev"
+        )
+
+    coverage_values = _llm_quality_parse_coverage_tokens(scenario_coverage)
+    if isinstance(coverage_values, set):
+        coverage_token_set = set(coverage_values)
+    elif isinstance(coverage_values, (list, tuple)):
+        coverage_token_set = {
+            str(token).strip().casefold() for token in coverage_values if str(token).strip()
+        }
+    elif coverage_values is None:
+        coverage_token_set = set()
+    else:
+        coverage_token_set = {str(coverage_values).strip().casefold()}
+    coverage_tokens = sorted(coverage_token_set)
+    required_coverage = ("booking", "info", "interrupt", "handoff")
+    missing_coverage = [token for token in required_coverage if token not in coverage_token_set]
+    judge_enabled = _llm_quality_is_judge_mode_enabled(judge_mode)
+    reasons = []
+    is_replay = bool(scenarios_file)
+
+    if lane_effective == "acceptance":
+        if not bool(fail_on_thresholds):
+            reasons.append("acceptance_requires_fail_on_thresholds")
+        if is_replay and not bool(fail_on_regression):
+            reasons.append("acceptance_requires_fail_on_regression_replay")
+        if not judge_enabled:
+            reasons.append("acceptance_requires_judge_mode")
+        if str(run_mode or "").strip().casefold() != "llm":
+            reasons.append("acceptance_requires_llm_mode")
+        if int(count or 0) < 10:
+            reasons.append("acceptance_requires_count_gte_10")
+        if not bool(include_media):
+            reasons.append("acceptance_requires_include_media")
+        for token in missing_coverage:
+            reasons.append(f"acceptance_missing_coverage:{token}")
+        if str(run_economy_gate or "").strip().casefold() != "block":
+            reasons.append("acceptance_requires_run_economy_block")
+        if str(manual_audit_gate or "").strip().casefold() != "block":
+            reasons.append("acceptance_requires_manual_audit_block")
+        if str(tool_evidence_policy or "").strip().casefold() != "strict":
+            reasons.append("acceptance_requires_tool_evidence_strict")
+        if bool(allow_weak_oracle):
+            reasons.append("acceptance_disallows_allow_weak_oracle")
+        if bool(allow_incomplete_run_artifacts):
+            reasons.append("acceptance_disallows_allow_incomplete_run_artifacts")
+        if bool(allow_judge_off):
+            reasons.append("acceptance_disallows_allow_judge_off")
+        if bool(allow_no_code_delta):
+            reasons.append("acceptance_disallows_allow_no_code_delta")
+        if bool(skip_outbox):
+            reasons.append("acceptance_disallows_skip_outbox")
+    elif bool(update_baseline):
+        reasons.append("dev_lane_disallows_update_baseline")
+
+    enforced = normalized_mode == "block"
+    valid = not reasons if enforced else True
+    return {
+        "mode": normalized_mode,
+        "valid": valid,
+        "enforced": enforced,
+        "reasons": reasons,
+        "lane_requested": lane_requested,
+        "lane_effective": lane_effective,
+        "is_replay": is_replay,
+        "coverage_tokens": coverage_tokens,
+        "required_coverage": list(required_coverage),
+        "missing_coverage": missing_coverage,
+        "judge_enabled": judge_enabled,
+    }
+
+
+def _llm_quality_collect_workaround_marker_hits(*, repo_root, changed_files):
+    hits = []
+    pattern = re.compile(
+        r"(?:#|//|--)\s*WORKAROUND_ID\s*[:=]\s*([A-Za-z0-9][A-Za-z0-9._-]{1,127})",
+        re.IGNORECASE,
+    )
+    normalized_files = sorted(
+        {
+            str(path or "").strip().replace("\\", "/")
+            for path in (changed_files or [])
+            if str(path or "").strip()
+        }
+    )
+    for rel_path in normalized_files:
+        abs_path = os.path.abspath(os.path.join(repo_root, rel_path))
+        if not os.path.isfile(abs_path):
+            continue
+        try:
+            with open(abs_path, "r", encoding="utf-8", errors="ignore") as handle:
+                content = handle.read()
+        except Exception:
+            continue
+        for match in pattern.finditer(content):
+            workaround_id = str(match.group(1) or "").strip()
+            if not workaround_id:
+                continue
+            line = content.count("\n", 0, match.start()) + 1
+            hits.append(
+                {
+                    "path": rel_path,
+                    "line": int(line),
+                    "workaround_id": workaround_id,
+                }
+            )
+    deduped = {}
+    for item in hits:
+        key = (
+            str(item.get("path") or "").strip(),
+            int(item.get("line") or 0),
+            str(item.get("workaround_id") or "").strip(),
+        )
+        if key in deduped:
+            continue
+        deduped[key] = item
+    ordered = sorted(
+        deduped.values(),
+        key=lambda row: (
+            str(row.get("workaround_id") or ""),
+            str(row.get("path") or ""),
+            int(row.get("line") or 0),
+        ),
+    )
+    return ordered
+
+
+def _llm_quality_collect_workaround_register_ids(payload):
+    ids = set()
+    stack = [payload]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            candidate = (
+                current.get("id")
+                or current.get("workaround_id")
+                or current.get("workaroundId")
+            )
+            if isinstance(candidate, str) and candidate.strip():
+                ids.add(candidate.strip())
+            for value in current.values():
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+        elif isinstance(current, list):
+            for item in current:
+                if isinstance(item, (dict, list)):
+                    stack.append(item)
+    return sorted(ids)
+
+
+def _llm_quality_build_workaround_register_status(
+    *,
+    mode,
+    repo_root,
+    base_ref,
+    register_path,
+    changed_files=None,
+):
+    normalized_mode = str(mode or "off").strip().casefold()
+    if normalized_mode not in {"off", "warn", "block"}:
+        normalized_mode = "block"
+    default_register_path = "docs/WORKAROUND_REGISTER.json"
+    register_path_raw = str(register_path or "").strip() or default_register_path
+    register_path_abs = (
+        os.path.abspath(os.path.expanduser(register_path_raw))
+        if os.path.isabs(register_path_raw)
+        else os.path.abspath(os.path.join(repo_root, register_path_raw))
+    )
+    gate_status = {
+        "mode": normalized_mode,
+        "valid": True,
+        "enforced": normalized_mode == "block",
+        "reasons": [],
+        "scan_warnings": [],
+        "changed_files": [],
+        "changed_files_count": 0,
+        "marker_hits": [],
+        "marker_count": 0,
+        "marker_ids": [],
+        "register_path": register_path_abs,
+        "register_exists": os.path.exists(register_path_abs),
+        "register_load_error": None,
+        "registered_ids": [],
+        "missing_ids": [],
+    }
+    if normalized_mode == "off":
+        return gate_status
+
+    scan_warnings = []
+    if changed_files is None:
+        changed_files, scan_warnings = _llm_quality_collect_git_changed_files(
+            repo_root, base_ref
+        )
+    normalized_files = sorted(
+        {
+            str(path or "").strip().replace("\\", "/")
+            for path in (changed_files or [])
+            if str(path or "").strip()
+        }
+    )
+    marker_hits = _llm_quality_collect_workaround_marker_hits(
+        repo_root=repo_root,
+        changed_files=normalized_files,
+    )
+    marker_ids = sorted(
+        {
+            str(row.get("workaround_id") or "").strip()
+            for row in marker_hits
+            if str(row.get("workaround_id") or "").strip()
+        }
+    )
+
+    register_load_error = None
+    register_payload = None
+    registered_ids = []
+    missing_ids = []
+    if marker_ids:
+        if not os.path.exists(register_path_abs):
+            register_load_error = "missing"
+        else:
+            try:
+                with open(register_path_abs, "r", encoding="utf-8") as handle:
+                    register_payload = json.load(handle)
+            except Exception:
+                register_load_error = "parse_error"
+        if register_load_error is None:
+            registered_ids = _llm_quality_collect_workaround_register_ids(register_payload)
+            registered_set = {str(item).strip() for item in registered_ids if str(item).strip()}
+            missing_ids = [workaround_id for workaround_id in marker_ids if workaround_id not in registered_set]
+
+    reasons = []
+    if marker_ids and register_load_error == "missing":
+        reasons.append("workaround_register_missing")
+    elif marker_ids and register_load_error == "parse_error":
+        reasons.append("workaround_register_parse_error")
+    for workaround_id in missing_ids:
+        reasons.append(f"workaround_id_unregistered:{workaround_id}")
+
+    gate_status.update(
+        {
+            "valid": (not reasons) if gate_status.get("enforced") else True,
+            "reasons": reasons,
+            "scan_warnings": scan_warnings,
+            "changed_files": normalized_files,
+            "changed_files_count": len(normalized_files),
+            "marker_hits": marker_hits[:50],
+            "marker_count": len(marker_hits),
+            "marker_ids": marker_ids,
+            "register_exists": os.path.exists(register_path_abs),
+            "register_load_error": register_load_error,
+            "registered_ids": registered_ids,
+            "missing_ids": missing_ids,
+        }
+    )
+    return gate_status
+
+
 def _llm_quality_load_json_object(path):
     normalized = os.path.abspath(os.path.expanduser(str(path or "").strip() or "."))
     if not os.path.exists(normalized):
@@ -6350,6 +6647,8 @@ def _llm_quality_next_step_for_reason(reason):
         "outbox_delivery_timeout": "increase poll/outbox wait for replay and verify worker/outbox process timing",
         "delivery_waiver_billing": "classify as delivery waiver and keep semantic acceptance on contract checks",
         "manual_audit_gate_violation": "complete manual audit for previous run (manual_audit.md/json) before starting a new run",
+        "quality_constant_violation": "run acceptance lane with full canonical envelope (judge/media/coverage/gates) or switch explicitly to dev lane",
+        "workaround_register_violation": "register WORKAROUND_ID in workaround register with owner/expiry/removal condition before rerun",
         "false_booking_confirmation": "verify booking confirmation text against appointment_id and calendar outcome",
         "calendar_tool_contract_miss": "inspect tool_signals.calendar + appointment_status before confirming booking",
         "requested_date_time_like": "fix runtime date normalization so requested_date stores only date/relative-date tokens",
@@ -7025,6 +7324,10 @@ def _llm_quality_stop_reason_from_system_exit(code):
             return "invalid_scenario_contract_preflight"
         if "run economy gate failed" in lowered:
             return "invalid_run_economy_preflight"
+        if "quality constant gate failed" in lowered:
+            return "invalid_quality_constant_preflight"
+        if "workaround register gate failed" in lowered:
+            return "invalid_workaround_register_preflight"
         return "invalid_preflight"
     if "signal_" in text:
         return text
@@ -7113,6 +7416,13 @@ def _llm_quality_write_failure_artifacts(
             "run_economy_gate": getattr(args, "run_economy_gate", None),
             "run_economy_base_ref": getattr(args, "run_economy_base_ref", None),
             "manual_audit_gate": getattr(args, "manual_audit_gate", None),
+            "quality_constant_gate": getattr(args, "quality_constant_gate", None),
+            "quality_lane": getattr(args, "quality_lane", None),
+            "workaround_register_gate": getattr(args, "workaround_register_gate", None),
+            "workaround_register_base_ref": getattr(
+                args, "workaround_register_base_ref", None
+            ),
+            "workaround_register_path": getattr(args, "workaround_register_path", None),
             "expected_runtime_commit": getattr(args, "expected_runtime_commit", None),
         },
         "metrics": {"counts": minimal_counts, "rates": {}, "stages": {}},
@@ -7252,6 +7562,13 @@ def _llm_quality_write_checkpoint_summary(
             "jid_mode": getattr(args, "jid_mode", None),
             "baseline_summary": getattr(args, "baseline_summary", None),
             "manual_audit_gate": getattr(args, "manual_audit_gate", None),
+            "quality_constant_gate": getattr(args, "quality_constant_gate", None),
+            "quality_lane": getattr(args, "quality_lane", None),
+            "workaround_register_gate": getattr(args, "workaround_register_gate", None),
+            "workaround_register_base_ref": getattr(
+                args, "workaround_register_base_ref", None
+            ),
+            "workaround_register_path": getattr(args, "workaround_register_path", None),
         },
         "infra_valid": False,
         "semantic_valid": False,
@@ -9436,6 +9753,39 @@ def _parse_llm_quality_args(argv):
         help="Stop or warn when previous run is missing mandatory manual audit artifacts.",
     )
     parser.add_argument(
+        "--quality-constant-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_CONSTANT_GATE", "block"),
+        help=(
+            "Fail-closed lane gate: acceptance runs must keep full canonical envelope "
+            "without debug downgrades."
+        ),
+    )
+    parser.add_argument(
+        "--quality-lane",
+        choices=["auto", "dev", "acceptance"],
+        default=os.environ.get("LLM_QUALITY_LANE", "auto"),
+        help="Operating lane for this run (auto infers from fail/update flags).",
+    )
+    parser.add_argument(
+        "--workaround-register-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_WORKAROUND_REGISTER_GATE", "block"),
+        help="Require WORKAROUND_ID markers in changed files to be registered.",
+    )
+    parser.add_argument(
+        "--workaround-register-base-ref",
+        default=os.environ.get("LLM_QUALITY_WORKAROUND_REGISTER_BASE_REF", "origin/main"),
+        help="Base ref used to scan changed files for workaround markers.",
+    )
+    parser.add_argument(
+        "--workaround-register-path",
+        default=os.environ.get(
+            "LLM_QUALITY_WORKAROUND_REGISTER_PATH", "docs/WORKAROUND_REGISTER.json"
+        ),
+        help="JSON register path that tracks active workaround IDs.",
+    )
+    parser.add_argument(
         "--allow-no-code-delta",
         action="store_true",
         help="Allow full run with doc-only/empty diff (debug-only override).",
@@ -9555,6 +9905,62 @@ def _parse_llm_quality_gates_args(argv):
         "--allow-no-code-delta",
         action="store_true",
         help="Allow empty/doc-only diff for full-run run-economy check.",
+    )
+    parser.add_argument(
+        "--quality-constant-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_CONSTANT_GATE", "block"),
+        help="Fail-closed lane gate for acceptance/dev envelope consistency.",
+    )
+    parser.add_argument(
+        "--quality-lane",
+        choices=["auto", "dev", "acceptance"],
+        default=os.environ.get("LLM_QUALITY_LANE", "auto"),
+        help="Operating lane token used by quality-constant gate.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["template", "llm"],
+        default="llm",
+        help="Run mode token used by quality-constant gate.",
+    )
+    parser.add_argument("--count", type=int, default=10)
+    parser.add_argument("--include-media", action="store_true")
+    parser.add_argument("--scenario-coverage", default="booking,info,interrupt,handoff")
+    parser.add_argument("--fail-on-thresholds", action="store_true")
+    parser.add_argument("--fail-on-regression", action="store_true")
+    parser.add_argument("--update-baseline", action="store_true")
+    parser.add_argument("--allow-weak-oracle", action="store_true")
+    parser.add_argument("--allow-incomplete-run-artifacts", action="store_true")
+    parser.add_argument("--allow-judge-off", action="store_true")
+    parser.add_argument("--skip-outbox", action="store_true")
+    parser.add_argument(
+        "--tool-evidence-policy",
+        choices=["off", "auto", "strict"],
+        default=os.environ.get("LLM_QUALITY_TOOL_EVIDENCE_POLICY", "strict"),
+    )
+    parser.add_argument(
+        "--manual-audit-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_MANUAL_AUDIT_GATE", "block"),
+    )
+    parser.add_argument(
+        "--workaround-register-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_WORKAROUND_REGISTER_GATE", "block"),
+        help="Require WORKAROUND_ID markers in changed files to be registered.",
+    )
+    parser.add_argument(
+        "--workaround-register-base-ref",
+        default=os.environ.get("LLM_QUALITY_WORKAROUND_REGISTER_BASE_REF", "origin/main"),
+        help="Base ref used for workaround marker scan.",
+    )
+    parser.add_argument(
+        "--workaround-register-path",
+        default=os.environ.get(
+            "LLM_QUALITY_WORKAROUND_REGISTER_PATH", "docs/WORKAROUND_REGISTER.json"
+        ),
+        help="JSON register path with active workaround IDs.",
     )
     parser.add_argument("--output", default=None, help="Optional JSON output file path.")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
@@ -12883,6 +13289,81 @@ def _run_llm_quality(args):
             "llm-quality: INVALID RUN - run economy gate failed "
             f"({','.join(reason_tokens)})"
         )
+    quality_constant_status = _llm_quality_build_quality_constant_status(
+        mode=args.quality_constant_gate,
+        lane=args.quality_lane,
+        scenarios_file=args.scenarios_file,
+        run_mode=args.mode,
+        count=args.count,
+        include_media=bool(args.include_media),
+        scenario_coverage=args.scenario_coverage,
+        judge_mode=judge_mode,
+        run_economy_gate=args.run_economy_gate,
+        manual_audit_gate=args.manual_audit_gate,
+        tool_evidence_policy=args.tool_evidence_policy,
+        fail_on_thresholds=bool(args.fail_on_thresholds),
+        fail_on_regression=bool(args.fail_on_regression),
+        allow_weak_oracle=bool(args.allow_weak_oracle),
+        allow_incomplete_run_artifacts=bool(args.allow_incomplete_run_artifacts),
+        allow_judge_off=bool(args.allow_judge_off),
+        allow_no_code_delta=bool(args.allow_no_code_delta),
+        skip_outbox=bool(args.skip_outbox),
+        update_baseline=bool(args.update_baseline),
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_quality_constant_preflight",
+                "mode": quality_constant_status.get("mode"),
+                "valid": quality_constant_status.get("valid"),
+                "enforced": quality_constant_status.get("enforced"),
+                "reasons": quality_constant_status.get("reasons"),
+                "lane_requested": quality_constant_status.get("lane_requested"),
+                "lane_effective": quality_constant_status.get("lane_effective"),
+                "missing_coverage": quality_constant_status.get("missing_coverage"),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if (
+        quality_constant_status.get("enforced")
+        and not quality_constant_status.get("valid", True)
+    ):
+        reason_tokens = quality_constant_status.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - quality constant gate failed "
+            f"({','.join(reason_tokens)})"
+        )
+    workaround_register_status = _llm_quality_build_workaround_register_status(
+        mode=args.workaround_register_gate,
+        repo_root=_llm_quality_repo_root(),
+        base_ref=args.workaround_register_base_ref,
+        register_path=args.workaround_register_path,
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_workaround_register_preflight",
+                "mode": workaround_register_status.get("mode"),
+                "valid": workaround_register_status.get("valid"),
+                "enforced": workaround_register_status.get("enforced"),
+                "reasons": workaround_register_status.get("reasons"),
+                "register_path": workaround_register_status.get("register_path"),
+                "marker_count": workaround_register_status.get("marker_count"),
+                "missing_ids": workaround_register_status.get("missing_ids"),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if (
+        workaround_register_status.get("enforced")
+        and not workaround_register_status.get("valid", True)
+    ):
+        reason_tokens = workaround_register_status.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - workaround register gate failed "
+            f"({','.join(reason_tokens)})"
+        )
 
     scenarios_payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -14918,6 +15399,22 @@ def _run_llm_quality(args):
             len(manual_audit_gate_status.get("reasons") or []),
             1,
         )
+    if (
+        not quality_constant_status.get("valid", True)
+        and quality_constant_status.get("mode") in {"warn", "block"}
+    ):
+        process_blocking_counts["quality_constant_violation"] = max(
+            len(quality_constant_status.get("reasons") or []),
+            1,
+        )
+    if (
+        not workaround_register_status.get("valid", True)
+        and workaround_register_status.get("mode") in {"warn", "block"}
+    ):
+        process_blocking_counts["workaround_register_violation"] = max(
+            len(workaround_register_status.get("reasons") or []),
+            1,
+        )
     missing_scenario_artifacts = list((scenario_artifact_status or {}).get("missing") or [])
     if missing_scenario_artifacts:
         process_blocking_counts["incomplete_run_artifact"] = len(missing_scenario_artifacts)
@@ -15104,6 +15601,12 @@ def _run_llm_quality(args):
         "run_economy_gate": args.run_economy_gate,
         "run_economy_base_ref": args.run_economy_base_ref,
         "manual_audit_gate": args.manual_audit_gate,
+        "quality_constant_gate": args.quality_constant_gate,
+        "quality_lane_requested": quality_constant_status.get("lane_requested"),
+        "quality_lane_effective": quality_constant_status.get("lane_effective"),
+        "workaround_register_gate": args.workaround_register_gate,
+        "workaround_register_base_ref": args.workaround_register_base_ref,
+        "workaround_register_path": workaround_register_status.get("register_path"),
         "allow_no_code_delta": bool(args.allow_no_code_delta),
         "judge_mode": judge_mode,
         "judge_required": judge_required,
@@ -15159,6 +15662,8 @@ def _run_llm_quality(args):
         "hardcode_core_gate": hardcode_core_gate,
         "run_economy": run_economy_status,
         "manual_audit_gate": manual_audit_gate_status,
+        "quality_constant_gate": quality_constant_status,
+        "workaround_register_gate": workaround_register_status,
         "top_failures": top_failures,
         "top_failure_turns": top_failure_turns,
         "failures": failures,
@@ -15231,6 +15736,26 @@ def _run_llm_quality(args):
             "manual_audit_gate_valid": manual_audit_gate_status.get("valid", True),
             "manual_audit_gate_enforced": manual_audit_gate_status.get("enforced", False),
             "manual_audit_gate_reasons": manual_audit_gate_status.get("reasons", []),
+            "quality_constant_gate_valid": quality_constant_status.get("valid", True),
+            "quality_constant_gate_enforced": quality_constant_status.get("enforced", False),
+            "quality_constant_gate_reasons": quality_constant_status.get("reasons", []),
+            "quality_lane_requested": quality_constant_status.get("lane_requested"),
+            "quality_lane_effective": quality_constant_status.get("lane_effective"),
+            "quality_lane_missing_coverage": quality_constant_status.get("missing_coverage", []),
+            "workaround_register_gate_valid": workaround_register_status.get("valid", True),
+            "workaround_register_gate_enforced": workaround_register_status.get(
+                "enforced", False
+            ),
+            "workaround_register_gate_reasons": workaround_register_status.get(
+                "reasons", []
+            ),
+            "workaround_register_path": workaround_register_status.get("register_path"),
+            "workaround_register_marker_count": workaround_register_status.get(
+                "marker_count", 0
+            ),
+            "workaround_register_missing_ids": workaround_register_status.get(
+                "missing_ids", []
+            ),
             "tool_evidence_valid": tool_evidence_status.get("valid"),
             "tool_evidence_reasons": tool_evidence_status.get("reasons"),
             "scenario_contract_valid": scenario_contract.get("valid"),
@@ -15545,11 +16070,46 @@ def _run_llm_quality_gates(args):
         scenario_coverage=getattr(args, "scenario_coverage", None),
     )
     _merge_scan_warnings(run_economy_gate, run_economy_scan_warnings)
+    quality_constant_gate = _llm_quality_build_quality_constant_status(
+        mode=args.quality_constant_gate,
+        lane=args.quality_lane,
+        scenarios_file=args.scenarios_file,
+        run_mode=args.mode,
+        count=args.count,
+        include_media=bool(args.include_media),
+        scenario_coverage=args.scenario_coverage,
+        judge_mode=args.judge_mode,
+        run_economy_gate=args.run_economy_gate,
+        manual_audit_gate=args.manual_audit_gate,
+        tool_evidence_policy=args.tool_evidence_policy,
+        fail_on_thresholds=bool(args.fail_on_thresholds),
+        fail_on_regression=bool(args.fail_on_regression),
+        allow_weak_oracle=bool(args.allow_weak_oracle),
+        allow_incomplete_run_artifacts=bool(args.allow_incomplete_run_artifacts),
+        allow_judge_off=bool(args.allow_judge_off),
+        allow_no_code_delta=bool(args.allow_no_code_delta),
+        skip_outbox=bool(args.skip_outbox),
+        update_baseline=bool(args.update_baseline),
+    )
+
+    workaround_changed, workaround_scan_warnings = _collect_changed_files(
+        args.workaround_register_base_ref
+    )
+    workaround_register_gate = _llm_quality_build_workaround_register_status(
+        mode=args.workaround_register_gate,
+        repo_root=repo_root,
+        base_ref=args.workaround_register_base_ref,
+        register_path=args.workaround_register_path,
+        changed_files=workaround_changed,
+    )
+    _merge_scan_warnings(workaround_register_gate, workaround_scan_warnings)
 
     gate_statuses = {
         "lexicon_regex_delta_gate": lexicon_regex_delta_gate,
         "hardcode_core_gate": hardcode_core_gate,
         "run_economy_gate": run_economy_gate,
+        "quality_constant_gate": quality_constant_gate,
+        "workaround_register_gate": workaround_register_gate,
     }
     blocking_reasons = []
     warn_reasons = []

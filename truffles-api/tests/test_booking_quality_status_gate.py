@@ -67,6 +67,11 @@ def _load_quality_helpers():
         "_llm_quality_build_hardcode_core_gate_status",
         "_llm_quality_is_doc_only_changed_file",
         "_llm_quality_build_run_economy_status",
+        "_llm_quality_parse_coverage_tokens",
+        "_llm_quality_build_quality_constant_status",
+        "_llm_quality_collect_workaround_marker_hits",
+        "_llm_quality_collect_workaround_register_ids",
+        "_llm_quality_build_workaround_register_status",
         "_llm_quality_build_replay_command",
         "_llm_quality_required_artifact_paths",
         "_llm_quality_collect_artifact_integrity",
@@ -726,6 +731,202 @@ def test_run_economy_blocks_replay_with_unreadable_baseline_summary():
 
     assert status["valid"] is False
     assert "replay_baseline_unreadable" in status["reasons"]
+
+
+def test_quality_constant_acceptance_lane_requires_canonical_envelope():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_quality_constant_status"]
+
+    valid = build(
+        mode="block",
+        lane="acceptance",
+        scenarios_file="/tmp/booking_quality/lock/scenarios.json",
+        run_mode="llm",
+        count=10,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+        judge_mode="all",
+        run_economy_gate="block",
+        manual_audit_gate="block",
+        tool_evidence_policy="strict",
+        fail_on_thresholds=True,
+        fail_on_regression=True,
+        allow_weak_oracle=False,
+        allow_incomplete_run_artifacts=False,
+        allow_judge_off=False,
+        allow_no_code_delta=False,
+        skip_outbox=False,
+        update_baseline=False,
+    )
+    assert valid["valid"] is True
+    assert valid["reasons"] == []
+    assert valid["lane_effective"] == "acceptance"
+
+    invalid = build(
+        mode="block",
+        lane="acceptance",
+        scenarios_file="/tmp/booking_quality/lock/scenarios.json",
+        run_mode="llm",
+        count=8,
+        include_media=False,
+        scenario_coverage="booking,info,interrupt",
+        judge_mode="off",
+        run_economy_gate="warn",
+        manual_audit_gate="warn",
+        tool_evidence_policy="auto",
+        fail_on_thresholds=False,
+        fail_on_regression=False,
+        allow_weak_oracle=True,
+        allow_incomplete_run_artifacts=True,
+        allow_judge_off=True,
+        allow_no_code_delta=True,
+        skip_outbox=True,
+        update_baseline=False,
+    )
+    assert invalid["valid"] is False
+    assert "acceptance_requires_fail_on_thresholds" in invalid["reasons"]
+    assert "acceptance_requires_fail_on_regression_replay" in invalid["reasons"]
+    assert "acceptance_requires_judge_mode" in invalid["reasons"]
+    assert "acceptance_requires_count_gte_10" in invalid["reasons"]
+    assert "acceptance_requires_include_media" in invalid["reasons"]
+    assert "acceptance_missing_coverage:handoff" in invalid["reasons"]
+    assert "acceptance_requires_run_economy_block" in invalid["reasons"]
+    assert "acceptance_requires_manual_audit_block" in invalid["reasons"]
+    assert "acceptance_requires_tool_evidence_strict" in invalid["reasons"]
+    assert "acceptance_disallows_allow_judge_off" in invalid["reasons"]
+    assert "acceptance_disallows_allow_no_code_delta" in invalid["reasons"]
+    assert "acceptance_disallows_skip_outbox" in invalid["reasons"]
+
+
+def test_quality_constant_dev_lane_disallows_baseline_update_only():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_quality_constant_status"]
+
+    allowed = build(
+        mode="block",
+        lane="dev",
+        scenarios_file=None,
+        run_mode="llm",
+        count=3,
+        include_media=False,
+        scenario_coverage="booking",
+        judge_mode="off",
+        run_economy_gate="warn",
+        manual_audit_gate="warn",
+        tool_evidence_policy="auto",
+        fail_on_thresholds=False,
+        fail_on_regression=False,
+        allow_weak_oracle=True,
+        allow_incomplete_run_artifacts=True,
+        allow_judge_off=True,
+        allow_no_code_delta=True,
+        skip_outbox=True,
+        update_baseline=False,
+    )
+    assert allowed["valid"] is True
+    assert allowed["reasons"] == []
+    assert allowed["lane_effective"] == "dev"
+
+    blocked = build(
+        mode="block",
+        lane="dev",
+        scenarios_file=None,
+        run_mode="llm",
+        count=3,
+        include_media=False,
+        scenario_coverage="booking",
+        judge_mode="off",
+        run_economy_gate="warn",
+        manual_audit_gate="warn",
+        tool_evidence_policy="auto",
+        fail_on_thresholds=False,
+        fail_on_regression=False,
+        allow_weak_oracle=True,
+        allow_incomplete_run_artifacts=True,
+        allow_judge_off=True,
+        allow_no_code_delta=True,
+        skip_outbox=True,
+        update_baseline=True,
+    )
+    assert blocked["valid"] is False
+    assert blocked["reasons"] == ["dev_lane_disallows_update_baseline"]
+
+
+def test_workaround_register_gate_blocks_unregistered_marker(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_workaround_register_status"]
+
+    source_file = tmp_path / "truffles-api" / "app" / "routers" / "webhook" / "decision.py"
+    source_file.parent.mkdir(parents=True)
+    marker = "WORKAROUND" "_ID: WA-001"
+    source_file.write_text(
+        f"if True:\n    pass  # {marker}\n",
+        encoding="utf-8",
+    )
+    register_dir = tmp_path / "docs"
+    register_dir.mkdir()
+    (register_dir / "WORKAROUND_REGISTER.json").write_text(
+        json.dumps({"workarounds": [{"id": "WA-999"}]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    status = build_gate(
+        mode="block",
+        repo_root=str(tmp_path),
+        base_ref="origin/main",
+        register_path="docs/WORKAROUND_REGISTER.json",
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+    )
+
+    assert status["valid"] is False
+    assert status["marker_count"] == 1
+    assert status["marker_ids"] == ["WA-001"]
+    assert "workaround_id_unregistered:WA-001" in status["reasons"]
+
+
+def test_workaround_register_gate_accepts_registered_marker(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_workaround_register_status"]
+
+    source_file = tmp_path / "ops" / "diagnose.py"
+    source_file.parent.mkdir(parents=True)
+    marker = "WORKAROUND" "_ID: WA-200"
+    source_file.write_text(
+        f"# {marker}\nprint(\"ok\")\n",
+        encoding="utf-8",
+    )
+    register_dir = tmp_path / "docs"
+    register_dir.mkdir()
+    (register_dir / "WORKAROUND_REGISTER.json").write_text(
+        json.dumps(
+            {
+                "workarounds": [
+                    {
+                        "id": "WA-200",
+                        "owner": "a1",
+                        "status": "active",
+                        "remove_when": "root cause fixed",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    status = build_gate(
+        mode="block",
+        repo_root=str(tmp_path),
+        base_ref="origin/main",
+        register_path="docs/WORKAROUND_REGISTER.json",
+        changed_files=["ops/diagnose.py"],
+    )
+
+    assert status["valid"] is True
+    assert status["reasons"] == []
+    assert status["missing_ids"] == []
+    assert status["marker_ids"] == ["WA-200"]
 
 
 def test_replay_command_forces_unique_jid_and_reset():
