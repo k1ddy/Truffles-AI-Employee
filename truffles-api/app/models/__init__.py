@@ -39,6 +39,7 @@ from app.models.tenants_fleet_cache import TenantsFleetCache
 from app.models.tenants_fleet_client_projection import TenantsFleetClientProjection
 from app.models.tenants_fleet_prewarm_job import TenantsFleetPrewarmJob
 from app.models.tenants_weekly_snapshot import TenantsWeeklySnapshot
+from app.models.tool_registry_entry import ToolRegistryEntry
 from app.models.user import User
 
 __all__ = [
@@ -84,4 +85,5 @@ __all__ = [
     "TenantsFleetCache",
     "TenantsFleetClientProjection",
     "TenantsFleetPrewarmJob",
+    "ToolRegistryEntry",
 ]

@@ -40,6 +40,7 @@ from app.services.pack_runtime_service import (
     get_system_lexicon_list,
     load_yaml_truth,
 )
+from app.services.tool_certification_service import resolve_tool_certification_decision
 
 _TIME_TOKEN_RE = re.compile(r"\b([01]?\d|2[0-3])[:.][0-5]\d\b")
 _DAYPART_TOKEN_RE = re.compile(
@@ -1385,6 +1386,51 @@ def execute_tool_action(
                 "tool_protocol_decision": "blocked",
                 "tool_protocol_enforced": protocol_decision.enforcement_enabled,
                 "tool_protocol_deny_by_default": protocol_decision.deny_by_default,
+            },
+        )
+
+    certification_scope = "branch" if branch_id else "client"
+    certification_decision = resolve_tool_certification_decision(
+        db,
+        tool_action=tool_action,
+        scope=certification_scope,
+    )
+    if not certification_decision.allowed:
+        response_text = (
+            "В этом филиале онлайн-календарь для такого запроса недоступен. "
+            "Передам менеджеру, чтобы помочь вручную."
+            if tool_action.startswith("calendar.")
+            else "Для этого запроса в данном филиале используется ручная обработка менеджером."
+        )
+        return ToolExecutionResult(
+            handled=True,
+            ok=False,
+            response_text=response_text,
+            error_code="tool_action_disabled",
+            decision_meta={
+                "tool_action": tool_action,
+                "tool_decision": "capability_blocked",
+                "capability_reason": certification_decision.reason,
+                "capability_source": certification_decision.source,
+                "tool_registry_decision": "blocked",
+                "tool_registry_scope": certification_scope,
+                "tool_registry_status": certification_decision.registry_status,
+                "tool_certification_status": certification_decision.certification_status,
+                "tool_registry_health_status": certification_decision.health_status,
+                "tool_registry_allowed_scopes": list(certification_decision.allowed_scopes),
+            },
+            trace={
+                "stage": "tool_registry",
+                "decision": "capability_blocked",
+                "tool_action": tool_action,
+                "capability_reason": certification_decision.reason,
+                "capability_source": certification_decision.source,
+                "tool_registry_decision": "blocked",
+                "tool_registry_scope": certification_scope,
+                "tool_registry_status": certification_decision.registry_status,
+                "tool_certification_status": certification_decision.certification_status,
+                "tool_registry_health_status": certification_decision.health_status,
+                "tool_registry_allowed_scopes": list(certification_decision.allowed_scopes),
             },
         )
 

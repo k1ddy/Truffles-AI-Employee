@@ -1777,6 +1777,38 @@ class ConsolePolicyRegistryMutationResponse(BaseModel):
     from_version_id: Optional[UUID] = None
 
 
+class ConsoleToolRegistryItem(BaseModel):
+    id: UUID
+    tool_action: str
+    tool_group: str
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    schema_version: str
+    status: Literal["active", "disabled"]
+    certification_status: Literal["certified", "uncertified"]
+    health_status: Literal["healthy", "degraded", "down"]
+    allowed_scopes: list[Literal["client", "branch"]] = []
+    metadata: dict = {}
+    created_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleToolRegistryListResponse(BaseModel):
+    items: list[ConsoleToolRegistryItem]
+
+
+class ConsoleToolRegistryUpsertRequest(BaseModel):
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    schema_version: Optional[str] = None
+    status: Optional[Literal["active", "disabled"]] = None
+    certification_status: Optional[Literal["certified", "uncertified"]] = None
+    health_status: Optional[Literal["healthy", "degraded", "down"]] = None
+    allowed_scopes: Optional[list[Literal["client", "branch"]]] = None
+    metadata: Optional[dict] = None
+
+
 class ConsoleOnboardingContractRecord(BaseModel):
     id: UUID
     client_id: UUID
