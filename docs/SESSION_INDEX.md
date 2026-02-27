@@ -337,3 +337,4 @@
 | 2026-02-27-ucpv1-phase3-a500 | done | feat/2026-02-27-ucpv1-phase3-a500 | /home/zhan/worktrees/2026-02-27-ucpv1-phase3-a500 | docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase3-a500.md | 2026-02-27 |
 | 2026-02-27-ucpv1-phase4-a500 | done | feat/2026-02-27-ucpv1-phase4-a500 | /home/zhan/worktrees/2026-02-27-ucpv1-phase4-a500 | docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase4-a500.md | 2026-02-27 |
 | 2026-02-27-ucpv1-phase5-a500 | done | feat/2026-02-27-ucpv1-phase5-a500 | /home/zhan/worktrees/2026-02-27-ucpv1-phase5-a500 | docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase5-a500.md | 2026-02-27 |
+| 2026-02-27-deploy-console-build-retry-a510 | done | feat/2026-02-27-deploy-console-build-retry-a510 | /home/zhan/worktrees/2026-02-27-deploy-console-build-retry-a510 | docs/TASK_PACKAGES/TP-2026-02-27-deploy-console-build-retry-a510.md | 2026-02-27 |
