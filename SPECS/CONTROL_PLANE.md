@@ -237,6 +237,7 @@ Pack‑файл — **генерируемый артефакт** при publish
 **Provisioning (Platform Admin):**
 - `POST /console/v1/admin/companies|clients|branches|agents` (`companies|clients` write: только `platform_admin`)
 - `PATCH /console/v1/admin/capabilities` (write: только `platform_admin`)
+- `GET|PUT|DELETE /console/v1/admin/domain-catalog*` (domain registry + domain capability templates, platform-admin only)
 - `GET /console/v1/admin/onboarding-blueprints`, `GET|PUT /console/v1/admin/reference-packs*`, `GET|PATCH /console/v1/admin/onboarding-contract`, `GET /console/v1/admin/webhook-secret`, `POST /console/v1/admin/onboarding/autopilot` (platform governance control)
 
 **Knowledge:**

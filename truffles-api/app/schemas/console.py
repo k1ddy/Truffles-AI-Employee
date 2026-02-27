@@ -1792,6 +1792,33 @@ class ConsoleReferencePackUpsertRequest(BaseModel):
     metadata: Optional[dict] = None
 
 
+class ConsoleDomainCatalogItem(BaseModel):
+    id: UUID
+    domain_slug: str
+    title: str
+    summary: Optional[str] = None
+    schema_version: str
+    status: Literal["active", "disabled"]
+    capability_template: CapabilitiesPayload
+    metadata: dict
+    created_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleDomainCatalogListResponse(BaseModel):
+    items: list[ConsoleDomainCatalogItem]
+
+
+class ConsoleDomainCatalogUpsertRequest(BaseModel):
+    title: str
+    summary: Optional[str] = None
+    schema_version: Optional[str] = None
+    status: Optional[Literal["active", "disabled"]] = None
+    capability_template: Optional[CapabilitiesPayload] = None
+    metadata: Optional[dict] = None
+
+
 class ConsoleOnboardingBlueprintQuestionTemplate(BaseModel):
     code: str
     question: str

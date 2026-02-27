@@ -65,3 +65,10 @@ def merge_capabilities(base: dict[str, Any] | None, override: dict[str, Any] | N
         else:
             merged[key] = value
     return merged
+
+
+def merge_capabilities_layers(*layers: dict[str, Any] | None) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for layer in layers:
+        merged = merge_capabilities(merged, layer)
+    return merged
