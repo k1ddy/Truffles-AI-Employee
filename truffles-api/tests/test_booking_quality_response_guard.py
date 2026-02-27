@@ -42,6 +42,7 @@ def _load_evaluate_turn():
     wanted_functions = {
         "_llm_quality_evaluate_turn",
         "_llm_quality_effective_intent",
+        "_llm_quality_has_catalog_service_choice_info_fallback",
         "_llm_quality_has_general_consult_fallback",
         "_llm_quality_is_booking_confirmation_text",
         "_llm_quality_is_unobserved_turn",
@@ -86,6 +87,7 @@ def _load_evaluate_turn():
         "re": re,
         "_llm_quality_value_matches": lambda *_args, **_kwargs: True,
         "_chaos_reply_type_fallback_ok": lambda *_args, **_kwargs: False,
+        "_llm_quality_collect_info_signals": lambda *_args, **_kwargs: (set(), set()),
         "_llm_quality_expected_section_answered": lambda *_args, **_kwargs: (False, set(), set()),
         "_llm_quality_state_matches_expected": lambda *_args, **_kwargs: True,
         "_llm_quality_action_matches_expected": lambda *_args, **_kwargs: True,
@@ -1169,6 +1171,41 @@ def test_evaluate_turn_allows_contract_cleared_expected_reply_mismatch():
     assert "expected_reply_type_mismatch" not in reasons
 
 
+def test_evaluate_turn_allows_calendar_list_slots_without_expected_reply_type():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "calendar.list_slots",
+            "tool_action": "calendar.list_slots",
+            "tool_decision": "ok",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="service_choice",
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=False,
+        allow_booking_stall=False,
+        outbox_text="Свободные слоты: Айгерим Болатова: 10:00, 11:00.",
+        tool_signals={"calendar": {"outcome": "success"}},
+    )
+
+    assert "expected_reply_type_mismatch" not in reasons
+
+
 def test_evaluate_turn_flags_slot_date_resolution_miss():
     evaluate = _load_evaluate_turn()
 
@@ -1355,6 +1392,43 @@ def test_evaluate_turn_does_not_flag_booking_prompt_leak_for_services_overview()
     assert "booking_prompt_leak" not in reasons
 
 
+def test_evaluate_turn_does_not_flag_booking_prompt_leak_for_missing_slot_collect():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "catalog.service_query",
+            "tool_action": "catalog.service_query",
+            "tool_decision": "missing_slot",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text=(
+            "На какую услугу хотите записаться? После этого сразу проверю свободное время."
+        ),
+        tool_signals={},
+    )
+
+    assert "booking_prompt_leak" not in reasons
+
+
 def test_evaluate_turn_does_not_flag_mix_info_booking_for_service_query_missing_slot():
     evaluate = _load_evaluate_turn()
 
@@ -1390,6 +1464,43 @@ def test_evaluate_turn_does_not_flag_mix_info_booking_for_service_query_missing_
     )
 
     assert "mix_info_booking" not in reasons
+
+
+def test_evaluate_turn_allows_service_choice_info_fallback_for_missing_slot():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "catalog.service_query",
+            "tool_action": "catalog.service_query",
+            "tool_decision": "missing_slot",
+            "expected_reply_type": "service_choice",
+        },
+        trace_entries=[{"stage": "tool_registry"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=["master", "specialist", "service_duration"],
+        expected_reply_type="service_choice",
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="service_choice",
+        info_tags=["master"],
+        info_answered={"master": False, "specialist": False, "service_duration": False},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На какую услугу хотите записаться? После этого сразу проверю свободное время.",
+        tool_signals={},
+    )
+
+    assert "expected_info_section_miss" not in reasons
+    assert "info_section_miss" not in reasons
 
 
 def test_evaluate_turn_flags_requested_date_time_like():
