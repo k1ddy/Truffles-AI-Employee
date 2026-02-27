@@ -84,7 +84,7 @@ blocks:
     parent_block_id: UCPV1
     depends_on:
       - UCPV1-PHASE3
-    status: planned
+    status: passed
     task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase4-a500.md
     report: docs/REPORTS/2026-02-22-universal-control-plane-v1-phase4-a500.md
     unlocks:
