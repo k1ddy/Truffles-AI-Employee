@@ -75,6 +75,9 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - **Quality Validity Gate:** quality-run считается валидным только при `infra_valid=true` и `semantic_valid=true`.
 - **Hard Preflight Gate:** при невалидном preflight (`webhook_secret`/branch/env/judge key) run = `INVALID`; сравнение метрик и baseline для такого run запрещены.
 - **Baseline Integrity Gate:** canonical baseline обновляется только если `infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`.
+- **Quality Constant Gate:** ограничения по времени/токенам/бюджету не могут снижать продуктовые и архитектурные требования (LAW/safety/invariants/acceptance thresholds/обязательные проверки). Если требуемый контур недоступен, статус = `BLOCKED`, а не "упрощенный pass".
+- **No Shortcut Gate:** запрещено вводить обходные/костыльные решения в default runtime path (временные phrase-hardcode, silent fallback, ослабление gate/oracle) как способ "успеть в бюджет".
+- **Budget Interpretation Gate:** бюджет влияет только на порядок и частоту запусков (cadence), но не на качество критериев, не на контракт продукта и не на целевую архитектуру.
 - **Anti Test-Fitting Gate:** запрещено добавлять/усиливать `must_include` как основной oracle без эквивалентных контрактных проверок в `decision_meta/decision_trace`.
 - **Demo-Neutral Gate:** demo-pack (`demo_salon`) используется только как канарейка; runtime-core остаётся pack-agnostic.
 - **Lexicon/Regex Delta Gate:** расширение словарей/regex допустимо только вместе с изменением резолвера и контрактных тестов.
@@ -179,6 +182,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Появились неожиданные файлы в diff.
 - Нет tests + live-check + trace/meta там, где они обязательны.
 - Есть предупреждения/ошибки в логах, которые мы игнорируем.
+- Для "экономии времени/токенов" предлагается снизить acceptance-бар, отключить обязательный gate или ослабить контрактный oracle вместо исправления root cause.
 
 **Пакет при CI fail (обязателен):**
 - run URL
@@ -196,6 +200,8 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - подгонять поведение под тесты через хардкоды (EVAL = доказательство, не цель).
 - “тихо” менять политику/обещания (REQUIREMENTS) без явного решения.
 - подменять LLM-first семантику keyword/regex логикой в core вместо контрактных resolver/capability механизмов.
+- использовать бюджетные ограничения как обоснование для архитектурного/продуктового downgrade.
+- оставлять обходной путь в production как "временный" без owner, срока удаления и отдельного rollback-плана.
 
 ### 6.1 Local-first validation law (обязательно)
 - Любая правка core‑поведения сначала проходит локальный реалистичный контур; без этого PR/приёмка = BLOCKED.
@@ -238,10 +244,16 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Нельзя начинать новый фикс без `brief.md` от предыдущего прогона.
 - Нельзя использовать `INVALID` run (`infra_valid=false`) для сравнения и baseline.
 - Если реплей хуже baseline — stop-the-line, сначала root cause, потом новый фикс.
+- Перед каждым новым run обязателен индекс артефактов и блокировка повторов:
+  - все quality-прогоны фиксируются в `run_manifest.json` и индексе `/tmp/booking_quality/_index` (по часу и по типу `lock/replay/full`),
+  - новый run запрещён, если предыдущий в том же режиме `incomplete/invalid/failed` или `manual_audit != done`,
+  - запрещено повторять один и тот же run_id или fingerprint без явного forensic override.
 
 **Командный шаблон:**
 - lock: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 42 --judge-mode all --fail-on-thresholds --run-id booking-lock-42`
 - replay: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression --max-failures 20`
+ - каноничный запуск: `scripts/llm_quality_guarded.sh --mode <lock|replay|full> --run-id <id> -- --base-url ...`
+ - отчёт по артефактам: `scripts/quality_artifact_report.py --hours 24 --show-commands`
 
 **Локальные тесты:**
 - локально запускаются в первую очередь и определяют качество поведения.
@@ -336,6 +348,8 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 17) **No business semantics in core regex/phrases** (доменные смыслы живут в packs/resolvers/capabilities).
 18) **Deterministic boundaries only** (validation/safety/capability/idempotency/outbox, без semantic захвата маршрутизации).
 19) **Graceful degrade observability** (каждый degrade имеет `reason_code` + trace/meta и учитывается в error budget, а не маскируется).
+20) **No Budget-Driven Quality Downgrade** (бюджет не снижает acceptance-критерии и не меняет целевой контракт продукта).
+21) **No Workaround-as-Architecture** (временный workaround не может становиться default-путем платформы).
 
 ---
 

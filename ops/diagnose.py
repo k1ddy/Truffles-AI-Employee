@@ -872,6 +872,24 @@ LLM_QUALITY_REQUIRED_RUN_ARTIFACTS = (
     "responses.jsonl",
     "trace_bundle.jsonl",
 )
+LLM_QUALITY_MANIFEST_VERSION = 1
+LLM_QUALITY_INDEX_ROOT = "/tmp/booking_quality/_index"
+LLM_QUALITY_MANIFEST_MAX_LATEST = 200
+LLM_QUALITY_MANIFEST_REDACT_KEYS = {
+    "admin_token",
+    "console_token",
+    "judge_api_key",
+    "llm_api_key",
+    "openai_api_key",
+    "webhook_secret",
+}
+LLM_QUALITY_MANIFEST_REDACT_SUBSTRINGS = (
+    "token",
+    "secret",
+    "api_key",
+    "password",
+    "bearer",
+)
 LLM_QUALITY_HQ1_CLASSES = (
     "wrong_action",
     "handoff_miss",
@@ -3041,6 +3059,9 @@ def _llm_quality_has_booking_prompt_leak(
         # `services_overview` legitimately asks the user to choose a service;
         # treat it as contract follow-up, not booking prompt leak.
         return False
+    if tool_decision in {"missing_slot", "slot_mismatch"}:
+        # Booking collect path under service-query/location is contract-valid.
+        return False
     if not isinstance(outbox_text, str):
         return False
     lowered = outbox_text.casefold()
@@ -4427,6 +4448,29 @@ def _llm_quality_has_general_consult_fallback(meta, trace_entries):
     if "consult_reply" in intents:
         return True
     return False
+
+
+def _llm_quality_has_catalog_service_choice_info_fallback(
+    *,
+    meta,
+    expected_reply_type,
+    actual_expected_reply_type,
+):
+    if not isinstance(meta, dict):
+        return False
+    intent_value = _llm_quality_effective_intent(meta)
+    tool_action_value = _llm_quality_normalize_tool_token(meta.get("tool_action"))
+    if intent_value != "catalog.service_query" and tool_action_value != "catalog.service_query":
+        return False
+    tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+    if tool_decision_value not in {"missing_slot", "slot_mismatch"}:
+        return False
+    expected_tokens = {
+        _llm_quality_normalize_tool_token(expected_reply_type),
+        _llm_quality_normalize_tool_token(actual_expected_reply_type),
+        _llm_quality_normalize_tool_token(meta.get("expected_reply_type")),
+    }
+    return "service_choice" in expected_tokens
 
 
 def _llm_quality_expected_response(state, meta):
@@ -5895,6 +5939,93 @@ def _llm_quality_resolve_manual_audit_status(run_dir):
     }
 
 
+def _llm_quality_sync_manual_audit_summary(
+    *,
+    run_dir,
+    status=None,
+    manual_audit_path=None,
+    manual_audit_json_path=None,
+):
+    normalized_dir = os.path.abspath(os.path.expanduser(str(run_dir or "").strip() or "."))
+    summary_path = os.path.join(normalized_dir, "summary.json")
+    summary = _llm_quality_load_json_object(summary_path)
+    if not isinstance(summary, dict):
+        return False
+
+    manual_meta = summary.get("manual_audit")
+    if not isinstance(manual_meta, dict):
+        manual_meta = {}
+    quality_status = summary.get("quality_status")
+    if not isinstance(quality_status, dict):
+        quality_status = {}
+
+    current_status = (
+        str(
+            status
+            or manual_meta.get("status")
+            or quality_status.get("manual_audit_status")
+            or "pending"
+        )
+        .strip()
+        .casefold()
+    )
+    if not current_status:
+        current_status = "pending"
+
+    command = manual_meta.get("command")
+    if not command:
+        command = (
+            "python3 ops/diagnose.py llm-quality-audit "
+            f"--run-dir {shlex.quote(normalized_dir)} "
+            "--status done "
+            "--strict-artifacts"
+        )
+    resolved_manual_audit_path = (
+        manual_audit_path
+        or manual_meta.get("path")
+        or os.path.join(normalized_dir, "manual_audit.md")
+    )
+    resolved_manual_audit_json_path = (
+        manual_audit_json_path
+        or manual_meta.get("json_path")
+        or os.path.join(normalized_dir, "manual_audit.json")
+    )
+    run_id = str(summary.get("run_id") or "").strip() or os.path.basename(normalized_dir)
+    before = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+    manual_meta["required"] = True
+    manual_meta["status"] = current_status
+    manual_meta["run_id"] = run_id
+    manual_meta["path"] = resolved_manual_audit_path
+    manual_meta["json_path"] = resolved_manual_audit_json_path
+    manual_meta["command"] = command
+    summary["manual_audit"] = manual_meta
+
+    quality_status["manual_audit_required"] = True
+    quality_status["manual_audit_status"] = current_status
+    quality_status["manual_audit_path"] = resolved_manual_audit_path
+    quality_status["manual_audit_command"] = command
+    summary["quality_status"] = quality_status
+
+    after = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+    if before == after:
+        return False
+
+    with open(summary_path, "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, ensure_ascii=False, indent=2)
+
+    brief_path = summary.get("brief_path")
+    if not isinstance(brief_path, str) or not brief_path.strip():
+        brief_path = os.path.join(normalized_dir, "brief.md")
+    brief_writer = globals().get("_llm_quality_write_brief")
+    if callable(brief_writer):
+        try:
+            brief_writer(brief_path, summary)
+        except Exception:
+            pass
+    return True
+
+
 def _llm_quality_resolve_lock_run_canonical(summary):
     if not isinstance(summary, dict):
         return None
@@ -6404,6 +6535,367 @@ def _llm_quality_default_output_dir(run_id, explicit_output_dir=None):
     return os.path.abspath(os.path.join("/tmp/booking_quality", run_token))
 
 
+def _llm_quality_manifest_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _llm_quality_manifest_coerce(value):
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, (list, tuple, set)):
+        return [_llm_quality_manifest_coerce(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            str(key): _llm_quality_manifest_coerce(val) for key, val in value.items()
+        }
+    return str(value)
+
+
+def _llm_quality_manifest_should_redact(key):
+    if not isinstance(key, str):
+        return False
+    if key in LLM_QUALITY_MANIFEST_REDACT_KEYS:
+        return True
+    lowered = key.casefold()
+    return any(token in lowered for token in LLM_QUALITY_MANIFEST_REDACT_SUBSTRINGS)
+
+
+def _llm_quality_manifest_args(args):
+    if args is None:
+        return {}
+    payload = {}
+    for key, value in vars(args).items():
+        if _llm_quality_manifest_should_redact(key):
+            payload[key] = "<redacted>"
+        else:
+            payload[key] = _llm_quality_manifest_coerce(value)
+    return payload
+
+
+def _llm_quality_manifest_mode(args, run_id, run_economy_status):
+    mode = None
+    source = "inferred"
+    if isinstance(run_economy_status, dict):
+        if run_economy_status.get("is_replay"):
+            mode = "replay"
+            source = "run_economy"
+    if mode is None and args is not None:
+        if getattr(args, "scenarios_file", None):
+            mode = "replay"
+            source = "scenarios_file"
+    if mode is None and isinstance(run_id, str):
+        lowered = run_id.casefold()
+        if "full" in lowered:
+            mode = "full"
+            source = "run_id"
+        elif "replay" in lowered:
+            mode = "replay"
+            source = "run_id"
+        elif "lock" in lowered:
+            mode = "lock"
+            source = "run_id"
+    if mode is None:
+        mode = "lock"
+    return mode, source
+
+
+def _llm_quality_manifest_status(summary, artifact_integrity):
+    if not isinstance(summary, dict):
+        return "unknown"
+    stop_reason = str(summary.get("stop_reason") or "").strip()
+    quality_status = summary.get("quality_status") or {}
+    infra_valid = summary.get("infra_valid")
+    if infra_valid is None:
+        infra_valid = quality_status.get("infra_valid")
+    semantic_valid = summary.get("semantic_valid")
+    if semantic_valid is None:
+        semantic_valid = quality_status.get("semantic_valid")
+    run_integrity_valid = quality_status.get("run_integrity_valid")
+    if run_integrity_valid is None:
+        run_integrity_valid = summary.get("run_integrity_valid")
+    if not isinstance(artifact_integrity, dict):
+        artifact_integrity = {}
+    artifact_valid = artifact_integrity.get("valid")
+    if stop_reason in {"in_progress", "system_exit"}:
+        return "incomplete"
+    if artifact_valid is False:
+        return "incomplete"
+    if run_integrity_valid is False:
+        return "incomplete"
+    if stop_reason == "early_failure":
+        return "failed"
+    if infra_valid is False or semantic_valid is False:
+        return "invalid"
+    if infra_valid is True and semantic_valid is True and run_integrity_valid is True:
+        return "canonical"
+    return "completed"
+
+
+def _llm_quality_build_command_from_args(
+    args,
+    *,
+    run_id=None,
+    output_dir=None,
+    allow_output_overwrite=False,
+    allow_incomplete_artifacts=False,
+):
+    if args is None:
+        return None
+    cmd = ["python3", "ops/diagnose.py", "llm-quality"]
+
+    def add(flag, value):
+        if value is None or value == "":
+            return
+        cmd.extend([flag, str(value)])
+
+    def add_bool(flag, value):
+        if value:
+            cmd.append(flag)
+
+    add("--base-url", getattr(args, "base_url", None))
+    add("--client-slug", getattr(args, "client_slug", None))
+    add("--branch-slug", getattr(args, "branch_slug", None))
+    add("--count", getattr(args, "count", None))
+    add("--seed", getattr(args, "seed", None))
+    add("--scenarios-file", getattr(args, "scenarios_file", None))
+    add("--mode", getattr(args, "mode", None))
+    add("--min-turns", getattr(args, "min_turns", None))
+    add("--max-turns", getattr(args, "max_turns", None))
+    add_bool("--include-media", getattr(args, "include_media", False))
+    add("--media-mode", getattr(args, "media_mode", None))
+    add("--media-kind", getattr(args, "media_kind", None))
+    add("--scenario-coverage", getattr(args, "scenario_coverage", None))
+    add("--batch-size", getattr(args, "batch_size", None))
+    add("--retry-count", getattr(args, "retry_count", None))
+    add("--retry-backoff", getattr(args, "retry_backoff", None))
+    add("--min-wait", getattr(args, "min_wait", None))
+    add("--max-wait", getattr(args, "max_wait", None))
+    add("--allowlist-jids", getattr(args, "allowlist_jids", None))
+    add("--remote-jid", getattr(args, "remote_jid", None))
+    add("--jid-mode", getattr(args, "jid_mode", None))
+    add_bool("--allow-non-allowlist", getattr(args, "allow_non_allowlist", False))
+    add("--timeout-profile", getattr(args, "timeout_profile", None))
+    add("--timeout", getattr(args, "timeout", None))
+    add("--poll-timeout", getattr(args, "poll_timeout", None))
+    add("--poll-interval", getattr(args, "poll_interval", None))
+    add("--trace-timeout", getattr(args, "trace_timeout", None))
+    add("--trace-interval", getattr(args, "trace_interval", None))
+    add_bool("--skip-outbox", getattr(args, "skip_outbox", False))
+    add("--outbox-wait", getattr(args, "outbox_wait", None))
+    add("--manager-mode", getattr(args, "manager_mode", None))
+    add("--manager-channel", getattr(args, "manager_channel", None))
+    add("--manager-actions", getattr(args, "manager_actions", None))
+    add("--manager-wait", getattr(args, "manager_wait", None))
+    add("--pending-mode", getattr(args, "pending_mode", None))
+    add("--ack-text", getattr(args, "ack_text", None))
+    add("--tool-hooks", getattr(args, "tool_hooks", None))
+    add("--tool-confirm-text", getattr(args, "tool_confirm_text", None))
+    add("--tool-cancel-text", getattr(args, "tool_cancel_text", None))
+    add("--tool-calendar-text", getattr(args, "tool_calendar_text", None))
+    add("--tool-hook-wait", getattr(args, "tool_hook_wait", None))
+    add("--tool-hook-limit", getattr(args, "tool_hook_limit", None))
+    add("--tool-evidence-policy", getattr(args, "tool_evidence_policy", None))
+    add_bool("--reset-before-dialog", getattr(args, "reset_before_dialog", False))
+    add("--console-base-url", getattr(args, "console_base_url", None))
+    add("--console-env", getattr(args, "console_env", None))
+    add("--console-client-id", getattr(args, "console_client_id", None))
+    add("--console-mode", getattr(args, "console_mode", None))
+    add("--output-dir", output_dir or getattr(args, "output_dir", None))
+    add_bool("--allow-output-overwrite", allow_output_overwrite or getattr(args, "allow_output_overwrite", False))
+    add("--run-id", run_id or getattr(args, "run_id", None))
+    add("--brief-file", getattr(args, "brief_file", None))
+    add("--expected-runtime-commit", getattr(args, "expected_runtime_commit", None))
+    add("--baseline-summary", getattr(args, "baseline_summary", None))
+    add_bool("--update-baseline", getattr(args, "update_baseline", False))
+    add_bool("--append-history", getattr(args, "append_history", False))
+    add("--history-max", getattr(args, "history_max", None))
+    add_bool("--fail-on-thresholds", getattr(args, "fail_on_thresholds", False))
+    add_bool("--fail-on-regression", getattr(args, "fail_on_regression", False))
+    add("--max-failures", getattr(args, "max_failures", None))
+    add("--regression-tolerance", getattr(args, "regression_tolerance", None))
+    add("--max-post-llm-semantic-rewrite-rate", getattr(args, "max_post_llm_semantic_rewrite_rate", None))
+    add("--max-keyword-override-rate", getattr(args, "max_keyword_override_rate", None))
+    add("--lexicon-regex-delta-gate", getattr(args, "lexicon_regex_delta_gate", None))
+    add("--delta-gate-base-ref", getattr(args, "delta_gate_base_ref", None))
+    add("--hardcode-core-gate", getattr(args, "hardcode_core_gate", None))
+    add("--hardcode-core-base-ref", getattr(args, "hardcode_core_base_ref", None))
+    add("--run-economy-gate", getattr(args, "run_economy_gate", None))
+    add("--run-economy-base-ref", getattr(args, "run_economy_base_ref", None))
+    add("--manual-audit-gate", getattr(args, "manual_audit_gate", None))
+    add_bool("--allow-no-code-delta", getattr(args, "allow_no_code_delta", False))
+    add("--judge-mode", getattr(args, "judge_mode", None))
+    add("--judge-sample", getattr(args, "judge_sample", None))
+    add("--judge-model", getattr(args, "judge_model", None))
+    add("--judge-base-url", getattr(args, "judge_base_url", None))
+    add("--judge-timeout", getattr(args, "judge_timeout", None))
+    add("--judge-max-tokens", getattr(args, "judge_max_tokens", None))
+    add("--judge-seed", getattr(args, "judge_seed", None))
+    add("--judge-cache-file", getattr(args, "judge_cache_file", None))
+    add("--judge-cache-max-entries", getattr(args, "judge_cache_max_entries", None))
+    add_bool("--judge-no-redact", not getattr(args, "judge_redact", True))
+    add_bool("--allow-judge-off", getattr(args, "allow_judge_off", False))
+    add_bool("--dry-run", getattr(args, "dry_run", False))
+    if allow_incomplete_artifacts:
+        cmd.append("--allow-incomplete-run-artifacts")
+    return " ".join(shlex.quote(part) for part in cmd)
+
+
+def _llm_quality_update_artifact_index(manifest):
+    if not isinstance(manifest, dict):
+        return
+    try:
+        os.makedirs(LLM_QUALITY_INDEX_ROOT, exist_ok=True)
+    except Exception:
+        return
+    finished_at = manifest.get("finished_at") or manifest.get("started_at") or _llm_quality_manifest_now()
+    finished_text = str(finished_at)
+    if finished_text.endswith("Z"):
+        finished_text = finished_text[:-1] + "+00:00"
+    try:
+        finished_dt = datetime.fromisoformat(finished_text)
+    except Exception:
+        finished_dt = datetime.now(timezone.utc)
+    date_bucket = finished_dt.strftime("%Y-%m-%d")
+    hour_bucket = finished_dt.strftime("%H")
+    by_hour_dir = os.path.join(LLM_QUALITY_INDEX_ROOT, "by_hour", date_bucket, hour_bucket)
+    by_mode_dir = os.path.join(LLM_QUALITY_INDEX_ROOT, "by_mode", str(manifest.get("mode") or "unknown"))
+    latest_by_mode_dir = os.path.join(LLM_QUALITY_INDEX_ROOT, "latest_by_mode")
+    os.makedirs(by_hour_dir, exist_ok=True)
+    os.makedirs(by_mode_dir, exist_ok=True)
+    os.makedirs(latest_by_mode_dir, exist_ok=True)
+    run_id = str(manifest.get("run_id") or "unknown")
+    hour_path = os.path.join(by_hour_dir, f"{run_id}.json")
+    mode_path = os.path.join(by_mode_dir, f"{run_id}.json")
+    latest_mode_path = os.path.join(latest_by_mode_dir, f"{manifest.get('mode') or 'unknown'}.json")
+    for path in (hour_path, mode_path, latest_mode_path):
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(manifest, handle, ensure_ascii=False, indent=2)
+        except Exception:
+            continue
+    latest_path = os.path.join(LLM_QUALITY_INDEX_ROOT, "latest.json")
+    entry = {
+        "run_id": run_id,
+        "mode": manifest.get("mode"),
+        "status": manifest.get("status"),
+        "finished_at": manifest.get("finished_at"),
+        "output_dir": manifest.get("output_dir"),
+        "summary_path": (manifest.get("artifacts") or {}).get("summary"),
+        "manifest_path": (manifest.get("artifacts") or {}).get("manifest"),
+    }
+    latest = []
+    if os.path.exists(latest_path):
+        try:
+            with open(latest_path, "r", encoding="utf-8") as handle:
+                latest = json.load(handle)
+        except Exception:
+            latest = []
+    if not isinstance(latest, list):
+        latest = []
+    latest = [item for item in latest if isinstance(item, dict) and item.get("run_id") != run_id]
+    latest.insert(0, entry)
+    latest = latest[:LLM_QUALITY_MANIFEST_MAX_LATEST]
+    with open(latest_path, "w", encoding="utf-8") as handle:
+        json.dump(latest, handle, ensure_ascii=False, indent=2)
+
+
+def _llm_quality_write_run_manifest(
+    *,
+    args,
+    run_id,
+    output_dir,
+    summary=None,
+    run_economy_status=None,
+    runtime_preflight=None,
+    stop_reason=None,
+):
+    output_dir = _llm_quality_default_output_dir(run_id, output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    summary_path = os.path.join(output_dir, "summary.json")
+    if summary is None and os.path.exists(summary_path):
+        try:
+            with open(summary_path, "r", encoding="utf-8") as handle:
+                summary = json.load(handle)
+        except Exception:
+            summary = {}
+    if summary is None:
+        summary = {}
+    if not isinstance(run_economy_status, dict):
+        run_economy_status = summary.get("run_economy") if isinstance(summary.get("run_economy"), dict) else {}
+    if not isinstance(runtime_preflight, dict):
+        runtime_preflight = summary.get("runtime_preflight") if isinstance(summary.get("runtime_preflight"), dict) else {}
+    artifact_integrity = summary.get("artifact_integrity") if isinstance(summary.get("artifact_integrity"), dict) else _llm_quality_collect_artifact_integrity(output_dir)
+    mode, mode_source = _llm_quality_manifest_mode(args, run_id, run_economy_status)
+    manual_audit = summary.get("manual_audit") if isinstance(summary.get("manual_audit"), dict) else {}
+    resolved_manual_audit = _llm_quality_resolve_manual_audit_status(output_dir)
+    manual_audit_status = (
+        resolved_manual_audit.get("manual_audit_status")
+        or manual_audit.get("status")
+        or (summary.get("quality_status") or {}).get("manual_audit_status")
+    )
+    status = _llm_quality_manifest_status(summary, artifact_integrity)
+    command = _llm_quality_build_command_from_args(args, run_id=run_id, output_dir=output_dir)
+    resume_command = None
+    if status in {"incomplete", "failed"}:
+        resume_command = _llm_quality_build_command_from_args(
+            args,
+            run_id=run_id,
+            output_dir=output_dir,
+            allow_output_overwrite=True,
+            allow_incomplete_artifacts=True,
+        )
+    manifest = {
+        "manifest_version": LLM_QUALITY_MANIFEST_VERSION,
+        "run_id": run_id,
+        "mode": mode,
+        "mode_source": mode_source,
+        "status": status,
+        "stop_reason": summary.get("stop_reason") or stop_reason,
+        "started_at": summary.get("started_at"),
+        "finished_at": summary.get("finished_at"),
+        "output_dir": output_dir,
+        "infra_valid": summary.get("infra_valid") or (summary.get("quality_status") or {}).get("infra_valid"),
+        "semantic_valid": summary.get("semantic_valid") or (summary.get("quality_status") or {}).get("semantic_valid"),
+        "run_integrity_valid": (summary.get("quality_status") or {}).get("run_integrity_valid"),
+        "manual_audit_status": manual_audit_status,
+        "artifact_integrity_valid": artifact_integrity.get("valid"),
+        "artifact_integrity_missing": artifact_integrity.get("missing"),
+        "artifacts": {
+            "summary": summary.get("summary_path") or summary_path,
+            "brief": summary.get("brief_path") or os.path.join(output_dir, "brief.md"),
+            "scenarios": summary.get("scenarios_path") or os.path.join(output_dir, "scenarios.json"),
+            "responses": summary.get("responses_path") or os.path.join(output_dir, "responses.jsonl"),
+            "trace_bundle": summary.get("trace_bundle_path") or os.path.join(output_dir, "trace_bundle.jsonl"),
+            "manual_audit": (
+                resolved_manual_audit.get("manual_audit_path")
+                or manual_audit.get("path")
+                or os.path.join(output_dir, "manual_audit.md")
+            ),
+            "manual_audit_json": (
+                resolved_manual_audit.get("manual_audit_json_path")
+                or manual_audit.get("json_path")
+                or os.path.join(output_dir, "manual_audit.json")
+            ),
+            "manifest": os.path.join(output_dir, "run_manifest.json"),
+        },
+        "args": _llm_quality_manifest_args(args),
+        "command": command,
+        "resume_command": resume_command,
+        "replay_command": summary.get("replay_command"),
+        "run_economy": run_economy_status,
+        "runtime_preflight": runtime_preflight,
+    }
+    manifest_path = os.path.join(output_dir, "run_manifest.json")
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, ensure_ascii=False, indent=2)
+    _llm_quality_update_artifact_index(manifest)
+    return manifest
+
+
 def _llm_quality_required_artifact_paths(output_dir):
     normalized_dir = os.path.abspath(os.path.expanduser(str(output_dir or "").strip() or "."))
     return {
@@ -6692,6 +7184,15 @@ def _llm_quality_write_failure_artifacts(
         run_integrity_valid=False,
         blocking_reason_count=1,
     )
+    _llm_quality_write_run_manifest(
+        args=args,
+        run_id=run_id,
+        output_dir=output_dir,
+        summary=summary,
+        run_economy_status=run_economy_status,
+        runtime_preflight=runtime_preflight,
+        stop_reason=stop_reason or "early_failure",
+    )
 
 
 def _llm_quality_write_checkpoint_summary(
@@ -6714,6 +7215,7 @@ def _llm_quality_write_checkpoint_summary(
     output_dir = _llm_quality_default_output_dir(run_id, output_dir)
     os.makedirs(output_dir, exist_ok=True)
     summary_path = os.path.join(output_dir, "summary.json")
+    brief_path = os.path.join(output_dir, "brief.md")
     started_dt = started_at if isinstance(started_at, datetime) else datetime.now(timezone.utc)
     finished_dt = datetime.now(timezone.utc)
     duration_s = round((finished_dt - started_dt).total_seconds(), 2)
@@ -6797,6 +7299,7 @@ def _llm_quality_write_checkpoint_summary(
         summary["runtime_preflight"] = runtime_preflight
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
+    _llm_quality_write_brief(brief_path, summary)
     summary["artifact_integrity"] = _llm_quality_collect_artifact_integrity(output_dir)
     summary["quality_status"]["artifact_integrity_valid"] = summary["artifact_integrity"]["valid"]
     summary["quality_status"]["artifact_integrity_missing"] = list(
@@ -6804,6 +7307,7 @@ def _llm_quality_write_checkpoint_summary(
     )
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
+    _llm_quality_write_brief(brief_path, summary)
     _llm_quality_persist_lock_state_from_run_economy(
         lock_state_path=lock_state_path or _llm_quality_lock_fingerprint_state_path(),
         run_economy_status=run_economy_status,
@@ -6821,6 +7325,15 @@ def _llm_quality_write_checkpoint_summary(
         semantic_valid=False,
         run_integrity_valid=False,
         blocking_reason_count=1,
+    )
+    _llm_quality_write_run_manifest(
+        args=args,
+        run_id=run_id,
+        output_dir=output_dir,
+        summary=summary,
+        run_economy_status=run_economy_status,
+        runtime_preflight=runtime_preflight,
+        stop_reason=stop_reason or "in_progress",
     )
 
 
@@ -8000,6 +8513,15 @@ def _llm_quality_evaluate_turn(
         ):
             fallback_ok = True
         elif isinstance(meta, dict):
+            intent_value = _llm_quality_effective_intent(meta)
+            tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+            if (
+                expected_reply_type in {"service_choice", "time", "name"}
+                and actual_expected_reply_type is None
+                and intent_value == "calendar.list_slots"
+                and tool_decision_value in {"ok", "conflict"}
+            ):
+                fallback_ok = True
             # Runtime may intentionally clear stale expected-reply contracts
             # (for example after resolved calendar reschedule/cancel flows).
             clear_flag = meta.get("expected_reply_contract_clear")
@@ -8034,6 +8556,11 @@ def _llm_quality_evaluate_turn(
         handover_meta=handover_meta,
     ):
         reasons.append("expected_reply_mismatch")
+    catalog_service_choice_info_fallback = _llm_quality_has_catalog_service_choice_info_fallback(
+        meta=meta,
+        expected_reply_type=expected_reply_type,
+        actual_expected_reply_type=actual_expected_reply_type,
+    )
     if expected_info_sections:
         skip_expected_info_check = (
             state in {"pending", "manager_active"}
@@ -8049,6 +8576,8 @@ def _llm_quality_evaluate_turn(
                 expected_info_sections, meta, trace_entries
             )
             if not expected_answered and _llm_quality_has_general_consult_fallback(meta, trace_entries):
+                expected_answered = True
+            if not expected_answered and catalog_service_choice_info_fallback:
                 expected_answered = True
         if not expected_answered:
             reasons.append("expected_info_section_miss")
@@ -8111,6 +8640,7 @@ def _llm_quality_evaluate_turn(
         and not any(info_answered.values())
         and state not in {"pending", "manager_active"}
         and not _llm_quality_has_general_consult_fallback(meta, trace_entries)
+        and not catalog_service_choice_info_fallback
     ):
         reasons.append("info_section_miss")
     booking_stall_ignored = False
@@ -9446,6 +9976,19 @@ def _run_llm_quality_audit(args):
     }
     with open(json_output, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+    summary_updated = _llm_quality_sync_manual_audit_summary(
+        run_dir=run_dir,
+        status=status,
+        manual_audit_path=md_output,
+        manual_audit_json_path=json_output,
+    )
+    if summary_updated:
+        _llm_quality_write_run_manifest(
+            args=None,
+            run_id=run_id,
+            output_dir=run_dir,
+        )
 
     print(json.dumps(payload, ensure_ascii=False, indent=2 if args.pretty else None))
     highest_severity = max((severity_rank.get(str(item.get("severity")), 0) for item in findings), default=0)
@@ -12925,6 +13468,8 @@ def _run_llm_quality(args):
     interrupted = False
     checkpoint_interval_turns = 1 if args.dry_run else 5
     last_checkpoint_turn = -1
+    progress_heartbeat_interval_seconds = 20.0
+    last_progress_heartbeat_monotonic = time.monotonic()
 
     previous_sigint = signal.getsignal(signal.SIGINT)
     previous_sigterm = signal.getsignal(signal.SIGTERM)
@@ -12967,9 +13512,39 @@ def _run_llm_quality(args):
         )
         last_checkpoint_turn = turns_done
 
+    def _emit_progress_heartbeat(
+        event,
+        *,
+        dialog_idx=None,
+        turn_idx=None,
+        force=False,
+        extra=None,
+    ):
+        nonlocal last_progress_heartbeat_monotonic
+        now_monotonic = time.monotonic()
+        if not force and (
+            now_monotonic - last_progress_heartbeat_monotonic
+            < progress_heartbeat_interval_seconds
+        ):
+            return
+        payload = {
+            "stage": "llm_quality_progress",
+            "event": str(event),
+            "run_id": run_id,
+            "dialog_index": dialog_idx,
+            "turn_index": turn_idx,
+            "turns_done": int(stats.get("turns") or 0),
+            "turns_strict_failed": int(stats.get("turns_strict_failed") or 0),
+        }
+        if isinstance(extra, dict):
+            payload.update(extra)
+        print(json.dumps(payload, ensure_ascii=False))
+        last_progress_heartbeat_monotonic = now_monotonic
+
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
     _checkpoint_run_summary(force=True)
+    _emit_progress_heartbeat("run_start", force=True)
 
     with open(responses_path, "w", encoding="utf-8") as responses_handle, open(
         trace_bundle_path, "w", encoding="utf-8"
@@ -12977,6 +13552,12 @@ def _run_llm_quality(args):
         for dialog_idx, dialog in enumerate(dialogs, start=1):
             if stop_requested:
                 break
+            _emit_progress_heartbeat(
+                "dialog_start",
+                dialog_idx=dialog_idx,
+                force=True,
+                extra={"dialog_turns_expected": len(dialog.get("turns") or [])},
+            )
             dialog_runtime_state = {"slot_candidates": []}
             remote_jid = args.remote_jid or _llm_quality_pick_jid(
                 allowlist_jids, dialog_idx - 1, rng, jid_mode_effective, run_id=run_id
@@ -12999,6 +13580,11 @@ def _run_llm_quality(args):
                 if stop_requested:
                     break
                 stats["turns"] += 1
+                _emit_progress_heartbeat(
+                    "turn_start",
+                    dialog_idx=dialog_idx,
+                    turn_idx=turn_idx,
+                )
                 if args.dry_run:
                     wait_seconds = 0
                 else:
@@ -13987,6 +14573,12 @@ def _run_llm_quality(args):
                 )
                 stats["trace_rows_written"] += 1
                 _checkpoint_run_summary()
+                _emit_progress_heartbeat(
+                    "turn_committed",
+                    dialog_idx=dialog_idx,
+                    turn_idx=turn_idx,
+                    extra={"trace_rows_written": int(stats.get("trace_rows_written") or 0)},
+                )
                 if stats["policy_core_infra_errors"] >= 3:
                     stop_reason = "policy_core_infra_errors"
                     stop_requested = True
@@ -14749,6 +15341,16 @@ def _run_llm_quality(args):
                 "blocking_reason_count": int(blocking_reason_count or 0),
             },
         )
+
+    _llm_quality_write_run_manifest(
+        args=args,
+        run_id=run_id,
+        output_dir=output_dir,
+        summary=summary,
+        run_economy_status=run_economy_status,
+        runtime_preflight=runtime_preflight,
+        stop_reason=stop_reason,
+    )
 
     history_entry = {
         "run_id": run_id,

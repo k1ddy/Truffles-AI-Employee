@@ -75,6 +75,45 @@ Evidence (forensics):
 - В lock run `booking-lock-20260226-envelope-a1-r10` обнаружен security/perf дефект: judge transport через `curl` subprocess включал `Authorization: Bearer ...` в argv процесса (`ps`) и давал дополнительный per-turn overhead.
 - Remediation: judge transport переведен на in-process HTTP request (без subprocess и без секрета в argv); lock до фикса классифицирован forensic-only.
 
+## Problem Snapshot Addendum (FACT, master intent semantics, 2026-02-27)
+
+Evidence:
+- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r38/summary.json`
+- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r38/responses.jsonl`
+
+Факты:
+- В replay (`r38`) зафиксирован semantic-fail `expected_info_section_miss` по `master`.
+- Фактический ответ на "Я хочу узнать о ваших услугах." ушёл в `catalog.service_query` (service_choice), `info_sections` пустые.
+- Это подтверждает mismatch между ожиданием сценария и желаемой семантикой: master-ответ должен быть только при явном master-запросе.
+
+Решение (binding):
+- Master-ответ выдаётся только по явным запросам о мастерах/опыте/кто делает услугу.
+- Общие вопросы про услуги остаются service-query и не переводятся в master без явного сигнала.
+- Реализация — через semantic resolver + pack data, без core hardcode/regex.
+
+## Problem Snapshot Addendum (FACT, budget reality + process trust, 2026-02-27)
+
+Evidence:
+- `/tmp/firebreak_summary_scan.json`
+- `/tmp/booking_quality_firebreak/summary.json`
+- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r38/summary.json`
+- `/tmp/booking_quality/analysis-last-11h-20260223T221713Z.md`
+- `/tmp/booking_quality/analysis-last-3h.md`
+
+Факты:
+- По текущему скану `summary.json` (`25` run): `semantic_red=13`, `infra_red=4`, `non_canonical=7`.
+- Значимая доля run в окне остается непригодной для baseline/comparison из-за process/integrity (`INVALID`, `run_incomplete`, `early_failure`, interrupted stop-reasons).
+- Зафиксирован process trust gap: `manual_audit.json=status:done`, но `summary.manual_audit.status=pending` в большинстве run текущей цепочки firebreak (`25/26` проверенных run со статусом).
+- В lock/replay артефактах одновременно наблюдаются:
+  - зеленые deterministic/delivery метрики,
+  - красные semantic-blockers (`wrong_action`, `handoff_miss`, `post_llm_semantic_rewrite_budget_exceeded`),
+  что подтверждает мульти-слойный характер дефекта.
+- Экономика прогонов: запуск полного `lock -> replay -> full` как каждодневного debug-цикла приводит к перерасходу токенов/времени до закрытия корневых дефектов в process + semantic + data слоях.
+
+Решение (binding):
+- Полная acceptance-цепочка `lock -> replay -> full` сохраняется как release-gate и не используется как основной inner-loop разработки.
+- В ежедневном цикле вводится обязательный бюджетный dev-lane (детерминированный + micro LLM + ручной аудит), а full-chain запускается только после прохождения `Go-to-Full` критериев.
+
 ## Contradictions Found And Resolved In This TP
 
 1. Противоречие: требование "один semantic owner" было не зафиксировано как жесткий контракт.
@@ -247,15 +286,81 @@ Evidence (forensics):
 - Новый run с тем же lock_fingerprint запрещён до закрытого manual audit предыдущего interrupted run.
 - Повторный lock с тем же fingerprint после non-canonical run допускается только через явный forensic override (`--allow-no-code-delta`) и остаётся вне acceptance lane до canonical lock.
 
-10. Semantic boundary guard for booking/info (mandatory)
+10. Artifact index + resume manifest (mandatory)
+- Каждый run обязан сохранять `run_manifest.json` c аргументами запуска, статусом, путями артефактов и resume-командой.
+- Индекс артефактов ведётся по часам и по типам (`lock/replay/full`) в `/tmp/booking_quality/_index`, чтобы всегда было видно последние прогоны, их аргументы и статус.
+- Любой новый run блокируется, если предыдущий в том же режиме имеет `manual_audit!=done` или неполный артефакт‑пакет.
+
+11. Semantic boundary guard for booking/info (mandatory)
 - Явный booking collect turn (`catalog.service_query` + `tool_decision in {missing_slot,slot_mismatch}`) не может классифицироваться как `mix_info_booking`.
 - Для explicit info-intent запрещено переопределение в `price_query/service_match` без явного price/duration сигнала текущего turn.
 - Любое отклонение от этого правила считается semantic contract regression и блокирует acceptance.
 
-11. Secret-safe transport gate (mandatory)
+12. Secret-safe transport gate (mandatory)
 - Запрещено передавать `OPENAI_API_KEY` или другие секреты в argv subprocess (`ps` visibility).
 - Judge/tool HTTP вызовы должны выполняться in-process transport (или эквивалент с гарантированной secret redaction).
 - Обнаружение секрета в argv/log artifact = `INVALID(secret_exposure_detected)` и stop-the-line до remediation.
+
+## Execution Addendum (2026-02-27, master intent semantics mandatory)
+
+1. Master-intent contract (mandatory)
+- Intent `master`/`master_query` разрешён только при явных master-запросах: “какие мастера делают X”, “кто делает X”, “кто лучше/опытнее по X”.
+- Общие вопросы “про услуги” остаются `catalog.service_query` без master-ответа.
+
+2. Pack-driven only (mandatory)
+- Ответы про мастеров строятся только из pack-данных (masters/services/experience), без домыслов.
+- При отсутствии service-слота обязателен уточняющий вопрос.
+
+3. No core hardcode (mandatory)
+- Запрещены phrase/regex ветки в core для master-routing.
+- Master intent определяется LLM/resolver + pack контрактом.
+
+4. P10/P13 gate
+- `P10/P13` нельзя закрывать до внедрения master-intent контракта, pack-данных и контрактных тестов.
+
+## Execution Addendum (2026-02-27, budget-aware operating model, mandatory)
+
+1. Two-lane operating model (mandatory)
+- `Dev lane` (дешевый, обязательный): deterministic contract tests + micro LLM replay + post-run manual audit.
+- `Acceptance lane` (дорогой, release-only): только canonical `lock -> replay -> full` с полными гейтами.
+- Любой вывод о релизной готовности из `Dev lane` недопустим.
+- Двухконтурность не является снижением quality bar: acceptance-инварианты/пороговые значения/архитектурные требования остаются неизменными.
+
+2. Go-to-Full gate (mandatory)
+- `Acceptance lane` разрешён только если одновременно:
+  - `manual_audit.status=done` и синхронен в `summary + manual_audit.json`,
+  - `artifact_integrity.valid=true`,
+  - `weak_oracle_turn_count=0`,
+  - последние dev-run не содержат `INVALID/NON-CANONICAL/INCOMPLETE`,
+  - нет активных blocker-классов `wrong_action|handoff_miss|booking_flow_break` на целевых дефект-кластерах,
+  - `rewrite_governance.valid=true` и `post_llm_semantic_rewrite_rate <= 0.02`.
+- Нарушение любого пункта блокирует full-chain и возвращает процесс в remediation.
+
+3. Full-chain frequency policy (mandatory)
+- Full-chain не запускается "после каждого фикса".
+- Разрешенный режим: milestone/candidate runs (по готовности gate), либо фиксированное окно (например, 1 раз в 24-48 часов) при выполненном Go-to-Full.
+- Любой full-run вне этой политики маркируется forensic-only и не используется для acceptance.
+- Запрет: использовать budget/time/token ограничения как аргумент для смягчения acceptance требований или для внедрения workaround в production path.
+
+4. Vertical remediation packets (mandatory)
+- Исправления выполняются пакетами "semantics + contracts + data + evidence", а не одиночными hotfix.
+- Минимум 3 обязательных пакета:
+  - `Packet A`: process trust (`manual_audit sync`, artifact completion, preflight fail-closed),
+  - `Packet B`: semantic routing (`master/service`, action ownership, rewrite budget),
+  - `Packet C`: pack/data contracts (masters/services/experience + slot requirements).
+- Частичное закрытие пакета не считается выполнением этапа.
+
+5. Past -> Present -> Future context contract (mandatory)
+- Каждый этап обязан явно фиксировать:
+  - `Past`: что уже делали и какой эффект подтвержден evidence,
+  - `Present`: какие root-causes активны сейчас,
+  - `Future`: какой следующий атомарный пакет закрывает какую бизнес-потерю.
+- Запись "сделано" без этой триады считается неполным handoff и не может быть использована как acceptance-evidence.
+
+6. Budget-aware stop-the-line (mandatory)
+- При росте `INVALID/NON-CANONICAL` или process-trust gap (audit mismatch) дорогие LLM прогоны останавливаются до фикса runner/process слоя.
+- Токены/время считаются ограниченным ресурсом качества; расход без прохождения Go-to-Full трактуется как process regression.
+- Если полноценная проверка временно недоступна, статус этапа = `BLOCKED`; "упрощенный pass" по бюджету запрещен.
 
 ## Invariant
 
@@ -274,6 +379,11 @@ Evidence (forensics):
 - Любой fallback/override, меняющий semantic class turn, обязан писать `reason_code` в trace/meta.
 - Runtime provenance (`runtime_fingerprint` + `/admin/version.git_commit`) должен совпадать по всей канонической цепочке.
 - Interrupted run обязан завершаться terminal summary/brief; "вечный in_progress" для acceptance запрещён.
+- Master intent допускается только при явном master-запросе; общие вопросы про услуги остаются service-query.
+- Ответы про мастеров строятся только из pack-данных; без фактов — уточнение/эскалация.
+- Acceptance lane запускается только после прохождения Go-to-Full; full-chain не используется как постоянный debug-цикл.
+- `manual_audit` статус обязан быть консистентен между `summary` и `manual_audit.json`; рассинхрон = process-blocker.
+- Бюджетные ограничения не меняют целевую архитектуру и не легализуют обходные решения в core/runtime.
 
 ## Scope
 
@@ -286,6 +396,7 @@ Evidence (forensics):
 - Закрыть infra-contract gap для dedup/cache budget path (Redis contract + fallback observability gate).
 - Ввести business-agnostic capability-contract: каждый tenant/ниша использует только свои tools/packs через capability manifest, без нишевого кода в core.
 - Зафиксировать protocol boundary для external tools (MCP-compatible adapter): migration без vendor lock-in и без hardcode provider semantics в core.
+- Ввести master-intent семантику через resolver + pack-данные (masters/services/experience), без core hardcode.
 
 ## Architectural Position (explicit)
 
@@ -340,6 +451,7 @@ Evidence (forensics):
 - `truffles-api/app/routers/webhook/session_memory.py`
 - `truffles-api/app/services/tool_registry_service.py`
 - `truffles-api/app/services/pack_runtime_service.py`
+- `truffles-api/app/services/consult_pack_service.py`
 - `truffles-api/app/services/tool_protocol_gateway.py` (new, if absent)
 - `truffles-api/app/services/capability_manifest_service.py` (new, if absent)
 - `truffles-api/tests/test_booking_quality_status_gate.py`
@@ -392,6 +504,7 @@ Evidence (forensics):
 - Оставить expected-reply как slot-evidence, а не semantic-owner.
 - Исключить захват маршрута `booking -> info` из-за stale expected-reply.
 - Выровнять clear/set контур expected-reply и session memory.
+- Добавить master-intent контракт: явные master-запросы -> master intent, общие услуги -> service-query.
 
 6. `P5 Pack Query Engine v2`
 - Hybrid retrieval: lexical recall + semantic rerank + strict tenant/branch filters.
@@ -426,16 +539,21 @@ Evidence (forensics):
 - Multi-seed drift для контрактных метрик (`action/tool/reason-code drift`).
 - INVALID/INCOMPLETE run не участвует в baseline/comparison.
 
-12. `P11 Cross-domain Hardening`
+12. `P11 Budget-Go-To-Full Control`
+- Внедрить fail-closed `Go-to-Full` preflight и lane enforcement в runner.
+- Синхронизировать `manual_audit` статус между артефактами и summary агрегатами.
+- Блокировать full-chain при process trust gap.
+
+13. `P12 Cross-domain Hardening`
 - Проверка pack-agnostic поведения на минимум 2 несалонных capability-pack.
 - Запрет domain-specific branching в runtime core.
 
-13. `P12 Canary + Rollback`
+14. `P13 Canary + Rollback`
 - Stage A: deterministic contracts + micro replay.
 - Stage B: lock/replay/full acceptance.
 - Stage C: canary rollout с stop-the-line при regression.
 
-14. `P13 Evidence + STATE Handoff`
+15. `P14 Evidence + STATE Handoff`
 - Обязательный пакет: `summary`, `brief`, `responses`, `trace_bundle`,
   top-failures, replay/full commands, contract drift digest.
 - FACT в `STATE.md` только с evidence.
@@ -472,6 +590,8 @@ Evidence (forensics):
   - `artifact_integrity.valid=true`,
   - root-cause digest заполнен для всех `critical/high` findings.
 - Runtime preflight обязан подтвердить `runtime_commit_match=true` между chain-step и ожидаемым кодом ветки.
+- Master intent допустим только для явных мастер-запросов; общие запросы про услуги остаются service-query.
+- Master-ответы должны ссылаться на pack-данные; отсутствие данных -> уточнение/эскалация.
 
 ## Testing Methods (binding)
 
@@ -496,20 +616,30 @@ Evidence (forensics):
 - Multi-seed contract drift report (`seed 7/19/42` минимум).
 - Judge graders должны быть узкими и контрактными (да/нет по `action/tool/trace/meta`); free-form judge summary не может быть единственным блокером acceptance.
 
-6. `Dual-Lane Validation`
+6. `Budget-aware Lane Suite`
+- Dev lane обязателен для каждого fix-пакета: deterministic + micro replay + manual audit.
+- Acceptance lane запускается только после Go-to-Full и не заменяется dev lane метриками.
+- Проверка консистентности `manual_audit` (`summary` vs `manual_audit.json`) обязательна перед full.
+
+7. `Dual-Lane Validation`
 - Semantic lane: contract metrics.
 - Delivery lane: transport metrics + waiver taxonomy.
 
-7. `Cross-domain Capability Suite`
+8. `Cross-domain Capability Suite`
 - Isolation tests tenant A/B + несалонные packs.
+
+9. `Master Intent Contract Suite`
+- Сценарии “какие мастера делают X / кто лучше / опыт по X” -> master intent.
+- Сценарии “какие услуги вы оказываете” -> service-query, без master.
+- Проверки по `intent/action/tool/trace`, без текст-ораклов.
 
 ## Execution Waves (binding)
 
 1. `Wave 0`: `P0`-`P1` governance + semantic envelope lock.
 2. `Wave A`: `P2`-`P4` semantic owner remediation.
 3. `Wave B`: `P5`-`P7` retrieval/capability/core de-hardcoding.
-4. `Wave C`: `P8`-`P11` acceptance split + quality chain + cross-domain.
-5. `Wave D`: `P12`-`P13` rollout + evidence closure.
+4. `Wave C`: `P8`-`P11` acceptance split + quality chain + budget-go-to-full control.
+5. `Wave D`: `P12`-`P14` cross-domain + rollout + evidence closure.
 
 Forensic only (not acceptance):
 - `judge_mode off/critical` допускается только в diagnostic lane.
@@ -528,6 +658,10 @@ Forensic only (not acceptance):
   - `/tmp/booking_quality/firebreak-full-critical-4defects-v2-20260224-a1-r2/responses.jsonl`
   - `/tmp/booking_quality/firebreak-full-critical-4defects-v2-20260224-a1-r3/summary.json`
   - `/tmp/booking_quality/firebreak-full-critical-4defects-v2-20260224-a1-r3/responses.jsonl`
+- Budget/process trust addendum (2026-02-27):
+  - `/tmp/firebreak_summary_scan.json`
+  - `/tmp/booking_quality_firebreak/summary.json`
+  - `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r38/summary.json`
 - Quality run artifacts:
   - `<run_dir>/summary.json`
   - `<run_dir>/brief.md`
@@ -569,6 +703,10 @@ Forensic only (not acceptance):
 - Нельзя принимать quality по subset-сценариям (`count<10`) или без полного coverage (`include_media`, `handoff`).
 - Нельзя использовать debug/forensic runner flags (`--allow-no-code-delta`, `--allow-judge-off`, `--skip-outbox`) как acceptance-доказательство.
 - Нельзя маскировать semantic drift ручным приоритетом stale service carryover над explicit текущим info-вопросом.
+- Нельзя переводить service-query в master без явного master-сигнала.
+- Нельзя реализовывать master-routing через core hardcode/regex.
+- Нельзя запускать full-chain как основной дневной debug-цикл до прохождения Go-to-Full.
+- Нельзя игнорировать `manual_audit` рассинхрон между `summary` и `manual_audit.json`.
 
 ## Риски/блокеры
 

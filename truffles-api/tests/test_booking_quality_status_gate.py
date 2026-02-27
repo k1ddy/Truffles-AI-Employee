@@ -72,6 +72,7 @@ def _load_quality_helpers():
         "_llm_quality_collect_artifact_integrity",
         "_llm_quality_load_json_object",
         "_llm_quality_resolve_manual_audit_status",
+        "_llm_quality_sync_manual_audit_summary",
         "_llm_quality_find_latest_pending_manual_audit",
         "_llm_quality_build_manual_audit_gate_status",
         "_llm_quality_hq1_normalize_text",
@@ -1257,3 +1258,45 @@ def test_manual_audit_gate_passes_when_pending_run_has_done_audit(tmp_path):
     assert gate["valid"] is True
     assert gate["reasons"] == []
     assert gate["pending_run"] is None
+
+
+def test_manual_audit_sync_updates_summary_and_quality_status(tmp_path):
+    ns = _load_quality_helpers()
+    sync_summary = ns["_llm_quality_sync_manual_audit_summary"]
+
+    run_dir = tmp_path / "run-audit-sync"
+    run_dir.mkdir()
+    summary_path = run_dir / "summary.json"
+    summary_payload = {
+        "run_id": "run-audit-sync",
+        "brief_path": str(run_dir / "brief.md"),
+        "manual_audit": {
+            "required": True,
+            "status": "pending",
+            "path": str(run_dir / "manual_audit.md"),
+            "json_path": str(run_dir / "manual_audit.json"),
+            "command": "python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/run --status done --strict-artifacts",
+        },
+        "quality_status": {
+            "manual_audit_required": True,
+            "manual_audit_status": "pending",
+            "manual_audit_path": str(run_dir / "manual_audit.md"),
+        },
+    }
+    summary_path.write_text(
+        json.dumps(summary_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    changed = sync_summary(
+        run_dir=str(run_dir),
+        status="done",
+        manual_audit_path=str(run_dir / "manual_audit.md"),
+        manual_audit_json_path=str(run_dir / "manual_audit.json"),
+    )
+
+    assert changed is True
+    updated = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert updated["manual_audit"]["status"] == "done"
+    assert updated["quality_status"]["manual_audit_status"] == "done"
+    assert updated["quality_status"]["manual_audit_path"] == str(run_dir / "manual_audit.md")
