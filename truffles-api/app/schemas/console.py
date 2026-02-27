@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
-from app.schemas.capabilities import CapabilitiesPayload
+from app.schemas.capabilities import CapabilitiesPayload, CapabilityPolicyOverrides
 from app.schemas.onboarding_contract import (
     OnboardingContractPayload,
     OnboardingProviderBindingPayload,
@@ -1728,6 +1728,53 @@ class ConsoleCapabilitiesPatchRequest(BaseModel):
     status: Optional[Literal["active", "disabled"]] = None
     schema_version: Optional[str] = None
     payload: CapabilitiesPayload
+
+
+class ConsolePolicyVersionRecord(BaseModel):
+    id: UUID
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    scope: Literal["client", "branch"]
+    status: Literal["published", "archived"]
+    schema_version: str
+    version_number: int
+    payload: CapabilityPolicyOverrides
+    reason: Optional[str] = None
+    source_version_id: Optional[UUID] = None
+    created_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    published_by: Optional[UUID] = None
+    published_at: Optional[str] = None
+
+
+class ConsolePolicyRegistryResponse(BaseModel):
+    client_id: UUID
+    scope: Literal["client", "branch"]
+    branch_id: Optional[UUID] = None
+    active: Optional[ConsolePolicyVersionRecord] = None
+    history: list[ConsolePolicyVersionRecord] = []
+
+
+class ConsolePolicyRegistryPublishRequest(BaseModel):
+    scope: Literal["client", "branch"]
+    branch_id: Optional[UUID] = None
+    schema_version: Optional[str] = None
+    reason: str
+    payload: CapabilityPolicyOverrides
+
+
+class ConsolePolicyRegistryRollbackRequest(BaseModel):
+    scope: Literal["client", "branch"]
+    branch_id: Optional[UUID] = None
+    target_version_id: UUID
+    reason: str
+
+
+class ConsolePolicyRegistryMutationResponse(BaseModel):
+    success: bool
+    record: ConsolePolicyVersionRecord
+    from_version_id: Optional[UUID] = None
 
 
 class ConsoleOnboardingContractRecord(BaseModel):

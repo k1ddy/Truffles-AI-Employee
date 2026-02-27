@@ -8,6 +8,7 @@ from app.models.branch import Branch
 from app.models.client import Client
 from app.models.client_capability import ClientCapability
 from app.models.client_onboarding_contract import ClientOnboardingContract
+from app.models.client_policy_version import ClientPolicyVersion
 from app.models.client_settings import ClientSettings
 from app.models.company import Company
 from app.models.console_branch_change import ConsoleBranchChange
@@ -45,6 +46,7 @@ __all__ = [
     "Client",
     "ClientCapability",
     "ClientOnboardingContract",
+    "ClientPolicyVersion",
     "Agent",
     "AgentMembership",
     "AgentIdentity",

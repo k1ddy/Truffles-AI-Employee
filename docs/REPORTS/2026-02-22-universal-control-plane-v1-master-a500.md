@@ -79,7 +79,7 @@
 | B02 RBAC & Governance Model | `UCPV1-PHASE1`, `UCPV1-PHASE2-SLICE2-*` | in_progress | Права ролей прозрачны и стабильны для Platform Admin first | Серверный RBAC source-of-truth; несанкционированные действия получают deterministic `403/400` |
 | B03 Domain Catalog + Capabilities v2 | `UCPV1-PHASE3` | passed | Новая ниша подключается без core-кода | Domain registry CRUD + capability templates + effective merge по scope + schema validation |
 | B04 Onboarding State Machine v2 | `UCPV1-PHASE4` | passed | Go-live воспроизводим и управляем в Console | Branch не уходит в live при незакрытых blockers; preflight/approve/reject/waive серверные |
-| B05 Policy Governance Split | `UCPV1-PHASE5` | in_progress | Hard-law отделен от operational policy | Wave1 done: operational override boundary + hard-law deny; remaining: versioned policy registry + rollback/pin |
+| B05 Policy Governance Split | `UCPV1-PHASE5` | passed | Hard-law отделен от operational policy | Versioned policy registry lifecycle реализован (publish/history/rollback) + runtime effective merge с hard-law deny |
 | B06 Tool Registry Certification | `UCPV1-PHASE6` | planned | Подключение инструментов безопасно и управляемо | Несертифицированный tool не попадает в effective capabilities; scope rules + health checks |
 | B07 Provider/Channel Control (WA-first) | `UCPV1-PHASE7` | planned | Каналы управляются предсказуемо при деградации провайдера | Provider lifecycle registry + explicit branch channel status + safe degrade mode |
 | B08 Knowledge Studio + Pack Compiler | `UCPV1-PHASE8` | planned | Контент управляется через Draft->Validate->Publish->Rollback | Publish блокируется при нарушении minimum data contract; rollback one-click |
@@ -102,7 +102,7 @@ Completed in this program chain:
 - `UCPV1-PHASE4` passed.
 
 Current queue head:
-- `UCPV1-PHASE5` (in_progress, wave2 pending: policy registry versioning).
+- `UCPV1-PHASE6` (planned, unlocked after Phase5 pass).
 
 ## 8) Program-level DoD
 

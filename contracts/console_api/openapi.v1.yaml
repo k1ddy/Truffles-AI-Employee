@@ -4799,6 +4799,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/policy-registry:
+    get:
+      tags:
+      - console
+      summary: Get Policy Registry
+      operationId: get_policy_registry_console_v1_admin_policy_registry_get
+      responses:
+        '200':
+          description: Successful Response
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+  /console/v1/admin/policy-registry/publish:
+    post:
+      tags:
+      - console
+      summary: Publish Policy Registry
+      operationId: publish_policy_registry_console_v1_admin_policy_registry_publish_post
+      responses:
+        '200':
+          description: Successful Response
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+  /console/v1/admin/policy-registry/rollback:
+    post:
+      tags:
+      - console
+      summary: Rollback Policy Registry
+      operationId: rollback_policy_registry_console_v1_admin_policy_registry_rollback_post
+      responses:
+        '200':
+          description: Successful Response
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Bad Request
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
   /console/v1/admin/onboarding-contract:
     get:
       tags:

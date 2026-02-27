@@ -7115,7 +7115,11 @@ async def _handle_webhook_payload(
     from . import _legacy as legacy
 
     policy_type = _get_policy_type(client, client_slug=payload.client_slug)
-    policy_pack = _get_policy_pack(client, client_slug=payload.client_slug)
+    policy_pack = _get_policy_pack(
+        client,
+        client_slug=payload.client_slug,
+        db=db,
+    )
     policy_pack_missing = not isinstance(policy_pack, dict)
     policy_source = "policy_pack" if not policy_pack_missing else "policy_gate"
     policy_handler = legacy._get_policy_handler(client, client_slug=payload.client_slug)

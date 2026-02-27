@@ -40,6 +40,7 @@ from app.models import (
     Client,
     ClientCapability,
     ClientOnboardingContract,
+    ClientPolicyVersion,
     ClientSettings,
     Company,
     ConsoleBranchChange,
@@ -68,7 +69,11 @@ from app.models import (
 from app.models.appointment import Appointment
 from app.models.appointment_audit import AppointmentAudit
 from app.models.reminder_job import ReminderJob
-from app.schemas.capabilities import CAPABILITIES_SCHEMA_VERSION, CapabilitiesPayload
+from app.schemas.capabilities import (
+    CAPABILITIES_SCHEMA_VERSION,
+    CapabilitiesPayload,
+    CapabilityPolicyOverrides,
+)
 from app.schemas.console import (
     ConsoleAgent,
     ConsoleAgentCreateRequest,
@@ -103,6 +108,11 @@ from app.schemas.console import (
     ConsoleCapabilitiesPatchRequest,
     ConsoleCapabilitiesRecord,
     ConsoleCapabilitiesResponse,
+    ConsolePolicyRegistryMutationResponse,
+    ConsolePolicyRegistryPublishRequest,
+    ConsolePolicyRegistryResponse,
+    ConsolePolicyRegistryRollbackRequest,
+    ConsolePolicyVersionRecord,
     ConsoleCase,
     ConsoleCaseActionResponse,
     ConsoleCaseActionSync,
@@ -293,6 +303,13 @@ from app.services.capabilities_service import (
     merge_capabilities,
     merge_capabilities_layers,
     payload_to_dict,
+)
+from app.services.policy_registry_service import (
+    POLICY_REGISTRY_SCHEMA_VERSION,
+    get_latest_policy_version,
+    list_policy_history,
+    publish_policy_version,
+    rollback_policy_version,
 )
 from app.services.chatflow_service import get_instance_id, send_bot_response
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
@@ -20333,6 +20350,34 @@ def _serialize_capabilities_record(record: ClientCapability) -> ConsoleCapabilit
     )
 
 
+def _serialize_policy_version_record(record: ClientPolicyVersion) -> ConsolePolicyVersionRecord:
+    try:
+        payload = CapabilityPolicyOverrides.model_validate(record.payload_json or {})
+    except ValidationError as exc:
+        raise ConsoleAPIError(
+            500,
+            "POLICY_REGISTRY_INVALID",
+            "Stored policy registry payload is invalid",
+        ) from exc
+    return ConsolePolicyVersionRecord(
+        id=record.id,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        scope=record.scope,
+        status=record.status,
+        schema_version=record.schema_version,
+        version_number=record.version_number,
+        payload=payload,
+        reason=record.reason,
+        source_version_id=record.source_version_id,
+        created_by=record.created_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+        published_by=record.published_by,
+        published_at=record.published_at.isoformat() if record.published_at else None,
+    )
+
+
 def _normalize_optional_domain_slug_token(value: Any) -> Optional[str]:
     if not isinstance(value, str):
         return None
@@ -20424,6 +20469,32 @@ def _build_effective_capabilities_payload(
     if domain_slug and not merged_payload.get("domain_slug"):
         merged_payload["domain_slug"] = domain_slug
     return CapabilitiesPayload.model_validate(merged_payload), domain_record
+
+
+def _resolve_policy_registry_scope(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    scope: str,
+    branch_id: Optional[UUID],
+) -> tuple[str, Optional[UUID]]:
+    normalized_scope = str(scope or "").strip().lower()
+    if normalized_scope not in {"client", "branch"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "scope must be client|branch")
+    if normalized_scope == "branch":
+        if not branch_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for branch scope")
+        branch = (
+            db.query(Branch)
+            .filter(Branch.id == branch_id, Branch.client_id == context.client.id)
+            .first()
+        )
+        if not branch:
+            raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+        return normalized_scope, branch.id
+    if branch_id is not None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id is only valid for branch scope")
+    return normalized_scope, None
 
 
 @router.get(
@@ -20572,6 +20643,193 @@ async def patch_capabilities(
     db.commit()
 
     return _serialize_capabilities_record(record)
+
+
+@router.get(
+    "/admin/policy-registry",
+    response_model=ConsolePolicyRegistryResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def get_policy_registry(
+    request: Request,
+    scope: Literal["client", "branch"] = Query("client"),
+    branch_id: Optional[UUID] = Query(None),
+    limit: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> ConsolePolicyRegistryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=scope,
+        branch_id=branch_id,
+    )
+    active_record = get_latest_policy_version(
+        db,
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+        status="published",
+    )
+    history_records = list_policy_history(
+        db,
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+        limit=limit,
+    )
+    return ConsolePolicyRegistryResponse(
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+        active=_serialize_policy_version_record(active_record) if active_record else None,
+        history=[_serialize_policy_version_record(item) for item in history_records],
+    )
+
+
+@router.post(
+    "/admin/policy-registry/publish",
+    response_model=ConsolePolicyRegistryMutationResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def publish_policy_registry(
+    request: Request,
+    body: ConsolePolicyRegistryPublishRequest,
+    db: Session = Depends(get_db),
+) -> ConsolePolicyRegistryMutationResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage policy registry",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+    schema_version = body.schema_version or POLICY_REGISTRY_SCHEMA_VERSION
+
+    try:
+        record = publish_policy_version(
+            db,
+            client_id=context.client.id,
+            scope=normalized_scope,
+            branch_id=resolved_branch_id,
+            payload=body.payload,
+            actor_id=context.agent.id,
+            reason=reason,
+            schema_version=schema_version,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="policy_registry_published",
+        entity_type="client_policy_version",
+        entity_id=record.id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": normalized_scope,
+            "client_id": str(context.client.id),
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "version_number": record.version_number,
+            "reason": reason,
+        },
+    )
+    db.commit()
+    return ConsolePolicyRegistryMutationResponse(
+        success=True,
+        record=_serialize_policy_version_record(record),
+    )
+
+
+@router.post(
+    "/admin/policy-registry/rollback",
+    response_model=ConsolePolicyRegistryMutationResponse,
+    responses={
+        400: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def rollback_policy_registry(
+    request: Request,
+    body: ConsolePolicyRegistryRollbackRequest,
+    db: Session = Depends(get_db),
+) -> ConsolePolicyRegistryMutationResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage policy registry",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+
+    try:
+        record, source_record = rollback_policy_version(
+            db,
+            client_id=context.client.id,
+            scope=normalized_scope,
+            branch_id=resolved_branch_id,
+            target_version_id=body.target_version_id,
+            actor_id=context.agent.id,
+            reason=reason,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message == "Policy version not found":
+            raise ConsoleAPIError(404, "NOT_FOUND", message) from exc
+        raise ConsoleAPIError(400, "INVALID_PARAM", message) from exc
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="policy_registry_rollback",
+        entity_type="client_policy_version",
+        entity_id=record.id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": normalized_scope,
+            "client_id": str(context.client.id),
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "version_number": record.version_number,
+            "reason": reason,
+            "from_version_id": str(source_record.id),
+        },
+    )
+    db.commit()
+    return ConsolePolicyRegistryMutationResponse(
+        success=True,
+        record=_serialize_policy_version_record(record),
+        from_version_id=source_record.id,
+    )
 
 
 def _get_latest_onboarding_contract(
