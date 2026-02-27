@@ -77,8 +77,8 @@
 |---|---|---|---|---|
 | B01 Tenant Core & Data Isolation | `UCPV1-PHASE2-SLICE1`, `UCPV1-PHASE2-SLICE2-*` | in_progress | Нет cross-tenant чтений/записей, tenant-context обязателен | Все критичные `/admin/*` write/read пути fail-closed без tenant-context; negative tests green |
 | B02 RBAC & Governance Model | `UCPV1-PHASE1`, `UCPV1-PHASE2-SLICE2-*` | in_progress | Права ролей прозрачны и стабильны для Platform Admin first | Серверный RBAC source-of-truth; несанкционированные действия получают deterministic `403/400` |
-| B03 Domain Catalog + Capabilities v2 | `UCPV1-PHASE3` | planned | Новая ниша подключается без core-кода | Domain registry CRUD + capability templates + effective merge по scope + schema validation |
-| B04 Onboarding State Machine v2 | `UCPV1-PHASE4` | planned | Go-live воспроизводим и управляем в Console | Branch не уходит в live при незакрытых blockers; preflight/approve/reject/waive серверные |
+| B03 Domain Catalog + Capabilities v2 | `UCPV1-PHASE3` | passed | Новая ниша подключается без core-кода | Domain registry CRUD + capability templates + effective merge по scope + schema validation |
+| B04 Onboarding State Machine v2 | `UCPV1-PHASE4` | passed | Go-live воспроизводим и управляем в Console | Branch не уходит в live при незакрытых blockers; preflight/approve/reject/waive серверные |
 | B05 Policy Governance Split | `UCPV1-PHASE5` | planned | Hard-law отделен от operational policy | Versioned policy registry; hard-law only Platform Admin; branch override только operational/SLA |
 | B06 Tool Registry Certification | `UCPV1-PHASE6` | planned | Подключение инструментов безопасно и управляемо | Несертифицированный tool не попадает в effective capabilities; scope rules + health checks |
 | B07 Provider/Channel Control (WA-first) | `UCPV1-PHASE7` | planned | Каналы управляются предсказуемо при деградации провайдера | Provider lifecycle registry + explicit branch channel status + safe degrade mode |
@@ -97,9 +97,12 @@ Completed in this program chain:
 - `UCPV1-PHASE2-SLICE2-ANALYSIS` passed.
 - `UCPV1-PHASE2-SLICE2-IMPL1` passed.
 - `UCPV1-GATES-SANITARY` passed.
+- `UCPV1-PHASE2-SLICE2-IMPL2` passed.
+- `UCPV1-PHASE3` passed.
+- `UCPV1-PHASE4` passed.
 
 Current queue head:
-- `UCPV1-PHASE2-SLICE2-IMPL2` (planned, next execution block).
+- `UCPV1-PHASE5` (planned, next execution block).
 
 ## 8) Program-level DoD
 
