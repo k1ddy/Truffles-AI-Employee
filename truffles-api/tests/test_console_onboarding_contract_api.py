@@ -6,7 +6,11 @@ from uuid import uuid4
 import pytest
 
 from app.routers import console as console_router
-from app.schemas.console import ConsoleOnboardingContractPatchRequest, ConsoleReferencePackUpsertRequest
+from app.schemas.console import (
+    ConsoleOnboardingAutopilotRequest,
+    ConsoleOnboardingContractPatchRequest,
+    ConsoleReferencePackUpsertRequest,
+)
 from app.schemas.onboarding_contract import OnboardingContractPayload
 from app.services.console_errors import ConsoleAPIError
 from app.services.reference_pack_integrity import (
@@ -39,6 +43,38 @@ async def test_patch_onboarding_contract_payment_requires_platform_admin(monkeyp
 
     with pytest.raises(ConsoleAPIError) as exc_info:
         await console_router.patch_onboarding_contract(request=Mock(), body=body, db=db)
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_patch_onboarding_contract_requires_platform_admin(monkeypatch):
+    context = _mock_context(role="owner")
+    db = Mock()
+    body = ConsoleOnboardingContractPatchRequest(
+        scope="client",
+        payload=OnboardingContractPayload.model_validate({"purchased": {}}),
+    )
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.patch_onboarding_contract(request=Mock(), body=body, db=db)
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_get_onboarding_contract_requires_platform_admin(monkeypatch):
+    context = _mock_context(role="owner")
+    db = Mock()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_onboarding_contract(request=Mock(), branch_id=None, db=db)
 
     assert exc_info.value.code == "ACCESS_DENIED"
 
@@ -113,7 +149,7 @@ async def test_get_onboarding_contract_reports_capability_mismatches(monkeypatch
     client_id = uuid4()
     agent_id = uuid4()
     now = datetime.now(timezone.utc)
-    context = _mock_context(role="owner", client_id=client_id, agent_id=agent_id)
+    context = _mock_context(role="platform_admin", client_id=client_id, agent_id=agent_id)
 
     contract_record = SimpleNamespace(
         id=uuid4(),
@@ -297,10 +333,24 @@ async def test_list_reference_packs_requires_platform_admin(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_webhook_secret_requires_platform_admin(monkeypatch):
+    context = _mock_context(role="owner")
+    db = Mock()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_webhook_secret(request=Mock(), branch_id=uuid4(), db=db)
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
 async def test_get_webhook_secret_generates_and_returns_value(monkeypatch):
     client_id = uuid4()
     branch_id = uuid4()
-    context = _mock_context(role="owner", client_id=client_id)
+    context = _mock_context(role="platform_admin", client_id=client_id)
     branch = SimpleNamespace(id=branch_id, client_id=client_id, instance_id="instance-123")
     client = SimpleNamespace(id=client_id, name="demo_salon")
     db = Mock()
@@ -326,3 +376,29 @@ async def test_get_webhook_secret_generates_and_returns_value(monkeypatch):
     assert response.webhook_secret == "whs_v1_test"
     assert response.webhook_url.endswith("webhook_secret=whs_v1_test")
     db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_onboarding_autopilot_requires_platform_admin(monkeypatch):
+    context = _mock_context(role="owner")
+    db = Mock()
+    body = ConsoleOnboardingAutopilotRequest(
+        phone="+77011111111",
+        instance_id="instance-123",
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda request, db, require_selection=False: context,
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.run_onboarding_autopilot(
+            request=Mock(),
+            body=body,
+            db=db,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
