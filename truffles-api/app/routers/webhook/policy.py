@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Client, Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
+from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.intent_service import Intent
 from app.services.pack_runtime_service import (
     PackDecision,
@@ -67,6 +68,11 @@ _DEFAULT_HARD_LAW_SECTIONS = (
     "complaint",
     "refund",
 )
+
+_ALLOWED_OPERATIONAL_POLICY_OVERRIDE_SECTIONS = {
+    "payment_info",
+    "discounts",
+}
 
 
 def _looks_like_policy_pack(value: object) -> bool:
@@ -139,15 +145,59 @@ def _load_policy_pack(*, policy_type: str | None, client_slug: str | None) -> di
     return policy_pack if isinstance(policy_pack, dict) and policy_pack else None
 
 
+def _resolve_runtime_policy_overrides() -> dict[str, dict[str, str]]:
+    runtime = get_runtime_capabilities()
+    if runtime is None:
+        return {}
+    override_payload = runtime.payload.policy_overrides.model_dump(exclude_none=True)
+    resolved: dict[str, dict[str, str]] = {}
+    for section_key, section_payload in override_payload.items():
+        if section_key not in _ALLOWED_OPERATIONAL_POLICY_OVERRIDE_SECTIONS:
+            continue
+        if not isinstance(section_payload, dict):
+            continue
+        response = section_payload.get("response")
+        if not isinstance(response, str):
+            continue
+        normalized_response = response.strip()
+        if not normalized_response:
+            continue
+        resolved[section_key] = {"response": normalized_response}
+    return resolved
+
+
+def _apply_runtime_policy_overrides(policy_pack: dict | None) -> dict | None:
+    if not isinstance(policy_pack, dict):
+        return None
+    overrides = _resolve_runtime_policy_overrides()
+    if not overrides:
+        return policy_pack
+    hard_law_sections = set(_resolve_hard_law_sections(policy_pack))
+    merged = dict(policy_pack)
+    for section_key, section_override in overrides.items():
+        if section_key in hard_law_sections:
+            continue
+        section = _get_policy_section(policy_pack, section_key)
+        if not isinstance(section, dict):
+            continue
+        updated_section = dict(section)
+        response = section_override.get("response")
+        if isinstance(response, str) and response.strip():
+            updated_section["response"] = response.strip()
+        merged[section_key] = updated_section
+    return merged
+
+
 def _get_policy_pack(client: Client | None, *, client_slug: str | None) -> dict | None:
     if not client or not isinstance(client.config, dict):
         return None
     policy_pack = _extract_policy_pack_from_config(client.config)
     if policy_pack:
-        return policy_pack
+        return _apply_runtime_policy_overrides(policy_pack)
     policy_type = _get_policy_type(client, client_slug=client_slug)
     if policy_type:
-        return _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
+        policy_pack = _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
+        return _apply_runtime_policy_overrides(policy_pack)
     return None
 
 

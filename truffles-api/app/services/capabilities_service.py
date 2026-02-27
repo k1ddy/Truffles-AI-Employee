@@ -38,6 +38,7 @@ def payload_to_dict(payload: CapabilitiesPayload) -> dict[str, Any]:
     data.setdefault("providers", {})
     data.setdefault("features", {})
     data.setdefault("tools", {})
+    data.setdefault("policy_overrides", {})
     return data
 
 
