@@ -18,6 +18,7 @@ from app.services.pack_runtime_service import (
     get_pack_price_reply,
     load_policy_pack,
 )
+from app.services.policy_registry_service import resolve_effective_policy_overrides
 
 _POLICY_SECTIONS = (
     "payment_info",
@@ -145,13 +146,13 @@ def _load_policy_pack(*, policy_type: str | None, client_slug: str | None) -> di
     return policy_pack if isinstance(policy_pack, dict) and policy_pack else None
 
 
-def _resolve_runtime_policy_overrides() -> dict[str, dict[str, str]]:
-    runtime = get_runtime_capabilities()
-    if runtime is None:
+def _normalize_policy_override_payload(
+    payload: dict | None,
+) -> dict[str, dict[str, str]]:
+    if not isinstance(payload, dict):
         return {}
-    override_payload = runtime.payload.policy_overrides.model_dump(exclude_none=True)
     resolved: dict[str, dict[str, str]] = {}
-    for section_key, section_payload in override_payload.items():
+    for section_key, section_payload in payload.items():
         if section_key not in _ALLOWED_OPERATIONAL_POLICY_OVERRIDE_SECTIONS:
             continue
         if not isinstance(section_payload, dict):
@@ -166,10 +167,35 @@ def _resolve_runtime_policy_overrides() -> dict[str, dict[str, str]]:
     return resolved
 
 
-def _apply_runtime_policy_overrides(policy_pack: dict | None) -> dict | None:
+def _resolve_runtime_policy_overrides() -> dict[str, dict[str, str]]:
+    runtime = get_runtime_capabilities()
+    if runtime is None:
+        return {}
+    override_payload = runtime.payload.policy_overrides.model_dump(exclude_none=True)
+    return _normalize_policy_override_payload(override_payload)
+
+
+def _resolve_registry_policy_overrides(*, db: Session | None) -> dict[str, dict[str, str]]:
+    runtime = get_runtime_capabilities()
+    if db is None or runtime is None or runtime.client_id is None:
+        return {}
+    overrides = resolve_effective_policy_overrides(
+        db,
+        client_id=runtime.client_id,
+        branch_id=runtime.branch_id,
+    )
+    if overrides is None:
+        return {}
+    return _normalize_policy_override_payload(overrides.model_dump(exclude_none=True))
+
+
+def _apply_policy_overrides(
+    policy_pack: dict | None,
+    *,
+    overrides: dict[str, dict[str, str]],
+) -> dict | None:
     if not isinstance(policy_pack, dict):
         return None
-    overrides = _resolve_runtime_policy_overrides()
     if not overrides:
         return policy_pack
     hard_law_sections = set(_resolve_hard_law_sections(policy_pack))
@@ -188,15 +214,40 @@ def _apply_runtime_policy_overrides(policy_pack: dict | None) -> dict | None:
     return merged
 
 
-def _get_policy_pack(client: Client | None, *, client_slug: str | None) -> dict | None:
+def _apply_registry_policy_overrides(
+    policy_pack: dict | None,
+    *,
+    db: Session | None,
+) -> dict | None:
+    return _apply_policy_overrides(
+        policy_pack,
+        overrides=_resolve_registry_policy_overrides(db=db),
+    )
+
+
+def _apply_runtime_policy_overrides(policy_pack: dict | None) -> dict | None:
+    return _apply_policy_overrides(
+        policy_pack,
+        overrides=_resolve_runtime_policy_overrides(),
+    )
+
+
+def _get_policy_pack(
+    client: Client | None,
+    *,
+    client_slug: str | None,
+    db: Session | None = None,
+) -> dict | None:
     if not client or not isinstance(client.config, dict):
         return None
     policy_pack = _extract_policy_pack_from_config(client.config)
     if policy_pack:
+        policy_pack = _apply_registry_policy_overrides(policy_pack, db=db)
         return _apply_runtime_policy_overrides(policy_pack)
     policy_type = _get_policy_type(client, client_slug=client_slug)
     if policy_type:
         policy_pack = _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
+        policy_pack = _apply_registry_policy_overrides(policy_pack, db=db)
         return _apply_runtime_policy_overrides(policy_pack)
     return None
 

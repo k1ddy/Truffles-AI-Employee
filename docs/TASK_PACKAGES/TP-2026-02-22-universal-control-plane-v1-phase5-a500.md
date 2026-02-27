@@ -7,7 +7,7 @@
 - `UNLOCKS`: UCPV1-PHASE6
 
 ## Название/цель
-Universal Control Plane v1 / Phase 5: внедрить Policy Governance split (hard-law vs operational policy) в pack-agnostic runtime с fail-closed guardrails и управлением через Console capabilities.
+Universal Control Plane v1 / Phase 5: закрыть Policy Governance split (hard-law vs operational policy) end-to-end через versioned policy registry в Console и runtime enforcement с fail-closed guardrails.
 
 ## Canon refs
 - `AGENTS.md`
@@ -48,7 +48,7 @@ Universal Control Plane v1 / Phase 5: внедрить Policy Governance split (
 - **Rejected options:**
   - Вводить новый внешний policy orchestrator: отклонено как DEC-level архитектурный скачок вне scope.
   - Делать policy override через клиентские regex в core: отклонено (нарушает semantic-first charter и no-hardcode gate).
-- **Open questions:** отдельный versioned policy registry CRUD остается в backlog следующей волны B05.
+- **Open questions:** нет; решение по versioned policy registry принято в рамках wave2 текущего блока.
 
 ## Root cause (mandatory)
 - **Symptom:** hard-law и operational policy смешаны на runtime data-path; tenant/branch-level customization operational policy не формализован в capabilities contract.
@@ -63,7 +63,7 @@ Universal Control Plane v1 / Phase 5: внедрить Policy Governance split (
   4. Why? Не реализован boundary-guard, который разрешает только operational sections и блокирует hard-law sections.
   5. Why? Без boundary-guard невозможно безопасно выполнить governance split в production path.
 - **Root cause statement:** отсутствует явный operational-policy override boundary между capabilities и runtime policy-pack с fail-closed защитой hard-law sections.
-- **Fix mechanism:** добавить `policy_overrides` в capabilities schema и применить их в `_get_policy_pack` только для разрешенных operational sections, с runtime hard-law deny через `_resolve_hard_law_sections`.
+- **Fix mechanism:** двухволновая реализация: (1) capability-level boundary contract (`policy_overrides`) для operational sections; (2) versioned `client_policy_versions` registry + Console publish/rollback API + runtime merge from registry с hard-law deny.
 
 ## Reuse-first plan (mandatory)
 - **Internal reuse:** `CapabilitiesPayload`, `merge_capabilities`, runtime context (`get_runtime_capabilities`), existing hard-law resolver `_resolve_hard_law_sections`.
@@ -79,21 +79,31 @@ Universal Control Plane v1 / Phase 5: внедрить Policy Governance split (
 ## Scope
 - Добавить `policy_overrides` в capabilities schema (операционные секции только).
 - Применить operational policy overrides в runtime `_get_policy_pack`.
-- Добавить contract tests на allowed operational override и hard-law override deny.
-- Обновить block docs/session/report для phase5 wave1.
+- Ввести versioned policy registry (`client_policy_versions`) с publish/history/rollback semantics.
+- Добавить Console API `/admin/policy-registry`, `/admin/policy-registry/publish`, `/admin/policy-registry/rollback` (platform-admin only).
+- Подключить runtime policy merge к effective policy registry версии (branch -> client fallback) c hard-law deny.
+- Добавить/обновить deterministic tests для schema/runtime/console/service слоев.
 
 ## Out of scope
-- Полный versioned policy registry CRUD и отдельные policy tables.
 - Изменение policy bundle schema `policy_bundle.v1`.
 - Перестройка onboarding/knowledge pipelines.
 - CI workflow redesign.
 
 ## Touch-list
 - `truffles-api/app/schemas/capabilities.py`
+- `truffles-api/app/schemas/console.py`
 - `truffles-api/app/services/capabilities_service.py`
+- `truffles-api/app/services/policy_registry_service.py`
+- `truffles-api/app/models/client_policy_version.py`
 - `truffles-api/app/routers/webhook/policy.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/app/routers/console.py`
+- `truffles-api/migrations/044_add_client_policy_versions.sql`
 - `truffles-api/tests/test_capabilities_runtime.py`
 - `truffles-api/tests/test_policy_handler_runtime.py`
+- `truffles-api/tests/test_console_policy_registry.py`
+- `truffles-api/tests/test_policy_registry_service.py`
+- `contracts/console_api/openapi.v1.yaml`
 - `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase5-a500.md`
 - `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase5-a500.md`
 - `docs/SESSIONS/SESSION-2026-02-27-ucpv1-phase5-a500.md`
@@ -104,30 +114,31 @@ Universal Control Plane v1 / Phase 5: внедрить Policy Governance split (
 
 ## Plan (1..N)
 1. Зафиксировать B05 analysis gate и создать phase5 TP/Report.
-2. Расширить capabilities schema operational policy override contract (`policy_overrides`).
-3. Добавить runtime policy boundary merge с hard-law deny.
-4. Добавить/обновить deterministic tests для schema/runtime behavior.
-5. Обновить docs/status/evidence и передать следующую волну B05 (versioned registry).
+2. Реализовать wave1 boundary: `policy_overrides` + runtime hard-law deny.
+3. Реализовать wave2 registry: новая таблица/модель/сервис versioning+rollback.
+4. Добавить Console policy registry API и platform-admin audit trail.
+5. Подключить runtime merge к effective registry version с branch->client fallback.
+6. Прогнать deterministic checks + openapi drift gate + doc sync.
 
 ## DoD
 - `CapabilitiesPayload` принимает только operational policy overrides (`payment_info`, `discounts`) и отвергает hard-law section keys.
 - Runtime `_get_policy_pack` применяет operational override только если section не входит в hard-law set.
-- Deterministic tests зелёные для:
-  - schema normalization/reject path,
-  - runtime apply path,
-  - hard-law deny path.
-- Block docs/session sync выполнен без дрейфа.
+- Versioned registry `client_policy_versions` поддерживает publish/history/rollback без hard-law override surface.
+- Console policy registry API работает только для platform admin и оставляет audit trail.
+- Runtime использует effective registry version (branch first, client fallback) и fail-closed при невалидном payload.
+- Deterministic tests зелёные для schema/runtime/console/service слоев.
+- Block docs/session sync выполнен без дрейфа и блок переводится в `passed`.
 
 ## Checks
-- `python3 -m py_compile truffles-api/app/schemas/capabilities.py truffles-api/app/services/capabilities_service.py truffles-api/app/routers/webhook/policy.py`
-- `pytest -q truffles-api/tests/test_capabilities_runtime.py`
-- `pytest -q truffles-api/tests/test_policy_handler_runtime.py`
+- `python3 -m py_compile truffles-api/app/models/client_policy_version.py truffles-api/app/services/policy_registry_service.py truffles-api/app/routers/webhook/policy.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/console.py truffles-api/app/schemas/console.py`
+- `pytest -q truffles-api/tests/test_policy_registry_service.py truffles-api/tests/test_console_policy_registry.py truffles-api/tests/test_policy_handler_runtime.py truffles-api/tests/test_console_onboarding_contract_api.py truffles-api/tests/test_console_domain_catalog.py`
+- `pytest -q truffles-api/tests/test_apply_sql_migrations.py`
 - `cd truffles-api && python3 scripts/generate_openapi.py --check`
 
 ## Evidence
-- test logs from `test_capabilities_runtime.py` and `test_policy_handler_runtime.py`
-- schema/runtime code diffs in touch-list
-- phase5 report with residual gaps for next B05 wave
+- test logs from policy registry + runtime + console suites in Checks
+- migration + model + router/service diffs in touch-list
+- phase5 report with final verdict and no residual B05 registry gap
 
 ## Token / run budget (mandatory for expensive suites)
 - **Max full runs:** `3`
@@ -136,9 +147,9 @@ Universal Control Plane v1 / Phase 5: внедрить Policy Governance split (
 - **Escalation path:** Brain/Top Architect approval для расширения до full booking-quality contour.
 
 ## Release safety (mandatory for non-doc changes)
-- **Strategy:** phased enablement через capabilities payload (tenant-scoped), без глобального forced switch.
-- **Go/no-go signals:** tests pass + отсутствие hard-law override в runtime path.
-- **Rollback:** revert commit или удалить `policy_overrides` из capabilities payload.
+- **Strategy:** phased enablement через tenant-scoped publish in policy registry (client/branch scopes).
+- **Go/no-go signals:** tests pass + openapi check pass + отсутствие hard-law override в runtime path.
+- **Rollback:** `POST /admin/policy-registry/rollback` на стабильную версию или revert commit.
 - **Post-release monitoring window:** 24h on policy-gate traces (`policy_gate`, `source`, runtime errors).
 
 ## Doc sync plan (after implementation)
@@ -150,12 +161,12 @@ Universal Control Plane v1 / Phase 5: внедрить Policy Governance split (
   - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
   - `STATE.md`
 - `Drift closeout rule`:
-  - phase5 не переводится в `passed`, пока не закрыт versioned policy registry gap.
+  - phase5 переводится в `passed` только после green checks + block graph/state sync.
 
 ## Rollback
 - Revert текущий commit(s) блока.
-- Проверить `pytest -q truffles-api/tests/test_capabilities_runtime.py truffles-api/tests/test_policy_handler_runtime.py`.
-- Удалить/очистить `policy_overrides` в клиентских payload при необходимости.
+- Проверить policy registry через `POST /admin/policy-registry/rollback`.
+- Перезапустить deterministic suite из секции Checks.
 
 ## No-go
 - Не добавлять hard-law override через capabilities.
@@ -164,13 +175,12 @@ Universal Control Plane v1 / Phase 5: внедрить Policy Governance split (
 - Не ослаблять safety gates ради “быстрого pass”.
 
 ## Risks/Blockers
-- Пока нет versioned policy registry CRUD и policy version pinning.
 - Возможна необходимость расширить operational sections beyond `payment_info/discounts` после product review.
 - Высокая связность `webhook/policy.py` повышает риск regressions при дальнейшем расширении B05.
 
 ## Handoff (for zero-context next agent)
 - `Ready for next agent`: yes
-- `Start from`: `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase5-a500.md`
+- `Start from`: `docs/BLOCK_GRAPH.yaml` (next planned block `UCPV1-PHASE6`)
 - `Do not touch`: unrelated booking quality tracks and onboarding state machine code
-- `Open risks`: отсутствует policy registry versioning wave
-- `First command to verify`: `pytest -q truffles-api/tests/test_policy_handler_runtime.py`
+- `Open risks`: возможное расширение operational sections beyond текущего allow-list
+- `First command to verify`: `pytest -q truffles-api/tests/test_policy_registry_service.py truffles-api/tests/test_console_policy_registry.py`

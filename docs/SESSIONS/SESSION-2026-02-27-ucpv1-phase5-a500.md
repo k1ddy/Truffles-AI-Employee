@@ -1,6 +1,6 @@
 # SESSION 2026-02-27-ucpv1-phase5-a500 — Session 2026-02-27-ucpv1-phase5-a500
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase5-a500.md
 - block_id: UCPV1-PHASE5
@@ -15,15 +15,20 @@
 - branch: feat/2026-02-27-ucpv1-phase5-a500
 - worktree: /home/zhan/worktrees/2026-02-27-ucpv1-phase5-a500
 - base_ref: origin/main
-- scope: UCPV1 phase5 wave1 - operational policy override boundary with hard-law deny
+- scope: UCPV1 phase5 full closure - operational policy boundary + versioned policy registry lifecycle
 - done:
   - Session created.
   - Phase5 TP/Report created and linked.
   - Implemented capabilities `policy_overrides` schema + runtime policy boundary apply.
   - Added deterministic tests for operational override apply + hard-law deny.
+  - Implemented wave2 versioned policy registry (`client_policy_versions`) with publish/history/rollback.
+  - Added platform-admin Console endpoints `/admin/policy-registry`, `/admin/policy-registry/publish`, `/admin/policy-registry/rollback`.
+  - Connected runtime policy pack merge to effective registry overrides with hard-law deny preserved.
+  - Added service/router/runtime tests and green openapi drift gate.
 - next:
-  - Complete phase5 wave2: versioned policy registry CRUD + policy version rollback contracts.
+  - Start next unlocked block `UCPV1-PHASE6`.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase5-a500.md
   - docs/REPORTS/2026-02-22-universal-control-plane-v1-phase5-a500.md
+  - /tmp/booking_quality/booking-full-20260225-pra-a1-d38-r4/summary.json
 - last_updated: 2026-02-27
