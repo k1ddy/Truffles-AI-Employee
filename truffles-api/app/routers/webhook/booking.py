@@ -1572,6 +1572,11 @@ def _create_booking_appointment(
     return appointment, meta
 
 
+def _is_appointment_overlap_integrity_error(exc: Exception) -> bool:
+    text = str(getattr(exc, "orig", exc) or exc).casefold()
+    return "appointments_no_overlap" in text or "exclusion constraint" in text
+
+
 @dataclass(frozen=True)
 class BookingFlowResult:
     response: WebhookResponse | None
