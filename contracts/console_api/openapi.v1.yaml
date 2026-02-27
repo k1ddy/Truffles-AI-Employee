@@ -2381,6 +2381,14 @@ paths:
           - type: string
           - type: 'null'
           title: Client Id
+      - name: branch_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Branch Id
       - name: lifecycle
         in: query
         required: false
@@ -2566,6 +2574,14 @@ paths:
           - type: string
           - type: 'null'
           title: Client Id
+      - name: include_branches
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Include Branches
       - name: lifecycle
         in: query
         required: false
@@ -4914,6 +4930,109 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/domain-catalog:
+    get:
+      tags:
+      - console
+      summary: List Domain Catalog
+      operationId: list_domain_catalog_console_v1_admin_domain_catalog_get
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleDomainCatalogListResponse'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/domain-catalog/{domain_slug}:
+    put:
+      tags:
+      - console
+      summary: Upsert Domain Catalog
+      operationId: upsert_domain_catalog_console_v1_admin_domain_catalog__domain_slug__put
+      parameters:
+      - name: domain_slug
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Domain Slug
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleDomainCatalogUpsertRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleDomainCatalogItem'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - console
+      summary: Disable Domain Catalog
+      operationId: disable_domain_catalog_console_v1_admin_domain_catalog__domain_slug__delete
+      parameters:
+      - name: domain_slug
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Domain Slug
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleDomainCatalogItem'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/onboarding-blueprints:
     get:
       tags:
@@ -5693,6 +5812,22 @@ components:
           $ref: '#/components/schemas/CapabilityFeatures'
         tools:
           $ref: '#/components/schemas/CapabilityTools'
+        allowed_fact_scopes:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Allowed Fact Scopes
+        handoff_policy:
+          anyOf:
+          - type: string
+            enum:
+            - allow
+            - manager_request_only
+            - deny
+          - type: 'null'
+          title: Handoff Policy
       additionalProperties: false
       type: object
       title: CapabilitiesPayload
@@ -8009,6 +8144,110 @@ components:
       - audit_events_24h
       - critical_audit_events_24h
       title: ConsoleDataTrustSummaryResponse
+    ConsoleDomainCatalogItem:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        domain_slug:
+          type: string
+          title: Domain Slug
+        title:
+          type: string
+          title: Title
+        summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Summary
+        schema_version:
+          type: string
+          title: Schema Version
+        status:
+          type: string
+          enum:
+          - active
+          - disabled
+          title: Status
+        capability_template:
+          $ref: '#/components/schemas/CapabilitiesPayload'
+        metadata:
+          type: object
+          title: Metadata
+        created_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Created By
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - id
+      - domain_slug
+      - title
+      - schema_version
+      - status
+      - capability_template
+      - metadata
+      title: ConsoleDomainCatalogItem
+    ConsoleDomainCatalogListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleDomainCatalogItem'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: ConsoleDomainCatalogListResponse
+    ConsoleDomainCatalogUpsertRequest:
+      properties:
+        title:
+          type: string
+          title: Title
+        summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Summary
+        schema_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Schema Version
+        status:
+          anyOf:
+          - type: string
+            enum:
+            - active
+            - disabled
+          - type: 'null'
+          title: Status
+        capability_template:
+          anyOf:
+          - $ref: '#/components/schemas/CapabilitiesPayload'
+          - type: 'null'
+        metadata:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Metadata
+      type: object
+      required:
+      - title
+      title: ConsoleDomainCatalogUpsertRequest
     ConsoleError:
       properties:
         code:
@@ -12077,6 +12316,23 @@ components:
           - type: string
           - type: 'null'
           title: Remote Jid
+        conversation_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Conversation Id
+        case_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Case Id
+        case_created:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Case Created
         outbox_enqueued:
           anyOf:
           - type: boolean
