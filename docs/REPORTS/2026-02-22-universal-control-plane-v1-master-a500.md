@@ -81,7 +81,7 @@
 | B04 Onboarding State Machine v2 | `UCPV1-PHASE4` | passed | Go-live воспроизводим и управляем в Console | Branch не уходит в live при незакрытых blockers; preflight/approve/reject/waive серверные |
 | B05 Policy Governance Split | `UCPV1-PHASE5` | passed | Hard-law отделен от operational policy | Versioned policy registry lifecycle реализован (publish/history/rollback) + runtime effective merge с hard-law deny |
 | B06 Tool Registry Certification | `UCPV1-PHASE6` | passed | Подключение инструментов безопасно и управляемо | Несертифицированный tool не попадает в effective capabilities; scope rules + health checks |
-| B07 Provider/Channel Control (WA-first) | `UCPV1-PHASE7` | planned | Каналы управляются предсказуемо при деградации провайдера | Provider lifecycle registry + explicit branch channel status + safe degrade mode |
+| B07 Provider/Channel Control (WA-first) | `UCPV1-PHASE7` | passed | Каналы управляются предсказуемо при деградации провайдера | Provider lifecycle registry + explicit branch channel status + safe degrade mode |
 | B08 Knowledge Studio + Pack Compiler | `UCPV1-PHASE8` | planned | Контент управляется через Draft->Validate->Publish->Rollback | Publish блокируется при нарушении minimum data contract; rollback one-click |
 | B09 Runtime Pack-Agnostic Decoupling | `UCPV1-PHASE9` | planned | Runtime независим от demo-пака | Нет прямых demo imports в core runtime; adapter boundaries + neutral fallback |
 | B10 SLA/SLO Engine (Multi-level) | `UCPV1-PHASE10` | planned | SLA/SLO профили реально влияют на runtime и escalation | Policy-driven thresholds + predictable actions + auditability on each violation |
@@ -102,9 +102,10 @@ Completed in this program chain:
 - `UCPV1-PHASE4` passed.
 - `UCPV1-PHASE5` passed.
 - `UCPV1-PHASE6` passed.
+- `UCPV1-PHASE7` passed.
 
 Current queue head:
-- `UCPV1-PHASE7` (planned, unlocked after Phase6 pass).
+- `UCPV1-PHASE8` (planned, unlocked after Phase7 pass).
 
 ## 8) Program-level DoD
 
