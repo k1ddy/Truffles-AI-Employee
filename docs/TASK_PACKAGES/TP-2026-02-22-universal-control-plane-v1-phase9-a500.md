@@ -132,6 +132,8 @@ Universal Control Plane v1 / Phase 9: Runtime Pack-Agnostic Decoupling, чтоб
 - `cd truffles-api && pytest -q tests/test_booking_chaos_dialogs.py tests/test_booking_quality_response_guard.py tests/test_demo_salon_eval.py`
 - `cd truffles-api && python3 scripts/generate_openapi.py --check`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:8031 --mode llm --count 1 --min-turns 2 --max-turns 2 --scenario-coverage none --tool-hooks off --tool-evidence-policy off --judge-mode sample --judge-sample 1 --allow-non-allowlist --skip-outbox --manager-mode skip --pending-mode skip --manual-audit-gate off --run-economy-gate off --run-id phase9-short-a521-r9`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:8041 --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id phase9-canonical-a521-r3`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/phase9-canonical-a521-r3 --status done --strict-artifacts`
 - `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase9-a500.md --report docs/REPORTS/2026-02-22-universal-control-plane-v1-phase9-a500.md --graph docs/BLOCK_GRAPH.yaml`
 
 ## Evidence
@@ -147,6 +149,12 @@ Universal Control Plane v1 / Phase 9: Runtime Pack-Agnostic Decoupling, чтоб
 - Short runtime smoke artifacts:
   - `/tmp/booking_quality/phase9-short-a521-r9/summary.json`
   - `/tmp/booking_quality/phase9-short-a521-r9/brief.md`
+- Canonical long acceptance artifacts:
+  - `/tmp/booking_quality/phase9-canonical-a521-r3/summary.json`
+  - `/tmp/booking_quality/phase9-canonical-a521-r3/brief.md`
+  - `/tmp/booking_quality/phase9-canonical-a521-r3/responses.jsonl`
+  - `/tmp/booking_quality/phase9-canonical-a521-r3/trace_bundle.jsonl`
+  - `/tmp/booking_quality/phase9-canonical-a521-r3/manual_audit.md`
 
 ## Token / run budget (mandatory for expensive suites)
 - **Max full runs:** `3`
@@ -179,12 +187,18 @@ Universal Control Plane v1 / Phase 9: Runtime Pack-Agnostic Decoupling, чтоб
 - No unrelated refactors outside listed touch-list.
 
 ## Risks/Blockers
-- Canonical acceptance lane for core behavior still requires full `llm-quality` profile.
-- Short smoke run is non-canonical and cannot be used as final DoD closure.
+- Canonical acceptance lane executed (`phase9-canonical-a521-r3`) but failed semantic gate (`semantic_valid=false`).
+- Blocking reasons from canonical run:
+  - `expected_action_mismatch=1`
+  - `expected_reply_type_mismatch=3`
+  - `judge_fail=3`
+  - `handoff_miss=1`
+  - `booking_flow_break=3`
+- `UCPV1-PHASE10` remains locked until semantic blockers are remediated and canonical rerun is green.
 
 ## Handoff (for zero-context next agent)
 - `Ready for next agent`: yes
 - `Start from`: `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase9-a500.md`
 - `Do not touch`: unrelated UCP blocks and non-runtime tracks.
-- `Open risks`: full acceptance lane pending.
-- `First command to verify`: `cd truffles-api && pytest -q tests/test_pack_runtime_service.py tests/test_policy_handler_runtime.py`
+- `Open risks`: semantic blockers in canonical run `phase9-canonical-a521-r3`.
+- `First command to verify`: `jq '.quality_status,.blocking_reasons' /tmp/booking_quality/phase9-canonical-a521-r3/summary.json`

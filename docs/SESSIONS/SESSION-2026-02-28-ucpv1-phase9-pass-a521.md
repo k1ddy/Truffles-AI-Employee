@@ -1,6 +1,6 @@
 # SESSION 2026-02-28-ucpv1-phase9-pass-a521 — Session 2026-02-28-ucpv1-phase9-pass-a521
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase9-a500.md
 - block_id: UCPV1-PHASE9
@@ -11,11 +11,20 @@
 - branch: feat/2026-02-28-ucpv1-phase9-pass-a521
 - worktree: /home/zhan/worktrees/worktrees/2026-02-28-ucpv1-phase9-pass-a521
 - base_ref: origin/feat/2026-02-28-ucpv1-phase9-a521
-- scope: <fill scope>
+- scope: UCPV1 Phase9 canonical long acceptance execution and block status finalization (pass/block) based on semantic gate outcome.
 - done:
-  - Session created.
+  - Runtime raised on new port `8041` from fresh branch commit.
+  - Canonical long quality run executed (`phase9-canonical-a521-r3`) with full artifacts.
+  - Manual audit completed (`manual_audit_status=done`).
+  - Phase9 block/report/state synchronized to `blocked` due semantic gate failure.
 - next:
-  - Fill Task Package and execute plan.
+  - Start remediation from /tmp/booking_quality/phase9-canonical-a521-r3/summary.json blocking_reasons before rerun.
+  - Run root-cause remediation for `expected_reply_type_mismatch`, `booking_flow_break`, and `handoff_miss`.
+  - Execute canonical rerun and move `UCPV1-PHASE9` to `passed` only after `semantic_valid=true`.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase9-a500.md
+  - docs/REPORTS/2026-02-22-universal-control-plane-v1-phase9-a500.md
+  - /tmp/booking_quality/phase9-canonical-a521-r3/summary.json
+  - /tmp/booking_quality/phase9-canonical-a521-r3/brief.md
+  - /tmp/booking_quality/phase9-canonical-a521-r3/manual_audit.md
 - last_updated: 2026-02-28
