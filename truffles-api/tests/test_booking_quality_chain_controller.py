@@ -27,6 +27,21 @@ def _load_module():
 _module = _load_module()
 
 
+def _write_pg_checklist(path: Path) -> None:
+    payload = {
+        "go_to_full": {
+            "PG0": {"status": "pass"},
+            "PG1": {"status": "pass"},
+            "PG2": {"status": "pass"},
+            "PG3": {"status": "pass"},
+            "PG4": {"status": "pass"},
+            "PG5": {"status": "pass"},
+            "PG6": {"status": "pass"},
+        }
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def test_chain_gate_requires_token_for_acceptance(tmp_path):
     args = SimpleNamespace(
         chain_id=None,
@@ -146,7 +161,9 @@ def test_chain_controller_prepare_and_finalize_advances_to_replay(tmp_path):
 
     run_id = "booking-lock-chain-e2e"
     output_dir = tmp_path / run_id
+    pg_checklist = tmp_path / "pg_checklist.json"
     output_dir.mkdir(parents=True, exist_ok=True)
+    _write_pg_checklist(pg_checklist)
     env = dict(os.environ)
     env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
 
@@ -160,6 +177,8 @@ def test_chain_controller_prepare_and_finalize_advances_to_replay(tmp_path):
             run_id,
             "--output-dir",
             str(output_dir),
+            "--pg-checklist",
+            str(pg_checklist),
         ],
         check=True,
         capture_output=True,
@@ -231,3 +250,36 @@ def test_chain_controller_prepare_and_finalize_advances_to_replay(tmp_path):
     assert payload["status"] == "active"
     assert "--mode replay" in (payload.get("next_command") or "")
     assert (output_dir / "brief_for_next_agent.md").exists()
+
+
+def test_chain_controller_blocks_lock_without_pg_checklist(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    run_id = "booking-lock-chain-no-pg"
+    output_dir = tmp_path / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
+
+    prepare = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "lock",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            str(output_dir),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+
+    assert prepare.returncode != 0
+    assert "go_to_full_gate_required:missing_pg_checklist" in prepare.stderr

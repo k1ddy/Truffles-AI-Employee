@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/quality_chain_controller.sh prepare --mode <lock|replay|full> --run-id <id> [--output-dir <dir>] [--chain-id <id>] [--resume]
+  scripts/quality_chain_controller.sh prepare --mode <lock|replay|full> --run-id <id> [--output-dir <dir>] [--chain-id <id>] [--resume] [--pg-checklist <path>]
   scripts/quality_chain_controller.sh finalize --mode <lock|replay|full> --run-id <id> [--output-dir <dir>] [--summary-path <path>] [--exit-code <n>] [--chain-id <id>]
   scripts/quality_chain_controller.sh status --chain-id <id>
   scripts/quality_chain_controller.sh close --chain-id <id>
@@ -67,6 +67,7 @@ SUMMARY_PATH=""
 EXIT_CODE="0"
 RESUME_FLAG=0
 ABORT_REASON=""
+PG_CHECKLIST_PATH=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -97,6 +98,10 @@ while [[ $# -gt 0 ]]; do
     --resume)
       RESUME_FLAG=1
       shift
+      ;;
+    --pg-checklist)
+      PG_CHECKLIST_PATH="$(trim "${2:-}")"
+      shift 2
       ;;
     --reason)
       ABORT_REASON="$(trim "${2:-}")"
@@ -131,7 +136,7 @@ if [[ "$COMMAND" == "finalize" && -z "$SUMMARY_PATH" ]]; then
   SUMMARY_PATH="${OUTPUT_DIR%/}/summary.json"
 fi
 
-python3 - "$COMMAND" "$CHAIN_ROOT" "$MODE" "$RUN_ID" "$OUTPUT_DIR" "$CHAIN_ID" "$SUMMARY_PATH" "$EXIT_CODE" "$RESUME_FLAG" "$ABORT_REASON" <<'PY'
+python3 - "$COMMAND" "$CHAIN_ROOT" "$MODE" "$RUN_ID" "$OUTPUT_DIR" "$CHAIN_ID" "$SUMMARY_PATH" "$EXIT_CODE" "$RESUME_FLAG" "$ABORT_REASON" "$PG_CHECKLIST_PATH" <<'PY'
 import json
 import os
 import re
@@ -156,9 +161,11 @@ except Exception:
     EXIT_CODE = 1
 RESUME_FLAG = str(sys.argv[9] or "0").strip() == "1"
 ABORT_REASON = (sys.argv[10] or "").strip() or "manual_abort"
+PG_CHECKLIST_PATH = (sys.argv[11] or "").strip()
 
 STEPS = ("lock", "replay", "full")
 BLOCKERS = ("wrong_action", "handoff_miss", "booking_flow_break", "run_completion_gap")
+GO_TO_FULL_KEYS = ("PG0", "PG1", "PG2", "PG3", "PG4", "PG5", "PG6")
 
 
 def now_iso() -> str:
@@ -196,6 +203,65 @@ def load_json(path: str):
         return None
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def parse_pg_entry(entry) -> bool:
+    if isinstance(entry, bool):
+        return entry
+    if isinstance(entry, (int, float)):
+        return bool(entry)
+    if isinstance(entry, str):
+        token = entry.strip().casefold()
+        return token in {"pass", "passed", "true", "ok", "done", "green"}
+    if isinstance(entry, dict):
+        if "pass" in entry:
+            return bool(entry.get("pass"))
+        status = str(entry.get("status") or "").strip().casefold()
+        if status:
+            return status in {"pass", "passed", "ok", "done", "green", "true"}
+    return False
+
+
+def load_pg_checklist(path: str):
+    token = str(path or "").strip()
+    if not token:
+        token = str(os.environ.get("LLM_QUALITY_PG_CHECKLIST") or "").strip()
+    if not token:
+        return None, "go_to_full_gate_required:missing_pg_checklist"
+    normalized = os.path.abspath(os.path.expanduser(token))
+    payload = load_json(normalized)
+    if not isinstance(payload, dict):
+        return None, f"go_to_full_gate_invalid:unreadable:{normalized}"
+
+    gate_payload = payload.get("go_to_full")
+    if isinstance(gate_payload, dict):
+        source = gate_payload
+    else:
+        source = payload
+
+    missing = []
+    failed = []
+    statuses = {}
+    for key in GO_TO_FULL_KEYS:
+        if key not in source:
+            missing.append(key)
+            continue
+        passed = parse_pg_entry(source.get(key))
+        statuses[key] = passed
+        if not passed:
+            failed.append(key)
+
+    if missing:
+        return None, "go_to_full_gate_missing:" + ",".join(missing)
+    if failed:
+        return None, "go_to_full_gate_failed:" + ",".join(failed)
+
+    result = {
+        "path": normalized,
+        "keys": list(GO_TO_FULL_KEYS),
+        "status": {key: bool(statuses.get(key)) for key in GO_TO_FULL_KEYS},
+    }
+    return result, None
 
 
 def write_json_atomic(path: str, payload: dict) -> None:
@@ -449,6 +515,15 @@ def ensure_previous_step_brief(state: dict, mode: str):
     return True, None
 
 
+def enforce_go_to_full_gate(mode: str, resume_required: bool):
+    if mode != "lock":
+        return None, None
+    if resume_required:
+        # Existing interrupted lock already passed this gate before.
+        return None, None
+    return load_pg_checklist(PG_CHECKLIST_PATH)
+
+
 def cmd_prepare():
     chain_id = derive_chain_id(RUN_ID, CHAIN_ID_ARG)
     if not chain_id:
@@ -503,6 +578,11 @@ def cmd_prepare():
             eprint("chain_resume_required")
             raise SystemExit(2)
 
+        gate_payload, gate_error = enforce_go_to_full_gate(MODE, resume_required)
+        if gate_error:
+            eprint(gate_error)
+            raise SystemExit(2)
+
         token = re.sub("-", "", os.urandom(16).hex())
         step_entry = state["steps"].get(MODE, {})
         step_entry.update(
@@ -510,6 +590,7 @@ def cmd_prepare():
                 "status": "running",
                 "run_id": RUN_ID,
                 "output_dir": OUTPUT_DIR,
+                "go_to_full": gate_payload if isinstance(gate_payload, dict) else None,
                 "updated_at": now_iso(),
             }
         )

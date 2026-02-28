@@ -7,6 +7,7 @@ Usage:
   scripts/llm_quality_guarded.sh \
     --mode <lock|replay|full> \
     --run-id <id> \
+    [--pg-checklist <path>] \
     [--owner-file <path>]... \
     [--quick-check <cmd>]... \
     [--allow-repeat-fingerprint] \
@@ -66,6 +67,7 @@ owner_match_found() {
 
 MODE=""
 RUN_ID=""
+PG_CHECKLIST_PATH=""
 ALLOW_REPEAT_FINGERPRINT=0
 ALLOW_NO_OWNER_DELTA=0
 ALLOW_PENDING_PREVIOUS=0
@@ -86,6 +88,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --run-id)
       RUN_ID="$(trim "${2:-}")"
+      shift 2
+      ;;
+    --pg-checklist)
+      PG_CHECKLIST_PATH="$(trim "${2:-}")"
       shift 2
       ;;
     --owner-file)
@@ -304,10 +310,21 @@ if [[ "$QUALITY_LANE_EFFECTIVE" == "acceptance" && "${LLM_QUALITY_CHAIN_CONTROLL
   if [[ "$has_chain_id_arg" -eq 1 || "$has_chain_step_arg" -eq 1 || "$has_chain_token_arg" -eq 1 ]]; then
     die "chain args are managed by quality_chain_controller; remove --chain-id/--chain-step/--chain-token from manual guarded runs"
   fi
+  PG_CHECKLIST_EFFECTIVE="$PG_CHECKLIST_PATH"
+  if [[ -z "$PG_CHECKLIST_EFFECTIVE" ]]; then
+    PG_CHECKLIST_EFFECTIVE="${LLM_QUALITY_PG_CHECKLIST:-}"
+  fi
+  PG_CHECKLIST_EFFECTIVE="$(trim "$PG_CHECKLIST_EFFECTIVE")"
+  if [[ "$MODE" == "lock" && "$HAS_RESUME" -ne 1 && -z "$PG_CHECKLIST_EFFECTIVE" ]]; then
+    die "go-to-full gate requires --pg-checklist for acceptance lock run"
+  fi
   if [[ ! -x "$CHAIN_CONTROLLER_BIN" ]]; then
     die "quality chain controller not executable: $CHAIN_CONTROLLER_BIN"
   fi
   declare -a PREPARE_CMD=("$CHAIN_CONTROLLER_BIN" "prepare" "--mode" "$MODE" "--run-id" "$RUN_ID" "--output-dir" "$OUTPUT_DIR")
+  if [[ -n "$PG_CHECKLIST_EFFECTIVE" ]]; then
+    PREPARE_CMD+=("--pg-checklist" "$PG_CHECKLIST_EFFECTIVE")
+  fi
   if [[ "$HAS_RESUME" -eq 1 ]]; then
     PREPARE_CMD+=("--resume")
   fi

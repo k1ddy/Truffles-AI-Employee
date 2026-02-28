@@ -517,7 +517,8 @@ Guarded llm-quality quickstart (single entrypoint)
    - It is semi-automatic: it runs checks and blocks bad launches, and for `quality-lane=acceptance` it now delegates step control to `scripts/quality_chain_controller.sh`.
    - Direct acceptance run via `python3 ops/diagnose.py llm-quality ...` is blocked unless chain token args are present.
 2. Lock run (acceptance envelope)
-   - `scripts/llm_quality_guarded.sh --mode lock --run-id booking-lock-<id> -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds`
+   - Prepare `PG0..PG6` checklist JSON (example path: `/tmp/booking_quality/pg_checklist-<id>.json`).
+   - `scripts/llm_quality_guarded.sh --mode lock --run-id booking-lock-<id> --pg-checklist /tmp/booking_quality/pg_checklist-<id>.json -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds`
 3. Replay run (same scenarios + baseline)
    - `scripts/llm_quality_guarded.sh --mode replay --run-id booking-replay-<id> -- --base-url <url> --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-<id>/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --max-failures 20`
 4. Full run (same acceptance lane)
@@ -531,6 +532,7 @@ Guarded llm-quality quickstart (single entrypoint)
    - Previous run has `manual_audit != done`.
    - Duplicate fingerprint or reused run-id.
    - Chain-controller preflight failed (step-order/run_id-mode mismatch/resume-only/token mismatch).
+   - Acceptance `lock` missing/failed `--pg-checklist` (`PG0..PG6`).
 8. Allowed override (for stale historical index only)
    - Use `--allow-pending-previous` only to bypass old unrelated mode blockers.
    - Do not use it to bypass current run failures; fix root cause first.

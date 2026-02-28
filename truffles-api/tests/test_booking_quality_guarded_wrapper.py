@@ -1,4 +1,5 @@
 import os
+import json
 import subprocess
 from pathlib import Path
 from uuid import uuid4
@@ -84,13 +85,30 @@ with open(summary_path, "w", encoding="utf-8") as handle:
     path.chmod(0o755)
 
 
-def _guarded_base_cmd(script_path: Path, run_id: str) -> list[str]:
+def _write_pg_checklist(path: Path) -> None:
+    payload = {
+        "go_to_full": {
+            "PG0": {"status": "pass"},
+            "PG1": {"status": "pass"},
+            "PG2": {"status": "pass"},
+            "PG3": {"status": "pass"},
+            "PG4": {"status": "pass"},
+            "PG5": {"status": "pass"},
+            "PG6": {"status": "pass"},
+        }
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _guarded_base_cmd(script_path: Path, run_id: str, pg_checklist: Path) -> list[str]:
     return [
         str(script_path),
         "--mode",
         "lock",
         "--run-id",
         run_id,
+        "--pg-checklist",
+        str(pg_checklist),
         "--allow-repeat-fingerprint",
         "--allow-pending-previous",
         "--",
@@ -135,8 +153,10 @@ def test_guarded_wrapper_acceptance_injects_chain_tokens(tmp_path):
     diagnose_log = tmp_path / "diagnose.log"
     fake_controller = tmp_path / "fake_controller.sh"
     fake_diagnose = tmp_path / "fake_diagnose.py"
+    pg_checklist = tmp_path / "pg_checklist.json"
     _write_fake_controller(fake_controller, controller_log)
     _write_fake_diagnose(fake_diagnose, diagnose_log)
+    _write_pg_checklist(pg_checklist)
 
     run_id = f"booking-lock-wrapper-{uuid4().hex[:8]}"
     env = dict(os.environ)
@@ -145,7 +165,7 @@ def test_guarded_wrapper_acceptance_injects_chain_tokens(tmp_path):
     env["LLM_QUALITY_DIAGNOSE_SCRIPT"] = str(fake_diagnose)
 
     result = subprocess.run(
-        _guarded_base_cmd(wrapper, run_id),
+        _guarded_base_cmd(wrapper, run_id, pg_checklist),
         cwd=str(repo_root),
         env=env,
         capture_output=True,
@@ -173,8 +193,10 @@ def test_guarded_wrapper_blocks_when_controller_prepare_fails(tmp_path):
     diagnose_log = tmp_path / "diagnose_fail.log"
     fake_controller = tmp_path / "fake_controller_fail.sh"
     fake_diagnose = tmp_path / "fake_diagnose.py"
+    pg_checklist = tmp_path / "pg_checklist.json"
     _write_failing_controller(fake_controller, controller_log)
     _write_fake_diagnose(fake_diagnose, diagnose_log)
+    _write_pg_checklist(pg_checklist)
 
     run_id = f"booking-lock-wrapper-{uuid4().hex[:8]}"
     env = dict(os.environ)
@@ -183,7 +205,7 @@ def test_guarded_wrapper_blocks_when_controller_prepare_fails(tmp_path):
     env["LLM_QUALITY_DIAGNOSE_SCRIPT"] = str(fake_diagnose)
 
     result = subprocess.run(
-        _guarded_base_cmd(wrapper, run_id),
+        _guarded_base_cmd(wrapper, run_id, pg_checklist),
         cwd=str(repo_root),
         env=env,
         capture_output=True,
