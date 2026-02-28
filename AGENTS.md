@@ -341,6 +341,16 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Doc-only fast path: разрешены только `docs/**`, `STATE.md`, `STRUCTURE.md`, `AGENTS.md`; такие изменения пушатся напрямую в `main` (fast-forward) без PR. PR допустим только при `ALLOW_DOC_ONLY_PR=1` (конфликты/исключения).
 - Doc-only в `main` требует `docs/SESSIONS/*` + `docs/SESSION_INDEX.md` в том же коммите (session_check блокирует без них).
 
+### 7.2 Research-gate adoption matrix (обязательно)
+- Допустимые режимы для `research_gate`, `root_cause_gate`, `reuse_gate`, `release_safety_gate`: `required | optional | off`.
+- `required`: `session_check`/`session_gate` блокируют commit/push/CI при нарушении TP-контракта.
+- `optional`: секции не блокируют поток, но учитываются в `session_audit` coverage.
+- `off`: секция не проверяется.
+- Новые сессии создаются с `required` по всем четырём gate-полям (через `scripts/session_start.sh`).
+- Backward compatibility: если в legacy-сессии задан только `research_gate: required` без явных `root_cause/reuse/release`, применяется bundled enforcement как `required` для этих секций.
+- Перевод legacy-сессий в `required` выполняется поэтапно: сначала обновление session metadata + TP, затем включение блокирующего режима.
+- Контроль покрытия выполняется через `scripts/session_audit.sh` (сводка gate adoption обязательна в evidence для process-blocks).
+
 ---
 
 ## 8) Live-check протокол (WA/Telegram)

@@ -95,6 +95,62 @@ require_tp_token_in_file() {
   fi
 }
 
+validate_gate_mode() {
+  local gate="$1"
+  local mode="$2"
+  if [[ -z "$mode" || "$mode" == "off" || "$mode" == "optional" || "$mode" == "required" ]]; then
+    return 0
+  fi
+  echo "ERROR: Unsupported ${gate} mode '${mode}' in ${session_file}." >&2
+  exit 1
+}
+
+research_mode_from_session() {
+  local session_file="$1"
+  local mode
+  mode=$(session_meta_value_from_file "$session_file" "research_gate")
+  validate_gate_mode "research_gate" "$mode"
+  if [[ -z "$mode" ]]; then
+    echo "off"
+    return 0
+  fi
+  echo "$mode"
+}
+
+has_explicit_research_subgate_modes() {
+  local session_file="$1"
+  local gate
+  for gate in root_cause_gate reuse_gate release_safety_gate; do
+    local mode
+    mode=$(session_meta_value_from_file "$session_file" "$gate")
+    validate_gate_mode "$gate" "$mode"
+    if [[ -n "$mode" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+research_subgate_mode_from_session() {
+  local session_file="$1"
+  local gate="$2"
+  local mode
+  mode=$(session_meta_value_from_file "$session_file" "$gate")
+  validate_gate_mode "$gate" "$mode"
+  if [[ -n "$mode" ]]; then
+    echo "$mode"
+    return 0
+  fi
+
+  local research_mode
+  research_mode=$(research_mode_from_session "$session_file")
+  if [[ "$research_mode" == "required" ]] && ! has_explicit_research_subgate_modes "$session_file"; then
+    echo "required"
+    return 0
+  fi
+  echo "off"
+}
+
 require_single_web_query_in_tp() {
   local file="$1"
   local query_count
@@ -119,51 +175,48 @@ require_web_sources_block_has_url() {
   fi
 }
 
-enforce_tp_research_requirements() {
+require_web_search_section() {
   local tp_file="$1"
-  if [[ ! -f "$tp_file" ]]; then
-    echo "ERROR: Task Package not found for research gate: ${tp_file}" >&2
-    exit 1
-  fi
-
-  local required_sections=(
-    "One web search (mandatory before implementation)"
-    "Root cause (mandatory)"
-    "Reuse-first plan (mandatory)"
-    "Token / run budget (mandatory for expensive suites)"
-    "Release safety (mandatory for non-doc changes)"
-  )
-  local section
-  for section in "${required_sections[@]}"; do
-    require_tp_section_in_file "$tp_file" "$section"
-  done
-
-  local required_tokens=(
-    "Query (exact):"
-    "Date/time (local):"
-    "Sources opened (from this query):"
-    "Decision:"
-    "Rejected options:"
-    "Symptom:"
-    "Minimal reproduction:"
-    "Five Whys"
-    "Root cause statement:"
-    "Fix mechanism:"
-    "Internal reuse:"
-    "External reuse:"
-    "Max full runs:"
-    "Strategy:"
-    "Go/no-go signals:"
-    "Rollback:"
-    "Post-release monitoring window:"
-  )
-  local token
-  for token in "${required_tokens[@]}"; do
-    require_tp_token_in_file "$tp_file" "$token"
-  done
-
+  require_tp_section_in_file "$tp_file" "One web search (mandatory before implementation)"
+  require_tp_token_in_file "$tp_file" "Query (exact):"
+  require_tp_token_in_file "$tp_file" "Date/time (local):"
+  require_tp_token_in_file "$tp_file" "Sources opened (from this query):"
+  require_tp_token_in_file "$tp_file" "Decision:"
+  require_tp_token_in_file "$tp_file" "Rejected options:"
   require_single_web_query_in_tp "$tp_file"
   require_web_sources_block_has_url "$tp_file"
+}
+
+require_root_cause_section() {
+  local tp_file="$1"
+  require_tp_section_in_file "$tp_file" "Root cause (mandatory)"
+  require_tp_token_in_file "$tp_file" "Symptom:"
+  require_tp_token_in_file "$tp_file" "Minimal reproduction:"
+  require_tp_token_in_file "$tp_file" "Five Whys"
+  require_tp_token_in_file "$tp_file" "Root cause statement:"
+  require_tp_token_in_file "$tp_file" "Fix mechanism:"
+}
+
+require_reuse_section() {
+  local tp_file="$1"
+  require_tp_section_in_file "$tp_file" "Reuse-first plan (mandatory)"
+  require_tp_token_in_file "$tp_file" "Internal reuse:"
+  require_tp_token_in_file "$tp_file" "External reuse:"
+}
+
+require_iteration_budget_section() {
+  local tp_file="$1"
+  require_tp_section_in_file "$tp_file" "Token / run budget (mandatory for expensive suites)"
+  require_tp_token_in_file "$tp_file" "Max full runs:"
+}
+
+require_release_safety_section() {
+  local tp_file="$1"
+  require_tp_section_in_file "$tp_file" "Release safety (mandatory for non-doc changes)"
+  require_tp_token_in_file "$tp_file" "Strategy:"
+  require_tp_token_in_file "$tp_file" "Go/no-go signals:"
+  require_tp_token_in_file "$tp_file" "Rollback:"
+  require_tp_token_in_file "$tp_file" "Post-release monitoring window:"
 }
 
 enforce_session_scoped_gates() {
@@ -174,21 +227,43 @@ enforce_session_scoped_gates() {
     exit 1
   fi
 
-  local research_mode
-  research_mode=$(session_meta_value_from_file "$session_file" "research_gate")
-  if [[ -n "$research_mode" && "$research_mode" != "off" && "$research_mode" != "optional" ]]; then
-    if [[ "$research_mode" != "required" ]]; then
-      echo "ERROR: Unsupported research_gate mode '${research_mode}' in ${session_file}." >&2
-      exit 1
-    fi
+  local research_mode root_cause_mode reuse_mode release_safety_mode
+  research_mode=$(research_mode_from_session "$session_file")
+  root_cause_mode=$(research_subgate_mode_from_session "$session_file" "root_cause_gate")
+  reuse_mode=$(research_subgate_mode_from_session "$session_file" "reuse_gate")
+  release_safety_mode=$(research_subgate_mode_from_session "$session_file" "release_safety_gate")
+
+  local requires_any="false"
+  if [[ "$research_mode" == "required" || "$root_cause_mode" == "required" || "$reuse_mode" == "required" || "$release_safety_mode" == "required" ]]; then
+    requires_any="true"
+  fi
+  if [[ "$requires_any" == "true" ]]; then
     local task_package tp_path
     task_package=$(session_meta_value_from_file "$session_file" "task_package")
     tp_path=$(resolve_repo_path "$task_package")
     if [[ -z "$tp_path" ]]; then
-      echo "ERROR: research_gate=required but task_package is missing in ${session_file}." >&2
+      echo "ERROR: research-driven gate is required but task_package is missing in ${session_file}." >&2
       exit 1
     fi
-    enforce_tp_research_requirements "$tp_path"
+    if [[ ! -f "$tp_path" ]]; then
+      echo "ERROR: Task Package not found for research-driven gates: ${tp_path}" >&2
+      exit 1
+    fi
+
+    if [[ "$research_mode" == "required" ]]; then
+      require_web_search_section "$tp_path"
+    fi
+    if [[ "$root_cause_mode" == "required" ]]; then
+      require_root_cause_section "$tp_path"
+    fi
+    if [[ "$reuse_mode" == "required" ]]; then
+      require_reuse_section "$tp_path"
+    fi
+    if [[ "$release_safety_mode" == "required" ]]; then
+      require_release_safety_section "$tp_path"
+    fi
+
+    require_iteration_budget_section "$tp_path"
   fi
 
   local zero_mode

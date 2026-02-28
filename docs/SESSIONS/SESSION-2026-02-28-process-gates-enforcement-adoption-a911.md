@@ -14,9 +14,14 @@
 - scope: Establish adoption policy and audit loop for research-driven process gates.
 - done:
   - Session created.
+  - Added per-gate adoption matrix enforcement (`required|optional|off`) in `scripts/session_check.sh` and `scripts/session_gate.sh`.
+  - Preserved backward compatibility: legacy bundled mode (`research_gate: required` without explicit subgates) remains enforced as required.
+  - Added adoption coverage summary to `scripts/session_audit.sh` for open-session telemetry.
+  - Documented gate-mode policy in `AGENTS.md` and session bootstrap protocol in `docs/SESSION_START_PROMPT.txt`.
 - next:
-  - Baseline active-session adoption coverage via session_audit.
-  - Implement adoption policy clarifications and gate diagnostics.
+  - Prepare commit and PR handoff with adoption coverage evidence.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-28-process-gates-enforcement-adoption-a911.md
+  - `SESSION_AGENT=a911 scripts/session_check.sh` => Session OK
+  - `scripts/session_audit.sh` => Gate adoption summary (open sessions: 111; required=3, missing=108 for each research-driven gate), warnings=319, errors=0
 - last_updated: 2026-02-28
