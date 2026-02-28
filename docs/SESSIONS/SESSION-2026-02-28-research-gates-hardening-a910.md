@@ -1,6 +1,6 @@
 # SESSION 2026-02-28-research-gates-hardening-a910 — Session 2026-02-28-research-gates-hardening-a910
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-27-research-gates-rollout-a900.md
 - block_id: PROCESS-GATES-RESEARCH-2026Q1
@@ -23,7 +23,7 @@
   - Added runner-safe fallback in `session_gate`/`doc_truth_gate` for environments without `rg` (use `grep` fallback).
   - Synced console OpenAPI contract with SLA registry endpoints to clear drift gate.
 - next:
-  - Run local gate checks and push remediation update.
+  - Block closed via PR #844 merge on main.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-27-research-gates-rollout-a900.md
   - AGENTS.md
@@ -33,4 +33,4 @@
   - scripts/zero_context_gate.sh
   - contracts/console_api/openapi.v1.yaml
   - .github/workflows/ci.yml
-- last_updated: 2026-02-28T15:05:00+05:00
+- last_updated: 2026-02-28T15:45:00+05:00
