@@ -1,0 +1,27 @@
+# SESSION 2026-02-28-process-gates-adoption-audit-a912 — Session 2026-02-28-process-gates-adoption-audit-a912
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-28-process-gates-adoption-audit-a912.md
+- block_id: PROCESS-GATES-ADOPTION-AUDIT-2026Q2
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- branch: feat/2026-02-28-process-gates-adoption-audit-a912
+- worktree: /home/zhan/worktrees/2026-02-28-process-gates-adoption-audit-a912
+- base_ref: origin/main
+- scope: Add machine-readable adoption audit evidence for research-driven gate rollout and define legacy migration cohorts.
+- done:
+  - Session created.
+  - Added `session_audit` structured mode `--adoption-report-json` with machine-readable gate counts and migration cohorts.
+  - Captured adoption baseline artifact `/tmp/session_adoption_a912.json` (open=112; required=4, missing=108 across research-driven gates).
+  - Published canonical adoption audit report `docs/REPORTS/2026-02-28-process-gates-adoption-audit-a912.md`.
+- next:
+  - Prepare PR handoff for `PROCESS-GATES-ADOPTION-AUDIT-2026Q2`.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-28-process-gates-adoption-audit-a912.md
+  - `SESSION_AGENT=a912 scripts/session_check.sh` => Session OK
+  - `scripts/session_audit.sh --adoption-report-json /tmp/session_adoption_a912.json` => Session audit OK
+  - docs/REPORTS/2026-02-28-process-gates-adoption-audit-a912.md
+- last_updated: 2026-02-28
