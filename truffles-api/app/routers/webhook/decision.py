@@ -172,6 +172,7 @@ from app.routers.webhook.guards import (
     _handle_clarify_limit_escalation,
     _handle_opt_out_mute_gate,
     _handle_reengage_and_mute_gate,
+    _handle_sla_collect_only_gate,
     _register_clarify_attempt,
     _select_intent_from_queue,  # noqa: F401
     _set_clarify_attempt,
@@ -8238,6 +8239,16 @@ async def _handle_webhook_payload(
     )
     if reengage_response:
         return reengage_response
+
+    sla_collect_only_response = _handle_sla_collect_only_gate(
+        db=db,
+        conversation=conversation,
+        saved_message=saved_message,
+        now=now,
+        send_and_save=_send_and_save,
+    )
+    if sla_collect_only_response:
+        return sla_collect_only_response
 
     # 9.01 ASR low-confidence confirmation (bot-active only).
     context = _get_conversation_context(conversation)

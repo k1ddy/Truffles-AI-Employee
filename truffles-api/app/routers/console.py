@@ -57,6 +57,7 @@ from app.models import (
     Message,
     OutboxMessage,
     ReferencePack,
+    SlaProfileVersion,
     TenantsFleetCache,
     TenantsFleetClientProjection,
     TenantsFleetPrewarmJob,
@@ -261,6 +262,11 @@ from app.schemas.console import (
     ConsoleSettingsResponse,
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
+    ConsoleSlaProfileRegistryMutationResponse,
+    ConsoleSlaProfileRegistryPublishRequest,
+    ConsoleSlaProfileRegistryResponse,
+    ConsoleSlaProfileRegistryRollbackRequest,
+    ConsoleSlaProfileVersionRecord,
     ConsoleSubscriptionContractGap,
     ConsoleSubscriptionContractHealth,
     ConsoleSubscriptionEvidenceItem,
@@ -300,6 +306,7 @@ from app.schemas.onboarding_contract import (
     OnboardingProviderBindingWhatsApp,
 )
 from app.schemas.outbox_payload import validate_outbox_payload
+from app.schemas.sla_profile import SlaProfilePayload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
 from app.services.alert_service import alert_warning
 from app.services.audit_service import AuditEvent, record_audit_event
@@ -475,6 +482,13 @@ from app.services.reference_branch_selection import (
 from app.services.reference_pack_integrity import (
     REFERENCE_PACK_SCHEMA_VERSION,
     build_reference_pack_metadata,
+)
+from app.services.sla_profile_registry_service import (
+    SLA_PROFILE_SCHEMA_VERSION,
+    get_latest_profile_version,
+    list_profile_history,
+    publish_profile_version,
+    rollback_profile_version,
 )
 from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_return as state_manager_return
@@ -20390,6 +20404,36 @@ def _serialize_policy_version_record(record: ClientPolicyVersion) -> ConsolePoli
     )
 
 
+def _serialize_sla_profile_version_record(record: SlaProfileVersion) -> ConsoleSlaProfileVersionRecord:
+    try:
+        payload = SlaProfilePayload.model_validate(record.payload_json or {})
+    except ValidationError as exc:
+        raise ConsoleAPIError(
+            500,
+            "SLA_PROFILE_REGISTRY_INVALID",
+            "Stored SLA profile payload is invalid",
+        ) from exc
+    return ConsoleSlaProfileVersionRecord(
+        id=record.id,
+        scope=record.scope,
+        company_id=record.company_id,
+        domain_key=record.domain_key,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        status=record.status,
+        schema_version=record.schema_version,
+        version_number=record.version_number,
+        payload=payload,
+        reason=record.reason,
+        source_version_id=record.source_version_id,
+        created_by=record.created_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+        published_by=record.published_by,
+        published_at=record.published_at.isoformat() if record.published_at else None,
+    )
+
+
 def _normalize_tool_registry_action(value: str) -> str:
     token = str(value or "").strip().casefold()
     if not token:
@@ -20569,6 +20613,58 @@ def _resolve_policy_registry_scope(
     if branch_id is not None:
         raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id is only valid for branch scope")
     return normalized_scope, None
+
+
+def _resolve_sla_profile_scope(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    scope: str,
+    domain_key: Optional[str],
+    branch_id: Optional[UUID],
+) -> tuple[str, UUID | None, str | None, UUID | None, UUID | None]:
+    normalized_scope = str(scope or "").strip().lower()
+    if normalized_scope not in {"global", "domain", "client", "branch"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "scope must be global|domain|client|branch")
+
+    normalized_domain = None
+    if isinstance(domain_key, str) and domain_key.strip():
+        normalized_domain = domain_key.strip().lower()
+        if not re.match(r"^[a-z0-9_-]+$", normalized_domain):
+            raise ConsoleAPIError(400, "INVALID_PARAM", "domain_key must match [a-z0-9_-]+")
+
+    if normalized_scope == "global":
+        if normalized_domain is not None or branch_id is not None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "global scope does not accept domain_key/branch_id")
+        return normalized_scope, None, None, None, None
+
+    if normalized_scope == "domain":
+        if normalized_domain is None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "domain_key required for domain scope")
+        if branch_id is not None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "domain scope does not accept branch_id")
+        return normalized_scope, None, normalized_domain, None, None
+
+    if context.client is None:
+        raise ConsoleAPIError(400, "CLIENT_SELECTION_REQUIRED", "Select client for client/branch scope")
+    if normalized_domain is not None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "domain_key only valid for domain scope")
+
+    if normalized_scope == "client":
+        if branch_id is not None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id is only valid for branch scope")
+        return normalized_scope, context.client.company_id, None, context.client.id, None
+
+    if not branch_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for branch scope")
+    branch = (
+        db.query(Branch)
+        .filter(Branch.id == branch_id, Branch.client_id == context.client.id)
+        .first()
+    )
+    if not branch:
+        raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+    return normalized_scope, context.client.company_id, None, context.client.id, branch.id
 
 
 @router.get(
@@ -20911,6 +21007,232 @@ async def rollback_policy_registry(
     return ConsolePolicyRegistryMutationResponse(
         success=True,
         record=_serialize_policy_version_record(record),
+        from_version_id=source_record.id,
+    )
+
+
+@router.get(
+    "/admin/sla-profile-registry",
+    response_model=ConsoleSlaProfileRegistryResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def get_sla_profile_registry(
+    request: Request,
+    scope: Literal["global", "domain", "client", "branch"] = Query("client"),
+    domain_key: Optional[str] = Query(None),
+    branch_id: Optional[UUID] = Query(None),
+    limit: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> ConsoleSlaProfileRegistryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=scope,
+        domain_key=domain_key,
+        branch_id=branch_id,
+    )
+
+    active_record = get_latest_profile_version(
+        db,
+        scope=normalized_scope,
+        company_id=resolved_company_id,
+        domain_key=resolved_domain_key,
+        client_id=resolved_client_id,
+        branch_id=resolved_branch_id,
+        status="published",
+    )
+    history_records = list_profile_history(
+        db,
+        scope=normalized_scope,
+        company_id=resolved_company_id,
+        domain_key=resolved_domain_key,
+        client_id=resolved_client_id,
+        branch_id=resolved_branch_id,
+        limit=limit,
+    )
+    return ConsoleSlaProfileRegistryResponse(
+        scope=normalized_scope,
+        company_id=resolved_company_id,
+        domain_key=resolved_domain_key,
+        client_id=resolved_client_id,
+        branch_id=resolved_branch_id,
+        active=_serialize_sla_profile_version_record(active_record) if active_record else None,
+        history=[_serialize_sla_profile_version_record(item) for item in history_records],
+    )
+
+
+@router.post(
+    "/admin/sla-profile-registry/publish",
+    response_model=ConsoleSlaProfileRegistryMutationResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def publish_sla_profile_registry(
+    request: Request,
+    body: ConsoleSlaProfileRegistryPublishRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleSlaProfileRegistryMutationResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage SLA profile registry",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        domain_key=body.domain_key,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+    schema_version = body.schema_version or SLA_PROFILE_SCHEMA_VERSION
+
+    try:
+        record = publish_profile_version(
+            db,
+            scope=normalized_scope,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            payload=body.payload,
+            actor_id=context.agent.id,
+            reason=reason,
+            schema_version=schema_version,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="sla_profile_registry_published",
+        entity_type="sla_profile_version",
+        entity_id=record.id,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": normalized_scope,
+            "company_id": str(record.company_id) if record.company_id else None,
+            "domain_key": record.domain_key,
+            "client_id": str(record.client_id) if record.client_id else None,
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "version_number": record.version_number,
+            "reason": reason,
+        },
+    )
+    db.commit()
+    return ConsoleSlaProfileRegistryMutationResponse(
+        success=True,
+        record=_serialize_sla_profile_version_record(record),
+    )
+
+
+@router.post(
+    "/admin/sla-profile-registry/rollback",
+    response_model=ConsoleSlaProfileRegistryMutationResponse,
+    responses={
+        400: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def rollback_sla_profile_registry(
+    request: Request,
+    body: ConsoleSlaProfileRegistryRollbackRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleSlaProfileRegistryMutationResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage SLA profile registry",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        domain_key=body.domain_key,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+
+    try:
+        record, source_record = rollback_profile_version(
+            db,
+            scope=normalized_scope,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            target_version_id=body.target_version_id,
+            actor_id=context.agent.id,
+            reason=reason,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message == "SLA profile version not found":
+            raise ConsoleAPIError(404, "NOT_FOUND", message) from exc
+        raise ConsoleAPIError(400, "INVALID_PARAM", message) from exc
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="sla_profile_registry_rollback",
+        entity_type="sla_profile_version",
+        entity_id=record.id,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": normalized_scope,
+            "company_id": str(record.company_id) if record.company_id else None,
+            "domain_key": record.domain_key,
+            "client_id": str(record.client_id) if record.client_id else None,
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "version_number": record.version_number,
+            "reason": reason,
+            "from_version_id": str(source_record.id),
+        },
+    )
+    db.commit()
+    return ConsoleSlaProfileRegistryMutationResponse(
+        success=True,
+        record=_serialize_sla_profile_version_record(record),
         from_version_id=source_record.id,
     )
 

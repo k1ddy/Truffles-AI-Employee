@@ -34,6 +34,7 @@ from app.models.outbox_message import OutboxMessage
 from app.models.outbox_status_event import OutboxStatusEvent
 from app.models.prompt import Prompt
 from app.models.reference_pack import ReferencePack
+from app.models.sla_profile_version import SlaProfileVersion
 from app.models.specialist import Specialist
 from app.models.tenants_fleet_cache import TenantsFleetCache
 from app.models.tenants_fleet_client_projection import TenantsFleetClientProjection
@@ -76,6 +77,7 @@ __all__ = [
     "DomainCapabilityTemplate",
     "Prompt",
     "ReferencePack",
+    "SlaProfileVersion",
     "OutboxMessage",
     "OutboxStatusEvent",
     "LearnedResponse",
