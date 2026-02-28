@@ -83,7 +83,7 @@
 | B06 Tool Registry Certification | `UCPV1-PHASE6` | passed | Подключение инструментов безопасно и управляемо | Несертифицированный tool не попадает в effective capabilities; scope rules + health checks |
 | B07 Provider/Channel Control (WA-first) | `UCPV1-PHASE7` | passed | Каналы управляются предсказуемо при деградации провайдера | Provider lifecycle registry + explicit branch channel status + safe degrade mode |
 | B08 Knowledge Studio + Pack Compiler | `UCPV1-PHASE8` | passed | Контент управляется через Draft->Validate->Publish->Rollback | Publish блокируется при нарушении minimum data contract; rollback one-click |
-| B09 Runtime Pack-Agnostic Decoupling | `UCPV1-PHASE9` | in_progress | Runtime независим от demo-пака | Нет прямых demo imports в core runtime; adapter boundaries + neutral fallback |
+| B09 Runtime Pack-Agnostic Decoupling | `UCPV1-PHASE9` | blocked | Runtime независим от demo-пака | Нет прямых demo imports в core runtime; adapter boundaries + neutral fallback |
 | B10 SLA/SLO Engine (Multi-level) | `UCPV1-PHASE10` | planned | SLA/SLO профили реально влияют на runtime и escalation | Policy-driven thresholds + predictable actions + auditability on each violation |
 | B11 Compliance KZ Retention/Lifecycle | `UCPV1-PHASE11` | planned | KZ boundary и lifecycle соблюдаются автоматически | Retention/delete/export jobs с owner+TTL+audit trail по каждому data class |
 | B12 Control Tower for Platform Admin | `UCPV1-PHASE12` | planned | Fleet управляется через Console без CLI как основного пути | Risk queue + readiness board + drift board + action center с evidence links |
@@ -106,10 +106,10 @@ Completed in this program chain:
 - `UCPV1-PHASE8` passed.
 
 Current active block:
-- `UCPV1-PHASE9` in_progress.
+- `UCPV1-PHASE9` blocked.
 
 Current queue head:
-- `UCPV1-PHASE9` (in_progress; deterministic acceptance done, canonical long lane pending).
+- `UCPV1-PHASE9` (blocked; canonical long lane executed, semantic gate failed).
 
 ## 8) Program-level DoD
 

@@ -83,10 +83,15 @@ Date
 - Short smoke (non-canonical):
   - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:8031 --mode llm --count 1 --min-turns 2 --max-turns 2 --scenario-coverage none --tool-hooks off --tool-evidence-policy off --judge-mode sample --judge-sample 1 --allow-non-allowlist --skip-outbox --manager-mode skip --pending-mode skip --manual-audit-gate off --run-economy-gate off --run-id phase9-short-a521-r9`
   - `infra_valid=true`, `semantic_valid=true`, run dir `/tmp/booking_quality/phase9-short-a521-r9`.
+- Canonical long acceptance run:
+  - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:8041 --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id phase9-canonical-a521-r3`
+  - `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/phase9-canonical-a521-r3 --status done --strict-artifacts`
+  - outcome: `infra_valid=true`, `semantic_valid=false`, `run_integrity_valid=true`, `scenario_contract_valid=true`, `manual_audit_status=done`.
+  - blocking reasons: `expected_action_mismatch=1`, `expected_reply_type_mismatch=3`, `judge_fail=3`, `handoff_miss=1`, `booking_flow_break=3`.
 
 ## Iteration budget outcomes
 - `Planned max runs` -> `3`
-- `Actual runs` -> `1` short llm-quality smoke + deterministic suites
+- `Actual runs` -> `4` llm-quality runs (`r1`,`r2` preflight invalid and audited, `r3` canonical full, short smoke `phase9-short-a521-r9`) + deterministic suites
 - `Stop condition respected` -> `yes`
 
 ## Evidence
@@ -99,10 +104,16 @@ Date
 - `truffles-api/tests/test_pack_runtime_service.py`
 - `/tmp/booking_quality/phase9-short-a521-r9/summary.json`
 - `/tmp/booking_quality/phase9-short-a521-r9/brief.md`
+- `/tmp/booking_quality/phase9-canonical-a521-r3/summary.json`
+- `/tmp/booking_quality/phase9-canonical-a521-r3/brief.md`
+- `/tmp/booking_quality/phase9-canonical-a521-r3/responses.jsonl`
+- `/tmp/booking_quality/phase9-canonical-a521-r3/trace_bundle.jsonl`
+- `/tmp/booking_quality/phase9-canonical-a521-r3/manual_audit.md`
 
 ## Release safety decision
 - Production rollout status: not finalized in this session.
-- Block is kept `in_progress` until canonical long acceptance lane is executed per TP DoD.
+- Stop-the-line is active: canonical long run is complete but semantic gate is red.
+- Block status moved to `blocked`; rollout to next phase is not allowed.
 - Rollback path validated at code level: revert phase9 commit(s) restores prior adapter resolution.
 
 ## Canon/doc sync updates
@@ -111,19 +122,23 @@ Date
   - `docs/BLOCK_GRAPH.yaml`
   - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
   - `STATE.md`
-  - `docs/SESSIONS/SESSION-2026-02-28-ucpv1-phase9-a521.md`
-- Drift status: reduced (implementation and docs aligned), final pass pending canonical lane.
+  - `docs/SESSIONS/SESSION-2026-02-28-ucpv1-phase9-pass-a521.md`
+- Drift status: reduced (implementation + canonical evidence aligned), semantic remediation pending.
 
 ## Residual GAP / Risks
-- Canonical long `llm-quality` acceptance run from TP DoD is still pending, so block cannot be marked `Passed`.
-- `UCPV1-PHASE10` remains locked until `UCPV1-PHASE9` is moved from `in_progress` to `passed`.
+- Canonical long acceptance run failed semantic gate (`semantic_valid=false`) despite valid infra/integrity.
+- High-signal blockers are concentrated in action/reply-type alignment and handoff/booking behavior:
+  - `expected_reply_type_mismatch`
+  - `booking_flow_break`
+  - `handoff_miss`
+- `UCPV1-PHASE10` remains locked until `UCPV1-PHASE9` is rerun with `semantic_valid=true`.
 
 ## Handoff (for zero-context next agent)
 - `Ready for next agent`: yes
 - `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase9-a500.md`
 - `Do not touch`: unrelated UCP tracks and non-phase9 branches
-- `Open risks`: canonical acceptance lane pending
-- `First command to verify`: `cd truffles-api && pytest -q tests/test_pack_runtime_service.py tests/test_policy_handler_runtime.py`
+- `Open risks`: semantic blockers from `phase9-canonical-a521-r3`
+- `First command to verify`: `jq '.quality_status,.blocking_reasons,.metrics.hq1_class_counts' /tmp/booking_quality/phase9-canonical-a521-r3/summary.json`
 
 ## Verdict
-- `In progress`
+- `Blocked`
