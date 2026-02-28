@@ -133,6 +133,7 @@ Universal Control Plane v1 / Phase 10: SLA/SLO Engine (Multi-level), чтобы 
 5. Добавить deterministic tests (positive/negative/anti-drift).
 6. Обновить console contracts/UI и evidence docs.
 7. Провести bounded acceptance checks без long llm-quality lane.
+7. Провести bounded acceptance checks без long llm-quality lane (phase9 blocker dependency).
 
 ## Analysis Gate (required for code start)
 1. FACT Snapshot: текущие SLA islands и существующие API/DB/test coverage.
@@ -163,6 +164,7 @@ Universal Control Plane v1 / Phase 10: SLA/SLO Engine (Multi-level), чтобы 
   - `cd truffles-api && pytest -q tests/test_message_endpoint.py -k "sla or escalation"`
   - `cd truffles-api && python3 scripts/generate_openapi.py --check`
   - bounded `ops/diagnose.py` verification (без long lane для этого slice).
+  - bounded `ops/diagnose.py` verification (no long lane while phase9 remains blocked).
 
 ## Evidence
 - Analysis evidence:
@@ -182,6 +184,8 @@ Universal Control Plane v1 / Phase 10: SLA/SLO Engine (Multi-level), чтобы 
 - **Fail-fast / scope lock:** only deterministic/read-only checks in this block stage.
 - **Stop condition:** if deterministic gates show regression/no new evidence in 2 итерациях, stop-the-line and RCA.
 - **Escalation path:** Brain/Top Architect for scope or contract delta decisions.
+- **Stop condition:** if phase9 dependency is not green, code implementation remains blocked.
+- **Escalation path:** Brain/Top Architect for dependency unlock decision.
 
 ## Release safety (mandatory for non-doc changes)
 - **Strategy:** staged rollout by scope (`global -> pilot domain -> selected client -> branch`).
@@ -201,6 +205,7 @@ Universal Control Plane v1 / Phase 10: SLA/SLO Engine (Multi-level), чтобы 
 - revert phase10 commits if deterministic gates fail.
 
 ## No-go
+- Нельзя начинать implementation, пока `UCPV1-PHASE9` blocked.
 - Нельзя вводить hardcoded thresholds в runtime вместо profile contracts.
 - Нельзя ослаблять hard-law/policy gates ради SLA tuning.
 - Нельзя закрывать блок без evidence trace/meta/audit.
@@ -216,3 +221,13 @@ Universal Control Plane v1 / Phase 10: SLA/SLO Engine (Multi-level), чтобы 
 - `Do not touch`: unrelated parallel tracks.
 - `Open risks`: merge drift between SLA islands.
 - `First command to verify`: `rg -n "sla|slo|policy" truffles-api/app/routers/console.py truffles-api/app/services`
+- **Hard blocker:** `UCPV1-PHASE9` currently `blocked`; phase10 implementation cannot start.
+- Fragmented SLA logic can cause contract drift if migrated partially.
+- Violation-action misconfiguration can over-escalate and inflate outbox/manager load.
+
+## Handoff (for zero-context next agent)
+- `Ready for next agent`: yes (analysis package ready, implementation blocked by dependency).
+- `Start from`: `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase10-a500.md`
+- `Do not touch`: phase9 remediation scope and unrelated parallel tracks.
+- `Open risks`: dependency lock + merge drift between SLA islands.
+- `First command to verify`: `rg -n "UCPV1-PHASE9|UCPV1-PHASE10" docs/BLOCK_GRAPH.yaml STATE.md docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
