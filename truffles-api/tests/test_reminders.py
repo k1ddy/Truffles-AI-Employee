@@ -117,6 +117,53 @@ class TestPendingSlaPing:
                 reminder_service.process_pending_sla(db)
                 assert send_mock.call_count == 1
 
+    def test_profile_collect_only_sets_runtime_context(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.PENDING.value
+        conversation.escalated_at = datetime.now(timezone.utc) - timedelta(minutes=90)
+        conversation.context = {"foo": "bar"}
+        conversation.id = uuid4()
+        conversation.client_id = uuid4()
+        conversation.branch_id = uuid4()
+
+        handover = Mock()
+        handover.id = uuid4()
+        handover.status = "pending"
+        handover.created_at = conversation.escalated_at
+        handover.conversation = conversation
+
+        db.query.return_value.filter.return_value.all.return_value = [handover]
+
+        decision = Mock(
+            severity="severe_breach",
+            action="collect_only",
+            reason_code="sla_severe_breach_collect_only",
+            elapsed_minutes=90,
+            threshold_minutes=60,
+            profile_id=uuid4(),
+            profile_version=3,
+            profile_scope="branch",
+            domain_key="salon",
+        )
+
+        with patch(
+            "app.services.reminder_service.resolve_pending_sla_violation",
+            return_value=decision,
+        ), patch(
+            "app.services.reminder_service._send_pending_user_message",
+            return_value=True,
+        ), patch(
+            "app.services.reminder_service.manager_resolve",
+            return_value=Mock(ok=True),
+        ):
+            result = reminder_service.process_pending_sla(db)
+
+        assert result["auto_closed"] == 1
+        assert result["items"][0]["action"] == "collect_only"
+        assert "sla_runtime" in conversation.context
+        assert conversation.context["sla_runtime"]["mode"] == "collect_only"
+
 
 class TestNoResponseAlerts:
     def test_alert_sets_dedup_and_skips_repeat(self):
@@ -242,6 +289,51 @@ class TestNoResponseAlerts:
             result = reminder_service.check_no_response_alerts(db)
 
         assert result["alerted"] == 0
+
+    def test_alert_threshold_uses_sla_profile_threshold(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.BOT_ACTIVE.value
+        conversation.bot_status = "active"
+        conversation.bot_muted_until = None
+        conversation.context = {}
+        conversation.id = uuid4()
+        conversation.client_id = uuid4()
+        conversation.branch_id = uuid4()
+
+        last_user = Mock()
+        last_user.id = uuid4()
+        last_user.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        last_user.content = "hello"
+        last_user.message_metadata = {
+            "messageId": "msg-10",
+            "remoteJid": "77015705555@s.whatsapp.net",
+            "decision_meta": {"action": "reply"},
+        }
+
+        def last_message(db_handle, conversation_id, role):
+            if role == "user":
+                return last_user
+            return None
+
+        db.query.return_value.filter.return_value.all.return_value = [conversation]
+
+        with patch(
+            "app.services.reminder_service._get_last_message", side_effect=last_message
+        ), patch(
+            "app.services.reminder_service._get_no_response_threshold_minutes", return_value=1
+        ), patch(
+            "app.services.reminder_service._get_no_response_max_age_days", return_value=30
+        ), patch(
+            "app.services.reminder_service.resolve_first_response_threshold_minutes",
+            return_value=15,
+        ), patch(
+            "app.services.reminder_service.alert_warning"
+        ) as alert_mock:
+            result = reminder_service.check_no_response_alerts(db)
+
+        assert result["alerted"] == 0
+        alert_mock.assert_not_called()
         assert conversation.context == {}
         alert_mock.assert_not_called()
 

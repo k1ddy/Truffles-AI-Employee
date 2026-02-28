@@ -9,6 +9,11 @@ from sqlalchemy.orm import Session
 from app.models import Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
 from app.services.pack_runtime_service import get_system_lexicon_list
+from app.services.sla_runtime_service import (
+    SLA_RUNTIME_CONTEXT_KEY,
+    build_collect_only_runtime_context,
+    resolve_pending_sla_violation,
+)
 from app.services.state_machine import ConversationState
 
 
@@ -743,20 +748,36 @@ def _handle_pending_gate(
     context = legacy._get_conversation_context(conversation)
     pending_sla = _get_pending_sla(context)
     ping_sent_at = pending_sla.get(legacy.PENDING_SLA_PING_SENT_KEY)
-    escalated_at = conversation.escalated_at
-    if escalated_at and escalated_at.tzinfo is None:
-        escalated_at = escalated_at.replace(tzinfo=timezone.utc)
-    ping_due = bool(
-        escalated_at
-        and not ping_sent_at
-        and now - escalated_at >= timedelta(minutes=legacy.PENDING_SLA_PING_MINUTES)
+    sla_violation = resolve_pending_sla_violation(
+        db,
+        conversation=conversation,
+        now=now,
     )
-    if ping_due:
+    if sla_violation and saved_message:
+        legacy._update_message_decision_metadata(
+            saved_message,
+            {
+                "sla_violation_severity": sla_violation.severity,
+                "sla_violation_action": sla_violation.action,
+                "sla_violation_reason": sla_violation.reason_code,
+                "sla_elapsed_minutes": sla_violation.elapsed_minutes,
+                "sla_threshold_minutes": sla_violation.threshold_minutes,
+                "sla_profile_id": str(sla_violation.profile_id) if sla_violation.profile_id else None,
+                "sla_profile_version": sla_violation.profile_version,
+                "sla_profile_scope": sla_violation.profile_scope,
+                "sla_domain_key": sla_violation.domain_key,
+            },
+        )
+
+    if sla_violation and sla_violation.severity != "none" and sla_violation.action == "collect_only":
         if guard_only_skip:
             trace_payload = {
                 "stage": "pending_sla",
                 "decision": "guard_only",
                 "state": conversation.state,
+                "sla_severity": sla_violation.severity,
+                "sla_action": sla_violation.action,
+                "sla_reason": sla_violation.reason_code,
             }
             trace_payload.update(router_pending_meta)
             legacy._record_decision_trace(conversation, trace_payload)
@@ -764,7 +785,91 @@ def _handle_pending_gate(
                 legacy._update_message_decision_metadata(
                     saved_message,
                     {
-                        "pending_action": "pending_sla_guard_only",
+                        "pending_action": "pending_sla_collect_only_guard_only",
+                        "pending_guard_only": True,
+                    },
+                )
+            return None
+
+        pending_sla[legacy.PENDING_SLA_PING_SENT_KEY] = now.isoformat()
+        pending_sla["collect_only_at"] = now.isoformat()
+        context = _set_pending_sla(context, pending_sla)
+        context[SLA_RUNTIME_CONTEXT_KEY] = build_collect_only_runtime_context(
+            decision=sla_violation,
+            now=now,
+        )
+        legacy._set_conversation_context(conversation, context)
+        trace_payload = {
+            "stage": "pending_sla",
+            "decision": "collect_only",
+            "state": conversation.state,
+            "sla_severity": sla_violation.severity,
+            "sla_action": sla_violation.action,
+            "sla_reason": sla_violation.reason_code,
+            "sla_elapsed_minutes": sla_violation.elapsed_minutes,
+            "sla_threshold_minutes": sla_violation.threshold_minutes,
+        }
+        trace_payload.update(router_pending_meta)
+        legacy._record_decision_trace(conversation, trace_payload)
+        if saved_message:
+            legacy._update_message_decision_metadata(
+                saved_message,
+                {
+                    "pending_action": "pending_sla_collect_only",
+                    "sla_collect_only": True,
+                },
+            )
+        bot_response = legacy.MSG_PENDING_WAIT
+        bot_response, sent = send_and_save(bot_response)
+        result_message = "Pending SLA collect_only response sent" if sent else "Pending SLA collect_only send failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    escalated_at = conversation.escalated_at
+    if escalated_at and escalated_at.tzinfo is None:
+        escalated_at = escalated_at.replace(tzinfo=timezone.utc)
+    if sla_violation:
+        ping_due = bool(
+            sla_violation.severity in {"breach", "severe_breach"}
+            and sla_violation.action in {"notify_manager", "escalate"}
+            and not ping_sent_at
+        )
+    else:
+        ping_due = bool(
+            escalated_at
+            and not ping_sent_at
+            and now - escalated_at >= timedelta(minutes=legacy.PENDING_SLA_PING_MINUTES)
+        )
+
+    if ping_due:
+        if guard_only_skip:
+            trace_payload = {
+                "stage": "pending_sla",
+                "decision": "guard_only",
+                "state": conversation.state,
+            }
+            if sla_violation:
+                trace_payload["sla_severity"] = sla_violation.severity
+                trace_payload["sla_action"] = sla_violation.action
+                trace_payload["sla_reason"] = sla_violation.reason_code
+            trace_payload.update(router_pending_meta)
+            legacy._record_decision_trace(conversation, trace_payload)
+            if saved_message:
+                legacy._update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_action": (
+                            "pending_sla_escalate_guard_only"
+                            if sla_violation and sla_violation.action == "escalate"
+                            else "pending_sla_notify_manager_guard_only"
+                            if sla_violation and sla_violation.action == "notify_manager"
+                            else "pending_sla_guard_only"
+                        ),
                         "pending_guard_only": True,
                     },
                 )
@@ -774,9 +879,21 @@ def _handle_pending_gate(
         legacy._set_conversation_context(conversation, context)
         trace_payload = {
             "stage": "pending_sla",
-            "decision": "ping",
+            "decision": (
+                "escalate"
+                if sla_violation and sla_violation.action == "escalate"
+                else "notify_manager"
+                if sla_violation and sla_violation.action == "notify_manager"
+                else "ping"
+            ),
             "state": conversation.state,
         }
+        if sla_violation:
+            trace_payload["sla_severity"] = sla_violation.severity
+            trace_payload["sla_action"] = sla_violation.action
+            trace_payload["sla_reason"] = sla_violation.reason_code
+            trace_payload["sla_elapsed_minutes"] = sla_violation.elapsed_minutes
+            trace_payload["sla_threshold_minutes"] = sla_violation.threshold_minutes
         trace_payload.update(router_pending_meta)
         legacy._record_decision_trace(conversation, trace_payload)
         if saved_message:
@@ -784,12 +901,26 @@ def _handle_pending_gate(
                 saved_message,
                 {
                     "pending_sla_ping": True,
-                    "pending_action": "pending_sla_ping",
+                    "pending_action": (
+                        "pending_sla_escalate"
+                        if sla_violation and sla_violation.action == "escalate"
+                        else "pending_sla_notify_manager"
+                        if sla_violation and sla_violation.action == "notify_manager"
+                        else "pending_sla_ping"
+                    ),
                 },
             )
         bot_response = legacy.MSG_PENDING_SLA_PING
         bot_response, sent = send_and_save(bot_response)
-        result_message = "Pending SLA ping sent" if sent else "Pending SLA ping send failed"
+        result_message = (
+            "Pending SLA escalation sent"
+            if sla_violation and sla_violation.action == "escalate" and sent
+            else "Pending SLA notify sent"
+            if sla_violation and sla_violation.action == "notify_manager" and sent
+            else "Pending SLA ping sent"
+            if sent
+            else "Pending SLA ping send failed"
+        )
         db.commit()
         return WebhookResponse(
             success=True,

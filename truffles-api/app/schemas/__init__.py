@@ -15,6 +15,7 @@ from app.schemas.intent import (
 )
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.outbox_payload import OutboxPayloadContract, validate_outbox_payload
+from app.schemas.sla_profile import SlaProfilePayload, SlaThresholds, SlaViolationActions
 from app.schemas.webhook import (
     ActionContract,
     ContextContract,
@@ -49,4 +50,7 @@ __all__ = [
     "ResponseContract",
     "MemoryContract",
     "TraceContract",
+    "SlaProfilePayload",
+    "SlaThresholds",
+    "SlaViolationActions",
 ]

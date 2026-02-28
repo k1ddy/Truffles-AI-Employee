@@ -132,6 +132,7 @@ Universal Control Plane v1 / Phase 10: SLA/SLO Engine (Multi-level), чтобы 
 4. Подключить runtime violation action resolver (routing/escalation/alerts).
 5. Добавить deterministic tests (positive/negative/anti-drift).
 6. Обновить console contracts/UI и evidence docs.
+7. Провести bounded acceptance checks без long llm-quality lane.
 7. Провести bounded acceptance checks без long llm-quality lane (phase9 blocker dependency).
 
 ## Analysis Gate (required for code start)
@@ -162,6 +163,7 @@ Universal Control Plane v1 / Phase 10: SLA/SLO Engine (Multi-level), чтобы 
   - `cd truffles-api && pytest -q tests/test_console_onboarding_state.py tests/test_console_integrations_registry.py tests/test_console_cases_helpers.py`
   - `cd truffles-api && pytest -q tests/test_message_endpoint.py -k "sla or escalation"`
   - `cd truffles-api && python3 scripts/generate_openapi.py --check`
+  - bounded `ops/diagnose.py` verification (без long lane для этого slice).
   - bounded `ops/diagnose.py` verification (no long lane while phase9 remains blocked).
 
 ## Evidence
@@ -180,6 +182,8 @@ Universal Control Plane v1 / Phase 10: SLA/SLO Engine (Multi-level), чтобы 
 ## Token / run budget (mandatory for expensive suites)
 - **Max full runs:** `0` for this analysis-only step.
 - **Fail-fast / scope lock:** only deterministic/read-only checks in this block stage.
+- **Stop condition:** if deterministic gates show regression/no new evidence in 2 итерациях, stop-the-line and RCA.
+- **Escalation path:** Brain/Top Architect for scope or contract delta decisions.
 - **Stop condition:** if phase9 dependency is not green, code implementation remains blocked.
 - **Escalation path:** Brain/Top Architect for dependency unlock decision.
 
@@ -207,6 +211,16 @@ Universal Control Plane v1 / Phase 10: SLA/SLO Engine (Multi-level), чтобы 
 - Нельзя закрывать блок без evidence trace/meta/audit.
 
 ## Risks/Blockers
+- Fragmented SLA logic can cause contract drift if migrated partially.
+- Violation-action misconfiguration can over-escalate and inflate outbox/manager load.
+- Program-level dependency note: `UCPV1-PHASE9` remains blocked in graph, but owner override allows continuing `phase10` implementation slices with bounded checks and without long-lane acceptance claims.
+
+## Handoff (for zero-context next agent)
+- `Ready for next agent`: yes (analysis package ready; implementation slices allowed by owner override).
+- `Start from`: `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase10-a500.md`
+- `Do not touch`: unrelated parallel tracks.
+- `Open risks`: merge drift between SLA islands.
+- `First command to verify`: `rg -n "sla|slo|policy" truffles-api/app/routers/console.py truffles-api/app/services`
 - **Hard blocker:** `UCPV1-PHASE9` currently `blocked`; phase10 implementation cannot start.
 - Fragmented SLA logic can cause contract drift if migrated partially.
 - Violation-action misconfiguration can over-escalate and inflate outbox/manager load.

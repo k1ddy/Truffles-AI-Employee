@@ -11,6 +11,12 @@ from app.schemas.reminder import ReminderItem
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import send_bot_response
 from app.services.message_service import save_message
+from app.services.sla_runtime_service import (
+    SLA_RUNTIME_CONTEXT_KEY,
+    build_collect_only_runtime_context,
+    resolve_first_response_threshold_minutes,
+    resolve_pending_sla_violation,
+)
 from app.services.state_machine import ConversationState
 from app.services.state_service import force_state, manager_resolve
 from app.services.telegram_service import TelegramService
@@ -133,6 +139,118 @@ def process_pending_sla(db: Session) -> dict:
         context, pending_sla = _get_pending_sla_context(conversation)
         auto_closed_at = pending_sla.get(PENDING_SLA_AUTO_CLOSE_KEY)
         ping_sent_at = pending_sla.get(PENDING_SLA_PING_SENT_KEY)
+        sla_violation = resolve_pending_sla_violation(
+            db,
+            conversation=conversation,
+            now=now,
+        )
+
+        if sla_violation:
+            pending_sla["last_check_at"] = now.isoformat()
+            pending_sla["severity"] = sla_violation.severity
+            pending_sla["action"] = sla_violation.action
+            pending_sla["reason_code"] = sla_violation.reason_code
+            pending_sla["elapsed_minutes"] = sla_violation.elapsed_minutes
+            pending_sla["threshold_minutes"] = sla_violation.threshold_minutes
+            if sla_violation.profile_id:
+                pending_sla["profile_id"] = str(sla_violation.profile_id)
+            if sla_violation.profile_version is not None:
+                pending_sla["profile_version"] = sla_violation.profile_version
+            if sla_violation.profile_scope:
+                pending_sla["profile_scope"] = sla_violation.profile_scope
+            if sla_violation.domain_key:
+                pending_sla["domain_key"] = sla_violation.domain_key
+
+            if sla_violation.action == "collect_only" and sla_violation.severity != "none" and not auto_closed_at:
+                _send_pending_user_message(
+                    db,
+                    conversation,
+                    text=MSG_PENDING_AUTO_CLOSE,
+                    decision_meta={
+                        "pending_action": "pending_sla_collect_only",
+                        "sla_violation_action": sla_violation.action,
+                        "sla_violation_severity": sla_violation.severity,
+                        "sla_violation_reason": sla_violation.reason_code,
+                    },
+                )
+                pending_sla[PENDING_SLA_AUTO_CLOSE_KEY] = now.isoformat()
+                manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
+                context, pending_sla = _get_pending_sla_context(conversation)
+                pending_sla[PENDING_SLA_AUTO_CLOSE_KEY] = now.isoformat()
+                context[PENDING_SLA_CONTEXT_KEY] = pending_sla
+                context[SLA_RUNTIME_CONTEXT_KEY] = build_collect_only_runtime_context(
+                    decision=sla_violation,
+                    now=now,
+                )
+                context = _append_decision_trace(
+                    context,
+                    {
+                        "stage": "pending_sla",
+                        "decision": "collect_only",
+                        "recorded_at": now.isoformat(),
+                        "reason": sla_violation.reason_code,
+                        "severity": sla_violation.severity,
+                    },
+                )
+                conversation.context = context
+                results["auto_closed"] += 1
+                results["items"].append(
+                    {
+                        "handover_id": str(handover.id),
+                        "conversation_id": str(conversation.id),
+                        "action": "collect_only",
+                    }
+                )
+                continue
+
+            ping_by_profile_due = bool(
+                sla_violation.severity in {"breach", "severe_breach"}
+                and sla_violation.action in {"notify_manager", "escalate"}
+                and not ping_sent_at
+            )
+            if ping_by_profile_due:
+                _send_pending_user_message(
+                    db,
+                    conversation,
+                    text=MSG_PENDING_SLA_PING,
+                    decision_meta={
+                        "pending_sla_ping": True,
+                        "pending_action": (
+                            "pending_sla_escalate"
+                            if sla_violation.action == "escalate"
+                            else "pending_sla_notify_manager"
+                        ),
+                        "sla_violation_action": sla_violation.action,
+                        "sla_violation_severity": sla_violation.severity,
+                        "sla_violation_reason": sla_violation.reason_code,
+                    },
+                )
+                pending_sla[PENDING_SLA_PING_SENT_KEY] = now.isoformat()
+                context = _append_decision_trace(
+                    context,
+                    {
+                        "stage": "pending_sla",
+                        "decision": sla_violation.action,
+                        "recorded_at": now.isoformat(),
+                        "reason": sla_violation.reason_code,
+                        "severity": sla_violation.severity,
+                    },
+                )
+                context[PENDING_SLA_CONTEXT_KEY] = pending_sla
+                conversation.context = context
+                results["pinged"] += 1
+                results["items"].append(
+                    {
+                        "handover_id": str(handover.id),
+                        "conversation_id": str(conversation.id),
+                        "action": sla_violation.action,
+                    }
+                )
+                continue
+
+            context[PENDING_SLA_CONTEXT_KEY] = pending_sla
+            conversation.context = context
+            continue
 
         auto_close_due = now - escalated_at >= timedelta(hours=PENDING_AUTO_CLOSE_HOURS)
         ping_due = now - escalated_at >= timedelta(minutes=PENDING_SLA_PING_MINUTES)
@@ -254,7 +372,7 @@ def auto_close_stale_handovers(db: Session) -> dict:
 def check_no_response_alerts(db: Session) -> dict:
     """Alert if user message waits too long without bot response in bot_active."""
     now = datetime.now(timezone.utc)
-    threshold_minutes = _get_no_response_threshold_minutes()
+    default_threshold_minutes = _get_no_response_threshold_minutes()
     max_age_days = _get_no_response_max_age_days()
     alerted = []
 
@@ -265,6 +383,12 @@ def check_no_response_alerts(db: Session) -> dict:
             conversation.bot_muted_until and conversation.bot_muted_until > now
         ):
             continue
+
+        threshold_minutes = resolve_first_response_threshold_minutes(
+            db,
+            conversation=conversation,
+            default_minutes=default_threshold_minutes,
+        )
 
         last_user = _get_last_message(db, conversation.id, "user")
         if not last_user:
@@ -333,6 +457,7 @@ def check_no_response_alerts(db: Session) -> dict:
                 "conversation_id": str(conversation.id),
                 "client_id": str(conversation.client_id),
                 "minutes_waiting": minutes_waiting,
+                "threshold_minutes": threshold_minutes,
                 "message": (last_user.content or "")[:200],
                 "last_action": last_action or "unknown",
                 "decision_trace": last_trace,
@@ -347,6 +472,7 @@ def check_no_response_alerts(db: Session) -> dict:
                 alert_type="no_response",
                 alert_metadata={
                     "minutes_waiting": minutes_waiting,
+                    "threshold_minutes": threshold_minutes,
                     "last_action": last_action or "unknown",
                 },
             )
