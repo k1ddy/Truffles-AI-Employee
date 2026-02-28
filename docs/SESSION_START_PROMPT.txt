@@ -67,8 +67,13 @@ TESTING CONTRACT (summary)
 - New feature requires at least one test (Playwright/Schemathesis/k6/unit) or an explicit waiver in the Task Package.
 - Core behavior changes require local-first realism checks before CI conclusions:
   - full critical pytest suites,
-  - `ops/diagnose.py llm-quality` with real LLM + tool hooks + chaos dialogs,
+  - `scripts/llm_quality_guarded.sh` as canonical llm-quality entrypoint (acceptance via chain controller),
   - evidence from `decision_meta/decision_trace` + tool outcomes (not text-only).
+- Direct `python3 ops/diagnose.py llm-quality` is not an acceptance entrypoint; use it only for dev/forensic diagnostics.
+- Before first quality run in a session, read `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`:
+  - `LLM-quality start here (mandatory for new agents)`,
+  - `Quality Operating Model v2 (mandatory for all future runs)`,
+  - `Guarded llm-quality quickstart (single entrypoint)`.
 - CI livecheck is allowed only with safety gates (TEST_MODE=1 + allowlist); evidence is `livecheck-evidence.md`.
 - Live-check uses JID pool (comma list). One suite -> one JID. Instance->instance simulation is valid only if inbound is recorded in DB with decision_meta/trace; **CA‑13** may use simulated inbound when allowlist is unavailable (mark as `simulated` in `STATE.md`).
 - Definitions for JID/instance_id/instance->instance are fixed in `SPECS/SYSTEM_REFERENCE.md`.

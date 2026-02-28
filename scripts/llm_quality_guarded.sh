@@ -34,6 +34,10 @@ Example:
     --fail-on-thresholds \
     --fail-on-regression \
     --run-economy-gate block
+
+Reference:
+  docs/runbooks/BOOKING_CONFIRM_VERIFY.md
+  section: "Guarded llm-quality quickstart (single entrypoint)"
 EOF
 }
 
@@ -69,6 +73,10 @@ declare -a OWNER_FILES=()
 declare -a QUICK_CHECKS=()
 declare -a QUALITY_ARGS=()
 HAS_RESUME=0
+QUALITY_LANE_REQUESTED="auto"
+FAIL_ON_THRESHOLDS=0
+FAIL_ON_REGRESSION=0
+UPDATE_BASELINE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -119,12 +127,67 @@ done
 [[ "$MODE" =~ ^(lock|replay|full)$ ]] || die "--mode must be one of: lock|replay|full"
 [[ -n "$RUN_ID" ]] || die "--run-id is required"
 [[ ${#QUALITY_ARGS[@]} -gt 0 ]] || die "llm-quality args are required after --"
-for token in "${QUALITY_ARGS[@]}"; do
-  if [[ "$token" == "--resume" ]]; then
-    HAS_RESUME=1
-    break
-  fi
+
+OUTPUT_DIR="/tmp/booking_quality/${RUN_ID}"
+has_run_id_arg=0
+has_output_dir_arg=0
+has_chain_id_arg=0
+has_chain_step_arg=0
+has_chain_token_arg=0
+for idx in "${!QUALITY_ARGS[@]}"; do
+  arg="${QUALITY_ARGS[$idx]}"
+  case "$arg" in
+    --resume)
+      HAS_RESUME=1
+      ;;
+    --run-id)
+      has_run_id_arg=1
+      ;;
+    --output-dir)
+      has_output_dir_arg=1
+      next_idx=$((idx + 1))
+      if [[ $next_idx -lt ${#QUALITY_ARGS[@]} ]]; then
+        OUTPUT_DIR="${QUALITY_ARGS[$next_idx]}"
+      fi
+      ;;
+    --quality-lane)
+      next_idx=$((idx + 1))
+      if [[ $next_idx -lt ${#QUALITY_ARGS[@]} ]]; then
+        QUALITY_LANE_REQUESTED="$(trim "${QUALITY_ARGS[$next_idx]}")"
+      fi
+      ;;
+    --fail-on-thresholds)
+      FAIL_ON_THRESHOLDS=1
+      ;;
+    --fail-on-regression)
+      FAIL_ON_REGRESSION=1
+      ;;
+    --update-baseline)
+      UPDATE_BASELINE=1
+      ;;
+    --chain-id)
+      has_chain_id_arg=1
+      ;;
+    --chain-step)
+      has_chain_step_arg=1
+      ;;
+    --chain-token)
+      has_chain_token_arg=1
+      ;;
+  esac
 done
+
+QUALITY_LANE_EFFECTIVE="$(printf '%s' "$QUALITY_LANE_REQUESTED" | tr '[:upper:]' '[:lower:]')"
+if [[ "$QUALITY_LANE_EFFECTIVE" != "dev" && "$QUALITY_LANE_EFFECTIVE" != "acceptance" && "$QUALITY_LANE_EFFECTIVE" != "auto" ]]; then
+  QUALITY_LANE_EFFECTIVE="auto"
+fi
+if [[ "$QUALITY_LANE_EFFECTIVE" == "auto" ]]; then
+  if [[ "$FAIL_ON_THRESHOLDS" -eq 1 || "$FAIL_ON_REGRESSION" -eq 1 || "$UPDATE_BASELINE" -eq 1 ]]; then
+    QUALITY_LANE_EFFECTIVE="acceptance"
+  else
+    QUALITY_LANE_EFFECTIVE="dev"
+  fi
+fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
@@ -170,7 +233,7 @@ FINGERPRINT="$(
   } | sha256sum | awk '{print $1}'
 )"
 
-LEDGER_DIR="/tmp/booking_quality/_run_guard"
+LEDGER_DIR="${LLM_QUALITY_GUARD_LEDGER_DIR:-/tmp/booking_quality/_run_guard}"
 LEDGER_FILE="$LEDGER_DIR/ledger.tsv"
 mkdir -p "$LEDGER_DIR"
 touch "$LEDGER_FILE"
@@ -183,7 +246,7 @@ if [[ "$ALLOW_REPEAT_FINGERPRINT" -ne 1 && "$HAS_RESUME" -ne 1 ]]; then
   fi
 fi
 
-INDEX_ROOT="/tmp/booking_quality/_index"
+INDEX_ROOT="${LLM_QUALITY_INDEX_ROOT:-/tmp/booking_quality/_index}"
 if [[ "$ALLOW_PENDING_PREVIOUS" -ne 1 && "$HAS_RESUME" -ne 1 ]]; then
   latest_mode_file="$INDEX_ROOT/latest_by_mode/${MODE}.json"
   if [[ -f "$latest_mode_file" ]]; then
@@ -229,30 +292,42 @@ for cmd in "${QUICK_CHECKS[@]}"; do
   bash -lc "$cmd"
 done
 
-OUTPUT_DIR="/tmp/booking_quality/${RUN_ID}"
-has_run_id_arg=0
-has_output_dir_arg=0
-for idx in "${!QUALITY_ARGS[@]}"; do
-  arg="${QUALITY_ARGS[$idx]}"
-  if [[ "$arg" == "--run-id" ]]; then
-    has_run_id_arg=1
-  fi
-  if [[ "$arg" == "--output-dir" ]]; then
-    has_output_dir_arg=1
-    next_idx=$((idx + 1))
-    if [[ $next_idx -lt ${#QUALITY_ARGS[@]} ]]; then
-      OUTPUT_DIR="${QUALITY_ARGS[$next_idx]}"
-    fi
-  fi
-done
+CHAIN_CONTROLLER_BIN="${LLM_QUALITY_CHAIN_CONTROLLER_BIN:-scripts/quality_chain_controller.sh}"
+DIAGNOSE_BIN="${LLM_QUALITY_DIAGNOSE_BIN:-python3}"
+DIAGNOSE_SCRIPT="${LLM_QUALITY_DIAGNOSE_SCRIPT:-ops/diagnose.py}"
+CHAIN_CONTROLLER_ACTIVE=0
+CHAIN_ID=""
+CHAIN_STEP=""
+CHAIN_TOKEN=""
 
-declare -a CMD=(python3 ops/diagnose.py llm-quality)
+if [[ "$QUALITY_LANE_EFFECTIVE" == "acceptance" && "${LLM_QUALITY_CHAIN_CONTROLLER_INTERNAL:-0}" != "1" ]]; then
+  if [[ "$has_chain_id_arg" -eq 1 || "$has_chain_step_arg" -eq 1 || "$has_chain_token_arg" -eq 1 ]]; then
+    die "chain args are managed by quality_chain_controller; remove --chain-id/--chain-step/--chain-token from manual guarded runs"
+  fi
+  if [[ ! -x "$CHAIN_CONTROLLER_BIN" ]]; then
+    die "quality chain controller not executable: $CHAIN_CONTROLLER_BIN"
+  fi
+  declare -a PREPARE_CMD=("$CHAIN_CONTROLLER_BIN" "prepare" "--mode" "$MODE" "--run-id" "$RUN_ID" "--output-dir" "$OUTPUT_DIR")
+  if [[ "$HAS_RESUME" -eq 1 ]]; then
+    PREPARE_CMD+=("--resume")
+  fi
+  PREPARE_OUTPUT="$("${PREPARE_CMD[@]}")" || die "chain controller prepare failed"
+  IFS=$'\t' read -r CHAIN_ID CHAIN_STEP CHAIN_TOKEN <<<"$PREPARE_OUTPUT"
+  [[ -n "$CHAIN_ID" && -n "$CHAIN_STEP" && -n "$CHAIN_TOKEN" ]] || die "chain controller prepare returned invalid tokens"
+  CHAIN_CONTROLLER_ACTIVE=1
+  echo "[guard] chain-controller active chain_id=$CHAIN_ID step=$CHAIN_STEP"
+fi
+
+declare -a CMD=("$DIAGNOSE_BIN" "$DIAGNOSE_SCRIPT" "llm-quality")
 CMD+=("${QUALITY_ARGS[@]}")
 if [[ "$has_run_id_arg" -ne 1 ]]; then
   CMD+=(--run-id "$RUN_ID")
 fi
 if [[ "$has_output_dir_arg" -ne 1 ]]; then
   CMD+=(--output-dir "$OUTPUT_DIR")
+fi
+if [[ "$CHAIN_CONTROLLER_ACTIVE" -eq 1 ]]; then
+  CMD+=(--chain-id "$CHAIN_ID" --chain-step "$CHAIN_STEP" --chain-token "$CHAIN_TOKEN")
 fi
 CMD_STRING="$(printf '%q ' "${CMD[@]}")"
 
@@ -269,6 +344,16 @@ SUMMARY_PATH="${OUTPUT_DIR%/}/summary.json"
 STATUS_LABEL="failed"
 if [[ "$EXIT_CODE" -eq 0 ]]; then
   STATUS_LABEL="completed"
+fi
+
+if [[ "$CHAIN_CONTROLLER_ACTIVE" -eq 1 ]]; then
+  if ! "$CHAIN_CONTROLLER_BIN" finalize --mode "$MODE" --run-id "$RUN_ID" --output-dir "$OUTPUT_DIR" --summary-path "$SUMMARY_PATH" --exit-code "$EXIT_CODE" >/dev/null; then
+    echo "[guard] chain-controller finalize failed for run_id=$RUN_ID" >&2
+    if [[ "$EXIT_CODE" -eq 0 ]]; then
+      EXIT_CODE=4
+      STATUS_LABEL="chain_finalize_failed"
+    fi
+  fi
 fi
 
 if [[ -f "$SUMMARY_PATH" ]]; then

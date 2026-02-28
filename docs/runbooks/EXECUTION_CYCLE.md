@@ -73,6 +73,23 @@
    - статус `INVALID`, baseline/compare запрещены.
 5. Обновить `STATE.md` как `FACT` только при наличии evidence.
 
+### 3.2.1 LLM-quality lane policy (mandatory)
+
+1. Работать по lane-модели:
+   - `L0` static/contracts,
+   - `L1` deterministic targeted,
+   - `L2` micro fail-fast,
+   - `L3` acceptance (`lock -> replay -> full`).
+2. `L3` не использовать как debug-цикл; это только release-gate.
+3. Перед любым `L3` обязательны `PG0..PG6` (Go-to-Full checklist из `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`).
+4. Canonical entrypoint для llm-quality:
+   - `scripts/llm_quality_guarded.sh`.
+5. `python3 ops/diagnose.py llm-quality` допустим только для dev/forensic и не является acceptance evidence.
+6. Если run `INVALID/NON-CANONICAL`:
+   - не запускать следующий expensive run,
+   - вернуться в `L1/L2`,
+   - закрыть manual forensic SOP.
+
 ### 3.3 CI run
 
 После каждого CI-прогона:

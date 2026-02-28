@@ -527,11 +527,25 @@ async def _process_outbox_rows(
     def _resolve_outbox_message(outbox_id: str):
         info = pick_info.get(outbox_id, {})
         inbound_message_id = info.get("inbound_message_id")
+        inbound_message_id_token = (
+            str(inbound_message_id).strip() if inbound_message_id is not None else ""
+        )
         client_id = info.get("client_id")
         message = None
-        if client_id and inbound_message_id:
-            message = legacy._find_message_by_message_id(db, client_id, str(inbound_message_id))
-        if not message and info.get("conversation_id") and info.get("created_at"):
+        if client_id and inbound_message_id_token:
+            message = legacy._find_message_by_message_id(
+                db,
+                client_id,
+                inbound_message_id_token,
+            )
+        if message:
+            return message
+        if inbound_message_id_token:
+            # Avoid conversation+timestamp fallback when an explicit idempotency key
+            # was provided but not found: synthetic ids (e.g. calendar sync keys)
+            # can otherwise attach timing/error metadata to an unrelated user turn.
+            return None
+        if info.get("conversation_id") and info.get("created_at"):
             message = legacy._find_message_by_conversation_created_at(
                 db,
                 info.get("conversation_id"),

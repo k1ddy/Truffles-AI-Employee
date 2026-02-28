@@ -6,7 +6,7 @@
 |---------|--------------|--------------|
 | Messages not delivered | ChatFlow down | Check `/admin/health/check` |
 | High escalation rate | LLM issues | Check `llm_fallback_total` |
-| Booking dialog regressions | Booking flow / LLM drift | Run `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` (llm-quality) |
+| Booking dialog regressions | Booking flow / LLM drift | Run `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` from section `LLM-quality start here (mandatory for new agents)` |
 | Outbox stuck | Worker down | Check outbox queue |
 | 403 on Console | Auth misconfigured | Verify OIDC settings |
 

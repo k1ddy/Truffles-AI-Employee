@@ -298,6 +298,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - replay: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression --max-failures 20`
  - каноничный запуск: `scripts/llm_quality_guarded.sh --mode <lock|replay|full> --run-id <id> -- --base-url ...`
  - отчёт по артефактам: `scripts/quality_artifact_report.py --hours 24 --show-commands`
+ - подробный SOP/quickstart (`lock/replay/full/resume/guard blocks`): `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` (section `Guarded llm-quality quickstart (single entrypoint)`).
 
 **Локальные тесты:**
 - локально запускаются в первую очередь и определяют качество поведения.

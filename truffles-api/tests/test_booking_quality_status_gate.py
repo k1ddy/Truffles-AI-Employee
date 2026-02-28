@@ -27,6 +27,7 @@ def _load_quality_helpers():
         "LLM_QUALITY_HQ1_HALLUCINATION_MARKERS",
         "LLM_POLICY_OVERRIDE_REASON_WHITELIST",
         "LLM_POLICY_OVERRIDE_KEYWORD_REASON_CODES",
+        "LLM_POLICY_OVERRIDE_NON_SEMANTIC_GUARD_REASON_CODES",
         "LLM_QUALITY_REGEX_LEXICON_TOKENS",
         "LLM_QUALITY_REGEX_LEXICON_RESOLVER_PREFIXES",
         "LLM_QUALITY_REGEX_LEXICON_TEST_PREFIX",
@@ -52,6 +53,7 @@ def _load_quality_helpers():
         "_llm_quality_check_regression",
         "_llm_quality_collect_override_reason_codes",
         "_llm_quality_collect_semantic_intent_override_audit",
+        "_llm_quality_collect_plan_delta_audit",
         "_llm_quality_init_rewrite_governance_state",
         "_llm_quality_track_rewrite_governance",
         "_llm_quality_finalize_rewrite_governance",
@@ -499,6 +501,69 @@ def test_rewrite_governance_ignores_semantic_override_audit_without_effective_ch
     assert status["rewrite_turns"] == 0
     assert "post_llm_semantic_rewrite_budget_exceeded" not in status["blocking_counts"]
     assert status["valid"] is True
+
+
+def test_rewrite_governance_excludes_non_semantic_contract_guard_from_budget():
+    ns = _load_quality_helpers()
+    init_state = ns["_llm_quality_init_rewrite_governance_state"]
+    track = ns["_llm_quality_track_rewrite_governance"]
+    finalize = ns["_llm_quality_finalize_rewrite_governance"]
+
+    state = init_state()
+    for index in range(120):
+        meta = {"policy_core_mode": "policy_core"}
+        if index in {7, 33, 58}:
+            meta["llm_policy_override_reason_code"] = "contract_validation_failure"
+            meta["llm_policy_plan_audit"] = {
+                "action_changed": False,
+                "intent_changed": False,
+                "tool_action_changed": True,
+            }
+        track(state, meta)
+
+    status = finalize(
+        state,
+        max_post_llm_semantic_rewrite_rate=0.02,
+        max_keyword_override_rate=0.0,
+    )
+
+    assert status["rewrite_turns"] == 3
+    assert status["non_semantic_contract_guard_turns"] == 3
+    assert status["rewrite_budget_turns"] == 0
+    assert status["post_llm_semantic_rewrite_rate"] == 0.0
+    assert "post_llm_semantic_rewrite_budget_exceeded" not in status["blocking_counts"]
+    assert status["valid"] is True
+
+
+def test_rewrite_governance_counts_contract_guard_action_change_against_budget():
+    ns = _load_quality_helpers()
+    init_state = ns["_llm_quality_init_rewrite_governance_state"]
+    track = ns["_llm_quality_track_rewrite_governance"]
+    finalize = ns["_llm_quality_finalize_rewrite_governance"]
+
+    state = init_state()
+    for index in range(120):
+        meta = {"policy_core_mode": "policy_core"}
+        if index in {3, 18, 42, 77}:
+            meta["llm_policy_override_reason_code"] = "contract_validation_failure"
+            meta["llm_policy_plan_audit"] = {
+                "action_changed": True,
+                "intent_changed": False,
+                "tool_action_changed": True,
+            }
+        track(state, meta)
+
+    status = finalize(
+        state,
+        max_post_llm_semantic_rewrite_rate=0.02,
+        max_keyword_override_rate=0.0,
+    )
+
+    assert status["rewrite_turns"] == 4
+    assert status["non_semantic_contract_guard_turns"] == 0
+    assert status["rewrite_budget_turns"] == 4
+    assert status["blocking_counts"]["post_llm_semantic_rewrite_budget_exceeded"] == 4
+    assert status["valid"] is False
 
 
 def test_collect_blocking_reasons_merges_governance_counts():

@@ -14503,7 +14503,16 @@ async def _handle_webhook_payload(
                     intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
                     force_master_intent=False,
                 )
-                master_request_signal = bool("master" in info_sections or master_resolution.explicit)
+                policy_intent_token = (
+                    policy_intent.strip().casefold()
+                    if isinstance(policy_intent, str) and policy_intent.strip()
+                    else ""
+                )
+                master_request_signal = bool(
+                    "master" in info_sections
+                    or master_resolution.explicit
+                    or policy_intent_token in {"master", "master_query", "specialist", "specialist_query"}
+                )
                 has_explicit_location_or_hours = _has_explicit_location_or_hours_request(
                     message_text,
                     client_slug=payload.client_slug,
@@ -14900,6 +14909,7 @@ async def _handle_webhook_payload(
                 )
                 if lateness_reply:
                     booking_followup_prompt = None
+                    suppress_booking_followup_for_info = False
                     if booking_wants_flow:
                         booking_followup_expected = (
                             expected_reply_type
@@ -14931,11 +14941,10 @@ async def _handle_webhook_payload(
                                 now=now,
                             )
                     bot_response = lateness_reply
-                    if booking_followup_prompt and _should_append_followup_prompt(
-                        bot_response,
-                        booking_followup_prompt,
-                    ):
-                        bot_response = _append_followup(bot_response, booking_followup_prompt)
+                    # Keep booking continuity via expected-reply context, but never
+                    # append booking prompt text to the same FACT/info lateness reply.
+                    if booking_followup_prompt:
+                        suppress_booking_followup_for_info = True
                     trace_payload = {
                         "stage": "truth_gate",
                         "decision": "reply",
@@ -14957,6 +14966,8 @@ async def _handle_webhook_payload(
                         }
                         if booking_followup_prompt:
                             booking_trace["booking_prompt"] = booking_followup_prompt
+                        if suppress_booking_followup_for_info:
+                            booking_trace["booking_prompt_suppressed"] = True
                         _record_decision_trace(conversation, booking_trace)
                     _record_message_decision_meta(
                         saved_message,
@@ -14974,6 +14985,11 @@ async def _handle_webhook_payload(
                             meta_updates["booking_info_interrupt"] = True
                             meta_updates["booking_interrupt_info"] = True
                             meta_updates["booking_info_intents"] = ["lateness_ok"]
+                        if suppress_booking_followup_for_info:
+                            meta_updates["carryover_ignored"] = True
+                            meta_updates["carryover_ignored_reason"] = (
+                                "info_reply_no_stale_booking_prompt"
+                            )
                         _update_message_decision_metadata(saved_message, meta_updates)
                     bot_response, sent = _send_and_save(bot_response)
                     result_message = (

@@ -877,6 +877,9 @@ LLM_QUALITY_REQUIRED_RUN_ARTIFACTS = (
 LLM_QUALITY_MANIFEST_VERSION = 1
 LLM_QUALITY_INDEX_ROOT = "/tmp/booking_quality/_index"
 LLM_QUALITY_MANIFEST_MAX_LATEST = 200
+LLM_QUALITY_CHAIN_ROOT = "/tmp/booking_quality/_chain"
+LLM_QUALITY_CHAIN_STEPS = ("lock", "replay", "full")
+LLM_QUALITY_CHAIN_BLOCKED_STATUSES = {"blocked", "aborted"}
 LLM_QUALITY_MANIFEST_REDACT_KEYS = {
     "admin_token",
     "console_token",
@@ -945,6 +948,9 @@ LLM_POLICY_OVERRIDE_KEYWORD_REASON_CODES = {
     "keyword_override",
     "lexicon_override",
     "regex_override",
+}
+LLM_POLICY_OVERRIDE_NON_SEMANTIC_GUARD_REASON_CODES = {
+    "contract_validation_failure",
 }
 LLM_QUALITY_MISSED_QUESTION_SUPPRESSION_REASON_CODES = {
     "required_slot_missing",
@@ -3384,7 +3390,14 @@ def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags, 
     if isinstance(meta, dict):
         intent_value = _llm_quality_effective_intent(meta)
         tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+        expected_reply_reason_value = _llm_quality_normalize_tool_token(
+            meta.get("expected_reply_reason")
+        )
         info_sections = meta.get("info_sections")
+        if expected_reply_reason_value == "policy_core_degraded_collect":
+            # Degraded collect path is tracked separately (degrade budget + trace/meta).
+            # Do not classify it as booking progress stall in this turn.
+            return False
         if not intent_value.startswith("calendar."):
             if isinstance(info_sections, list) and any(
                 isinstance(item, str) and item.strip() for item in info_sections
@@ -5081,6 +5094,29 @@ def _llm_quality_collect_semantic_intent_override_audit(meta):
     return result
 
 
+def _llm_quality_collect_plan_delta_audit(meta):
+    result = {
+        "action_changed": False,
+        "intent_changed": False,
+        "tool_action_changed": False,
+    }
+    if not isinstance(meta, dict):
+        return result
+    plan_audit = meta.get("llm_policy_plan_audit")
+    if not isinstance(plan_audit, dict):
+        llm_policy_core = meta.get("llm_policy_core")
+        if isinstance(llm_policy_core, dict):
+            nested_audit = llm_policy_core.get("plan_final_audit")
+            if isinstance(nested_audit, dict):
+                plan_audit = nested_audit
+    if not isinstance(plan_audit, dict):
+        return result
+    result["action_changed"] = bool(plan_audit.get("action_changed"))
+    result["intent_changed"] = bool(plan_audit.get("intent_changed"))
+    result["tool_action_changed"] = bool(plan_audit.get("tool_action_changed"))
+    return result
+
+
 def _llm_quality_init_rewrite_governance_state():
     return {
         "turns_seen": 0,
@@ -5093,6 +5129,7 @@ def _llm_quality_init_rewrite_governance_state():
         "semantic_intent_override_reason_missing_turns": 0,
         "semantic_intent_override_reason_unknown_turns": 0,
         "semantic_intent_override_count_mismatch_turns": 0,
+        "non_semantic_contract_guard_turns": 0,
         "keyword_override_turns": 0,
         "reason_counts": {},
     }
@@ -5110,6 +5147,7 @@ def _llm_quality_track_rewrite_governance(state, meta):
 
     meta_reason_codes = _llm_quality_collect_override_reason_codes(meta)
     semantic_override_audit = _llm_quality_collect_semantic_intent_override_audit(meta)
+    plan_delta_audit = _llm_quality_collect_plan_delta_audit(meta)
     semantic_audit_count = int(semantic_override_audit.get("audit_count") or 0)
     semantic_reason_codes = [
         code
@@ -5119,6 +5157,9 @@ def _llm_quality_track_rewrite_governance(state, meta):
     semantic_action_changed = bool(semantic_override_audit.get("action_changed"))
     semantic_intent_changed = bool(semantic_override_audit.get("intent_changed"))
     semantic_tool_action_changed = bool(semantic_override_audit.get("tool_action_changed"))
+    plan_action_changed = bool(plan_delta_audit.get("action_changed"))
+    plan_intent_changed = bool(plan_delta_audit.get("intent_changed"))
+    plan_semantic_change = bool(plan_action_changed or plan_intent_changed)
     semantic_effective_change = bool(
         semantic_action_changed or semantic_intent_changed or semantic_tool_action_changed
     )
@@ -5156,6 +5197,19 @@ def _llm_quality_track_rewrite_governance(state, meta):
         return
 
     state["rewrite_turns"] = int(state.get("rewrite_turns", 0) or 0) + 1
+    non_semantic_reason_only = bool(meta_reason_codes) and all(
+        code in LLM_POLICY_OVERRIDE_NON_SEMANTIC_GUARD_REASON_CODES
+        for code in meta_reason_codes
+    )
+    if (
+        non_semantic_reason_only
+        and not meta_missing_reason
+        and not semantic_rewrite_turn
+        and not plan_semantic_change
+    ):
+        state["non_semantic_contract_guard_turns"] = int(
+            state.get("non_semantic_contract_guard_turns", 0) or 0
+        ) + 1
     if missing_reason:
         state["rewrite_reason_missing_turns"] = int(
             state.get("rewrite_reason_missing_turns", 0) or 0
@@ -5217,9 +5271,16 @@ def _llm_quality_finalize_rewrite_governance(
     semantic_intent_override_count_mismatch_turns = int(
         state.get("semantic_intent_override_count_mismatch_turns", 0) or 0
     )
+    non_semantic_contract_guard_turns = int(
+        state.get("non_semantic_contract_guard_turns", 0) or 0
+    )
     keyword_override_turns = int(state.get("keyword_override_turns", 0) or 0)
     denominator = max(policy_core_turns or turns_seen, 1)
-    rewrite_rate = round(rewrite_turns / denominator, 4)
+    rewrite_budget_turns = max(
+        int(rewrite_turns - non_semantic_contract_guard_turns),
+        0,
+    )
+    rewrite_rate = round(rewrite_budget_turns / denominator, 4)
     keyword_override_rate = round(keyword_override_turns / denominator, 4)
     if max_post_llm_semantic_rewrite_rate <= 0:
         max_rewrite_turns = 0
@@ -5236,8 +5297,8 @@ def _llm_quality_finalize_rewrite_governance(
 
     blocking_counts = {}
     reasons = []
-    if rewrite_turns > max_rewrite_turns:
-        blocking_counts["post_llm_semantic_rewrite_budget_exceeded"] = rewrite_turns
+    if rewrite_budget_turns > max_rewrite_turns:
+        blocking_counts["post_llm_semantic_rewrite_budget_exceeded"] = rewrite_budget_turns
         reasons.append("post_llm_semantic_rewrite_budget_exceeded")
     if keyword_override_rate > max_keyword_override_rate:
         blocking_counts["keyword_override_budget_exceeded"] = keyword_override_turns
@@ -5284,6 +5345,8 @@ def _llm_quality_finalize_rewrite_governance(
         "semantic_intent_override_count_mismatch_turns": (
             semantic_intent_override_count_mismatch_turns
         ),
+        "non_semantic_contract_guard_turns": non_semantic_contract_guard_turns,
+        "rewrite_budget_turns": rewrite_budget_turns,
         "keyword_override_turns": keyword_override_turns,
         "post_llm_semantic_rewrite_rate": rewrite_rate,
         "keyword_override_rate": keyword_override_rate,
@@ -7008,6 +7071,9 @@ def _llm_quality_build_command_from_args(
     add_bool("--allow-output-overwrite", allow_output_overwrite or getattr(args, "allow_output_overwrite", False))
     add_bool("--resume", resume or getattr(args, "resume", False))
     add("--run-id", run_id or getattr(args, "run_id", None))
+    add("--chain-id", getattr(args, "chain_id", None))
+    add("--chain-step", getattr(args, "chain_step", None))
+    add("--chain-token", getattr(args, "chain_token", None))
     add("--brief-file", getattr(args, "brief_file", None))
     add("--expected-runtime-commit", getattr(args, "expected_runtime_commit", None))
     add("--baseline-summary", getattr(args, "baseline_summary", None))
@@ -7269,6 +7335,185 @@ def _llm_quality_lock_fingerprint_state_path():
     return "/tmp/booking_quality/.run_economy_lock_state.json"
 
 
+def _llm_quality_chain_state_path(chain_id, *, chain_root=None):
+    root = str(chain_root or LLM_QUALITY_CHAIN_ROOT or "").strip() or LLM_QUALITY_CHAIN_ROOT
+    normalized_root = os.path.abspath(os.path.expanduser(root))
+    token = str(chain_id or "").strip()
+    if not token:
+        return None
+    safe_token = re.sub(r"[^A-Za-z0-9._-]+", "-", token).strip("-._")
+    if not safe_token:
+        return None
+    return os.path.join(normalized_root, f"{safe_token}.json")
+
+
+def _llm_quality_chain_load_state(chain_id, *, chain_root=None):
+    path = _llm_quality_chain_state_path(chain_id, chain_root=chain_root)
+    if not isinstance(path, str) or not path:
+        return None, "chain_id_missing", None
+    if not os.path.exists(path):
+        return None, "chain_state_missing", path
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception as exc:
+        return None, f"chain_state_parse_error:{exc}", path
+    if not isinstance(payload, dict):
+        return None, "chain_state_invalid_payload", path
+    return payload, None, path
+
+
+def _llm_quality_chain_resolve_requested_mode(*, args, run_id):
+    if getattr(args, "scenarios_file", None):
+        return "replay", "scenarios_file"
+    run_token = str(run_id or "").strip().casefold()
+    if run_token.startswith("booking-full-"):
+        return "full", "run_id_prefix"
+    if run_token.startswith("booking-replay-"):
+        return "replay", "run_id_prefix"
+    if run_token.startswith("booking-lock-"):
+        return "lock", "run_id_prefix"
+    if "full" in run_token:
+        return "full", "run_id_token"
+    if "replay" in run_token:
+        return "replay", "run_id_token"
+    if "lock" in run_token:
+        return "lock", "run_id_token"
+    return "lock", "default"
+
+
+def _llm_quality_chain_validate_run_id_mode_contract(run_id, requested_mode):
+    normalized_mode = str(requested_mode or "").strip().casefold()
+    if normalized_mode not in {"lock", "replay", "full"}:
+        return False, "mode_unknown"
+    run_token = str(run_id or "").strip().casefold()
+    if not run_token:
+        return False, "run_id_missing"
+    if run_token.startswith("booking-"):
+        expected_prefix = f"booking-{normalized_mode}-"
+        if not run_token.startswith(expected_prefix):
+            observed = run_token.split("-", 3)
+            observed_mode = observed[1] if len(observed) > 1 else "unknown"
+            return False, f"run_id_mode_mismatch:{normalized_mode}:{observed_mode}"
+    return True, None
+
+
+def _llm_quality_build_chain_controller_gate_status(
+    *,
+    args,
+    run_id,
+    lane_effective,
+    output_dir,
+    chain_root=None,
+):
+    lane_token = str(lane_effective or "").strip().casefold()
+    step_token = str(getattr(args, "chain_step", "") or "").strip().casefold()
+    gate = {
+        "required": lane_token == "acceptance",
+        "valid": True,
+        "enforced": lane_token == "acceptance",
+        "reasons": [],
+        "lane_effective": lane_token or "unknown",
+        "chain_id": getattr(args, "chain_id", None),
+        "chain_step": step_token or None,
+        "chain_step_source": "arg",
+        "state_path": None,
+        "mode": None,
+        "mode_source": None,
+        "active_run_id": None,
+        "resume_required": False,
+    }
+    if not gate["required"]:
+        return gate
+
+    requested_mode, mode_source = _llm_quality_chain_resolve_requested_mode(
+        args=args,
+        run_id=run_id,
+    )
+    gate["mode"] = requested_mode
+    gate["mode_source"] = mode_source
+
+    chain_id = str(getattr(args, "chain_id", "") or "").strip()
+    chain_token = str(getattr(args, "chain_token", "") or "").strip()
+    if not chain_id or not step_token or not chain_token:
+        gate["valid"] = False
+        gate["reasons"].append("chain_controller_required")
+        return gate
+    if step_token not in LLM_QUALITY_CHAIN_STEPS:
+        gate["valid"] = False
+        gate["reasons"].append(f"chain_step_invalid:{step_token}")
+        return gate
+
+    mode_contract_ok, mode_contract_reason = _llm_quality_chain_validate_run_id_mode_contract(
+        run_id,
+        requested_mode,
+    )
+    if not mode_contract_ok:
+        gate["valid"] = False
+        gate["reasons"].append(mode_contract_reason or "run_id_mode_mismatch")
+    if step_token != requested_mode:
+        gate["valid"] = False
+        gate["reasons"].append(
+            f"chain_step_mode_mismatch:{step_token}:{requested_mode}"
+        )
+
+    state, state_error, state_path = _llm_quality_chain_load_state(
+        chain_id,
+        chain_root=chain_root,
+    )
+    gate["state_path"] = state_path
+    if state_error:
+        gate["valid"] = False
+        gate["reasons"].append(state_error)
+        return gate
+
+    chain_status = str(state.get("status") or "").strip().casefold()
+    if chain_status in LLM_QUALITY_CHAIN_BLOCKED_STATUSES:
+        gate["valid"] = False
+        gate["reasons"].append(f"chain_status_blocked:{chain_status}")
+
+    current_step = str(state.get("current_step") or "").strip().casefold()
+    if current_step and current_step != step_token:
+        gate["valid"] = False
+        gate["reasons"].append(
+            f"chain_current_step_mismatch:{current_step}:{step_token}"
+        )
+
+    active = state.get("active")
+    if not isinstance(active, dict):
+        active = {}
+    active_run_id = str(active.get("run_id") or "").strip()
+    active_token = str(active.get("token") or "").strip()
+    active_step = str(active.get("step") or "").strip().casefold()
+    resume_required = bool(active.get("resume_required"))
+    gate["active_run_id"] = active_run_id or None
+    gate["resume_required"] = resume_required
+
+    if active_step and active_step != step_token:
+        gate["valid"] = False
+        gate["reasons"].append(f"active_step_mismatch:{active_step}:{step_token}")
+    if active_token and chain_token != active_token:
+        gate["valid"] = False
+        gate["reasons"].append("chain_token_mismatch")
+    if active_run_id and active_run_id != str(run_id or "").strip():
+        gate["valid"] = False
+        gate["reasons"].append(
+            f"chain_active_run_id_mismatch:{active_run_id}:{run_id}"
+        )
+    if resume_required and not bool(getattr(args, "resume", False)):
+        gate["valid"] = False
+        gate["reasons"].append("chain_resume_required")
+    if bool(getattr(args, "resume", False)) and active_run_id and active_run_id != str(
+        run_id or ""
+    ).strip():
+        gate["valid"] = False
+        gate["reasons"].append(
+            f"chain_resume_run_id_mismatch:{active_run_id}:{run_id}"
+        )
+
+    return gate
+
+
 def _llm_quality_load_replay_fingerprint_state(path):
     if not isinstance(path, str) or not path.strip():
         return {}
@@ -7446,6 +7691,8 @@ def _llm_quality_write_failure_artifacts(
             "manual_audit_gate": getattr(args, "manual_audit_gate", None),
             "quality_constant_gate": getattr(args, "quality_constant_gate", None),
             "quality_lane": getattr(args, "quality_lane", None),
+            "chain_id": getattr(args, "chain_id", None),
+            "chain_step": getattr(args, "chain_step", None),
             "workaround_register_gate": getattr(args, "workaround_register_gate", None),
             "workaround_register_base_ref": getattr(
                 args, "workaround_register_base_ref", None
@@ -7593,6 +7840,8 @@ def _llm_quality_write_checkpoint_summary(
             "manual_audit_gate": getattr(args, "manual_audit_gate", None),
             "quality_constant_gate": getattr(args, "quality_constant_gate", None),
             "quality_lane": getattr(args, "quality_lane", None),
+            "chain_id": getattr(args, "chain_id", None),
+            "chain_step": getattr(args, "chain_step", None),
             "workaround_register_gate": getattr(args, "workaround_register_gate", None),
             "workaround_register_base_ref": getattr(
                 args, "workaround_register_base_ref", None
@@ -9777,6 +10026,22 @@ def _parse_llm_quality_args(argv):
         help="Continue interrupted run from runtime_state.json without wiping output-dir.",
     )
     parser.add_argument("--run-id", default=None)
+    parser.add_argument(
+        "--chain-id",
+        default=None,
+        help="Acceptance chain identifier issued by quality_chain_controller.sh.",
+    )
+    parser.add_argument(
+        "--chain-step",
+        choices=["lock", "replay", "full"],
+        default=None,
+        help="Acceptance chain step token issued by quality_chain_controller.sh.",
+    )
+    parser.add_argument(
+        "--chain-token",
+        default=None,
+        help="Acceptance chain execution token issued by quality_chain_controller.sh.",
+    )
     parser.add_argument(
         "--brief-file",
         default=None,
@@ -12885,6 +13150,60 @@ def _run_llm_quality(args):
                 "llm-quality: --resume requires existing scenarios.json in output-dir "
                 "or explicit --scenarios-file"
             )
+    quality_constant_status = _llm_quality_build_quality_constant_status(
+        mode=args.quality_constant_gate,
+        lane=args.quality_lane,
+        scenarios_file=args.scenarios_file,
+        run_mode=args.mode,
+        count=args.count,
+        include_media=bool(args.include_media),
+        scenario_coverage=args.scenario_coverage,
+        judge_mode=args.judge_mode,
+        run_economy_gate=args.run_economy_gate,
+        manual_audit_gate=args.manual_audit_gate,
+        tool_evidence_policy=args.tool_evidence_policy,
+        fail_on_thresholds=bool(args.fail_on_thresholds),
+        fail_on_regression=bool(args.fail_on_regression),
+        allow_weak_oracle=bool(args.allow_weak_oracle),
+        allow_incomplete_run_artifacts=bool(args.allow_incomplete_run_artifacts),
+        allow_judge_off=bool(args.allow_judge_off),
+        allow_no_code_delta=bool(args.allow_no_code_delta),
+        skip_outbox=bool(args.skip_outbox),
+        update_baseline=bool(args.update_baseline),
+    )
+    chain_controller_status = _llm_quality_build_chain_controller_gate_status(
+        args=args,
+        run_id=run_id,
+        lane_effective=quality_constant_status.get("lane_effective"),
+        output_dir=output_dir,
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_chain_controller_preflight",
+                "required": chain_controller_status.get("required"),
+                "valid": chain_controller_status.get("valid"),
+                "enforced": chain_controller_status.get("enforced"),
+                "reasons": chain_controller_status.get("reasons"),
+                "lane_effective": chain_controller_status.get("lane_effective"),
+                "chain_id": chain_controller_status.get("chain_id"),
+                "chain_step": chain_controller_status.get("chain_step"),
+                "mode": chain_controller_status.get("mode"),
+                "mode_source": chain_controller_status.get("mode_source"),
+                "state_path": chain_controller_status.get("state_path"),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if (
+        chain_controller_status.get("enforced")
+        and not chain_controller_status.get("valid", True)
+    ):
+        reason_tokens = chain_controller_status.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - chain controller gate failed "
+            f"({','.join(reason_tokens)})"
+        )
     manual_audit_gate_status = _llm_quality_build_manual_audit_gate_status(
         mode=getattr(args, "manual_audit_gate", "block"),
         output_dir=output_dir,
@@ -13413,27 +13732,6 @@ def _run_llm_quality(args):
             "llm-quality: INVALID RUN - run economy gate failed "
             f"({','.join(reason_tokens)})"
         )
-    quality_constant_status = _llm_quality_build_quality_constant_status(
-        mode=args.quality_constant_gate,
-        lane=args.quality_lane,
-        scenarios_file=args.scenarios_file,
-        run_mode=args.mode,
-        count=args.count,
-        include_media=bool(args.include_media),
-        scenario_coverage=args.scenario_coverage,
-        judge_mode=judge_mode,
-        run_economy_gate=args.run_economy_gate,
-        manual_audit_gate=args.manual_audit_gate,
-        tool_evidence_policy=args.tool_evidence_policy,
-        fail_on_thresholds=bool(args.fail_on_thresholds),
-        fail_on_regression=bool(args.fail_on_regression),
-        allow_weak_oracle=bool(args.allow_weak_oracle),
-        allow_incomplete_run_artifacts=bool(args.allow_incomplete_run_artifacts),
-        allow_judge_off=bool(args.allow_judge_off),
-        allow_no_code_delta=bool(args.allow_no_code_delta),
-        skip_outbox=bool(args.skip_outbox),
-        update_baseline=bool(args.update_baseline),
-    )
     print(
         json.dumps(
             {
@@ -15824,6 +16122,14 @@ def _run_llm_quality(args):
             len(workaround_register_status.get("reasons") or []),
             1,
         )
+    if (
+        not chain_controller_status.get("valid", True)
+        and chain_controller_status.get("enforced")
+    ):
+        process_blocking_counts["chain_controller_violation"] = max(
+            len(chain_controller_status.get("reasons") or []),
+            1,
+        )
     missing_scenario_artifacts = list((scenario_artifact_status or {}).get("missing") or [])
     if missing_scenario_artifacts:
         process_blocking_counts["incomplete_run_artifact"] = len(missing_scenario_artifacts)
@@ -16015,6 +16321,8 @@ def _run_llm_quality(args):
         "quality_constant_gate": args.quality_constant_gate,
         "quality_lane_requested": quality_constant_status.get("lane_requested"),
         "quality_lane_effective": quality_constant_status.get("lane_effective"),
+        "chain_id": args.chain_id,
+        "chain_step": args.chain_step,
         "workaround_register_gate": args.workaround_register_gate,
         "workaround_register_base_ref": args.workaround_register_base_ref,
         "workaround_register_path": workaround_register_status.get("register_path"),
@@ -16075,6 +16383,7 @@ def _run_llm_quality(args):
         "run_economy": run_economy_status,
         "manual_audit_gate": manual_audit_gate_status,
         "quality_constant_gate": quality_constant_status,
+        "chain_controller_gate": chain_controller_status,
         "workaround_register_gate": workaround_register_status,
         "top_failures": top_failures,
         "top_failure_turns": top_failure_turns,
@@ -16154,6 +16463,12 @@ def _run_llm_quality(args):
             "quality_lane_requested": quality_constant_status.get("lane_requested"),
             "quality_lane_effective": quality_constant_status.get("lane_effective"),
             "quality_lane_missing_coverage": quality_constant_status.get("missing_coverage", []),
+            "chain_controller_required": bool(chain_controller_status.get("required")),
+            "chain_controller_gate_valid": chain_controller_status.get("valid", True),
+            "chain_controller_gate_enforced": chain_controller_status.get("enforced", False),
+            "chain_controller_gate_reasons": chain_controller_status.get("reasons", []),
+            "chain_id": args.chain_id,
+            "chain_step": args.chain_step,
             "workaround_register_gate_valid": workaround_register_status.get("valid", True),
             "workaround_register_gate_enforced": workaround_register_status.get(
                 "enforced", False

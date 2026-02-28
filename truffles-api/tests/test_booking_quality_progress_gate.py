@@ -95,6 +95,16 @@ def test_progress_gate_skips_slot_progress_for_calendar_missing_slot_reply():
     assert _should_expect_progress("time", ["time"], meta) is False
 
 
+def test_progress_gate_skips_slot_progress_for_policy_core_degraded_collect():
+    meta = {
+        "intent": "booking",
+        "action": "booking_prompt",
+        "expected_reply_type": "time",
+        "expected_reply_reason": "policy_core_degraded_collect",
+    }
+    assert _should_expect_progress("time", ["time"], meta) is False
+
+
 def test_slots_progress_detects_new_slot_even_when_count_stays_one():
     assert _slots_progressed({"service": "Стрижка"}, {"datetime": "15:00"}) is True
 
