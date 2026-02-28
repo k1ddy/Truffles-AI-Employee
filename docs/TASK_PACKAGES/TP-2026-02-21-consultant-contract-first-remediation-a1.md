@@ -1095,6 +1095,49 @@ Forensic only (not acceptance):
   - Запустить L3 только после прохождения Stage A-F и PG0..PG6.
   - Exit criteria: `lock -> replay -> full` используется как release confirmation, не как debug loop.
 
+### Execution Status Update (2026-02-28, fact-checked)
+
+- Completed implementation (code + tests):
+  - Chain controller introduced and wired as acceptance step owner:
+    - `scripts/quality_chain_controller.sh`
+    - `scripts/llm_quality_guarded.sh`
+  - Acceptance token gate enforced in runtime preflight:
+    - `ops/diagnose.py` (`chain_controller_required`, step/token/mode checks).
+  - Resume/order/identity enforcement implemented:
+    - `chain_step_order_violation`, `chain_resume_required`, `run_id_mode_mismatch`.
+  - Go-to-Full enforcement upgraded from docs-only to runtime gate:
+    - acceptance `lock` requires `--pg-checklist`,
+    - checklist must include `PG0..PG6`,
+    - checklist must include `root_cause_statement`,
+    - checklist must include `defect_mapping` entries (`defect_class`, `target_test`, `gate`, `owner`),
+    - `target_test` is validated as real repository reference (`path::test_name` exists).
+  - Deterministic regression coverage exists and is green for this layer:
+    - `truffles-api/tests/test_booking_quality_chain_controller.py`
+    - `truffles-api/tests/test_booking_quality_guarded_wrapper.py`
+    - `truffles-api/tests/test_booking_quality_status_gate.py`
+    - `truffles-api/tests/test_booking_quality_progress_gate.py`
+
+- Partially completed (policy defined, enforcement not fully automated yet):
+  - Stage B Oracle Rebalance:
+    - contract-first is documented and partially enforced,
+    - full machine arbitration for oracle conflicts is still pending.
+  - Stage C Forensic Automation:
+    - manual-audit gating exists,
+    - SLA-grade forensic template validation is still pending.
+  - Stage D Scenario Governance:
+    - scenario contract checks exist,
+    - versioned scenario quality SLA and promotion policy are still pending.
+  - Stage E Fail-Fast Economics:
+    - run-economy and stop-loss signals exist,
+    - full lane scheduler enforcement across all run types is still pending.
+
+- Remaining implementation items before declaring Stage A-G complete:
+  - Implement executable defect taxonomy matrix `defect -> test -> gate -> owner` with mandatory validation artifact (beyond checklist presence).
+  - Add machine-enforced judge reliability conflict policy (`primary contract` wins, judge as corroboration) with explicit reason-codes.
+  - Add forensic SLA validator (`manual_audit` completeness + owner + timestamp + conflict resolution) as blocking preflight.
+  - Add scenario governance registry (version, realism bucket coverage, acceptance eligibility marker).
+  - Add promotion validator that blocks lane jump (`L1/L2 -> L3`) without evidence chain, not only checklist declaration.
+
 ### DoD for this Addendum
 
 - TP явно фиксирует L0-L3 operating model.

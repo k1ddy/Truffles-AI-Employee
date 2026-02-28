@@ -255,4 +255,29 @@
   - Commit and PR:
     - commit `235de808` pushed to `fix/llm-first-firebreak-2026-02-19`.
     - PR opened: `https://github.com/k1ddy/Truffles-AI-Employee/pull/847`.
-- last_updated: 2026-02-28T17:03:15+05:00
+  - Fact-check pass on PR `#847`:
+    - `session-gate` green,
+    - `unit-tests` green,
+    - `lint` red root-cause identified (`I001 import order` in `test_booking_quality_guarded_wrapper.py`) and fixed.
+  - Continued Stage B/Stage F implementation in code (not docs-only):
+    - Acceptance lock now requires `--pg-checklist` via guarded wrapper.
+    - Chain controller validates checklist hard-gates:
+      - `PG0..PG6`,
+      - `root_cause_statement`,
+      - `defect_mapping` required fields.
+    - Added executable mapping validation:
+      - `target_test` must resolve to existing `path::test_name` in repository.
+  - Added/updated deterministic tests for new gates:
+    - `test_chain_controller_blocks_lock_without_pg_checklist`
+    - `test_chain_controller_blocks_lock_with_pg_checklist_missing_mapping`
+    - `test_chain_controller_blocks_lock_with_pg_checklist_invalid_target_test`
+  - Updated operator docs for mandatory checklist schema and executable `target_test` rule:
+    - `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`
+    - `docs/SESSION_START_PROMPT.txt`
+    - `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md` (fact-checked status block: done/partial/remaining).
+  - Validation (green):
+    - `bash -n scripts/quality_chain_controller.sh && bash -n scripts/llm_quality_guarded.sh`
+    - `ruff check truffles-api/tests/test_booking_quality_chain_controller.py truffles-api/tests/test_booking_quality_guarded_wrapper.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py truffles-api/tests/test_booking_quality_guarded_wrapper.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_progress_gate.py` (`78 passed`)
+    - `scripts/session_check.sh`
+- last_updated: 2026-02-28T18:07:15+05:00

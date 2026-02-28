@@ -518,6 +518,30 @@ Guarded llm-quality quickstart (single entrypoint)
    - Direct acceptance run via `python3 ops/diagnose.py llm-quality ...` is blocked unless chain token args are present.
 2. Lock run (acceptance envelope)
    - Prepare `PG0..PG6` checklist JSON (example path: `/tmp/booking_quality/pg_checklist-<id>.json`).
+   - Required schema (minimum):
+     ```json
+     {
+       "go_to_full": {
+         "PG0": {"status": "pass"},
+         "PG1": {"status": "pass"},
+         "PG2": {"status": "pass"},
+         "PG3": {"status": "pass"},
+         "PG4": {"status": "pass"},
+         "PG5": {"status": "pass"},
+         "PG6": {"status": "pass"},
+         "root_cause_statement": "one-sentence root cause linked to evidence",
+         "defect_mapping": [
+           {
+             "defect_class": "booking_flow_break",
+             "target_test": "path::test_name",
+             "gate": "PG1",
+             "owner": "a1"
+           }
+         ]
+       }
+     }
+     ```
+   - `target_test` is enforced as executable reference: `path/to/test_file.py::test_name` must exist in repository.
    - `scripts/llm_quality_guarded.sh --mode lock --run-id booking-lock-<id> --pg-checklist /tmp/booking_quality/pg_checklist-<id>.json -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds`
 3. Replay run (same scenarios + baseline)
    - `scripts/llm_quality_guarded.sh --mode replay --run-id booking-replay-<id> -- --base-url <url> --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-<id>/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --max-failures 20`

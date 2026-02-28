@@ -1,5 +1,5 @@
-import os
 import json
+import os
 import subprocess
 from pathlib import Path
 from uuid import uuid4
@@ -95,6 +95,15 @@ def _write_pg_checklist(path: Path) -> None:
             "PG4": {"status": "pass"},
             "PG5": {"status": "pass"},
             "PG6": {"status": "pass"},
+            "root_cause_statement": "handoff miss reproduced in L2 micro-chaos",
+            "defect_mapping": [
+                {
+                    "defect_class": "handoff_miss",
+                    "target_test": "truffles-api/tests/test_booking_quality_status_gate.py::test_quality_constant_requires_acceptance_envelope_for_critical_run",
+                    "gate": "PG1",
+                    "owner": "a1",
+                }
+            ],
         }
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

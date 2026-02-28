@@ -67,7 +67,7 @@ TESTING CONTRACT (summary)
 - New feature requires at least one test (Playwright/Schemathesis/k6/unit) or an explicit waiver in the Task Package.
 - Core behavior changes require local-first realism checks before CI conclusions:
   - full critical pytest suites,
-  - `scripts/llm_quality_guarded.sh` as canonical llm-quality entrypoint (acceptance via chain controller; `lock` requires `--pg-checklist`),
+  - `scripts/llm_quality_guarded.sh` as canonical llm-quality entrypoint (acceptance via chain controller; `lock` requires `--pg-checklist` with `PG0..PG6`, `root_cause_statement`, `defect_mapping`),
   - evidence from `decision_meta/decision_trace` + tool outcomes (not text-only).
 - Direct `python3 ops/diagnose.py llm-quality` is not an acceptance entrypoint; use it only for dev/forensic diagnostics.
 - Before first quality run in a session, read `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`:

@@ -37,6 +37,15 @@ def _write_pg_checklist(path: Path) -> None:
             "PG4": {"status": "pass"},
             "PG5": {"status": "pass"},
             "PG6": {"status": "pass"},
+            "root_cause_statement": "calendar conflict reply leaked stale booking prompt",
+            "defect_mapping": [
+                {
+                    "defect_class": "booking_flow_break",
+                    "target_test": "truffles-api/tests/test_message_endpoint.py::test_llm_policy_core_info_lateness_signal_uses_lateness_reply",
+                    "gate": "PG1",
+                    "owner": "a1",
+                }
+            ],
         }
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -283,3 +292,111 @@ def test_chain_controller_blocks_lock_without_pg_checklist(tmp_path):
 
     assert prepare.returncode != 0
     assert "go_to_full_gate_required:missing_pg_checklist" in prepare.stderr
+
+
+def test_chain_controller_blocks_lock_with_pg_checklist_missing_mapping(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    run_id = "booking-lock-chain-bad-pg"
+    output_dir = tmp_path / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pg_checklist = tmp_path / "pg_checklist_bad.json"
+    pg_payload = {
+        "go_to_full": {
+            "PG0": {"status": "pass"},
+            "PG1": {"status": "pass"},
+            "PG2": {"status": "pass"},
+            "PG3": {"status": "pass"},
+            "PG4": {"status": "pass"},
+            "PG5": {"status": "pass"},
+            "PG6": {"status": "pass"},
+            "root_cause_statement": "root cause exists",
+        }
+    }
+    pg_checklist.write_text(json.dumps(pg_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
+
+    prepare = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "lock",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            str(output_dir),
+            "--pg-checklist",
+            str(pg_checklist),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+
+    assert prepare.returncode != 0
+    assert "go_to_full_mapping_missing" in prepare.stderr
+
+
+def test_chain_controller_blocks_lock_with_pg_checklist_invalid_target_test(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    run_id = "booking-lock-chain-bad-target-test"
+    output_dir = tmp_path / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pg_checklist = tmp_path / "pg_checklist_bad_target.json"
+    pg_payload = {
+        "go_to_full": {
+            "PG0": {"status": "pass"},
+            "PG1": {"status": "pass"},
+            "PG2": {"status": "pass"},
+            "PG3": {"status": "pass"},
+            "PG4": {"status": "pass"},
+            "PG5": {"status": "pass"},
+            "PG6": {"status": "pass"},
+            "root_cause_statement": "root cause exists",
+            "defect_mapping": [
+                {
+                    "defect_class": "booking_flow_break",
+                    "target_test": "truffles-api/tests/does_not_exist.py::test_missing",
+                    "gate": "PG1",
+                    "owner": "a1",
+                }
+            ],
+        }
+    }
+    pg_checklist.write_text(json.dumps(pg_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
+
+    prepare = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "lock",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            str(output_dir),
+            "--pg-checklist",
+            str(pg_checklist),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+
+    assert prepare.returncode != 0
+    assert "go_to_full_mapping_invalid:0:target_test_path_missing" in prepare.stderr

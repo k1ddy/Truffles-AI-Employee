@@ -166,6 +166,10 @@ PG_CHECKLIST_PATH = (sys.argv[11] or "").strip()
 STEPS = ("lock", "replay", "full")
 BLOCKERS = ("wrong_action", "handoff_miss", "booking_flow_break", "run_completion_gap")
 GO_TO_FULL_KEYS = ("PG0", "PG1", "PG2", "PG3", "PG4", "PG5", "PG6")
+DEFECT_MAPPING_KEYS = ("defect_class", "target_test", "gate", "owner")
+REPO_ROOT = os.path.abspath(
+    os.path.expanduser(str(os.environ.get("LLM_QUALITY_REPO_ROOT") or os.getcwd()))
+)
 
 
 def now_iso() -> str:
@@ -256,12 +260,83 @@ def load_pg_checklist(path: str):
     if failed:
         return None, "go_to_full_gate_failed:" + ",".join(failed)
 
+    root_cause_statement = str(
+        source.get("root_cause_statement")
+        or payload.get("root_cause_statement")
+        or ""
+    ).strip()
+    if not root_cause_statement:
+        return None, "go_to_full_root_cause_missing"
+
+    mapping = source.get("defect_mapping")
+    if not isinstance(mapping, list):
+        mapping = payload.get("defect_mapping")
+    if not isinstance(mapping, list) or not mapping:
+        return None, "go_to_full_mapping_missing"
+
+    invalid_rows = []
+    for index, row in enumerate(mapping):
+        if not isinstance(row, dict):
+            invalid_rows.append(f"{index}:not_object")
+            continue
+        missing_row_fields = []
+        for field in DEFECT_MAPPING_KEYS:
+            value = str(row.get(field) or "").strip()
+            if not value:
+                missing_row_fields.append(field)
+        gate_value = str(row.get("gate") or "").strip()
+        if gate_value and gate_value not in GO_TO_FULL_KEYS:
+            missing_row_fields.append("gate_invalid")
+        target_ref = str(row.get("target_test") or "").strip()
+        target_valid, target_reason = validate_target_test_reference(target_ref)
+        if not target_valid:
+            missing_row_fields.append(target_reason or "target_test_invalid")
+        if missing_row_fields:
+            invalid_rows.append(f"{index}:{','.join(missing_row_fields)}")
+    if invalid_rows:
+        return None, "go_to_full_mapping_invalid:" + ";".join(invalid_rows)
+
     result = {
         "path": normalized,
         "keys": list(GO_TO_FULL_KEYS),
         "status": {key: bool(statuses.get(key)) for key in GO_TO_FULL_KEYS},
+        "root_cause_statement": root_cause_statement,
+        "defect_mapping_count": len(mapping),
     }
     return result, None
+
+
+def validate_target_test_reference(target_ref: str):
+    token = str(target_ref or "").strip()
+    if not token:
+        return False, "target_test_missing"
+    if "::" not in token:
+        return False, "target_test_format_invalid"
+    path_part, test_part = token.split("::", 1)
+    path_part = path_part.strip()
+    test_part = test_part.strip()
+    if not path_part or not test_part:
+        return False, "target_test_format_invalid"
+
+    resolved_path = path_part
+    if not os.path.isabs(resolved_path):
+        resolved_path = os.path.join(REPO_ROOT, resolved_path)
+    resolved_path = os.path.abspath(os.path.expanduser(resolved_path))
+    if not os.path.exists(resolved_path) or not os.path.isfile(resolved_path):
+        return False, "target_test_path_missing"
+
+    # Keep this check lightweight and deterministic: ensure test symbol exists in file text.
+    test_symbol = test_part.split("[", 1)[0].strip()
+    if not test_symbol:
+        return False, "target_test_symbol_missing"
+    try:
+        with open(resolved_path, "r", encoding="utf-8") as handle:
+            content = handle.read()
+    except Exception:
+        return False, "target_test_file_unreadable"
+    if test_symbol not in content:
+        return False, "target_test_symbol_missing"
+    return True, None
 
 
 def write_json_atomic(path: str, payload: dict) -> None:
