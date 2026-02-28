@@ -2,12 +2,25 @@
 set -euo pipefail
 
 hooks_path_expected=".githooks"
+canonical_agents_path="${TRUFFLES_CANONICAL_AGENTS_PATH:-/home/zhan/AGENTS.md}"
 
 repo_root=$(git rev-parse --show-toplevel)
 branch=$(git rev-parse --abbrev-ref HEAD)
 canonical_repo_root="${TRUFFLES_CANONICAL_REPO_ROOT:-/home/zhan/truffles-main}"
 allowed_doc_regex='^(docs/|STATE.md$|STRUCTURE.md$|AGENTS.md$)'
 core_behavior_regex='^(truffles-api/app/routers/webhook/|truffles-api/app/services/(intent_service|ai_service)\.py$|truffles-api/app/schemas/intent\.py$|prompts/llm_policy_core\.md$|contracts/llm/)'
+
+enforce_canon_sync_gate() {
+  local repo_agents="$repo_root/AGENTS.md"
+  if [[ ! -f "$repo_agents" || ! -f "$canonical_agents_path" ]]; then
+    return 0
+  fi
+  if ! diff -q "$canonical_agents_path" "$repo_agents" >/dev/null 2>&1; then
+    echo "ERROR: Canon Sync Gate failed: ${canonical_agents_path} differs from ${repo_agents}." >&2
+    echo "Run: cp \"${repo_agents}\" \"${canonical_agents_path}\"" >&2
+    exit 1
+  fi
+}
 
 collect_scope_changed_files() {
   local changed_files
@@ -198,6 +211,30 @@ require_tp_token_in_file() {
   fi
 }
 
+require_single_web_query_in_tp() {
+  local file="$1"
+  local query_count
+  query_count=$(rg -n '^- \*\*Query \(exact\):\*\*' "$file" | wc -l | tr -d '[:space:]')
+  if [[ "$query_count" != "1" ]]; then
+    echo "ERROR: Task Package must contain exactly one 'Query (exact)' entry (found ${query_count}) in ${file}." >&2
+    exit 1
+  fi
+}
+
+require_web_sources_block_has_url() {
+  local file="$1"
+  local sources_block
+  sources_block=$(awk '
+    /^## One web search \(mandatory before implementation\)/ {in_section=1; next}
+    in_section && /^## / {exit}
+    in_section {print}
+  ' "$file")
+  if ! printf '%s\n' "$sources_block" | rg -q 'https?://'; then
+    echo "ERROR: Task Package one-web-search section must include at least one URL source in ${file}." >&2
+    exit 1
+  fi
+}
+
 enforce_research_driven_tp_gate() {
   local mode
   mode=$(session_meta_value "research_gate")
@@ -224,16 +261,30 @@ enforce_research_driven_tp_gate() {
 
   local required_tokens=(
     "Query (exact):"
+    "Date/time (local):"
+    "Sources opened (from this query):"
+    "Decision:"
+    "Rejected options:"
+    "Symptom:"
+    "Minimal reproduction:"
     "Five Whys"
+    "Root cause statement:"
+    "Fix mechanism:"
     "Internal reuse:"
     "External reuse:"
     "Max full runs:"
     "Strategy:"
+    "Go/no-go signals:"
+    "Rollback:"
+    "Post-release monitoring window:"
   )
   local token
   for token in "${required_tokens[@]}"; do
     require_tp_token_in_file "$tp_file" "$token"
   done
+
+  require_single_web_query_in_tp "$tp_file"
+  require_web_sources_block_has_url "$tp_file"
 }
 
 if [[ "$branch" == "HEAD" ]]; then
@@ -251,6 +302,8 @@ if [[ "$hooks_path" != "$hooks_path_expected" && "$hooks_path" != "${repo_root}/
   echo "ERROR: git hooks not installed. Run: scripts/install_hooks.sh" >&2
   exit 1
 fi
+
+enforce_canon_sync_gate
 
 if [[ "$branch" == "main" || "$branch" == "master" ]]; then
   changed_files=$(git diff --name-only --cached)

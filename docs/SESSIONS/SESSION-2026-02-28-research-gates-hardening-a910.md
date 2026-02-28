@@ -1,0 +1,31 @@
+# SESSION 2026-02-28-research-gates-hardening-a910 — Session 2026-02-28-research-gates-hardening-a910
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-27-research-gates-rollout-a900.md
+- block_id: PROCESS-GATES-RESEARCH-2026Q1
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- branch: feat/2026-02-28-research-gates-hardening-a910
+- worktree: /home/zhan/worktrees/2026-02-28-research-gates-hardening-a910
+- base_ref: origin/main
+- scope: Harden research-driven gates and add CI livecheck reliability gate.
+- done:
+  - Session created.
+  - Strengthened AGENTS research source-quality clause.
+  - Hardened session/zero-context gates with strict TP token checks and single-query enforcement.
+  - Added Canon Sync enforcement in session_check.
+  - Added CI session-gate enforcement for session-scoped research/zero-context gates.
+  - Added reliability fail-on-breach gate in ci-livecheck remote lane.
+- next:
+  - Run local gate checks and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-27-research-gates-rollout-a900.md
+  - AGENTS.md
+  - scripts/session_check.sh
+  - scripts/session_gate.sh
+  - scripts/zero_context_gate.sh
+  - .github/workflows/ci.yml
+- last_updated: 2026-02-28

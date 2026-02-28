@@ -38,9 +38,9 @@
 - **Date/time (local):** `2026-02-27 13:35, Asia/Almaty`
 - **Why this query is precise:** проверяет именно policy связи релизов с надежностью, а не общие советы по CI/CD.
 - **Sources opened (from this query):**
-  - `Google SRE Workbook: Error Budgets`
-  - `Google SRE Workbook: Canarying Releases`
-  - `AWS Well-Architected: perform safe deployment`
+  - `Google SRE Workbook: Error Budgets` - `https://sre.google/workbook/error-budget-policy/`
+  - `Google SRE Workbook: Canarying Releases` - `https://sre.google/workbook/canarying-releases/`
+  - `AWS Well-Architected: perform safe deployment` - `https://docs.aws.amazon.com/wellarchitected/latest/framework/rel_prepare_safe_deployment.html`
 - **Existing solutions found:** error-budget policy gates, staged rollout/canary, explicit rollback as mandatory release contract.
 - **Decision:** `reuse` документированных SRE/Well-Architected практик и встроить их в процессные гейты Truffles.
 - **Rejected options:** ad-hoc “инженер решает по ситуации” отклонено как невалидируемое и дрейфующее.
@@ -74,9 +74,10 @@
 - Обновление zero-context шаблонов TP/Report.
 - Усиление `scripts/zero_context_gate.sh`.
 - Усиление `scripts/session_start.sh` и `scripts/session_check.sh` под новый контракт.
+- Усиление `scripts/session_gate.sh` для серверного enforcement `research_gate`/`zero_context_gate` в CI.
+- Добавление reliability gate в `ci-livecheck` на базе `ops/console_owner_admin_kpi_snapshot.py --fail-on-breach`.
 
 ## Out of scope
-- Изменения CI workflows.
 - Изменения runtime business logic консультанта.
 - Миграция старых закрытых Task Packages.
 
@@ -87,6 +88,8 @@
 - `scripts/zero_context_gate.sh`
 - `scripts/session_start.sh`
 - `scripts/session_check.sh`
+- `scripts/session_gate.sh`
+- `.github/workflows/ci.yml`
 - `docs/SESSIONS/SESSION-2026-02-27-research-gates-rollout-a900.md`
 - `docs/SESSION_INDEX.md`
 
@@ -95,8 +98,10 @@
 2. Расширить TP/Report templates обязательными секциями.
 3. Обновить `zero_context_gate.sh` под новые секции/токены.
 4. Обновить `session_start.sh` и `session_check.sh` для enforced adoption в новых сессиях.
-5. Прогнать локальные проверки (`shellcheck`, `session_check`, `zero_context_gate` smoke).
-6. Зафиксировать evidence и handoff.
+5. Обновить `session_gate.sh`, чтобы CI проверял session-scoped research/zero-context gates по изменённым session log.
+6. Добавить в `ci-livecheck` reliability gate с fail-on-breach и artifact evidence.
+7. Прогнать локальные проверки (`bash -n`, `session_check`, `zero_context_gate`, YAML parse).
+8. Зафиксировать evidence и handoff.
 
 ## DoD
 - В `AGENTS.md` есть явные mandatory gates: `External Research`, `Root Cause`, `Reuse-First`, `Release Safety`, `Iteration Discipline`.
@@ -104,11 +109,15 @@
 - `session_start.sh` проставляет gate-маркеры в новой session log.
 - `session_check.sh` блокирует сессию при `research_gate=required` и отсутствии обязательных TP section/token.
 - `zero_context_gate.sh` проверяет новые секции и запрещает placeholder content.
+- `session_gate.sh` валидирует `research_gate`/`zero_context_gate` для изменённых `docs/SESSIONS/SESSION-*.md` в CI.
+- `ci-livecheck` блокируется при reliability breach (`console_owner_admin_kpi_snapshot --fail-on-breach`) и сохраняет reliability artifacts.
 
 ## Checks
 - `bash -n scripts/session_start.sh scripts/session_check.sh scripts/zero_context_gate.sh`
+- `bash -n scripts/session_gate.sh`
 - `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-27-research-gates-rollout-a900.md --report docs/REPORTS/REPORT_TEMPLATE_ZERO_CONTEXT.md` (ожидаемо fail для template с placeholders; sanity check)
 - `scripts/session_check.sh`
+- `python3 - <<'PY' ... yaml.safe_load(open('.github/workflows/ci.yml')) ... PY`
 
 ## Evidence
 - `git diff --stat`

@@ -1553,13 +1553,18 @@ jobs:
           LIVECHECK_ALLOWLIST_JIDS="${LIVECHECK_ALLOWLIST_JIDS:-}"
           GATE_LOG="/tmp/livecheck-gate-${RUN_ID}.txt"
           RUN_LOG="/tmp/livecheck-run-${RUN_ID}.log"
+          RELIABILITY_SNAPSHOT="/tmp/livecheck-reliability-${RUN_ID}.json"
+          RELIABILITY_LOG="/tmp/livecheck-reliability-${RUN_ID}.log"
           ARTIFACT_TAR="/tmp/livecheck-artifacts-${RUN_ID}.tar.gz"
           : > "${GATE_LOG}"
           : > "${RUN_LOG}"
+          : > "${RELIABILITY_LOG}"
           cleanup() {
             tar -czf "${ARTIFACT_TAR}" -C /tmp \
               "livecheck-gate-${RUN_ID}.txt" \
               "livecheck-run-${RUN_ID}.log" \
+              "livecheck-reliability-${RUN_ID}.json" \
+              "livecheck-reliability-${RUN_ID}.log" \
               "livecheck-ca01-core.jsonl" \
               "livecheck-ca02-policy.jsonl" \
               "livecheck-ca03-info.jsonl" \
@@ -1737,6 +1742,21 @@ jobs:
           git remote set-url origin "${SOURCE_ORIGIN_URL}"
           git fetch origin "${GIT_SHA}" --depth=1
           git checkout -q "${GIT_SHA}"
+          if [ "${JID_INDEX}" -eq 0 ]; then
+            if python3 ops/console_owner_admin_kpi_snapshot.py \
+              --client-slug demo_salon \
+              --output "${RELIABILITY_SNAPSHOT}" \
+              --fail-on-breach \
+              --fail-level critical > "${RELIABILITY_LOG}" 2>&1; then
+              echo "RELIABILITY_GATE=PASS" >> "${GATE_LOG}"
+            else
+              echo "RELIABILITY_GATE=FAIL" >> "${GATE_LOG}"
+              cat "${RELIABILITY_LOG}" >> "${RUN_LOG}"
+              exit 1
+            fi
+          else
+            echo "RELIABILITY_GATE=SKIP_NON_PRIMARY_GROUP" >> "${GATE_LOG}"
+          fi
           suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca05-booking-commit ca06-consult ca07-ood ca08-state ca09-manager ca10-outbox)
           suite_jid="${ALLOWLIST_POOL[$JID_INDEX]}"
           suite_fail=0
