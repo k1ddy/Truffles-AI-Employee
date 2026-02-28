@@ -78,6 +78,30 @@ require_token() {
   fi
 }
 
+require_single_web_query_in_tp() {
+  local file="$1"
+  local query_count
+  query_count=$(rg -n '^- \*\*Query \(exact\):\*\*' "$file" | wc -l | tr -d '[:space:]')
+  if [[ "$query_count" != "1" ]]; then
+    echo "ERROR: TP must contain exactly one 'Query (exact)' entry (found ${query_count}) in ${file}" >&2
+    exit 1
+  fi
+}
+
+require_web_sources_block_has_url() {
+  local file="$1"
+  local sources_block
+  sources_block=$(awk '
+    /^## One web search \(mandatory before implementation\)/ {in_section=1; next}
+    in_section && /^## / {exit}
+    in_section {print}
+  ' "$file")
+  if ! printf '%s\n' "$sources_block" | rg -q 'https?://'; then
+    echo "ERROR: TP one-web-search section must include at least one URL source in ${file}" >&2
+    exit 1
+  fi
+}
+
 tp_required_sections=(
   "Block identity"
   "Название/цель"
@@ -143,9 +167,29 @@ for file in "$TP_PATH" "$REPORT_PATH"; do
   fi
 done
 
-for token in "Query (exact)" "Five Whys" "Decision:" "Max full runs" "Strategy:"; do
+for token in \
+  "Query (exact)" \
+  "Date/time (local)" \
+  "Sources opened (from this query)" \
+  "Decision:" \
+  "Rejected options:" \
+  "Symptom:" \
+  "Minimal reproduction:" \
+  "Five Whys" \
+  "Root cause statement:" \
+  "Fix mechanism:" \
+  "Internal reuse:" \
+  "External reuse:" \
+  "Max full runs" \
+  "Strategy:" \
+  "Go/no-go signals:" \
+  "Rollback:" \
+  "Post-release monitoring window:"; do
   require_token "$TP_PATH" "$token"
 done
+
+require_single_web_query_in_tp "$TP_PATH"
+require_web_sources_block_has_url "$TP_PATH"
 
 if [[ -n "$GRAPH_PATH" ]]; then
   if ! rg -Fq "blocks:" "$GRAPH_PATH"; then
