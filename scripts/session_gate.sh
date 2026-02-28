@@ -202,9 +202,27 @@ enforce_changed_session_files_gates() {
   done <<< "$diff_files"
 }
 
-empty_tree=$(git hash-object -t tree /dev/null)
+resolve_zero_base_diff_ref() {
+  local head="$1"
+  local merge_base=""
+
+  if git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+    merge_base=$(git merge-base "$head" origin/main 2>/dev/null || true)
+  fi
+  if [[ -z "$merge_base" ]] && git rev-parse --verify --quiet main >/dev/null 2>&1; then
+    merge_base=$(git merge-base "$head" main 2>/dev/null || true)
+  fi
+  if [[ -n "$merge_base" ]]; then
+    printf '%s\n' "$merge_base"
+    return 0
+  fi
+
+  git hash-object -t tree /dev/null
+}
+
 if [[ "$base_ref" =~ ^0+$ ]]; then
-  diff_files=$(git diff --name-only "$empty_tree" "$head_ref")
+  zero_base_ref=$(resolve_zero_base_diff_ref "$head_ref")
+  diff_files=$(git diff --name-only "$zero_base_ref" "$head_ref")
 else
   diff_files=$(git diff --name-only "$base_ref" "$head_ref")
 fi
