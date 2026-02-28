@@ -1,3 +1,5 @@
+import json
+import shlex
 import subprocess
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -164,3 +166,140 @@ def test_llm_quality_generate_batch_expands_timeout_budget_for_llm(monkeypatch):
     assert warnings == {}
     assert captured["timeout"] == pytest.approx(205.0)
     assert "--progress-stderr" in captured["command"]
+
+
+def test_prepare_output_dir_resume_keeps_existing_artifacts(tmp_path):
+    output_dir = tmp_path / "run"
+    output_dir.mkdir(parents=True)
+    artifact = output_dir / "summary.json"
+    artifact.write_text("{}", encoding="utf-8")
+
+    resolved = _module._llm_quality_prepare_output_dir(
+        str(output_dir),
+        allow_overwrite=False,
+        resume=True,
+    )
+
+    assert Path(resolved) == output_dir
+    assert artifact.exists()
+
+
+def test_prepare_output_dir_rejects_resume_and_overwrite(tmp_path):
+    output_dir = tmp_path / "run"
+    output_dir.mkdir(parents=True)
+    (output_dir / "summary.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        _module._llm_quality_prepare_output_dir(
+            str(output_dir),
+            allow_overwrite=True,
+            resume=True,
+        )
+
+
+def test_build_command_from_args_includes_resume_flag():
+    args = SimpleNamespace()
+    command = _module._llm_quality_build_command_from_args(
+        args,
+        run_id="resume-demo",
+        output_dir="/tmp/booking_quality/resume-demo",
+        resume=True,
+    )
+    parts = shlex.split(command)
+
+    assert "--resume" in parts
+    assert "--allow-output-overwrite" not in parts
+
+
+def test_run_manifest_resume_command_uses_resume_not_overwrite(tmp_path):
+    output_dir = tmp_path / "run"
+    output_dir.mkdir(parents=True)
+    summary = {
+        "run_id": "resume-run",
+        "started_at": "2026-02-27T00:00:00+00:00",
+        "finished_at": "2026-02-27T00:10:00+00:00",
+        "stop_reason": "in_progress",
+        "quality_status": {
+            "infra_valid": False,
+            "semantic_valid": False,
+            "run_integrity_valid": False,
+        },
+    }
+    args = SimpleNamespace(run_id="resume-run", output_dir=str(output_dir))
+
+    _module._llm_quality_write_run_manifest(
+        args=args,
+        run_id="resume-run",
+        output_dir=str(output_dir),
+        summary=summary,
+        run_economy_status={},
+        runtime_preflight={},
+        stop_reason="in_progress",
+    )
+    manifest_path = output_dir / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    resume_command = manifest.get("resume_command") or ""
+
+    assert "--resume" in resume_command
+    assert "--allow-output-overwrite" not in resume_command
+
+
+def test_run_manifest_preserves_command_when_rewritten_without_args(tmp_path):
+    output_dir = tmp_path / "run"
+    output_dir.mkdir(parents=True)
+    initial_summary = {
+        "run_id": "resume-run",
+        "started_at": "2026-02-27T00:00:00+00:00",
+        "finished_at": "2026-02-27T00:10:00+00:00",
+        "stop_reason": "in_progress",
+        "quality_status": {
+            "infra_valid": False,
+            "semantic_valid": False,
+            "run_integrity_valid": False,
+        },
+    }
+    args = SimpleNamespace(
+        run_id="resume-run",
+        output_dir=str(output_dir),
+        judge_mode="off",
+        allow_judge_off=True,
+    )
+
+    _module._llm_quality_write_run_manifest(
+        args=args,
+        run_id="resume-run",
+        output_dir=str(output_dir),
+        summary=initial_summary,
+        run_economy_status={},
+        runtime_preflight={},
+        stop_reason="in_progress",
+    )
+    manifest_path = output_dir / "run_manifest.json"
+    initial_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    rewritten_summary = {
+        "run_id": "resume-run",
+        "started_at": "2026-02-27T00:00:00+00:00",
+        "finished_at": "2026-02-27T00:20:00+00:00",
+        "stop_reason": None,
+        "quality_status": {
+            "infra_valid": True,
+            "semantic_valid": True,
+            "run_integrity_valid": True,
+            "manual_audit_status": "done",
+        },
+    }
+    _module._llm_quality_write_run_manifest(
+        args=None,
+        run_id="resume-run",
+        output_dir=str(output_dir),
+        summary=rewritten_summary,
+        run_economy_status={},
+        runtime_preflight={},
+        stop_reason=None,
+    )
+    rewritten_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert initial_manifest.get("command")
+    assert rewritten_manifest.get("command") == initial_manifest.get("command")
+    assert rewritten_manifest.get("args") == initial_manifest.get("args")

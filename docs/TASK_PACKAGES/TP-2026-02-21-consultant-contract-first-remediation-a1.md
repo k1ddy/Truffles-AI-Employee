@@ -362,6 +362,39 @@ Evidence:
 - Токены/время считаются ограниченным ресурсом качества; расход без прохождения Go-to-Full трактуется как process regression.
 - Если полноценная проверка временно недоступна, статус этапа = `BLOCKED`; "упрощенный pass" по бюджету запрещен.
 
+## Execution Addendum (2026-02-28, runtime reliability root-fix, mandatory)
+
+1. Root-cause scope (mandatory)
+- Текущий активный blocker после process-fix: `semantic_valid=false` при `infra_valid=true` из-за `degraded_fallback_rate > 0.05` в timeout-degrade кластере.
+- Root-cause считается runtime reliability path (`policy_core_degraded_collect/timeout_degrade`), а не oracle/text mismatch.
+
+2. Quality-constant protection (mandatory)
+- Порог `degraded_fallback_rate <= 0.05` не смягчается.
+- Запрещено снижать acceptance threshold, отключать judge/coverage или менять quality lane как workaround.
+
+3. Single-degrade-per-context contract (mandatory)
+- Для `timeout_degrade` в booking collect допускается только один degrade-turn на conversation context.
+- Повторный `timeout_degrade` в том же context обязан приводить в `clarify_limit -> HANDOFF` (или эквивалентный contract escalation), а не к повторному `degraded_collect`.
+- Любой второй подряд `policy_core_mode=degraded_fallback` на том же timeout-контексте без escalation = regression.
+
+4. Observability contract (mandatory)
+- Повторный timeout-degrade обязан быть наблюдаем через `decision_trace`/`decision_meta`:
+  - `reason_code=timeout_degrade`,
+  - retry counter/limit,
+  - explicit decision (`timeout_booking_limit`/`clarify_limit`/`handoff`).
+- Silent fallback without retry metadata запрещён.
+
+5. Deterministic gate before replay (mandatory)
+- Обязательный тест: timeout booking-safe fallback first-hit -> collect prompt; second-hit (same context) -> clarify-limit escalation.
+- Acceptance replay разрешён только после зелёного deterministic test для этого контракта.
+
+6. Completion criteria for this packet (mandatory)
+- Dev-lane replay с `judge-mode all` на фиксированном hotset показывает:
+  - `infra_valid=true`,
+  - `run_integrity_valid=true`,
+  - `degraded_fallback_rate <= 0.05`,
+  - без новых `wrong_action|handoff_miss|booking_flow_break` blocker-классов.
+
 ## Invariant
 
 - Не менять продуктовый контракт `FACT/COLLECT/HANDOFF`.
@@ -558,6 +591,11 @@ Evidence:
   top-failures, replay/full commands, contract drift digest.
 - FACT в `STATE.md` только с evidence.
 
+16. `P15 Timeout-Degrade Reliability Remediation`
+- Убрать повторный timeout-degrade collect в booking контексте через `single-degrade-per-context`.
+- На втором timeout-degrade того же intent/context делать contract escalation (`clarify_limit -> HANDOFF`) вместо второго collect.
+- Зафиксировать turn-level evidence и deterministic regression test до следующего judge replay.
+
 ## Acceptance Requirements (binding)
 
 ### A. Semantic Acceptance
@@ -633,6 +671,12 @@ Evidence:
 - Сценарии “какие услуги вы оказываете” -> service-query, без master.
 - Проверки по `intent/action/tool/trace`, без текст-ораклов.
 
+10. `Timeout-Degrade Reliability Suite`
+- Deterministic test на booking timeout-degrade:
+  - first-hit -> slot-driven collect,
+  - second-hit same context -> clarify-limit escalation/handoff.
+- Replay check на фиксированном сценарии подтверждает снижение `degraded_fallback_rate` до контрактного порога без ослабления gates.
+
 ## Execution Waves (binding)
 
 1. `Wave 0`: `P0`-`P1` governance + semantic envelope lock.
@@ -707,6 +751,7 @@ Forensic only (not acceptance):
 - Нельзя реализовывать master-routing через core hardcode/regex.
 - Нельзя запускать full-chain как основной дневной debug-цикл до прохождения Go-to-Full.
 - Нельзя игнорировать `manual_audit` рассинхрон между `summary` и `manual_audit.json`.
+- Нельзя понижать threshold `degraded_fallback_rate` или отключать timeout-degrade контроль как способ пройти semantic gate.
 
 ## Риски/блокеры
 

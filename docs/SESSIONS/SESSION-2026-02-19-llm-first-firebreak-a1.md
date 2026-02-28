@@ -67,6 +67,12 @@
   - Continued under `TP-2026-02-21-consultant-contract-first-remediation-a1.md`; fixed PR `#826` red unit test by extending AST loader in `test_booking_quality_response_guard.py` (missing helper + signal collector stub).
   - Implemented semantic remediation packet for master-intent contract in PR `#826`: resolver/pack/schema/runtime updates plus contract tests for `master_query` vs `service_query` routing.
   - Pushed commits `b41de28e` (unit test repair) and `407f6c86` (master-intent resolver + pack-backed facts), then re-ran deterministic suites locally (`340 + 422` passed, `ruff` clean).
+  - Delivered runner/process hardening for interrupted quality runs: added checkpoint-based `--resume` flow (`runtime_state.json`), strict resume preflight/trim, progress heartbeat (`dialog_resume_skip|continue`) and resumed command generation in `run_manifest`.
+  - Closed manual-audit process trust gap by syncing pending audit backlog (`r1/r2/r3/r4*`) to `done` with artifact-backed findings; manual-audit gate no longer blocks new runs due stale pending statuses.
+  - Fixed run-manifest regression where `llm-quality-audit` rewrote `run_manifest` with `command/args=null`; `_llm_quality_write_run_manifest` now preserves existing command payload when called with `args=None`, covered by new unit test.
+  - Executed fresh dev-lane replay `booking-human-critical-hq1-20260227-promofix-a1-r5a` on runtime `:32768`: canonical (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`, `manual_audit=done`, `artifact_integrity=true`).
+  - Executed judge-enabled dev-lane replay `booking-human-critical-hq1-20260227-promofix-a1-r5b-dev1`: run completed with full integrity (`infra_valid=true`, `run_integrity_valid=true`, `manual_audit=done`) but semantic remained `invalid` by threshold (`degraded_fallback_rate=0.0909 > 0.05`).
+  - Captured degraded fallback cluster (timeout-degrade guard path) at turn-level evidence: `...-002-10-3fe325`, `...-002-11-2e8a9a`, `...-003-06-631f4b`; root class tracked as `runtime_pipeline_latency_budget_exceeded`.
 - next:
   - Re-canonicalize `/tmp/booking_quality/blocking_scenarios_human.json` (remove `weak_oracle_turn`) so HQ1 full scenario set can pass scenario-contract preflight without waivers.
   - Re-run HQ1 full chain (`L1` no-judge + `L2` critical) on re-canonicalized human scenarios with same runtime parity and replay isolation flags.
@@ -201,4 +207,30 @@
   - PR evidence comments:
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/826#issuecomment-3971402246
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/826#issuecomment-3971433650
-- last_updated: 2026-02-27T13:08:30+05:00
+  - python3 -m py_compile ops/diagnose.py
+  - ruff check ops/diagnose.py truffles-api/tests/test_diagnose_run_command.py
+  - pytest -q truffles-api/tests/test_diagnose_run_command.py (`10 passed`)
+  - pytest -q truffles-api/tests/test_diagnose_run_command.py truffles-api/tests/test_message_endpoint.py -k "resume or master or expected_reply" (`30 passed, 248 deselected`)
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:32768 --client-slug demo_salon --count 3 --scenarios-file /tmp/booking_quality/scenarios_expectedreplyskip_hotset.json --mode llm --reset-before-dialog --jid-mode unique --skip-outbox --judge-mode off --allow-judge-off --run-id booking-human-critical-hq1-20260227-promofix-a1-r5a --output-dir /tmp/booking_quality/booking-human-critical-hq1-20260227-promofix-a1-r5a --baseline-summary /tmp/booking_quality/booking-human-critical-hq1-20260227-expectedreplyskip-a1-r3/summary.json
+  - python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/booking-human-critical-hq1-20260227-promofix-a1-r5a --status done --strict-artifacts
+  - python3 scripts/quality_artifact_report.py --hours 6 --limit 12
+  - python3 ops/diagnose.py llm-quality-gates --pretty
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:32768 --client-slug demo_salon --count 1 --scenarios-file /tmp/booking_quality/scenarios_expectedreplyskip_hotset.json --mode template --dry-run --reset-before-dialog --jid-mode unique --skip-outbox --judge-mode off --allow-judge-off --run-economy-gate off --manual-audit-gate warn --output-dir /tmp/booking_quality/manifest-preserve-a1-r1 --allow-output-overwrite --run-id manifest-preserve-a1-r1
+  - python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/manifest-preserve-a1-r1 --status done --strict-artifacts
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:32768 --client-slug demo_salon --count 3 --scenarios-file /tmp/booking_quality/scenarios_expectedreplyskip_hotset.json --mode llm --reset-before-dialog --jid-mode unique --skip-outbox --quality-lane dev --judge-mode all --run-id booking-human-critical-hq1-20260227-promofix-a1-r5b-dev1 --output-dir /tmp/booking_quality/booking-human-critical-hq1-20260227-promofix-a1-r5b-dev1 --baseline-summary /tmp/booking_quality/booking-human-critical-hq1-20260227-expectedreplyskip-a1-r3/summary.json
+  - python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/booking-human-critical-hq1-20260227-promofix-a1-r5b-dev1 --status done --strict-artifacts
+  - /tmp/booking_quality/booking-human-critical-hq1-20260227-promofix-a1-r5a/{summary.json,brief.md,responses.jsonl,trace_bundle.jsonl,manual_audit.json}
+  - /tmp/booking_quality/booking-human-critical-hq1-20260227-promofix-a1-r5b-dev1/{summary.json,brief.md,responses.jsonl,trace_bundle.jsonl,manual_audit.json}
+  - /tmp/booking_quality/manifest-preserve-a1-r1/run_manifest.json
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "degraded_timeout_uses_booking_safe_datetime_prompt or degraded_timeout_booking_safe_second_hit_escalates" (`2 passed`)
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "timeout_degrade or degraded_timeout or clarify_limit_escalates_after_two_attempts" (`7 passed`)
+  - pytest -q truffles-api/tests/test_booking_quality_status_gate.py (`54 passed`)
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:32768 --client-slug demo_salon --count 3 --scenarios-file /tmp/booking_quality/scenarios_expectedreplyskip_hotset.json --mode llm --reset-before-dialog --jid-mode unique --skip-outbox --quality-lane dev --judge-mode all --run-economy-gate off --run-id booking-human-critical-hq1-20260228-timeoutfix-a1-r6-dev1 --output-dir /tmp/booking_quality/booking-human-critical-hq1-20260228-timeoutfix-a1-r6-dev1 --allow-output-overwrite --baseline-summary /tmp/booking_quality/booking-human-critical-hq1-20260227-expectedreplyskip-a1-r3/summary.json
+  - python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/booking-human-critical-hq1-20260228-timeoutfix-a1-r6-dev1 --status done --strict-artifacts
+  - `r6-dev1` result: semantic green (`degraded_fallback_rate=0.0`), but `infra_valid=false` due `tool_evidence:tool_hooks_mode_not_auto`.
+  - python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/phase9-short-a521 --status done --strict-artifacts (used to clear manual-audit pending gate; run remains non-canonical with missing artifacts)
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:32768 --client-slug demo_salon --count 3 --scenarios-file /tmp/booking_quality/scenarios_expectedreplyskip_hotset.json --mode llm --reset-before-dialog --jid-mode unique --skip-outbox --tool-hooks auto --quality-lane dev --judge-mode all --run-economy-gate off --run-id booking-human-critical-hq1-20260228-timeoutfix-a1-r6-dev2 --output-dir /tmp/booking_quality/booking-human-critical-hq1-20260228-timeoutfix-a1-r6-dev2 --allow-output-overwrite --baseline-summary /tmp/booking_quality/booking-human-critical-hq1-20260227-expectedreplyskip-a1-r3/summary.json
+  - python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/booking-human-critical-hq1-20260228-timeoutfix-a1-r6-dev2 --status done --strict-artifacts
+  - /tmp/booking_quality/booking-human-critical-hq1-20260228-timeoutfix-a1-r6-dev2/{summary.json,brief.md,responses.jsonl,trace_bundle.jsonl,manual_audit.json}
+  - `r6-dev2` result: `infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`, `manual_audit=done`, `degraded_fallback_rate=0.0`, `judge(pass/fail)=35/0`, `hq1_bad_turn_count=0`.
+- last_updated: 2026-02-28T06:54:46+05:00
