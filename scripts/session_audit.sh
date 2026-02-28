@@ -44,6 +44,66 @@ fi
 errors=0
 warnings=0
 now_ts=$(date +%s)
+open_sessions=0
+legacy_bundle_sessions=0
+
+gates=(research_gate root_cause_gate reuse_gate release_safety_gate)
+declare -A gate_mode_counts
+for gate in "${gates[@]}"; do
+  for mode in required optional off missing invalid; do
+    gate_mode_counts["${gate}:${mode}"]=0
+  done
+done
+
+increment_gate_mode_count() {
+  local gate="$1"
+  local mode="$2"
+  local key="${gate}:${mode}"
+  gate_mode_counts["$key"]=$((gate_mode_counts["$key"] + 1))
+}
+
+classify_gate_mode() {
+  local mode="$1"
+
+  if [[ -z "$mode" ]]; then
+    printf '%s\n' "missing"
+    return 0
+  fi
+  if [[ "$mode" == "required" || "$mode" == "optional" || "$mode" == "off" ]]; then
+    printf '%s\n' "$mode"
+    return 0
+  fi
+
+  printf '%s\n' "invalid"
+}
+
+record_gate_mode() {
+  local gate="$1"
+  local session_id="$2"
+  local mode="$3"
+  local classified_mode
+  classified_mode=$(classify_gate_mode "$mode")
+  increment_gate_mode_count "$gate" "$classified_mode"
+  if [[ "$classified_mode" == "invalid" ]]; then
+    echo "WARN: ${session_id} has invalid ${gate} mode '${mode}' (allowed: required|optional|off)." >&2
+    warnings=$((warnings + 1))
+  fi
+}
+
+print_gate_adoption_summary() {
+  echo "Gate adoption summary (open sessions: ${open_sessions})"
+  local gate
+  for gate in "${gates[@]}"; do
+    local required optional off missing invalid
+    required=${gate_mode_counts["${gate}:required"]}
+    optional=${gate_mode_counts["${gate}:optional"]}
+    off=${gate_mode_counts["${gate}:off"]}
+    missing=${gate_mode_counts["${gate}:missing"]}
+    invalid=${gate_mode_counts["${gate}:invalid"]}
+    echo "  ${gate}: required=${required} optional=${optional} off=${off} missing=${missing} invalid=${invalid}"
+  done
+  echo "  legacy_bundle_sessions (research_gate=required + no explicit subgates)=${legacy_bundle_sessions}"
+}
 
 for session_file in "$sessions_dir"/SESSION-*.md; do
   [[ -f "$session_file" ]] || continue
@@ -69,6 +129,22 @@ for session_file in "$sessions_dir"/SESSION-*.md; do
   fi
 
   if [[ "$status" == "active" || "$status" == "paused" ]]; then
+    open_sessions=$((open_sessions + 1))
+
+    research_gate_mode=$(grep -E "^- research_gate: " "$session_file" | head -n1 | sed 's/^- research_gate: //' || true)
+    root_cause_gate_mode=$(grep -E "^- root_cause_gate: " "$session_file" | head -n1 | sed 's/^- root_cause_gate: //' || true)
+    reuse_gate_mode=$(grep -E "^- reuse_gate: " "$session_file" | head -n1 | sed 's/^- reuse_gate: //' || true)
+    release_safety_gate_mode=$(grep -E "^- release_safety_gate: " "$session_file" | head -n1 | sed 's/^- release_safety_gate: //' || true)
+
+    record_gate_mode "research_gate" "$session_id" "$research_gate_mode"
+    record_gate_mode "root_cause_gate" "$session_id" "$root_cause_gate_mode"
+    record_gate_mode "reuse_gate" "$session_id" "$reuse_gate_mode"
+    record_gate_mode "release_safety_gate" "$session_id" "$release_safety_gate_mode"
+
+    if [[ "$research_gate_mode" == "required" && -z "$root_cause_gate_mode" && -z "$reuse_gate_mode" && -z "$release_safety_gate_mode" ]]; then
+      legacy_bundle_sessions=$((legacy_bundle_sessions + 1))
+    fi
+
     if [[ ! -d "$worktree" ]]; then
       echo "WARN: ${session_id} status=${status} but worktree missing: ${worktree}" >&2
       warnings=$((warnings + 1))
@@ -110,6 +186,8 @@ for session_file in "$sessions_dir"/SESSION-*.md; do
     fi
   fi
 done
+
+print_gate_adoption_summary
 
 if [[ $errors -gt 0 ]]; then
   echo "Session audit failed: ${errors} error(s), ${warnings} warning(s)." >&2
