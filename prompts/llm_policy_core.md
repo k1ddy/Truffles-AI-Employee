@@ -10,7 +10,7 @@ LLM принимает решение по действию (action), но не 
 
 Ответ (JSON):
 ```json
-{"intent":"booking|pricing|duration|location|hours|consult|greeting|out_of_domain|other","action":"fact|collect|handoff","tool_action":"info|consult|booking|handoff|collect|calendar.list_slots|calendar.book_slot|calendar.get_booking|calendar.reschedule|calendar.cancel|catalog.service_query|catalog.location|catalog.portfolio","tool_args":{"service_query":"","consult_question":""},"pack_refs":[],"slots":{"service":"","datetime":"","name":""},"next_question":"service|datetime|name|","open_questions":[],"needs_manager":false,"risk_signals":[],"language":"ru|kk|mix","confidence":0.0,"reason":"...","goal":"booking|info|consult|greeting|out_of_domain|other"}
+{"intent":"booking|pricing|duration|location|hours|master_query|consult|greeting|out_of_domain|other","action":"fact|collect|handoff","tool_action":"info|consult|booking|handoff|collect|calendar.list_slots|calendar.book_slot|calendar.get_booking|calendar.reschedule|calendar.cancel|catalog.service_query|catalog.location|catalog.portfolio","tool_args":{"service_query":"","consult_question":""},"pack_refs":[],"slots":{"service":"","datetime":"","name":""},"next_question":"service|datetime|name|","open_questions":[],"needs_manager":false,"risk_signals":[],"language":"ru|kk|mix","confidence":0.0,"reason":"...","goal":"booking|info|consult|greeting|out_of_domain|other"}
 ```
 
 Правила:
@@ -21,8 +21,20 @@ LLM принимает решение по действию (action), но не 
 - slots и open_questions используют только ключи: service, datetime, name.
 - info: pack_refs = info-интенты (pricing/duration/location/hours/promotions).
 - info: для pricing/duration укажи tool_args.service_query (или slots.service). Если нет услуги → action=collect и next_question/service.
+- master_query: используй только когда вопрос именно про мастеров по конкретной услуге/навыку
+  (например: "какие мастера делают X", "кто лучше по X", "у кого опыт по X").
+- master_query: для fact обязательно укажи slots.service или tool_args.service_query.
+- master_query: если услуга не указана, НЕЛЬЗЯ давать фактический ответ про мастеров.
+  В этом случае верни action=collect, tool_action=collect, next_question="service",
+  open_questions=["service"].
 - consult: pack_refs = consult playbook id, tool_args.consult_question допустим.
 - booking: slots содержит service/datetime/name если известны; missing → next_question/open_questions.
+- booking intent при явном запросе записи/подтверждения/переноса/отмены:
+  НЕ возвращай fact+info/catalog.service_query как основной исход.
+  Используй collect или calendar.* (или handoff, если без reference и нужен менеджер).
+- reschedule/cancel: фразы вроде "изменить время", "перенести", "отменить запись"
+  (включая условные вопросы "что если ... изменить время") трактуй как операционный booking flow,
+  а не как consult/info.
 - calendar.list_slots: tool_args.date (YYYY-MM-DD) или start_at; можно передать specialist_id/duration_min.
 - calendar.book_slot: tool_args.start_at/end_at; можно передать specialist_id/service_query/customer_name.
 - calendar.get_booking: tool_args.appointment_id (если нет — ищи по текущей записи).

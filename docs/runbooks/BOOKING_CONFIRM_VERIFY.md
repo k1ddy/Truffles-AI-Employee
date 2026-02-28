@@ -451,6 +451,13 @@ Detailed operator workflow (future agents + humans)
    - Check whether run already finished: `test -f <output>/summary.json`.
    - If finished: collect metrics only, do not rerun.
    - If not finished: rerun the exact replay command with the same output dir and same run stamp.
+   - For single-run recovery use `--resume` on the same `--run-id`/`--output-dir`; do not use `--allow-output-overwrite` for recovery.
+   - Resume requires `<output>/runtime_state.json`; if it is missing (legacy run), restart from lock/replay command as a fresh run.
+   - Resume safety checks are strict: run id, scenario fingerprint, and `responses/trace` row counts must match checkpoint; mismatches stop the run.
+   - Expected stdout evidence for successful resume:
+     - `stage=llm_quality_resume_preflight` with `completed_turns > 0`
+     - `stage=llm_quality_progress event=dialog_resume_skip|dialog_resume_continue`
+     - final `quality_status.run_integrity_valid=true`
    - For matrix script: rerun the same `scripts/booking_quality_matrix_resumable.sh --run-stamp ...`; completed steps are skipped automatically.
 5. Analysis order (to avoid false conclusions)
    - First: `stop_reason`, `webhook_errors`, `infra_errors` (hard blockers).
