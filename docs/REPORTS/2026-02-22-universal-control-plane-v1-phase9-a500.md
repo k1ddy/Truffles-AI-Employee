@@ -10,62 +10,120 @@ Date
 - `UNLOCKS`: UCPV1-PHASE10
 
 ## Input baseline (FACT)
-- `UCPV1-PHASE8` is passed and unlocks phase9.
-- Runtime decoupling block is queued as next delivery target in program graph.
+- `UCPV1-PHASE8` passed and unlocked `UCPV1-PHASE9`.
+- FACT pre-check identified residual demo coupling in runtime boundary:
+  - hardcoded slug routing map in `pack_runtime_default`,
+  - explicit `demo_salon` handler key in webhook decision map,
+  - legacy demo alias wrappers in policy helpers.
 
 ## FACT pre-check evidence (before changes)
-- Pre-check is scheduled for phase9 execution session.
-- Expected evidence scope: runtime imports, adapter boundaries, and deterministic tests for pack neutrality.
+- Command: `rg -n "_PACK_ADAPTER_BY_SLUG|demo_salon" truffles-api/app/services/pack_runtime_default.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/policy.py`
+- Findings:
+  - `truffles-api/app/services/pack_runtime_default.py` had hardcoded demo slug route.
+  - `truffles-api/app/routers/webhook/decision.py` had explicit `demo_salon` entry in `_POLICY_HANDLERS`.
+  - `truffles-api/app/routers/webhook/policy.py` had demo alias helper wrappers.
 
 ## One web search evidence
-- `Query (exact)` -> to be executed in phase9 implementation session.
-- `Sources opened` -> to be recorded in phase9 implementation session.
-- `Decision` -> to be recorded in phase9 implementation session.
+- `Query (exact)` -> `Python importlib import_module documentation dynamic module loading`
+- `Date/time (local)` -> `2026-02-28 06:35 (+05)`
+- `Sources opened`:
+  - Python docs `importlib`: https://docs.python.org/3/library/importlib.html
+- `Decision`:
+  - use slug-based dynamic adapter discovery via `importlib.import_module` and fail-closed fallback to generic adapter.
 
 ## Root cause validation
-- `Symptom` -> phase9 still not implemented.
-- `Root cause statement` -> execution pending; no runtime delta applied in this report.
-- `Proof after fix` -> to be recorded in phase9 implementation session.
+- `Symptom` -> phase9 remained open because runtime core still had demo-specific routing artifacts.
+- `Root cause statement` -> previous dedemo waves left explicit demo mappings in core boundary instead of pure adapter discovery.
+- `Proof after fix`:
+  - hardcoded `_PACK_ADAPTER_BY_SLUG` removed,
+  - explicit `demo_salon` key removed from `_POLICY_HANDLERS`,
+  - demo alias helper wrappers removed from policy module,
+  - deterministic runtime/policy suites green.
 
 ## Reuse-first outcome
-- Planned approach is reuse-first with existing runtime adapter boundaries and capability contracts.
-- Final reuse evidence will be recorded in phase9 implementation session.
+- Internal reuse:
+  - existing `pack_runtime_demo_adapter`,
+  - existing generic fallback adapter and runtime service contracts.
+- External reuse:
+  - official Python `importlib` dynamic import path.
+- Build-new scope:
+  - only thin slug bridge module (`pack_runtime_demo_salon_adapter`) to align naming contract.
 
 ## Contract delta
-- No contract delta is applied by this pre-created report.
-- Any API/runtime deltas will be documented in phase9 implementation session.
+- No external API contract changes.
+- Internal runtime resolution contract updated:
+  - adapter lookup now uses `app.services.pack_runtime_{slug}_adapter`,
+  - unresolved slug falls back to `app.services.pack_runtime_generic_adapter`.
 
 ## Implemented changes
-- Report file created to keep zero-context chain complete for next block kickoff.
+- `truffles-api/app/services/pack_runtime_default.py`
+  - removed hardcoded slug map and switched to dynamic slug-based adapter resolution.
+- `truffles-api/app/services/pack_runtime_demo_salon_adapter.py`
+  - added slug bridge module that re-exports `pack_runtime_demo_adapter`.
+- `truffles-api/app/routers/webhook/decision.py`
+  - removed explicit demo key in `_POLICY_HANDLERS`.
+- `truffles-api/app/routers/webhook/policy.py`
+  - removed legacy demo alias helper wrappers.
+- `truffles-api/tests/test_pack_runtime_service.py`
+  - updated adapter-name expectation and asserted no hardcoded slug map remains.
 
 ## Checks + outcomes
-- No phase9 runtime checks executed in this report.
+- `cd truffles-api && ruff check app/services/pack_runtime_default.py app/services/pack_runtime_demo_salon_adapter.py app/routers/webhook/decision.py app/routers/webhook/policy.py tests/test_pack_runtime_service.py tests/test_policy_handler_runtime.py`
+  - `All checks passed!`
+- `cd truffles-api && pytest -q tests/test_pack_runtime_service.py tests/test_policy_handler_runtime.py`
+  - `22 passed in 2.44s`
+- `cd truffles-api && pytest -q tests/test_pack_query_engine_contract.py tests/test_pack_query_engine_abstain.py`
+  - `6 passed in 1.01s`
+- `cd truffles-api && pytest -q tests/test_message_endpoint.py`
+  - `265 passed, 2 warnings in 68.78s`
+- `cd truffles-api && pytest -q tests/test_booking_chaos_dialogs.py tests/test_booking_quality_response_guard.py tests/test_demo_salon_eval.py`
+  - `70 passed in 198.79s`
+- `cd truffles-api && python3 scripts/generate_openapi.py --check`
+  - exit `0`
+- Short smoke (non-canonical):
+  - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:8031 --mode llm --count 1 --min-turns 2 --max-turns 2 --scenario-coverage none --tool-hooks off --tool-evidence-policy off --judge-mode sample --judge-sample 1 --allow-non-allowlist --skip-outbox --manager-mode skip --pending-mode skip --manual-audit-gate off --run-economy-gate off --run-id phase9-short-a521-r9`
+  - `infra_valid=true`, `semantic_valid=true`, run dir `/tmp/booking_quality/phase9-short-a521-r9`.
 
 ## Iteration budget outcomes
 - `Planned max runs` -> `3`
-- `Actual runs` -> `0`
+- `Actual runs` -> `1` short llm-quality smoke + deterministic suites
 - `Stop condition respected` -> `yes`
 
 ## Evidence
 - `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase9-a500.md`
 - `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase9-a500.md`
+- `truffles-api/app/services/pack_runtime_default.py`
+- `truffles-api/app/services/pack_runtime_demo_salon_adapter.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/app/routers/webhook/policy.py`
+- `truffles-api/tests/test_pack_runtime_service.py`
+- `/tmp/booking_quality/phase9-short-a521-r9/summary.json`
+- `/tmp/booking_quality/phase9-short-a521-r9/brief.md`
 
 ## Release safety decision
-- No production-impacting changes in this report.
-- Release decision deferred to phase9 implementation session.
+- Production rollout status: not finalized in this session.
+- Block is kept `in_progress` until canonical long acceptance lane is executed per TP DoD.
+- Rollback path validated at code level: revert phase9 commit(s) restores prior adapter resolution.
 
 ## Canon/doc sync updates
-- Added phase9 report artifact in advance to avoid documentation drift at block start.
+- Updated:
+  - `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase9-a500.md`
+  - `docs/BLOCK_GRAPH.yaml`
+  - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
+  - `STATE.md`
+  - `docs/SESSIONS/SESSION-2026-02-28-ucpv1-phase9-a521.md`
+- Drift status: reduced (implementation and docs aligned), final pass pending canonical lane.
 
 ## Residual GAP / Risks
-- Phase9 runtime decoupling work remains open.
+- Canonical long `llm-quality` acceptance run from TP DoD is still pending, so block cannot be marked `Passed`.
+- `UCPV1-PHASE10` remains locked until `UCPV1-PHASE9` is moved from `in_progress` to `passed`.
 
 ## Handoff (for zero-context next agent)
 - `Ready for next agent`: yes
 - `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase9-a500.md`
-- `Do not touch`: unrelated tracks
-- `Open risks`: hidden demo-coupling in runtime paths
-- `First command to verify`: `rg -n "demo_salon|pack_runtime|neutral_adapter|fallback_adapter" truffles-api/app`
+- `Do not touch`: unrelated UCP tracks and non-phase9 branches
+- `Open risks`: canonical acceptance lane pending
+- `First command to verify`: `cd truffles-api && pytest -q tests/test_pack_runtime_service.py tests/test_policy_handler_runtime.py`
 
 ## Verdict
-- `Planned`
+- `In progress`

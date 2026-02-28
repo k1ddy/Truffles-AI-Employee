@@ -750,19 +750,6 @@ def _pack_price_sidecar(
     return None, None
 
 
-# Backward-compatible aliases while call sites migrate from demo-specific names.
-def _demo_salon_escalation_gate(messages: list[str], *, client_slug: str | None):
-    return _pack_escalation_gate(messages, client_slug=client_slug)
-
-
-def _demo_salon_price_sidecar(
-    messages: list[str],
-    *,
-    client_slug: str | None,
-) -> tuple[str | None, str | None]:
-    return _pack_price_sidecar(messages, client_slug=client_slug)
-
-
 def _get_policy_type(client: Client | None, *, client_slug: str | None) -> str | None:
     if not client or not isinstance(client.config, dict):
         return None

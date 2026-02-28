@@ -1,0 +1,35 @@
+# SESSION 2026-02-28-ucpv1-phase9-a521 — Session 2026-02-28-ucpv1-phase9-a521
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase9-a500.md
+- block_id: UCPV1-PHASE9
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- branch: feat/2026-02-28-ucpv1-phase9-a521
+- worktree: /home/zhan/worktrees/2026-02-28-ucpv1-phase9-a521
+- base_ref: origin/main
+- scope: UCPV1 Phase9 runtime pack-agnostic decoupling (remove demo-specific core routing, keep adapter-only behavior) with deterministic verification and short smoke evidence.
+- done:
+  - FACT pre-check executed for runtime coupling points.
+  - Slug-based adapter resolution implemented in `pack_runtime_default`.
+  - Demo slug bridge adapter module added (`pack_runtime_demo_salon_adapter`).
+  - Explicit demo alias removed from webhook decision/policy boundaries.
+  - Deterministic runtime/core suites executed green.
+  - Short non-canonical `llm-quality` smoke run completed (`phase9-short-a521-r9`).
+  - Phase9 report and program graph synced to `in_progress`.
+- next:
+  - Run canonical long acceptance lane for phase9 before changing UCPV1-PHASE9 to passed.
+  - Move `UCPV1-PHASE9` to `passed` only after canonical lane evidence is attached.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase9-a500.md
+  - docs/REPORTS/2026-02-22-universal-control-plane-v1-phase9-a500.md
+  - truffles-api/app/services/pack_runtime_default.py
+  - truffles-api/app/services/pack_runtime_demo_salon_adapter.py
+  - truffles-api/app/routers/webhook/decision.py
+  - truffles-api/app/routers/webhook/policy.py
+  - truffles-api/tests/test_pack_runtime_service.py
+  - /tmp/booking_quality/phase9-short-a521-r9/summary.json
+- last_updated: 2026-02-28

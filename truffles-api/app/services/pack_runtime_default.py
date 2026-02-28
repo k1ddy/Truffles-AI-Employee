@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import importlib
+import re
 from functools import lru_cache
 from types import ModuleType
 from typing import Any
 
 _DEFAULT_ADAPTER_MODULE = "app.services.pack_runtime_generic_adapter"
-_PACK_ADAPTER_BY_SLUG = {
-    "demo_salon": "app.services.pack_runtime_demo_adapter",
-}
 
 
 @lru_cache(maxsize=None)
@@ -22,10 +20,30 @@ def _normalize_slug(client_slug: str | None) -> str:
     return (client_slug or "").strip().lower()
 
 
+def _slug_to_module_token(client_slug: str | None) -> str:
+    normalized = _normalize_slug(client_slug)
+    if not normalized:
+        return ""
+    return re.sub(r"[^a-z0-9_]+", "_", normalized).strip("_")
+
+
+def _load_adapter_if_present(module_path: str) -> ModuleType | None:
+    try:
+        return _load_adapter(module_path)
+    except ModuleNotFoundError as exc:
+        if exc.name == module_path:
+            return None
+        raise
+
+
 def _resolve_adapter(client_slug: str | None = None) -> ModuleType:
-    slug = _normalize_slug(client_slug)
-    module_path = _PACK_ADAPTER_BY_SLUG.get(slug, _DEFAULT_ADAPTER_MODULE)
-    return _load_adapter(module_path)
+    module_token = _slug_to_module_token(client_slug)
+    if module_token:
+        pack_adapter_module = f"app.services.pack_runtime_{module_token}_adapter"
+        pack_adapter = _load_adapter_if_present(pack_adapter_module)
+        if pack_adapter is not None:
+            return pack_adapter
+    return _load_adapter(_DEFAULT_ADAPTER_MODULE)
 
 
 def get_pack_adapter(client_slug: str | None = None) -> ModuleType:
