@@ -1,0 +1,45 @@
+# SESSION 2026-02-28-ucpv1-phase10-impl1-a700 — UCPV1 Phase10 impl1 registry+merge
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase10-a500.md
+- block_id: UCPV1-PHASE10
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- branch: feat/2026-02-28-ucpv1-phase10-impl1-a700
+- worktree: /home/zhan/worktrees/2026-02-28-ucpv1-phase10-impl1-a700
+- base_ref: origin/main
+- scope: UCPV1 Phase10 slice1+slice2: SLA profile registry model/migration/service + console API (get/publish/rollback) + deterministic tests.
+- done:
+  - Session created.
+  - Added SLA profile storage migration `046_add_sla_profile_versions.sql`.
+  - Added model/schema/service for SLA profile registry and effective merge.
+  - Added console API contracts and endpoints for SLA profile registry.
+  - Added deterministic tests for service and console API.
+  - Added runtime SLA violation resolver service (`app/services/sla_runtime_service.py`) with effective profile lookup and severity/action mapping.
+  - Wired SLA runtime resolver into pending runtime gate (`app/routers/webhook/pending.py`) with trace/meta emission.
+  - Wired collect-only runtime guard into webhook routing (`app/routers/webhook/guards.py`, `app/routers/webhook/decision.py`).
+  - Wired SLA-aware threshold for no-response alerts and collect-only context handoff in reminders (`app/services/reminder_service.py`).
+  - Added deterministic tests for runtime resolver + pending/reminder integration.
+- next:
+  - Extend SLA violation action mapping from pending/reminder path to provider/outbox incident paths.
+  - Add console-facing evidence endpoint/view for recent applied SLA actions (profile/version/action).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase10-a500.md
+  - truffles-api/migrations/046_add_sla_profile_versions.sql
+  - truffles-api/app/models/sla_profile_version.py
+  - truffles-api/app/services/sla_profile_registry_service.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/tests/test_sla_profile_registry_service.py
+  - truffles-api/tests/test_console_sla_profile_registry.py
+  - truffles-api/app/services/sla_runtime_service.py
+  - truffles-api/app/routers/webhook/pending.py
+  - truffles-api/app/routers/webhook/guards.py
+  - truffles-api/app/routers/webhook/decision.py
+  - truffles-api/app/services/reminder_service.py
+  - truffles-api/tests/test_sla_runtime_service.py
+  - truffles-api/tests/test_pending_pack_lexicons.py
+  - truffles-api/tests/test_reminders.py
+- last_updated: 2026-02-28

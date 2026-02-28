@@ -8,6 +8,7 @@ from app.schemas.onboarding_contract import (
     OnboardingContractPayload,
     OnboardingProviderBindingPayload,
 )
+from app.schemas.sla_profile import SlaProfilePayload
 
 
 class ConsoleError(BaseModel):
@@ -1774,6 +1775,59 @@ class ConsolePolicyRegistryRollbackRequest(BaseModel):
 class ConsolePolicyRegistryMutationResponse(BaseModel):
     success: bool
     record: ConsolePolicyVersionRecord
+    from_version_id: Optional[UUID] = None
+
+
+class ConsoleSlaProfileVersionRecord(BaseModel):
+    id: UUID
+    scope: Literal["global", "domain", "client", "branch"]
+    company_id: Optional[UUID] = None
+    domain_key: Optional[str] = None
+    client_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    status: Literal["published", "archived"]
+    schema_version: str
+    version_number: int
+    payload: SlaProfilePayload
+    reason: Optional[str] = None
+    source_version_id: Optional[UUID] = None
+    created_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    published_by: Optional[UUID] = None
+    published_at: Optional[str] = None
+
+
+class ConsoleSlaProfileRegistryResponse(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    company_id: Optional[UUID] = None
+    domain_key: Optional[str] = None
+    client_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    active: Optional[ConsoleSlaProfileVersionRecord] = None
+    history: list[ConsoleSlaProfileVersionRecord] = []
+
+
+class ConsoleSlaProfileRegistryPublishRequest(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    domain_key: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    schema_version: Optional[str] = None
+    reason: str
+    payload: SlaProfilePayload
+
+
+class ConsoleSlaProfileRegistryRollbackRequest(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    domain_key: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    target_version_id: UUID
+    reason: str
+
+
+class ConsoleSlaProfileRegistryMutationResponse(BaseModel):
+    success: bool
+    record: ConsoleSlaProfileVersionRecord
     from_version_id: Optional[UUID] = None
 
 

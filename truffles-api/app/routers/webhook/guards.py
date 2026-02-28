@@ -15,6 +15,11 @@ from app.routers.webhook.trace import (
 from app.schemas.webhook import WebhookResponse
 from app.services.ai_service import normalize_for_matching
 from app.services.human_lock_service import get_active_human_lock, normalize_remote_jid
+from app.services.sla_runtime_service import (
+    SLA_RUNTIME_CONTEXT_KEY,
+    SLA_RUNTIME_MODE_COLLECT_ONLY,
+    is_collect_only_runtime_active,
+)
 
 DECISION_TRACE_KEY = "decision_trace"
 
@@ -744,6 +749,84 @@ def _handle_opt_out_mute_gate(
     bot_response, sent = send_and_save(bot_response, allow_quiet_hours=False)
     result_message = (
         f"Muted (opt-out #{conversation.no_count})" if sent else "Opt-out response failed"
+    )
+    db.commit()
+    return WebhookResponse(
+        success=True,
+        message=result_message,
+        conversation_id=conversation.id,
+        bot_response=bot_response,
+    )
+
+
+def _handle_sla_collect_only_gate(
+    *,
+    db: Session,
+    conversation: Conversation,
+    saved_message: Message | None,
+    now: datetime,
+    send_and_save,
+) -> WebhookResponse | None:
+    from . import _legacy as legacy
+
+    if conversation.state != legacy.ConversationState.BOT_ACTIVE.value:
+        return None
+
+    context = legacy._get_conversation_context(conversation)
+    runtime = context.get(SLA_RUNTIME_CONTEXT_KEY) if isinstance(context, dict) else None
+    if not isinstance(runtime, dict):
+        return None
+
+    if runtime.get("mode") == SLA_RUNTIME_MODE_COLLECT_ONLY and not is_collect_only_runtime_active(
+        context,
+        now=now,
+    ):
+        context.pop(SLA_RUNTIME_CONTEXT_KEY, None)
+        legacy._set_conversation_context(conversation, context)
+        return None
+
+    if not is_collect_only_runtime_active(context, now=now):
+        return None
+
+    router_pending_meta = legacy._set_router_observability(
+        saved_message,
+        eligible=False,
+        reason="sla_collect_only",
+    )
+    trace_payload = {
+        "stage": "routing",
+        "decision": "sla_collect_only",
+        "reason": runtime.get("reason_code"),
+        "state": conversation.state,
+        "sla_severity": runtime.get("severity"),
+        "sla_profile_id": runtime.get("profile_id"),
+        "sla_profile_version": runtime.get("profile_version"),
+    }
+    trace_payload.update(router_pending_meta)
+    legacy._record_decision_trace(conversation, trace_payload)
+    legacy._record_message_decision_meta(
+        saved_message,
+        action="reply",
+        intent="sla_collect_only",
+        source="sla_profile",
+        fast_intent=False,
+    )
+    if saved_message:
+        legacy._update_message_decision_metadata(
+            saved_message,
+            {
+                "sla_runtime_mode": SLA_RUNTIME_MODE_COLLECT_ONLY,
+                "sla_runtime_reason": runtime.get("reason_code"),
+                "sla_runtime_severity": runtime.get("severity"),
+                "sla_runtime_profile_id": runtime.get("profile_id"),
+                "sla_runtime_profile_version": runtime.get("profile_version"),
+            },
+        )
+    bot_response, sent = send_and_save(legacy.MSG_FACT_GUARD_CLARIFY)
+    result_message = (
+        "SLA collect_only guard response sent"
+        if sent
+        else "SLA collect_only guard response failed"
     )
     db.commit()
     return WebhookResponse(

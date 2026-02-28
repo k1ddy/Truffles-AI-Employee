@@ -1,0 +1,146 @@
+# Universal Control Plane v1 - Phase 10 SLA/SLO Engine (a500)
+
+Date
+- 2026-02-28
+
+## Block identity
+- `BLOCK_ID`: UCPV1-PHASE10
+- `PARENT_BLOCK_ID`: UCPV1
+- `DEPENDS_ON`: UCPV1-PHASE9
+- `UNLOCKS`: UCPV1-PHASE11
+
+## Input baseline (FACT)
+- `UCPV1-PHASE9` remains `blocked` in `docs/BLOCK_GRAPH.yaml`, but owner override allows phase10 implementation slices with bounded checks.
+- SLA/SLO logic exists as separate islands:
+  - router in-memory SLA counters,
+  - inbox case age SLA statuses,
+  - onboarding SLA control loop,
+  - provider lifecycle SLA deadline logic,
+  - owner/admin ops KPI thresholds.
+- Unified profile-driven multi-level SLA engine (`global -> domain -> client -> branch`) is not implemented.
+
+## FACT pre-check evidence (before changes)
+- `rg -n "_calculate_sla_status|_resolve_provider_ops_sla|_build_sla_control_loop|_update_router_sla" truffles-api/app` -> confirms fragmented SLA logic across modules.
+- `truffles-api/app/routers/webhook/router_sla.py` -> in-memory counters + `fallback_rate_flag`, no profile storage/merge.
+- `truffles-api/app/services/onboarding_state.py` -> branch-level SLA loop from `client_settings` (`reminder_timeout_1/2`, `auto_close_timeout`).
+- `truffles-api/app/routers/console.py` -> fixed case SLA thresholds and provider ops deadline resolver.
+- `truffles-api/app/schemas/console.py` -> SLA-related response fields exist, but no registry lifecycle contract.
+- `ops/console_owner_admin_kpi_snapshot.py` -> external guard thresholds independent from runtime policy engine.
+
+## One web search evidence
+- `Query (exact)` -> `OpenSLO specification service level objectives alert policies`
+- `Sources opened` -> `https://github.com/OpenSLO/OpenSLO`
+- `Decision` -> `reuse/integrate` reference vocabulary for objective/policy structure in phase10 contracts.
+- `What was reused` -> objective/policy decomposition approach (service/indicator/objective/alert policy) adapted to Truffles scope layering.
+
+## Root cause validation
+- `Symptom` -> B10 remains planned with no central SLA/SLO engine despite multiple SLA signals in runtime/console.
+- `Minimal reproduction` -> inspect SLA helpers in `router_sla.py`, `onboarding_state.py`, and `console.py`; no shared profile registry or effective merge path exists.
+- `Root cause statement` -> SLA logic evolved per feature area, but profile registry + hierarchy merge + runtime enforcement were never consolidated.
+- `Proof after fix` -> analysis package now defines explicit contract delta/touch-list/migration plan for consolidated engine; implementation can proceed by slices with bounded checks.
+
+## Reuse-first outcome
+- `Internal reuse applied` -> yes; existing onboarding/provider/KPI SLA producers are retained as signal sources.
+- `External reuse applied` -> yes; OpenSLO reference vocabulary selected for profile contract structure.
+- `If build-new` -> new code is limited to registry/merge/enforcement glue; no rewrite of existing telemetry producers.
+
+## Contract delta
+- Planned new contracts:
+  - SLA profile versioning (`draft/published/rollback`) at scoped levels.
+  - Effective merge contract for `global/domain/client/branch`.
+  - Runtime trace/meta markers for `sla_profile_id/version` and applied violation action.
+- Planned API additions:
+  - `GET /admin/sla-profiles`
+  - `POST /admin/sla-profiles/publish`
+  - `POST /admin/sla-profiles/rollback`
+  - `GET /admin/sla-profiles/history`
+  - write operations restricted to `platform_admin`.
+
+## Implemented changes
+- `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase10-a500.md`
+- `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase10-a500.md`
+- `truffles-api/migrations/046_add_sla_profile_versions.sql`
+- `truffles-api/app/models/sla_profile_version.py`
+- `truffles-api/app/schemas/sla_profile.py`
+- `truffles-api/app/services/sla_profile_registry_service.py`
+- `truffles-api/app/routers/console.py`
+- `truffles-api/app/models/__init__.py`
+- `truffles-api/app/schemas/__init__.py`
+- `truffles-api/app/services/sla_runtime_service.py`
+- `truffles-api/app/routers/webhook/pending.py`
+- `truffles-api/app/routers/webhook/guards.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/app/services/reminder_service.py`
+- `truffles-api/tests/test_sla_profile_registry_service.py`
+- `truffles-api/tests/test_console_sla_profile_registry.py`
+- `truffles-api/tests/test_sla_runtime_service.py`
+- `truffles-api/tests/test_pending_pack_lexicons.py`
+- `truffles-api/tests/test_reminders.py`
+
+## Checks + outcomes
+- `cd truffles-api && ruff check app/models/sla_profile_version.py app/schemas/sla_profile.py app/services/sla_profile_registry_service.py tests/test_sla_profile_registry_service.py` -> `All checks passed`.
+- `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_sla_profile_registry.py tests/test_console_policy_registry.py` -> `All checks passed`.
+- `cd truffles-api && pytest -q tests/test_sla_profile_registry_service.py tests/test_policy_registry_service.py` -> `7 passed`.
+- `cd truffles-api && pytest -q tests/test_sla_profile_registry_service.py tests/test_console_sla_profile_registry.py tests/test_console_policy_registry.py` -> `13 passed`.
+- `python3 scripts/check_migration_governance.py` -> `Migration governance OK`.
+- `scripts/session_check.sh` -> `Session OK`.
+- `cd truffles-api && ruff check app/services/sla_runtime_service.py app/routers/webhook/pending.py app/services/reminder_service.py app/routers/webhook/guards.py app/routers/webhook/decision.py tests/test_sla_runtime_service.py tests/test_pending_pack_lexicons.py tests/test_reminders.py` -> `All checks passed`.
+- `cd truffles-api && pytest -q tests/test_sla_runtime_service.py tests/test_pending_pack_lexicons.py tests/test_reminders.py tests/test_sla_profile_registry_service.py tests/test_console_sla_profile_registry.py` -> `31 passed`.
+
+## Iteration budget outcomes
+- `Planned max runs` -> 0 expensive long quality runs for this slice.
+- `Actual runs` -> 0 expensive long quality runs.
+- `Stop condition respected` -> yes.
+- `If exceeded` -> n/a.
+
+## Evidence
+- `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase10-a500.md`
+- `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase10-a500.md`
+- `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
+- `truffles-api/app/routers/webhook/router_sla.py`
+- `truffles-api/app/services/onboarding_state.py`
+- `truffles-api/app/routers/console.py`
+- `truffles-api/app/schemas/console.py`
+- `truffles-api/app/schemas/sla_profile.py`
+- `truffles-api/app/services/sla_profile_registry_service.py`
+- `truffles-api/app/models/sla_profile_version.py`
+- `truffles-api/app/services/sla_runtime_service.py`
+- `truffles-api/app/routers/webhook/pending.py`
+- `truffles-api/app/routers/webhook/guards.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/app/services/reminder_service.py`
+- `truffles-api/migrations/046_add_sla_profile_versions.sql`
+- `truffles-api/tests/test_sla_profile_registry_service.py`
+- `truffles-api/tests/test_console_sla_profile_registry.py`
+- `truffles-api/tests/test_sla_runtime_service.py`
+- `truffles-api/tests/test_pending_pack_lexicons.py`
+- `truffles-api/tests/test_reminders.py`
+- `ops/console_owner_admin_kpi_snapshot.py`
+- `ops/owner_admin_control_loop.py`
+
+## Release safety decision
+- `Strategy used` -> code implemented in isolated branch/worktree with deterministic-only checks (no deploy).
+- `Go/no-go signals observed` -> slice goals achieved (`registry+merge+console API`) with green deterministic tests.
+- `Rollback readiness` -> ready (single migration + bounded service/API additions can be reverted by commit rollback).
+
+## Canon/doc sync updates
+- `Updated docs/specs`:
+  - `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase10-a500.md`
+  - `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase10-a500.md`
+  - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
+- `Drift resolved`: `yes` (phase10 graph references are now backed by concrete TP/report docs).
+
+## Residual GAP / Risks
+- Full phase10 is not complete: current runtime resolver covers `pending/reminder/no_response + collect_only guard`, but provider/outbox-wide SLA action mapping is still pending.
+- Program-level graph/status still references old dependency chain and needs explicit sync decision.
+- Violation-action misconfiguration can over-escalate if rollout lacks staged gates.
+
+## Handoff (for zero-context next agent)
+- `Ready for next agent`: yes
+- `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase10-a500.md`
+- `Do not touch`: unrelated parallel tracks.
+- `Open risks`: merge consistency across current SLA islands.
+- `First command to verify`: `rg -n "UCPV1-PHASE9|UCPV1-PHASE10" docs/BLOCK_GRAPH.yaml STATE.md docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
+
+## Verdict
+- `In Progress`
