@@ -32,28 +32,34 @@ Universal Control Plane v1 / Phase 8: Knowledge Studio + Pack Compiler, чтоб
   - `rg -n "knowledge|publish|rollback|draft|validate" truffles-api/tests`
   - `rg -n "knowledge" SPECS/CONTROL_PLANE.md SPECS/CONSULTANT.md`
 - `FACT findings`:
-  - Phase8 execution required after Phase7 pass.
-  - Must verify current draft/publish/rollback coverage and identify contract gaps before code changes.
-- `Detected drift (docs vs code)`: to be validated at phase8 start
+  - Console endpoints for lifecycle already implemented: `/knowledge/current`, `/knowledge/validate`, `/knowledge/publish`, `/knowledge/history`, `/knowledge/rollback`.
+  - Service contract already implemented in `knowledge_registry_service` (`get_current_published`, `upsert_draft`, `validate_draft`, `publish_version`, `list_history`) and used by Console router.
+  - Deterministic test coverage for knowledge/reference-pack path is present and green in phase8 session.
+- `Detected drift (docs vs code)`: B08 remained `planned` in docs/graph while core lifecycle contract and tests were already implemented in codebase.
 
 ## One web search (mandatory before implementation)
 - **Query (exact):** `knowledge publishing workflow draft validate publish rollback contract gate best practices`
-- **Date/time (local):** to be executed at phase8 start
+- **Date/time (local):** `2026-02-28 05:44 (+05)`
 - **Why this query is precise:** фокус на жизненном цикле публикации знаний и fail-closed контрактных блокировках.
 - **Sources opened (from this query):**
-  - to be filled at phase8 start
-- **Existing solutions found:** to be filled at phase8 start
-- **Decision:** to be filled at phase8 start
-- **Rejected options:** to be filled at phase8 start
-- **Open questions:** to be filled at phase8 start
+  - Kentico Xperience docs, content publishing workflow best practices: https://docs.kentico.com/documentation/developers-and-admins/development/content-retrieval/content-retrieval-specification/best-practices-for-published-content-retrieval
+- **Existing solutions found:** strict separation between draft and published states, retrieval only from published artifacts, explicit rollback/versioning patterns.
+- **Decision:** reuse existing internal DB-first lifecycle and preflight gates; close B08 via evidence + doc sync instead of introducing a new publishing subsystem.
+- **Rejected options:** re-building a parallel publish pipeline outside current `knowledge_registry_service` (out of scope and duplicates existing behavior).
+- **Open questions:** none for B08 closure.
 
 ## Root cause (mandatory)
 - **Symptom:** B08 still planned and not закрыт как отдельный evidence-backed блок.
-- **Minimal reproduction:** to be defined at phase8 start based on FACT pre-check.
+- **Minimal reproduction:** inspect phase8 status in `docs/BLOCK_GRAPH.yaml` + master report, then verify implemented lifecycle endpoints/services/tests in current code.
 - **Evidence to capture:** compile/publish/rollback checks, audit trail, deterministic tests.
-- **Five Whys (or equivalent):** to be completed at phase8 start
-- **Root cause statement:** to be completed at phase8 start
-- **Fix mechanism:** to be completed at phase8 start
+- **Five Whys (or equivalent):**
+  1. Why B08 looked unfinished? Status stayed `planned` in block graph and report.
+  2. Why status lagged code? Lifecycle was implemented incrementally, but no dedicated phase8 closure pass executed.
+  3. Why closure pass was missed? No explicit phase8 evidence session synchronized TP/Report/Graph/STATE together.
+  4. Why it matters? Zero-context agents trust docs first; stale status causes repeated analysis and planning drift.
+  5. Why drift persisted? Program-level closure discipline was not applied as a dedicated B08 block.
+- **Root cause statement:** documentation-state drift, not missing phase8 runtime contract.
+- **Fix mechanism:** execute dedicated phase8 FACT verification, run deterministic checks, and synchronize canonical docs/statuses to `passed`.
 
 ## Reuse-first plan (mandatory)
 - **Internal reuse:** existing knowledge/reference-pack services, onboarding contract validators, publish audit flow.
@@ -78,7 +84,7 @@ Universal Control Plane v1 / Phase 8: Knowledge Studio + Pack Compiler, чтоб
 ## Touch-list
 - `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase8-a500.md`
 - `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase8-a500.md`
-- `docs/SESSIONS/SESSION-2026-02-27-ucpv1-phase8-a521.md`
+- `docs/SESSIONS/SESSION-2026-02-28-ucpv1-phase8-a521.md`
 - `docs/BLOCK_GRAPH.yaml`
 - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
 - `STATE.md`
