@@ -33,28 +33,34 @@ Universal Control Plane v1 / Phase 7: внедрить Provider/Channel Control 
   - `rg -n "safe_mode|collect_only|degrade|handoff" truffles-api/app`
   - `rg -n "provider|channel" truffles-api/tests`
 - `FACT findings`:
-  - Phase7 execution required.
-  - Must confirm current provider/channel lifecycle behavior in code before implementation.
-- `Detected drift (docs vs code)`: `to be determined in phase7 execution`
+  - `GET /admin/provider-lifecycle`, `GET /admin/integrations`, `POST /admin/integrations/{branch_id}/reconcile` already implemented with `_require_platform_admin` and tenant access guards.
+  - Branch-level integration payload already exposes provider binding lifecycle (`provider_binding_*`, `integration_state`, `drift_issues`) via `_build_branch_integration_status`.
+  - Deterministic degrade/control path already present through provider ops queue + `integration_reconcile` workflow and corresponding tests.
+- `Detected drift (docs vs code)`: B07 remained `planned` in program docs although required implementation and deterministic tests were already present in codebase.
 
 ## One web search (mandatory before implementation)
 - **Query (exact):** `messaging provider lifecycle health checks branch binding fail closed degradation patterns`
-- **Date/time (local):** `to be executed at phase7 start`
+- **Date/time (local):** `2026-02-27 19:36 (+05)`
 - **Why this query is precise:** фокус на lifecycle+health+binding и fail-closed degrade для multi-tenant channel governance.
 - **Sources opened (from this query):**
-  - to be filled during phase7 start
-- **Existing solutions found:** to be filled during phase7 start
-- **Decision:** to be filled during phase7 start
-- **Rejected options:** to be filled during phase7 start
-- **Open questions:** to be filled during phase7 start
+  - AWS Well-Architected Framework: Operational Excellence (monitor workload resources) — https://docs.aws.amazon.com/wellarchitected/latest/framework/ops_mission_organization_monitor_resources.html
+- **Existing solutions found:** explicit service-health states, operational alarms, and deterministic remediation workflows mapped to incident classes.
+- **Decision:** reuse existing internal lifecycle/reconcile mechanisms (`provider lifecycle map`, `integration_state`, `provider ops queue`) and complete block by evidence + doc sync, without introducing new orchestration subsystem.
+- **Rejected options:** introducing separate provider orchestration service in this block (out of scope and unnecessary for current DoD).
+- **Open questions:** none for B07 closure; next deltas move to B08.
 
 ## Root cause (mandatory)
 - **Symptom:** provider/channel lifecycle и явный branch-level status/degrade пока не зафиксированы как завершенный контракт в B07.
-- **Minimal reproduction:** to be filled during phase7 start
+- **Minimal reproduction:** run `pytest -q truffles-api/tests/test_console_integrations_registry.py tests/test_console_ops_jobs.py` and inspect existing provider lifecycle endpoints/handlers in `truffles-api/app/routers/console.py`.
 - **Evidence to capture:** tests + traces + outbox/provider state evidence
-- **Five Whys (or equivalent):** to be filled during phase7 start
-- **Root cause statement:** to be filled during phase7 start
-- **Fix mechanism:** to be filled during phase7 start
+- **Five Whys (or equivalent):**
+  1. Why block looked unfinished? B07 status in docs/graph was still `planned`.
+  2. Why status lagged behind code? Earlier phases delivered integration primitives without explicit B07 closure pass.
+  3. Why closure was missed? No dedicated B07 evidence pass with synchronized TP/Report/Graph updates.
+  4. Why this matters? Zero-context agents rely on docs first; stale status causes repeated re-analysis and drift.
+  5. Why could drift persist? Program-level status checks were not executed for B07 as a separate closure session.
+- **Root cause statement:** documentation/state drift, not missing runtime functionality.
+- **Fix mechanism:** execute dedicated B07 FACT verification, run target checks, and synchronize TP/Report/BLOCK_GRAPH/master report/STATE with evidence.
 
 ## Reuse-first plan (mandatory)
 - **Internal reuse:** existing provider adapters, outbox pipeline, console RBAC/audit flows.
@@ -80,7 +86,7 @@ Universal Control Plane v1 / Phase 7: внедрить Provider/Channel Control 
 ## Touch-list
 - `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase7-a500.md`
 - `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase7-a500.md`
-- `docs/SESSIONS/SESSION-<phase7-session-id>.md`
+- `docs/SESSIONS/SESSION-2026-02-27-ucpv1-phase7-a520.md`
 - `docs/BLOCK_GRAPH.yaml`
 - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
 - `STATE.md`
