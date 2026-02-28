@@ -53,10 +53,34 @@ session_meta_value_from_file() {
   grep -E "^- ${key}: " "$file" | head -n1 | sed "s/^- ${key}: //" || true
 }
 
+has_rg() {
+  command -v rg >/dev/null 2>&1
+}
+
+contains_fixed() {
+  local needle="$1"
+  local file="$2"
+  if has_rg; then
+    rg -Fq "$needle" "$file"
+  else
+    grep -Fq "$needle" "$file"
+  fi
+}
+
+count_regex_lines() {
+  local pattern="$1"
+  local file="$2"
+  if has_rg; then
+    rg -n "$pattern" "$file" | wc -l | tr -d '[:space:]'
+  else
+    grep -nE "$pattern" "$file" | wc -l | tr -d '[:space:]'
+  fi
+}
+
 require_tp_section_in_file() {
   local file="$1"
   local section="$2"
-  if ! rg -Fq "## ${section}" "$file"; then
+  if ! contains_fixed "## ${section}" "$file"; then
     echo "ERROR: Task Package missing section '## ${section}' in ${file}." >&2
     exit 1
   fi
@@ -65,7 +89,7 @@ require_tp_section_in_file() {
 require_tp_token_in_file() {
   local file="$1"
   local token="$2"
-  if ! rg -Fq "$token" "$file"; then
+  if ! contains_fixed "$token" "$file"; then
     echo "ERROR: Task Package missing token '${token}' in ${file}." >&2
     exit 1
   fi
@@ -74,7 +98,7 @@ require_tp_token_in_file() {
 require_single_web_query_in_tp() {
   local file="$1"
   local query_count
-  query_count=$(rg -n '^- \*\*Query \(exact\):\*\*' "$file" | wc -l | tr -d '[:space:]')
+  query_count=$(count_regex_lines '^- \*\*Query \(exact\):\*\*' "$file")
   if [[ "$query_count" != "1" ]]; then
     echo "ERROR: Task Package must contain exactly one 'Query (exact)' entry (found ${query_count}) in ${file}." >&2
     exit 1
@@ -89,7 +113,7 @@ require_web_sources_block_has_url() {
     in_section && /^## / {exit}
     in_section {print}
   ' "$file")
-  if ! printf '%s\n' "$sources_block" | rg -q 'https?://'; then
+  if ! printf '%s\n' "$sources_block" | grep -Eq 'https?://'; then
     echo "ERROR: Task Package one-web-search section must include at least one URL source in ${file}." >&2
     exit 1
   fi
@@ -202,9 +226,27 @@ enforce_changed_session_files_gates() {
   done <<< "$diff_files"
 }
 
-empty_tree=$(git hash-object -t tree /dev/null)
+resolve_zero_base_diff_ref() {
+  local head="$1"
+  local merge_base=""
+
+  if git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+    merge_base=$(git merge-base "$head" origin/main 2>/dev/null || true)
+  fi
+  if [[ -z "$merge_base" ]] && git rev-parse --verify --quiet main >/dev/null 2>&1; then
+    merge_base=$(git merge-base "$head" main 2>/dev/null || true)
+  fi
+  if [[ -n "$merge_base" ]]; then
+    printf '%s\n' "$merge_base"
+    return 0
+  fi
+
+  git hash-object -t tree /dev/null
+}
+
 if [[ "$base_ref" =~ ^0+$ ]]; then
-  diff_files=$(git diff --name-only "$empty_tree" "$head_ref")
+  zero_base_ref=$(resolve_zero_base_diff_ref "$head_ref")
+  diff_files=$(git diff --name-only "$zero_base_ref" "$head_ref")
 else
   diff_files=$(git diff --name-only "$base_ref" "$head_ref")
 fi
