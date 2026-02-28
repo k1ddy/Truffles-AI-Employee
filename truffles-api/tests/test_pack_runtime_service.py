@@ -163,6 +163,7 @@ def test_pack_runtime_decision_back_compat_alias() -> None:
 def test_pack_runtime_default_does_not_import_demo_module_directly() -> None:
     content = _services_file("app/services/pack_runtime_default.py").read_text(encoding="utf-8")
     assert "demo_salon_knowledge" not in content
+    assert "_PACK_ADAPTER_BY_SLUG" not in content
 
 
 def test_pack_runtime_generic_adapter_avoids_demo_module_imports() -> None:
@@ -179,7 +180,7 @@ def test_pack_runtime_fallback_adapter_avoids_demo_module_imports() -> None:
 
 def test_pack_runtime_default_routes_demo_slug_to_explicit_adapter() -> None:
     adapter = default_runtime._resolve_adapter("demo_salon")
-    assert adapter.__name__ == "app.services.pack_runtime_demo_adapter"
+    assert adapter.__name__ == "app.services.pack_runtime_demo_salon_adapter"
 
     default_adapter = default_runtime._resolve_adapter("non_existing_slug")
     assert default_adapter.__name__ == "app.services.pack_runtime_generic_adapter"

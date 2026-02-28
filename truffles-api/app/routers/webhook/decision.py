@@ -5908,8 +5908,6 @@ _DEFAULT_POLICY_HANDLER = {
 
 _POLICY_HANDLERS = {
     "default": _DEFAULT_POLICY_HANDLER,
-    # Keep explicit demo alias for backward compatibility in tests/config.
-    "demo_salon": _DEFAULT_POLICY_HANDLER,
 }
 
 
