@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 import dateparser
 from rapidfuzz import fuzz, process
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from app.schemas.webhook import WebhookResponse
 from app.services.appointment_service import SchedulingService
@@ -955,15 +956,18 @@ def _looks_like_booking_reschedule_request(
         intent_signals = set()
     if intent_signals & {"reschedule", "cancel_request"}:
         return True
+    # Check explicit reschedule lexicon before generic info-question guards.
+    # Phrases like "что если я захочу изменить время" can look informational,
+    # but operationally they still mean reschedule flow.
+    reschedule_markers = get_system_lexicon_list("booking_reschedule_keywords")
+    if any(marker in normalized for marker in reschedule_markers):
+        return True
     if intent_signals & legacy.INFO_INTENTS:
         return False
     if legacy._looks_like_info_query(message_text, client_slug=client_slug):
         return False
     booking_reference_markers = get_system_lexicon_list("booking_request")
     booking_keyword_markers = get_system_lexicon_list("booking_keywords")
-    reschedule_markers = get_system_lexicon_list("booking_reschedule_keywords")
-    if any(marker in normalized for marker in reschedule_markers):
-        return True
     has_booking_reference = any(marker in normalized for marker in booking_reference_markers) or any(
         marker in normalized for marker in booking_keyword_markers
     )
@@ -1731,7 +1735,7 @@ def _handle_booking_interrupt(
         compose_multi_truth_reply,
         format_reply_from_truth,
         get_pack_decision,
-        phrase_match_intent,
+        resolve_master_intent,
     )
 
     from . import _legacy as legacy
@@ -1886,72 +1890,18 @@ def _handle_booking_interrupt(
             )
         if promotions_signal and "promotions" not in booking_info_intents:
             booking_info_intents = [*booking_info_intents, "promotions"]
-        normalized_interrupt = legacy._normalize_service_text(booking_interrupt_text or "")
-        explicit_team_lookup = any(
-            marker in normalized_interrupt
-            for marker in (
-                "кто делает",
-                "какой мастер",
-                "какой специалист",
-                "кто из мастеров",
-                "к кому запис",
-            )
+        master_resolution = resolve_master_intent(
+            message_text=booking_interrupt_text,
+            client_slug=client_slug,
+            intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
+            force_master_intent=False,
         )
-        master_signal = False
-        if booking_interrupt_text and client_slug:
-            try:
-                master_signal = "master" in phrase_match_intent(
-                    booking_interrupt_text, client_slug=client_slug
-                )
-            except Exception:
-                master_signal = False
-        if master_signal and "master" not in booking_info_intents:
-            keep_master_intent = explicit_team_lookup
-            if not keep_master_intent and policy_handler and booking_interrupt_text:
-                service_matcher = policy_handler.get("service_matcher")
-                if service_matcher:
-                    try:
-                        service_candidate = service_matcher(
-                            booking_interrupt_text,
-                            client_slug=client_slug,
-                            intent_decomp=intent_decomp_payload,
-                        )
-                    except Exception:
-                        service_candidate = None
-                    keep_master_intent = not (
-                        service_candidate
-                        and service_candidate.action == "reply"
-                        and service_candidate.intent in {"service_match", "price_query"}
-                    )
-            if keep_master_intent:
-                booking_info_intents = [*booking_info_intents, "master"]
-        if (
-            "master" in booking_info_intents
-            and not explicit_team_lookup
-            and policy_handler
-            and booking_interrupt_text
-        ):
-            service_matcher = policy_handler.get("service_matcher")
-            service_candidate = None
-            if service_matcher:
-                try:
-                    service_candidate = service_matcher(
-                        booking_interrupt_text,
-                        client_slug=client_slug,
-                        intent_decomp=intent_decomp_payload,
-                    )
-                except Exception:
-                    service_candidate = None
-            if (
-                service_candidate
-                and service_candidate.action == "reply"
-                and service_candidate.intent in {"service_match", "price_query"}
-            ):
-                booking_info_intents = [
-                    intent_name
-                    for intent_name in booking_info_intents
-                    if intent_name != "master"
-                ]
+        if master_resolution.explicit and "master" not in booking_info_intents:
+            booking_info_intents = [*booking_info_intents, "master"]
+        if not master_resolution.explicit and "master" in booking_info_intents:
+            booking_info_intents = [
+                intent_name for intent_name in booking_info_intents if intent_name != "master"
+            ]
         guest_policy_hit = bool(
             booking_interrupt_text
             and legacy._matches_guest_policy_lexicon(
@@ -2598,6 +2548,7 @@ def _handle_booking_interrupt(
                 )
                 pricing_name_followup_signal = bool(
                     booking_wants_flow
+                    and not expected_reply_blocked_by_info
                     and "pricing" in set(trace_info_intents or [])
                     and booking_expected == legacy.EXPECTED_REPLY_NAME
                 )
@@ -2982,7 +2933,54 @@ def _handle_booking_flow(
                 result_message = f"{result_message}; response_send=failed"
             log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
             booking_logged = True
-            db.commit()
+            try:
+                db.commit()
+            except IntegrityError as exc:
+                db.rollback()
+                if not _is_appointment_overlap_integrity_error(exc):
+                    raise
+                booking_state["active"] = True
+                booking_state["datetime"] = None
+                booking_state["last_question"] = "datetime"
+                context = legacy._set_booking_context(context, booking_state)
+                legacy._set_conversation_context(conversation, context)
+                legacy._record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "booking_commit",
+                        "decision": "appointment_conflict",
+                        "state": conversation.state,
+                        "skip_reason": "appointment_overlap_conflict",
+                    },
+                )
+                legacy._record_message_decision_meta(
+                    saved_message,
+                    action="booking_prompt",
+                    intent="booking",
+                    source="booking",
+                    fast_intent=False,
+                )
+                conflict_prompt = "Похоже, это время уже занято. На какую дату и время вам удобно?"
+                conflict_prompt = legacy._combine_sidecar(
+                    conflict_prompt, multi_intent_booking_followup
+                )
+                conflict_prompt, sent_conflict = send_and_save(conflict_prompt)
+                conflict_message = (
+                    "Booking conflict prompt sent"
+                    if sent_conflict
+                    else "Booking conflict prompt failed"
+                )
+                db.commit()
+                return BookingFlowResult(
+                    response=WebhookResponse(
+                        success=True,
+                        message=conflict_message,
+                        conversation_id=conversation.id,
+                        bot_response=conflict_prompt,
+                    ),
+                    booking_t0=booking_t0,
+                    booking_logged=booking_logged,
+                )
             return BookingFlowResult(
                 response=WebhookResponse(
                     success=True,

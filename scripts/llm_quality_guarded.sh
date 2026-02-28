@@ -11,6 +11,7 @@ Usage:
     [--quick-check <cmd>]... \
     [--allow-repeat-fingerprint] \
     [--allow-no-owner-delta] \
+    [--allow-pending-previous] \
     -- \
     <llm-quality args>
 
@@ -63,9 +64,11 @@ MODE=""
 RUN_ID=""
 ALLOW_REPEAT_FINGERPRINT=0
 ALLOW_NO_OWNER_DELTA=0
+ALLOW_PENDING_PREVIOUS=0
 declare -a OWNER_FILES=()
 declare -a QUICK_CHECKS=()
 declare -a QUALITY_ARGS=()
+HAS_RESUME=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -93,6 +96,10 @@ while [[ $# -gt 0 ]]; do
       ALLOW_NO_OWNER_DELTA=1
       shift
       ;;
+    --allow-pending-previous)
+      ALLOW_PENDING_PREVIOUS=1
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -112,6 +119,12 @@ done
 [[ "$MODE" =~ ^(lock|replay|full)$ ]] || die "--mode must be one of: lock|replay|full"
 [[ -n "$RUN_ID" ]] || die "--run-id is required"
 [[ ${#QUALITY_ARGS[@]} -gt 0 ]] || die "llm-quality args are required after --"
+for token in "${QUALITY_ARGS[@]}"; do
+  if [[ "$token" == "--resume" ]]; then
+    HAS_RESUME=1
+    break
+  fi
+done
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
@@ -162,12 +175,52 @@ LEDGER_FILE="$LEDGER_DIR/ledger.tsv"
 mkdir -p "$LEDGER_DIR"
 touch "$LEDGER_FILE"
 
-if [[ "$ALLOW_REPEAT_FINGERPRINT" -ne 1 ]]; then
+if [[ "$ALLOW_REPEAT_FINGERPRINT" -ne 1 && "$HAS_RESUME" -ne 1 ]]; then
   last_match="$(awk -F'\t' -v m="$MODE" -v f="$FINGERPRINT" '$2==m && $4==f {line=$0} END{print line}' "$LEDGER_FILE")"
   if [[ -n "$last_match" ]]; then
     IFS=$'\t' read -r ts _ lm_run_id _ status summary <<<"$last_match"
     die "repeat fingerprint blocked (mode=$MODE run_id=$lm_run_id status=$status at $ts summary=$summary). Use --allow-repeat-fingerprint only with explicit reason."
   fi
+fi
+
+INDEX_ROOT="/tmp/booking_quality/_index"
+if [[ "$ALLOW_PENDING_PREVIOUS" -ne 1 && "$HAS_RESUME" -ne 1 ]]; then
+  latest_mode_file="$INDEX_ROOT/latest_by_mode/${MODE}.json"
+  if [[ -f "$latest_mode_file" ]]; then
+    read -r last_run_id last_status last_audit last_artifacts <<EOF
+$(python3 - "$latest_mode_file" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+print(
+    (data.get("run_id") or ""),
+    (data.get("status") or ""),
+    (data.get("manual_audit_status") or ""),
+    str(data.get("artifact_integrity_valid") or ""),
+)
+PY
+)
+EOF
+    if [[ "$last_run_id" != "" ]]; then
+      if [[ "$last_status" == "incomplete" || "$last_status" == "invalid" || "$last_status" == "failed" ]]; then
+        die "previous run not canonical (mode=$MODE run_id=$last_run_id status=$last_status). Resolve artifacts/manual audit before new run or pass --allow-pending-previous."
+      fi
+      if [[ "$last_audit" != "" && "$last_audit" != "done" ]]; then
+        die "previous run manual audit pending (mode=$MODE run_id=$last_run_id audit=$last_audit). Resolve before new run or pass --allow-pending-previous."
+      fi
+      if [[ "$last_artifacts" == "False" || "$last_artifacts" == "false" ]]; then
+        die "previous run artifacts incomplete (mode=$MODE run_id=$last_run_id). Resolve before new run or pass --allow-pending-previous."
+      fi
+    fi
+  fi
+fi
+
+if [[ -f "$INDEX_ROOT/by_mode/${MODE}/${RUN_ID}.json" && "$HAS_RESUME" -ne 1 ]]; then
+  die "run_id already exists in index (mode=$MODE run_id=$RUN_ID). Choose a new run-id."
+fi
+if [[ "$HAS_RESUME" -eq 1 && ! -f "$INDEX_ROOT/by_mode/${MODE}/${RUN_ID}.json" ]]; then
+  echo "[guard] resume requested but indexed run_id not found; continuing anyway" >&2
 fi
 
 for cmd in "${QUICK_CHECKS[@]}"; do
@@ -201,9 +254,10 @@ fi
 if [[ "$has_output_dir_arg" -ne 1 ]]; then
   CMD+=(--output-dir "$OUTPUT_DIR")
 fi
+CMD_STRING="$(printf '%q ' "${CMD[@]}")"
 
 START_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$START_TS" "$MODE" "$RUN_ID" "$FINGERPRINT" "started" "-" >> "$LEDGER_FILE"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$START_TS" "$MODE" "$RUN_ID" "$FINGERPRINT" "started" "-" "$OUTPUT_DIR" "$CMD_STRING" >> "$LEDGER_FILE"
 
 echo "[guard] mode=$MODE run_id=$RUN_ID fingerprint=$FINGERPRINT"
 set +e
@@ -228,6 +282,6 @@ if [[ -f "$SUMMARY_PATH" ]]; then
 fi
 
 END_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$END_TS" "$MODE" "$RUN_ID" "$FINGERPRINT" "$STATUS_LABEL" "$SUMMARY_PATH" >> "$LEDGER_FILE"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$END_TS" "$MODE" "$RUN_ID" "$FINGERPRINT" "$STATUS_LABEL" "$SUMMARY_PATH" "$OUTPUT_DIR" "$CMD_STRING" >> "$LEDGER_FILE"
 
 exit "$EXIT_CODE"

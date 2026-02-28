@@ -6941,6 +6941,7 @@ def _llm_quality_build_command_from_args(
     output_dir=None,
     allow_output_overwrite=False,
     allow_incomplete_artifacts=False,
+    resume=False,
 ):
     if args is None:
         return None
@@ -7005,6 +7006,7 @@ def _llm_quality_build_command_from_args(
     add("--console-mode", getattr(args, "console_mode", None))
     add("--output-dir", output_dir or getattr(args, "output_dir", None))
     add_bool("--allow-output-overwrite", allow_output_overwrite or getattr(args, "allow_output_overwrite", False))
+    add_bool("--resume", resume or getattr(args, "resume", False))
     add("--run-id", run_id or getattr(args, "run_id", None))
     add("--brief-file", getattr(args, "brief_file", None))
     add("--expected-runtime-commit", getattr(args, "expected_runtime_commit", None))
@@ -7114,6 +7116,16 @@ def _llm_quality_write_run_manifest(
 ):
     output_dir = _llm_quality_default_output_dir(run_id, output_dir)
     os.makedirs(output_dir, exist_ok=True)
+    manifest_path = os.path.join(output_dir, "run_manifest.json")
+    existing_manifest = {}
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as handle:
+                loaded_manifest = json.load(handle)
+            if isinstance(loaded_manifest, dict):
+                existing_manifest = loaded_manifest
+        except Exception:
+            existing_manifest = {}
     summary_path = os.path.join(output_dir, "summary.json")
     if summary is None and os.path.exists(summary_path):
         try:
@@ -7137,16 +7149,32 @@ def _llm_quality_write_run_manifest(
         or (summary.get("quality_status") or {}).get("manual_audit_status")
     )
     status = _llm_quality_manifest_status(summary, artifact_integrity)
-    command = _llm_quality_build_command_from_args(args, run_id=run_id, output_dir=output_dir)
-    resume_command = None
-    if status in {"incomplete", "failed"}:
-        resume_command = _llm_quality_build_command_from_args(
+    if args is None:
+        manifest_args = (
+            existing_manifest.get("args")
+            if isinstance(existing_manifest.get("args"), dict)
+            else {}
+        )
+        command = existing_manifest.get("command")
+    else:
+        manifest_args = _llm_quality_manifest_args(args)
+        command = _llm_quality_build_command_from_args(
             args,
             run_id=run_id,
             output_dir=output_dir,
-            allow_output_overwrite=True,
-            allow_incomplete_artifacts=True,
         )
+    resume_command = None
+    if status in {"incomplete", "failed"}:
+        if args is None and isinstance(existing_manifest.get("resume_command"), str):
+            resume_command = existing_manifest.get("resume_command")
+        elif args is not None:
+            resume_command = _llm_quality_build_command_from_args(
+                args,
+                run_id=run_id,
+                output_dir=output_dir,
+                allow_incomplete_artifacts=True,
+                resume=True,
+            )
     manifest = {
         "manifest_version": LLM_QUALITY_MANIFEST_VERSION,
         "run_id": run_id,
@@ -7169,6 +7197,7 @@ def _llm_quality_write_run_manifest(
             "scenarios": summary.get("scenarios_path") or os.path.join(output_dir, "scenarios.json"),
             "responses": summary.get("responses_path") or os.path.join(output_dir, "responses.jsonl"),
             "trace_bundle": summary.get("trace_bundle_path") or os.path.join(output_dir, "trace_bundle.jsonl"),
+            "runtime_state": _llm_quality_runtime_state_path(output_dir),
             "manual_audit": (
                 resolved_manual_audit.get("manual_audit_path")
                 or manual_audit.get("path")
@@ -7181,14 +7210,13 @@ def _llm_quality_write_run_manifest(
             ),
             "manifest": os.path.join(output_dir, "run_manifest.json"),
         },
-        "args": _llm_quality_manifest_args(args),
+        "args": manifest_args,
         "command": command,
         "resume_command": resume_command,
         "replay_command": summary.get("replay_command"),
         "run_economy": run_economy_status,
         "runtime_preflight": runtime_preflight,
     }
-    manifest_path = os.path.join(output_dir, "run_manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as handle:
         json.dump(manifest, handle, ensure_ascii=False, indent=2)
     _llm_quality_update_artifact_index(manifest)
@@ -7550,6 +7578,7 @@ def _llm_quality_write_checkpoint_summary(
         "scenarios_path": scenarios_path,
         "responses_path": responses_path,
         "trace_bundle_path": trace_bundle_path,
+        "runtime_state_path": _llm_quality_runtime_state_path(output_dir),
         "scenario_source": scenario_source,
         "manual_audit": manual_audit,
         "config": {
@@ -9455,13 +9484,79 @@ LLM_QUALITY_ARTIFACT_FILES = (
     "brief.md",
     "preflight.json",
     "responses.jsonl",
+    "runtime_state.json",
     "scenarios.json",
     "summary.json",
     "trace_bundle.jsonl",
 )
 
 
-def _llm_quality_prepare_output_dir(path, *, allow_overwrite=False):
+def _llm_quality_runtime_state_path(output_dir):
+    return os.path.join(output_dir, "runtime_state.json")
+
+
+def _llm_quality_dialogs_fingerprint(dialogs):
+    try:
+        payload = json.dumps(dialogs or [], ensure_ascii=False, sort_keys=True)
+    except Exception:
+        payload = "[]"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _llm_quality_load_runtime_state(output_dir):
+    path = _llm_quality_runtime_state_path(output_dir)
+    if not os.path.exists(path):
+        return None, None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception as exc:
+        return None, f"runtime_state_parse_error:{exc}"
+    if not isinstance(payload, dict):
+        return None, "runtime_state_invalid_payload"
+    return payload, None
+
+
+def _llm_quality_save_runtime_state(output_dir, payload):
+    path = _llm_quality_runtime_state_path(output_dir)
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+    return path
+
+
+def _llm_quality_count_jsonl_rows(path):
+    if not os.path.exists(path):
+        return None, "missing"
+    rows = 0
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    rows += 1
+    except Exception as exc:
+        return None, str(exc)
+    return rows, None
+
+
+def _llm_quality_trim_jsonl_rows(path, keep_rows):
+    keep_rows = max(int(keep_rows or 0), 0)
+    rows = []
+    seen = 0
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            if seen >= keep_rows:
+                break
+            rows.append(line if line.endswith("\n") else f"{line}\n")
+            seen += 1
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.writelines(rows)
+
+
+def _llm_quality_prepare_output_dir(path, *, allow_overwrite=False, resume=False):
     output_dir = os.path.abspath(os.path.expanduser(path))
     os.makedirs(output_dir, exist_ok=True)
     entries = []
@@ -9469,7 +9564,13 @@ def _llm_quality_prepare_output_dir(path, *, allow_overwrite=False):
         entries = os.listdir(output_dir)
     except OSError:
         entries = []
+    if allow_overwrite and resume:
+        raise SystemExit(
+            "llm-quality: --allow-output-overwrite and --resume are mutually exclusive"
+        )
     if entries and not allow_overwrite:
+        if resume:
+            return output_dir
         raise SystemExit(
             "llm-quality: output-dir already contains artifacts; "
             "use unique --run-id/--output-dir or pass --allow-output-overwrite"
@@ -9670,6 +9771,11 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--console-mode", choices=["real", "skip"], default="real")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--allow-output-overwrite", action="store_true")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Continue interrupted run from runtime_state.json without wiping output-dir.",
+    )
     parser.add_argument("--run-id", default=None)
     parser.add_argument(
         "--brief-file",
@@ -12764,10 +12870,21 @@ def _run_llm_quality(args):
             "llm-quality: INVALID RUN - --allow-weak-oracle is debug-only "
             "(requires --judge-mode off --allow-judge-off and no fail-on-threshold/regression)"
         )
+    resume_mode = bool(getattr(args, "resume", False))
     output_dir = _llm_quality_prepare_output_dir(
         args.output_dir or os.path.join("/tmp/booking_quality", run_id),
         allow_overwrite=bool(getattr(args, "allow_output_overwrite", False)),
+        resume=resume_mode,
     )
+    if resume_mode and not args.scenarios_file:
+        auto_scenarios = os.path.join(output_dir, "scenarios.json")
+        if os.path.exists(auto_scenarios):
+            args.scenarios_file = auto_scenarios
+        else:
+            raise SystemExit(
+                "llm-quality: --resume requires existing scenarios.json in output-dir "
+                "or explicit --scenarios-file"
+            )
     manual_audit_gate_status = _llm_quality_build_manual_audit_gate_status(
         mode=getattr(args, "manual_audit_gate", "block"),
         output_dir=output_dir,
@@ -13183,6 +13300,13 @@ def _run_llm_quality(args):
 
     if not dialogs:
         raise SystemExit("llm-quality: no dialogs to execute")
+    expected_turns_total = 0
+    for dialog in dialogs:
+        if not isinstance(dialog, dict):
+            continue
+        turns = dialog.get("turns")
+        if isinstance(turns, list):
+            expected_turns_total += len(turns)
 
     acceptance_contract = bool(
         args.fail_on_thresholds
@@ -13585,6 +13709,176 @@ def _run_llm_quality(args):
         judge_stats["counts"]["skipped"] += 1
         judge_stats["skips"][reason] = judge_stats["skips"].get(reason, 0) + 1
 
+    runtime_state_path = _llm_quality_runtime_state_path(output_dir)
+    dialogs_fingerprint = _llm_quality_dialogs_fingerprint(dialogs)
+    resume_completed_turns = 0
+    resume_last_dialog_idx = None
+    resume_last_turn_idx = None
+    resume_remote_jid_by_dialog = {}
+
+    if resume_mode:
+        runtime_state_payload, runtime_state_error = _llm_quality_load_runtime_state(output_dir)
+        if runtime_state_error:
+            raise SystemExit(f"llm-quality: --resume failed ({runtime_state_error})")
+        if not isinstance(runtime_state_payload, dict):
+            raise SystemExit(
+                "llm-quality: --resume failed (runtime_state_missing); "
+                "legacy incomplete runs cannot be resumed safely"
+            )
+        state_payload = (
+            runtime_state_payload.get("state")
+            if isinstance(runtime_state_payload.get("state"), dict)
+            else None
+        )
+        progress_payload = (
+            runtime_state_payload.get("progress")
+            if isinstance(runtime_state_payload.get("progress"), dict)
+            else None
+        )
+        if state_payload is None or progress_payload is None:
+            raise SystemExit(
+                "llm-quality: --resume failed (runtime_state_incomplete); "
+                "missing state/progress payload"
+            )
+        state_run_id = str(runtime_state_payload.get("run_id") or "").strip()
+        if state_run_id and state_run_id != run_id:
+            raise SystemExit(
+                f"llm-quality: --resume failed (run_id_mismatch:{state_run_id}!={run_id})"
+            )
+        state_fingerprint = str(runtime_state_payload.get("dialogs_fingerprint") or "").strip()
+        if state_fingerprint and state_fingerprint != dialogs_fingerprint:
+            raise SystemExit(
+                "llm-quality: --resume failed (dialogs_fingerprint_mismatch); "
+                "scenario set changed since interruption"
+            )
+        saved_stats = state_payload.get("stats")
+        if not isinstance(saved_stats, dict):
+            raise SystemExit("llm-quality: --resume failed (runtime_state_stats_missing)")
+        for key in list(stats.keys()):
+            if key in saved_stats:
+                stats[key] = saved_stats.get(key)
+        if isinstance(state_payload.get("state_stats"), dict):
+            state_stats = state_payload.get("state_stats")
+        if isinstance(state_payload.get("info_stats"), dict):
+            info_stats = state_payload.get("info_stats")
+        if isinstance(state_payload.get("manager_stats"), dict):
+            manager_stats = state_payload.get("manager_stats")
+        if isinstance(state_payload.get("booking_stats"), dict):
+            booking_stats = state_payload.get("booking_stats")
+        if isinstance(state_payload.get("dedup_stats"), dict):
+            dedup_stats = state_payload.get("dedup_stats")
+        if isinstance(state_payload.get("stage_stats"), dict):
+            stage_stats = state_payload.get("stage_stats")
+        if isinstance(state_payload.get("booking_progress"), dict):
+            booking_progress = state_payload.get("booking_progress")
+        if isinstance(state_payload.get("coverage_stats"), dict):
+            coverage_stats = state_payload.get("coverage_stats")
+        if isinstance(state_payload.get("judge_stats"), dict):
+            judge_stats = state_payload.get("judge_stats")
+        if isinstance(state_payload.get("failure_counts"), dict):
+            failure_counts = state_payload.get("failure_counts")
+        if isinstance(state_payload.get("taxonomy_counts"), dict):
+            taxonomy_counts = state_payload.get("taxonomy_counts")
+        if isinstance(state_payload.get("taxonomy_by_reason"), dict):
+            taxonomy_by_reason = state_payload.get("taxonomy_by_reason")
+        if isinstance(state_payload.get("tool_hook_state"), dict):
+            tool_hook_state = state_payload.get("tool_hook_state")
+        if isinstance(state_payload.get("rewrite_governance_state"), dict):
+            rewrite_governance_state = state_payload.get("rewrite_governance_state")
+        if isinstance(state_payload.get("hq1_class_counts"), dict):
+            hq1_class_counts = state_payload.get("hq1_class_counts")
+        if isinstance(state_payload.get("hq1_bad_turn_count"), int):
+            hq1_bad_turn_count = int(state_payload.get("hq1_bad_turn_count") or 0)
+        saved_failures = state_payload.get("failures")
+        if isinstance(saved_failures, list):
+            failures = saved_failures[:LLM_QUALITY_FAILURE_LIMIT]
+
+        resume_completed_turns = int(
+            progress_payload.get("completed_turns") or stats.get("turns") or 0
+        )
+        resume_trace_rows = int(
+            progress_payload.get("trace_rows_written") or stats.get("trace_rows_written") or 0
+        )
+        if resume_completed_turns < 0:
+            resume_completed_turns = 0
+        if resume_completed_turns > expected_turns_total:
+            raise SystemExit(
+                "llm-quality: --resume failed (runtime_state_completed_turns_overflow)"
+            )
+        if int(stats.get("turns") or 0) != resume_completed_turns:
+            raise SystemExit(
+                "llm-quality: --resume failed (runtime_state_turns_mismatch)"
+            )
+        if int(stats.get("trace_rows_written") or 0) != resume_trace_rows:
+            raise SystemExit(
+                "llm-quality: --resume failed (runtime_state_trace_rows_mismatch)"
+            )
+        response_rows, response_rows_error = _llm_quality_count_jsonl_rows(responses_path)
+        trace_rows, trace_rows_error = _llm_quality_count_jsonl_rows(trace_bundle_path)
+        if response_rows_error:
+            raise SystemExit(
+                f"llm-quality: --resume failed (responses_jsonl:{response_rows_error})"
+            )
+        if trace_rows_error:
+            raise SystemExit(
+                f"llm-quality: --resume failed (trace_bundle_jsonl:{trace_rows_error})"
+            )
+        if int(response_rows or 0) > resume_completed_turns:
+            trimmed = int(response_rows or 0) - resume_completed_turns
+            _llm_quality_trim_jsonl_rows(responses_path, resume_completed_turns)
+            response_rows = resume_completed_turns
+            print(
+                json.dumps(
+                    {
+                        "stage": "llm_quality_resume_trim",
+                        "artifact": "responses.jsonl",
+                        "trimmed_rows": trimmed,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        if int(trace_rows or 0) > resume_trace_rows:
+            trimmed = int(trace_rows or 0) - resume_trace_rows
+            _llm_quality_trim_jsonl_rows(trace_bundle_path, resume_trace_rows)
+            trace_rows = resume_trace_rows
+            print(
+                json.dumps(
+                    {
+                        "stage": "llm_quality_resume_trim",
+                        "artifact": "trace_bundle.jsonl",
+                        "trimmed_rows": trimmed,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        if int(response_rows or 0) != resume_completed_turns:
+            raise SystemExit(
+                "llm-quality: --resume failed (responses_row_count_mismatch)"
+            )
+        if int(trace_rows or 0) != resume_trace_rows:
+            raise SystemExit(
+                "llm-quality: --resume failed (trace_row_count_mismatch)"
+            )
+        resume_last_dialog_idx = progress_payload.get("last_dialog_index")
+        resume_last_turn_idx = progress_payload.get("last_turn_index")
+        if isinstance(progress_payload.get("remote_jid_by_dialog"), dict):
+            resume_remote_jid_by_dialog = progress_payload.get("remote_jid_by_dialog")
+        print(
+            json.dumps(
+                {
+                    "stage": "llm_quality_resume_preflight",
+                    "enabled": True,
+                    "runtime_state_path": runtime_state_path,
+                    "completed_turns": resume_completed_turns,
+                    "expected_turns": expected_turns_total,
+                    "remaining_turns": max(expected_turns_total - resume_completed_turns, 0),
+                    "last_dialog_index": resume_last_dialog_idx,
+                    "last_turn_index": resume_last_turn_idx,
+                },
+                ensure_ascii=False,
+            )
+        )
+
     def _should_judge_turn(
         state,
         bot_response,
@@ -13949,8 +14243,11 @@ def _run_llm_quality(args):
     interrupted = False
     checkpoint_interval_turns = 1 if args.dry_run else 5
     last_checkpoint_turn = -1
+    last_runtime_state_turn = -1
     progress_heartbeat_interval_seconds = 20.0
     last_progress_heartbeat_monotonic = time.monotonic()
+    last_committed_dialog_idx = resume_last_dialog_idx
+    last_committed_turn_idx = resume_last_turn_idx
 
     previous_sigint = signal.getsignal(signal.SIGINT)
     previous_sigterm = signal.getsignal(signal.SIGTERM)
@@ -13993,6 +14290,48 @@ def _run_llm_quality(args):
         )
         last_checkpoint_turn = turns_done
 
+    def _checkpoint_runtime_state(*, force=False):
+        nonlocal last_runtime_state_turn
+        turns_done = int(stats.get("turns") or 0)
+        if not force and turns_done == last_runtime_state_turn:
+            return
+        payload = {
+            "version": 1,
+            "run_id": run_id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "dialogs_fingerprint": dialogs_fingerprint,
+            "progress": {
+                "completed_turns": turns_done,
+                "trace_rows_written": int(stats.get("trace_rows_written") or 0),
+                "expected_turns": expected_turns_total,
+                "last_dialog_index": last_committed_dialog_idx,
+                "last_turn_index": last_committed_turn_idx,
+                "remote_jid_by_dialog": resume_remote_jid_by_dialog,
+            },
+            "state": {
+                "stats": stats,
+                "state_stats": state_stats,
+                "info_stats": info_stats,
+                "manager_stats": manager_stats,
+                "booking_stats": booking_stats,
+                "dedup_stats": dedup_stats,
+                "stage_stats": stage_stats,
+                "booking_progress": booking_progress,
+                "coverage_stats": coverage_stats,
+                "judge_stats": judge_stats,
+                "failures": failures,
+                "failure_counts": failure_counts,
+                "taxonomy_counts": taxonomy_counts,
+                "taxonomy_by_reason": taxonomy_by_reason,
+                "tool_hook_state": tool_hook_state,
+                "rewrite_governance_state": rewrite_governance_state,
+                "hq1_class_counts": hq1_class_counts,
+                "hq1_bad_turn_count": hq1_bad_turn_count,
+            },
+        }
+        _llm_quality_save_runtime_state(output_dir, payload)
+        last_runtime_state_turn = turns_done
+
     def _emit_progress_heartbeat(
         event,
         *,
@@ -14016,6 +14355,13 @@ def _run_llm_quality(args):
             "turn_index": turn_idx,
             "turns_done": int(stats.get("turns") or 0),
             "turns_strict_failed": int(stats.get("turns_strict_failed") or 0),
+            "expected_turns": expected_turns_total,
+            "remaining_turns": max(expected_turns_total - int(stats.get("turns") or 0), 0),
+            "completion_ratio": (
+                round(int(stats.get("turns") or 0) / max(expected_turns_total, 1), 4)
+                if expected_turns_total
+                else None
+            ),
         }
         if isinstance(extra, dict):
             payload.update(extra)
@@ -14024,28 +14370,77 @@ def _run_llm_quality(args):
 
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
+    _checkpoint_runtime_state(force=True)
     _checkpoint_run_summary(force=True)
-    _emit_progress_heartbeat("run_start", force=True)
+    _emit_progress_heartbeat(
+        "run_start",
+        force=True,
+        extra={"resume_completed_turns": resume_completed_turns},
+    )
 
-    with open(responses_path, "w", encoding="utf-8") as responses_handle, open(
-        trace_bundle_path, "w", encoding="utf-8"
+    responses_mode = "a" if resume_mode and resume_completed_turns > 0 else "w"
+    trace_mode = "a" if resume_mode and resume_completed_turns > 0 else "w"
+    with open(responses_path, responses_mode, encoding="utf-8") as responses_handle, open(
+        trace_bundle_path, trace_mode, encoding="utf-8"
     ) as trace_handle:
+        global_turn_index = 0
         for dialog_idx, dialog in enumerate(dialogs, start=1):
             if stop_requested:
                 break
+            dialog_turns = dialog.get("turns") or []
+            dialog_turn_count = len(dialog_turns)
+            dialog_start_turn = global_turn_index + 1
+            dialog_skip_count = 0
+            if resume_completed_turns >= dialog_start_turn:
+                dialog_skip_count = min(
+                    dialog_turn_count,
+                    max(resume_completed_turns - dialog_start_turn + 1, 0),
+                )
+            if dialog_skip_count >= dialog_turn_count and dialog_turn_count > 0:
+                global_turn_index += dialog_turn_count
+                _emit_progress_heartbeat(
+                    "dialog_resume_skip",
+                    dialog_idx=dialog_idx,
+                    force=True,
+                    extra={"dialog_turns_skipped": dialog_skip_count},
+                )
+                continue
+            dialog_partial_resume = dialog_skip_count > 0
             _emit_progress_heartbeat(
                 "dialog_start",
                 dialog_idx=dialog_idx,
                 force=True,
-                extra={"dialog_turns_expected": len(dialog.get("turns") or [])},
+                extra={
+                    "dialog_turns_expected": dialog_turn_count,
+                    "dialog_turns_skipped": dialog_skip_count,
+                },
             )
             dialog_runtime_state = {"slot_candidates": []}
-            remote_jid = args.remote_jid or _llm_quality_pick_jid(
-                allowlist_jids, dialog_idx - 1, rng, jid_mode_effective, run_id=run_id
+            remote_jid = args.remote_jid
+            stored_remote_jid = (
+                resume_remote_jid_by_dialog.get(str(dialog_idx))
+                if isinstance(resume_remote_jid_by_dialog, dict)
+                else None
             )
+            if not remote_jid and stored_remote_jid:
+                remote_jid = stored_remote_jid
+            if not remote_jid:
+                remote_jid = _llm_quality_pick_jid(
+                    allowlist_jids, dialog_idx - 1, rng, jid_mode_effective, run_id=run_id
+                )
+            if (
+                dialog_partial_resume
+                and not args.remote_jid
+                and not stored_remote_jid
+            ):
+                raise SystemExit(
+                    "llm-quality: --resume failed (remote_jid_missing_for_partial_dialog)"
+                )
             if not remote_jid:
                 raise SystemExit("llm-quality: remote_jid unresolved")
-            if args.reset_before_dialog:
+            if isinstance(resume_remote_jid_by_dialog, dict):
+                resume_remote_jid_by_dialog[str(dialog_idx)] = remote_jid
+            if args.reset_before_dialog and not dialog_partial_resume:
                 preflight = _reset_dialog_state(remote_jid)
                 if preflight:
                     print(json.dumps(preflight, ensure_ascii=False))
@@ -14056,8 +14451,18 @@ def _run_llm_quality(args):
                             "llm-quality: contaminated preflight (state_before="
                             f"{state_before}, cleared=false); restart with --jid-mode unique"
                         )
+            elif dialog_partial_resume:
+                _emit_progress_heartbeat(
+                    "dialog_resume_continue",
+                    dialog_idx=dialog_idx,
+                    force=True,
+                    extra={"dialog_turns_skipped": dialog_skip_count},
+                )
 
-            for turn_idx, turn in enumerate(dialog.get("turns") or [], start=1):
+            for turn_idx, turn in enumerate(dialog_turns, start=1):
+                global_turn_index += 1
+                if global_turn_index <= resume_completed_turns:
+                    continue
                 if stop_requested:
                     break
                 stats["turns"] += 1
@@ -15053,6 +15458,9 @@ def _run_llm_quality(args):
                     + "\n"
                 )
                 stats["trace_rows_written"] += 1
+                last_committed_dialog_idx = dialog_idx
+                last_committed_turn_idx = turn_idx
+                _checkpoint_runtime_state()
                 _checkpoint_run_summary()
                 _emit_progress_heartbeat(
                     "turn_committed",
@@ -15080,6 +15488,7 @@ def _run_llm_quality(args):
     if stop_requested and not stop_reason:
         stop_reason = "stop_requested"
     if stop_requested:
+        _checkpoint_runtime_state(force=True)
         _checkpoint_run_summary(force=True)
 
     if stop_reason:
@@ -15576,6 +15985,8 @@ def _run_llm_quality(args):
         "allow_weak_oracle": bool(args.allow_weak_oracle),
         "weak_oracle_debug_waiver": weak_oracle_debug_waiver,
         "allow_incomplete_run_artifacts": bool(args.allow_incomplete_run_artifacts),
+        "resume": resume_mode,
+        "resume_completed_turns": resume_completed_turns,
         "seed": args.seed,
         "manager_mode": args.manager_mode,
         "pending_mode": args.pending_mode,
@@ -15637,6 +16048,7 @@ def _run_llm_quality(args):
         "scenarios_path": scenarios_path,
         "responses_path": responses_path,
         "trace_bundle_path": trace_bundle_path,
+        "runtime_state_path": runtime_state_path,
         "metrics": metrics,
         "baseline_metrics": baseline_metrics,
         "baseline_source": baseline_source,

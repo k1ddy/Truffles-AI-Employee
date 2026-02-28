@@ -1297,6 +1297,7 @@ def _run_intent_decomposition(
     booking: dict | None,
     booking_active: bool,
     expected_reply_shortcircuit: bool,
+    expected_reply_blocked_by_info: bool,
     context: dict[str, Any],
     context_manager: dict[str, Any],
     current_goal: str | None,
@@ -1331,6 +1332,31 @@ def _run_intent_decomposition(
     critical_booking_turn = bool(
         booking_signal or booking_active or expected_reply_shortcircuit or booking_slot_signal
     )
+    booking_expected_reply_turn = bool(
+        expected_reply_type
+        in {
+            legacy.EXPECTED_REPLY_SERVICE,
+            legacy.EXPECTED_REPLY_TIME,
+            legacy.EXPECTED_REPLY_NAME,
+        }
+        and (booking_signal or booking_slot_signal or expected_reply_shortcircuit)
+        and not expected_reply_blocked_by_info
+        and (
+            not expected_reply_reason
+            or expected_reply_reason
+            in {
+                "booking_prompt",
+                "booking_interrupt",
+                "booking_confirm_reject",
+                "booking_prompt_media_ack",
+            }
+        )
+    )
+    if booking_expected_reply_turn and message_text and _looks_like_info_query(
+        message_text,
+        client_slug=client_slug,
+    ):
+        booking_expected_reply_turn = False
     intent_decomp_skipped_reason = None
     intent_decomp_budget_required_ms = WEBHOOK_MULTI_INTENT_MIN_BUDGET_MS
 
@@ -1361,6 +1387,25 @@ def _run_intent_decomposition(
         )
 
     allow_intent_decomp = bool(routing["allow_bot_reply"] and not bypass_domain_flows and message_text)
+    if allow_intent_decomp and booking_expected_reply_turn:
+        allow_intent_decomp = False
+        intent_decomp_skipped_reason = "booking_expected_reply_turn"
+        meta_updates = {"intent_decomp_skipped_reason": intent_decomp_skipped_reason}
+        trace_payload = {
+            "stage": "intent_decomposition",
+            "decision": "skipped",
+            "reason": intent_decomp_skipped_reason,
+        }
+        if isinstance(expected_reply_type, str) and expected_reply_type.strip():
+            meta_updates["intent_decomp_expected_reply_type"] = expected_reply_type.strip()
+            trace_payload["expected_reply_type"] = expected_reply_type.strip()
+        if isinstance(expected_reply_reason, str) and expected_reply_reason.strip():
+            meta_updates["intent_decomp_expected_reply_reason"] = expected_reply_reason.strip()
+            trace_payload["expected_reply_reason"] = expected_reply_reason.strip()
+        if saved_message:
+            legacy._update_message_decision_metadata(saved_message, meta_updates)
+        legacy._record_decision_trace(conversation, trace_payload)
+
     if (
         allow_intent_decomp
         and critical_booking_turn
@@ -8925,6 +8970,7 @@ async def _handle_webhook_payload(
         booking=booking,
         booking_active=booking_active,
         expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
+        expected_reply_blocked_by_info=expected_reply_blocked_by_info,
         context=context,
         context_manager=context_manager,
         current_goal=current_goal,
@@ -10033,6 +10079,27 @@ async def _handle_webhook_payload(
                 if policy_validation_error is None:
                     allowed_info_map = {ref.casefold(): ref for ref in info_refs}
                     allowed_consult_map = {ref.casefold(): ref for ref in consult_refs}
+                    if policy_tool_action == "catalog.service_query" and policy_pack_refs:
+                        service_query_info_override_refs = [
+                            ref
+                            for ref in policy_pack_refs
+                            if ref in {"promotions"}
+                        ]
+                        if service_query_info_override_refs:
+                            # Keep semantic ownership: if policy-core selected non-service
+                            # fact refs, route through info contract instead of service catalog.
+                            previous_tool_action = policy_tool_action
+                            policy_tool_action = "info"
+                            policy_pack_refs = list(dict.fromkeys(service_query_info_override_refs))
+                            policy_tool_args = dict(policy_tool_args)
+                            if not policy_tool_args.get("info_refs"):
+                                policy_tool_args["info_refs"] = list(policy_pack_refs)
+                            _register_policy_override(
+                                reason_code="contract_validation_failure",
+                                reason="service_query_non_service_refs",
+                                from_action=policy_action,
+                                from_tool_action=previous_tool_action,
+                            )
                     if policy_tool_action == "info":
                         if not policy_pack_refs:
                             policy_validation_error = "pack_refs_missing"
@@ -11313,6 +11380,97 @@ async def _handle_webhook_payload(
             # never fall back to generic clarify.
             collect_slot = "datetime"
         original_collect_slot = collect_slot
+        if policy_core_timeout_degrade and timeout_booking_safe_fallback:
+            timeout_context = _get_conversation_context(conversation)
+            timeout_context_manager = _get_context_manager(timeout_context)
+            timeout_retry_count, timeout_retry_exhausted = _timeout_degrade_retry_status(
+                timeout_context_manager
+            )
+            if timeout_retry_exhausted:
+                _record_context_manager_decision(
+                    conversation,
+                    saved_message,
+                    decision="clarify_limit",
+                    updates={
+                        "clarify_attempt": {
+                            "intent": POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT,
+                            "count": timeout_retry_count,
+                        },
+                        "clarify_reason": "timeout_degrade_booking_collect",
+                        "clarify_limit": True,
+                    },
+                )
+                _apply_policy_guard_override(
+                    final_action="handoff",
+                    final_tool_action="handoff",
+                    reason_code="timeout_degrade",
+                    reason="policy_core_timeout_degrade_booking_limit",
+                )
+                _sync_policy_plan_audit(emit_trace=True)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "policy_core_guard",
+                        "decision": "timeout_booking_limit",
+                        "state": conversation.state,
+                        "mode": policy_core_mode,
+                        "reason": policy_core_degrade_reason,
+                        "retry_count": timeout_retry_count,
+                        "retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
+                        "missing_slot": collect_slot,
+                    },
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "policy_core_timeout_retry_count": timeout_retry_count,
+                            "policy_core_timeout_retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
+                            "policy_core_timeout_retry_exhausted": True,
+                            "policy_core_timeout_retry_path": "booking_collect",
+                        },
+                    )
+                return _handle_clarify_limit_escalation(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message_text=message_text or "Клиент ожидает подтверждение записи.",
+                    saved_message=saved_message,
+                    source="policy_core_guard",
+                    allow_handover=routing.get("allow_handover_create", False),
+                    escalation_intent=POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT,
+                    send_response=_send_response,
+                    finalize_response=_finalize_bot_response,
+                )
+            timeout_retry_count = _register_clarify_attempt(
+                conversation=conversation,
+                saved_message=saved_message,
+                intent=POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT,
+                now=now,
+                reason="timeout_degrade_booking_collect",
+            )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "timeout_booking_collect",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                    "retry_count": timeout_retry_count,
+                    "retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
+                    "missing_slot": collect_slot,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "policy_core_timeout_retry_count": timeout_retry_count,
+                        "policy_core_timeout_retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
+                        "policy_core_timeout_retry_path": "booking_collect",
+                    },
+                )
         info_query_override = False
         if (
             collect_slot in {"service", "datetime", "name"}
