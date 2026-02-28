@@ -20,13 +20,17 @@
   - Added CI session-gate enforcement for session-scoped research/zero-context gates.
   - Added reliability fail-on-breach gate in ci-livecheck remote lane.
   - Fixed pre-push zero-base diff scope in `session_gate`: new branch push now compares from merge-base (`origin/main`/`main`) instead of empty tree.
+  - Added runner-safe fallback in `session_gate`/`doc_truth_gate` for environments without `rg` (use `grep` fallback).
+  - Synced console OpenAPI contract with SLA registry endpoints to clear drift gate.
 - next:
-  - Run local gate checks for zero-base pre-push path and open remediation PR.
+  - Run local gate checks and push remediation update.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-27-research-gates-rollout-a900.md
   - AGENTS.md
   - scripts/session_check.sh
   - scripts/session_gate.sh
+  - scripts/doc_truth_gate.sh
   - scripts/zero_context_gate.sh
+  - contracts/console_api/openapi.v1.yaml
   - .github/workflows/ci.yml
-- last_updated: 2026-02-28T13:45:00+05:00
+- last_updated: 2026-02-28T15:05:00+05:00

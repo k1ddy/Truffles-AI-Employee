@@ -4927,6 +4927,144 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/sla-profile-registry:
+    get:
+      tags:
+      - console
+      summary: Get Sla Profile Registry
+      operationId: get_sla_profile_registry_console_v1_admin_sla_profile_registry_get
+      parameters:
+      - name: scope
+        in: query
+        required: false
+        schema:
+          enum:
+          - global
+          - domain
+          - client
+          - branch
+          type: string
+          default: client
+          title: Scope
+      - name: domain_key
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Key
+      - name: branch_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 20
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSlaProfileRegistryResponse'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/sla-profile-registry/publish:
+    post:
+      tags:
+      - console
+      summary: Publish Sla Profile Registry
+      operationId: publish_sla_profile_registry_console_v1_admin_sla_profile_registry_publish_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleSlaProfileRegistryPublishRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSlaProfileRegistryMutationResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/sla-profile-registry/rollback:
+    post:
+      tags:
+      - console
+      summary: Rollback Sla Profile Registry
+      operationId: rollback_sla_profile_registry_console_v1_admin_sla_profile_registry_rollback_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleSlaProfileRegistryRollbackRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSlaProfileRegistryMutationResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/tool-registry:
     get:
       tags:
@@ -13756,6 +13894,240 @@ components:
       - success
       - message
       title: ConsoleSettingsUpdateResponse
+    ConsoleSlaProfileRegistryMutationResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        record:
+          $ref: '#/components/schemas/ConsoleSlaProfileVersionRecord'
+        from_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: From Version Id
+      type: object
+      required:
+      - success
+      - record
+      title: ConsoleSlaProfileRegistryMutationResponse
+    ConsoleSlaProfileRegistryPublishRequest:
+      properties:
+        scope:
+          type: string
+          enum:
+          - global
+          - domain
+          - client
+          - branch
+          title: Scope
+        domain_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Key
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        schema_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Schema Version
+        reason:
+          type: string
+          title: Reason
+        payload:
+          $ref: '#/components/schemas/SlaProfilePayload'
+      type: object
+      required:
+      - scope
+      - reason
+      - payload
+      title: ConsoleSlaProfileRegistryPublishRequest
+    ConsoleSlaProfileRegistryResponse:
+      properties:
+        scope:
+          type: string
+          enum:
+          - global
+          - domain
+          - client
+          - branch
+          title: Scope
+        company_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Company Id
+        domain_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Key
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        active:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleSlaProfileVersionRecord'
+          - type: 'null'
+        history:
+          items:
+            $ref: '#/components/schemas/ConsoleSlaProfileVersionRecord'
+          type: array
+          title: History
+          default: []
+      type: object
+      required:
+      - scope
+      title: ConsoleSlaProfileRegistryResponse
+    ConsoleSlaProfileRegistryRollbackRequest:
+      properties:
+        scope:
+          type: string
+          enum:
+          - global
+          - domain
+          - client
+          - branch
+          title: Scope
+        domain_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Key
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        target_version_id:
+          type: string
+          format: uuid
+          title: Target Version Id
+        reason:
+          type: string
+          title: Reason
+      type: object
+      required:
+      - scope
+      - target_version_id
+      - reason
+      title: ConsoleSlaProfileRegistryRollbackRequest
+    ConsoleSlaProfileVersionRecord:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        scope:
+          type: string
+          enum:
+          - global
+          - domain
+          - client
+          - branch
+          title: Scope
+        company_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Company Id
+        domain_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Key
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        status:
+          type: string
+          enum:
+          - published
+          - archived
+          title: Status
+        schema_version:
+          type: string
+          title: Schema Version
+        version_number:
+          type: integer
+          title: Version Number
+        payload:
+          $ref: '#/components/schemas/SlaProfilePayload'
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+        source_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Source Version Id
+        created_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Created By
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+        published_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Published By
+        published_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Published At
+      type: object
+      required:
+      - id
+      - scope
+      - status
+      - schema_version
+      - version_number
+      - payload
+      title: ConsoleSlaProfileVersionRecord
     ConsoleSubscriptionContractGap:
       properties:
         code:
@@ -15041,6 +15413,70 @@ components:
       additionalProperties: false
       type: object
       title: OnboardingProviderBindingWhatsApp
+    SlaProfilePayload:
+      properties:
+        profile_name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Profile Name
+          default: default
+        thresholds:
+          $ref: '#/components/schemas/SlaThresholds'
+        actions:
+          $ref: '#/components/schemas/SlaViolationActions'
+      additionalProperties: false
+      type: object
+      title: SlaProfilePayload
+    SlaThresholds:
+      properties:
+        first_response_minutes:
+          type: integer
+          maximum: 1440.0
+          minimum: 1.0
+          title: First Response Minutes
+          default: 5
+        handoff_ack_minutes:
+          type: integer
+          maximum: 1440.0
+          minimum: 1.0
+          title: Handoff Ack Minutes
+          default: 15
+        resolution_minutes:
+          type: integer
+          maximum: 10080.0
+          minimum: 1.0
+          title: Resolution Minutes
+          default: 120
+        fallback_rate_max:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Fallback Rate Max
+          default: 0.2
+      additionalProperties: false
+      type: object
+      title: SlaThresholds
+    SlaViolationActions:
+      properties:
+        warning:
+          type: string
+          pattern: ^(none|notify_manager|escalate)$
+          title: Warning
+          default: notify_manager
+        breach:
+          type: string
+          pattern: ^(none|notify_manager|escalate|collect_only)$
+          title: Breach
+          default: escalate
+        severe_breach:
+          type: string
+          pattern: ^(none|notify_manager|escalate|collect_only)$
+          title: Severe Breach
+          default: collect_only
+      additionalProperties: false
+      type: object
+      title: SlaViolationActions
     SlotResponse:
       properties:
         start:
