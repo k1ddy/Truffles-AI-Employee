@@ -15,6 +15,37 @@ Prerequisites
 - `branches.instance_id` present and matches payload instance_id.
 - Local base URL (default `http://localhost:8000`).
 
+LLM-quality start here (mandatory for new agents)
+1. Entry points
+   - `acceptance`: only `scripts/llm_quality_guarded.sh` (it injects chain token and enforces order).
+   - `dev`: prefer `scripts/llm_quality_guarded.sh`; direct `python3 ops/diagnose.py llm-quality` is allowed only for forensic/dev lane and never as acceptance evidence.
+2. Source of process truth
+   - Lane model and gates: section `Quality Operating Model v2 (mandatory for all future runs)` in this file.
+   - Acceptance chain operations: section `Guarded llm-quality quickstart (single entrypoint)` in this file.
+3. Minimal acceptance workflow
+   - Run `lock` using guarded wrapper in `quality-lane acceptance`.
+   - Complete mandatory manual audit for the run dir.
+   - Read chain `next_command` and run exactly that command.
+   - Never start replay/full manually if `next_command` is empty or chain is blocked/aborted.
+4. Mandatory artifacts per run
+   - `/tmp/booking_quality/<run-id>/summary.json`
+   - `/tmp/booking_quality/<run-id>/responses.jsonl`
+   - `/tmp/booking_quality/<run-id>/trace_bundle.jsonl`
+   - `/tmp/booking_quality/<run-id>/brief.md`
+   - `/tmp/booking_quality/<run-id>/manual_audit.json` and `/tmp/booking_quality/<run-id>/manual_audit.md`
+5. Mandatory actions by status
+   - `canonical`: continue to chain `next_command`.
+   - `incomplete`: resume same `run-id` (`--resume --output-dir ...`), do not start new run-id.
+   - `invalid` or `failed`: stop expensive lane, return to deterministic + micro fail-fast loop (`L1/L2`), then re-enter acceptance through gates.
+
+Tool map (quick reference)
+| Tool | Main use | Never use for |
+|------|----------|---------------|
+| `scripts/llm_quality_guarded.sh` | Canonical runner entrypoint (dev/acceptance) | Bypassing chain/order/gates |
+| `scripts/quality_chain_controller.sh` | Step orchestration (`prepare/finalize/status/abort/close`) | Running quality itself |
+| `python3 ops/diagnose.py llm-quality` | Low-level engine (invoked by wrapper) | Manual acceptance launch without chain token |
+| `python3 ops/diagnose.py llm-quality-audit` | Mandatory post-run manual audit artifact | Replacing contract evidence with judge text |
+
 Quickstart (script)
 ```bash
 scripts/booking_confirm_verify.sh \
@@ -125,6 +156,10 @@ LLM booking quality runner (state-aware)
 Purpose
 - Run booking dialogs (LLM or template) with state-aware evaluation (manager_active/pending).
 - Persist a baseline and compare deltas to avoid repeating the same findings.
+
+Important
+- Commands in this section can be used for forensic/dev workflows.
+- For acceptance evidence, use only `scripts/llm_quality_guarded.sh` flow from section `Guarded llm-quality quickstart (single entrypoint)`.
 
 When to use
 - After any booking-related changes (packs, routing, booking slots, expected_reply_type).
@@ -476,6 +511,60 @@ Detailed operator workflow (future agents + humans)
    - Explicit callout: which failures improved and which worsened.
    - Exact next command for continuation.
 
+Guarded llm-quality quickstart (single entrypoint)
+1. Purpose
+   - `scripts/llm_quality_guarded.sh` is the canonical runner wrapper.
+   - It is semi-automatic: it runs checks and blocks bad launches, and for `quality-lane=acceptance` it now delegates step control to `scripts/quality_chain_controller.sh`.
+   - Direct acceptance run via `python3 ops/diagnose.py llm-quality ...` is blocked unless chain token args are present.
+2. Lock run (acceptance envelope)
+   - Prepare `PG0..PG6` checklist JSON (example path: `/tmp/booking_quality/pg_checklist-<id>.json`).
+   - Required schema (minimum):
+     ```json
+     {
+       "go_to_full": {
+         "PG0": {"status": "pass"},
+         "PG1": {"status": "pass"},
+         "PG2": {"status": "pass"},
+         "PG3": {"status": "pass"},
+         "PG4": {"status": "pass"},
+         "PG5": {"status": "pass"},
+         "PG6": {"status": "pass"},
+         "root_cause_statement": "one-sentence root cause linked to evidence",
+         "defect_mapping": [
+           {
+             "defect_class": "booking_flow_break",
+             "target_test": "path::test_name",
+             "gate": "PG1",
+             "owner": "a1"
+           }
+         ]
+       }
+     }
+     ```
+   - `target_test` is enforced as executable reference: `path/to/test_file.py::test_name` must exist in repository.
+   - `scripts/llm_quality_guarded.sh --mode lock --run-id booking-lock-<id> --pg-checklist /tmp/booking_quality/pg_checklist-<id>.json -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds`
+3. Replay run (same scenarios + baseline)
+   - `scripts/llm_quality_guarded.sh --mode replay --run-id booking-replay-<id> -- --base-url <url> --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-<id>/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --max-failures 20`
+4. Full run (same acceptance lane)
+   - `scripts/llm_quality_guarded.sh --mode full --run-id booking-full-<id> -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json`
+5. Mandatory post-run audit
+   - `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/<run-id> --status done --strict-artifacts`
+6. Resume one interrupted run
+   - `scripts/llm_quality_guarded.sh --mode <lock|replay|full> --run-id <same-run-id> -- --base-url <url> --client-slug demo_salon --resume --output-dir /tmp/booking_quality/<run-id> ...`
+7. Why a run can be blocked by guard
+   - Previous run in same mode is `incomplete/invalid/failed`.
+   - Previous run has `manual_audit != done`.
+   - Duplicate fingerprint or reused run-id.
+   - Chain-controller preflight failed (step-order/run_id-mode mismatch/resume-only/token mismatch).
+   - Acceptance `lock` missing/failed `--pg-checklist` (`PG0..PG6`).
+8. Allowed override (for stale historical index only)
+   - Use `--allow-pending-previous` only to bypass old unrelated mode blockers.
+   - Do not use it to bypass current run failures; fix root cause first.
+9. Chain controller status / lifecycle
+   - Status: `scripts/quality_chain_controller.sh status --chain-id <id>`
+   - Manual abort: `scripts/quality_chain_controller.sh abort --chain-id <id> --reason root_cause_required`
+   - Manual close (after accepted full canonical): `scripts/quality_chain_controller.sh close --chain-id <id>`
+
 Artifacts
 - `/tmp/booking_quality/<stamp>/scenarios.json`
 - `/tmp/booking_quality/<stamp>/responses.jsonl`
@@ -588,3 +677,43 @@ Notes
 - Requires allowlist JIDs (state mode). Use `--remote-jid` for a fixed allowlist number.
 - Manager simulation uses Telegram callbacks by default; switch to console with `--manager-channel console`.
 - Use `--reset-before-dialog` to clear pending/manager_active before each dialog.
+
+---
+
+Quality Operating Model v2 (mandatory for all future runs)
+1. Lane model
+   - `L0`: static/contract checks (no expensive LLM runs).
+   - `L1`: deterministic targeted tests for concrete root-cause.
+   - `L2`: micro chaos fail-fast (`--max-failures`), cheap validation.
+   - `L3`: acceptance release chain only (`lock -> replay -> full`).
+2. Key rule
+   - `L3` is not a debug loop. It is a release gate and runs only after `L0/L1/L2` are green.
+3. No-Loop Law
+   - Do not repeat expensive run with same fingerprint without new root-cause evidence.
+   - If `L3` run is `INVALID/NON-CANONICAL`, return to `L1/L2`; do not start next `L3` immediately.
+4. Oracle priority
+   - Primary: `decision_meta/decision_trace/outcome` contract.
+   - Secondary: judge verdict as corroboration.
+   - Tertiary: text checks as debug hints only.
+
+Go-to-Full checklist (must pass before any L3 run)
+1. `PG0`: root-cause statement linked to artifacts (`summary/responses/trace/manual_audit`).
+2. `PG1`: target contract test exists and is green after fix.
+3. `PG2`: deterministic subset green.
+4. `PG3`: micro fail-fast run shows improvement on target blocker class.
+5. `PG4`: manual audit done and consistent with summary.
+6. `PG5`: runtime/provenance/preflight valid.
+7. `PG6`: no pending interrupted run in same chain/fingerprint.
+
+Minimal operating sequence (recommended)
+1. Run `L1` tests for the target defect.
+2. Run one `L2` micro fail-fast validation.
+3. Complete forensic handoff (`root_causes`, `top_failures`, `next_command`).
+4. Only then start `L3 lock` via guarded wrapper/chain controller.
+5. Continue `replay/full` only if `lock` is canonical and solves target blocker.
+
+Hard no-go
+- Do not run `lock/replay/full` “just to check maybe it passes now”.
+- Do not use judge-only success as acceptance evidence.
+- Do not skip manual audit before next expensive run.
+- Do not start new run-id when `resume` is required.

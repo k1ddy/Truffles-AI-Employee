@@ -189,6 +189,71 @@ async def test_outbox_gateway_uses_provider_from_payload(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_outbox_rows_skip_conversation_fallback_when_inbound_id_present(monkeypatch):
+    monkeypatch.setenv("PROVIDER_GATEWAY_OUTBOUND_ENABLED", "1")
+
+    client_id = uuid4()
+    outbox_id = uuid4()
+    conversation_id = uuid4()
+    outbox_row = OutboxMessage(
+        id=outbox_id,
+        client_id=client_id,
+        inbound_message_id="calendar:123:1:update",
+        payload_json={},
+        status="PENDING",
+        meta={},
+    )
+    db = _make_db(outbox=outbox_row)
+
+    payload_json = {
+        "schema_version": "outbox.v1",
+        "event_type": "whatsapp.send_text",
+        "client_slug": "demo_salon",
+        "provider": "mockflow",
+        "channel": "whatsapp",
+        "tenant_context": {
+            "client_id": str(client_id),
+            "client_slug": "demo_salon",
+            "instance_id": "demo-instance",
+        },
+        "payload": {
+            "remote_jid": "77770000000@s.whatsapp.net",
+            "instance_id": "demo-instance",
+            "text": "Hello",
+            "idempotency_key": "idem-calendar-fallback",
+        },
+    }
+    row = {
+        "id": outbox_id,
+        "payload_json": payload_json,
+        "conversation_id": conversation_id,
+        "client_id": client_id,
+        "inbound_message_id": "calendar:123:1:update",
+        "created_at": datetime.now(timezone.utc),
+    }
+
+    fallback_calls: list[object] = []
+
+    def _send_text(self, to, text, options):
+        return Ok(MessageSent(remote_jid=to, message_id="mock-2", provider_response={"ok": True}))
+
+    monkeypatch.setattr(outbox_router.ProviderGatewayAdapter, "send_text", _send_text)
+    monkeypatch.setattr(outbox_router, "mark_outbox_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_router, "record_outbox_latency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(legacy, "_find_message_by_message_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        legacy,
+        "_find_message_by_conversation_created_at",
+        lambda *args, **kwargs: fallback_calls.append((args, kwargs)) or None,
+    )
+
+    results = await outbox_router._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
+
+    assert results["sent"] == 1
+    assert not fallback_calls
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("client_slug", ["demo_salon", "generic"])
 async def test_outbox_rows_reject_tenant_context_client_mismatch(monkeypatch, client_slug: str):
     client_id = uuid4()

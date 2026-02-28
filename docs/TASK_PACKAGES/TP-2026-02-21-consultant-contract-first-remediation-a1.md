@@ -759,3 +759,410 @@ Forensic only (not acceptance):
 - Возможны ложные срабатывания static hardcode gate; требуется точная allowlist разрешенных зон.
 - Переход на contract-only oracle может вскрыть старые тесты, которые держались на тексте.
 - Понадобится синхронное обновление resolver + tests + run-gates, иначе churn в CI.
+
+## Execution Addendum (2026-02-28, Chain Controller + Budget Firebreak)
+
+### FACT audit (last 5h, budget loop evidence)
+
+Источники:
+- `/tmp/booking_quality/_index/by_hour/2026-02-28/**`
+- `/tmp/booking_quality/_run_guard/ledger.tsv`
+- `/tmp/booking_quality/booking-lock-20260228-a1-r11/summary.json`
+- `/tmp/booking_quality/booking-lock-20260228-a1-r12/summary.json`
+- `/tmp/booking_quality/booking-lock-20260228-a1-r13/summary.json`
+- `/tmp/booking_quality/booking-replay-20260228-a1-r11-fix{1,2,3,4}/summary.json`
+
+Факты:
+- За последние 5 часов: `27` run, из них `canonical=3`, `non-canonical=24`.
+- Стоимость non-canonical части существенно выше полезной:
+  - `turns`: `407` vs `45` (canonical),
+  - `judge judged`: `297` vs `39`,
+  - `duration_s`: `7566.3` vs `777.55`.
+- По guard ledger есть повторные циклы с одинаковым fingerprint в одном и том же окне:
+  - `mode=replay`: один fingerprint запущен `8` раз,
+  - `mode=lock`: один fingerprint запущен `2` раза.
+- Есть реальный `resume` механизм (`run_manifest.resume_command` + `--resume`), но на практике запускались новые run-id цепочки и быстрые preflight retries.
+- Есть путаница идентичности run: `run_id` с префиксом `lock-` может фактически быть `mode=replay` (определение mode идет по `scenarios_file/run_economy`).
+
+Вывод:
+- Корень сжигания бюджета в этом окне: не отсутствие quality-gates, а отсутствие обязательного chain-level оркестратора, который технически запрещает divergence-path (new-run вместо resume/step-order).
+
+### Что уже реализовано (и что это закрывает)
+
+1. `run_manifest + _index + latest_by_mode` реализованы.
+   - Закрывает трассировку артефактов по run.
+2. `manual_audit_gate` реализован fail-closed.
+   - Блокирует старт при `manual_audit_pending`.
+3. `run_economy` fingerprint gate реализован.
+   - Блокирует replay на non-canonical baseline и repeat lock после non-canonical fingerprint.
+4. `runtime_state + --resume` реализованы.
+   - Позволяет продолжать interrupted run без старта с нуля.
+5. `quality lane` (`dev/acceptance`) реализован.
+   - Фиксирует envelope acceptance требований.
+6. `run_manifest` содержит `resume_command`.
+   - Есть deterministic recovery command.
+
+### Что не реализовано (ключевые пробелы)
+
+1. Нет единого chain-level state machine (`lock -> replay -> full`) как обязательного entrypoint.
+2. Нет hard запрета на прямой запуск `ops/diagnose.py llm-quality` в acceptance lane.
+3. Нет строгого контракта `run_id` vs `mode`; mismatch не блокируется.
+4. Нет global stop-loss логики по ROI (повтор без улучшения target blocker).
+5. Guard работает mode-local, а не chain-local.
+6. Нет обязательного bootstrap handoff контекста для следующего агента (anti-amnesia на уровне запуска).
+
+### Что может сломаться даже после текущих gate (failure map)
+
+1. **Bypass risk:** оператор запускает `ops/diagnose.py` напрямую, минуя guarded wrapper.
+2. **Identity drift:** `lock-` run-id при фактическом replay уводит аудит и decision trail в неверный контекст.
+3. **Chain split risk:** можно параллельно вести разные acceptance-кандидаты, потому что индекс и gate mode-local.
+4. **Resume abandonment:** interrupted lock имеет `resume_command`, но ничто не заставляет использовать его вместо нового run-id.
+5. **False progress:** dev-lane canonical run воспринимается как закрытие acceptance chain.
+6. **Global state collision:** `.run_economy_lock_state.json/.run_economy_replay_state.json` глобальны, не chain-scoped.
+7. **Budget runaway:** нет автоматического стопа при повторных non-canonical прогонах без сокращения target failures.
+
+---
+
+## TP: Chain Controller Enforcement (full implementation plan)
+
+- Название/цель:
+  - Ввести обязательный chain-controller для acceptance quality, чтобы исключить бюджетный цикл повторных non-canonical запусков и устранить зависимость процесса от "памяти агента".
+
+- Canon refs:
+  - `AGENTS.md` (Quality Constant Gate, No Shortcut Gate, Booking anti-drift loop)
+  - текущий TP (sections 6, 7, 9, 10, 11)
+  - CA_ID: `CA-QUALITY-CHAIN-CONTROLLER-2026-02-28`
+
+- Invariant:
+  - Качество и acceptance критерии не ослабляются.
+  - `lock -> replay -> full` остается обязательной acceptance-цепочкой.
+  - Прямой обход chain-controller для acceptance невозможен технически.
+
+- Scope:
+  - Chain-level оркестрация acceptance прогонов.
+  - Hard enforcement step-order/resume-only/run-id contract.
+  - Budget stop-loss и mandatory context handoff.
+  - Обновление runbook/TP evidence flow.
+
+- Out of scope:
+  - Изменение semantic логики консультанта.
+  - Ослабление существующих quality gates.
+  - Изменение deterministic oracle на текстовый.
+
+- Touch-list (files/paths):
+  - `ops/diagnose.py`
+  - `scripts/llm_quality_guarded.sh`
+  - `scripts/quality_chain_controller.sh` (new)
+  - `scripts/quality_artifact_report.py` (optional extensions for chain view)
+  - `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`
+  - `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`
+  - `truffles-api/tests/test_booking_quality_chain_controller.py` (new)
+  - `truffles-api/tests/test_booking_quality_guarded_wrapper.py` (new)
+
+- Plan (implementation steps):
+  1. Add chain state model:
+     - New store `/tmp/booking_quality/_chain/{chain_id}.json`.
+     - Fields: `chain_id`, `lane`, `status`, `current_step`, `steps.lock/replay/full`, `active_run_id`, `target_blockers`, `roi_window`, `context_hash`, `next_command`.
+  2. Add single entrypoint script:
+     - `scripts/quality_chain_controller.sh` with commands:
+       - `start`, `resume`, `advance`, `status`, `close`, `abort`.
+     - `advance` chooses exactly one legal next action (`resume current` or next step), no free-form launch.
+  3. Add acceptance hard gate inside `ops/diagnose.py llm-quality`:
+     - New args: `--chain-id`, `--chain-step`, `--chain-token`.
+     - For `quality_lane=acceptance` require valid chain-token and state alignment.
+     - Direct acceptance launch without controller token -> `INVALID(chain_controller_required)`.
+  4. Add run_id/mode strict contract:
+     - `run_id` prefix must match resolved mode:
+       - `booking-lock-*` -> lock,
+       - `booking-replay-*` -> replay,
+       - `booking-full-*` -> full.
+     - Mismatch -> `INVALID(run_id_mode_mismatch)`.
+  5. Add resume-only enforcement:
+     - If latest chain step run is `incomplete` and has `resume_command`, only resume is allowed.
+     - Starting new run-id for same step blocked with explicit reason.
+  6. Add chain-level anti-loop/ROI stop-loss:
+     - Track target blockers (`wrong_action`, `handoff_miss`, `booking_flow_break`, `run_incomplete`).
+     - If `N` consecutive expensive runs (`judge_judged` above threshold) without delta on target blockers -> auto `BLOCKED(root_cause_required)`.
+  7. Scope run_economy state by chain:
+     - Keep lock/replay fingerprint state in chain namespace, not only global singleton files.
+  8. Integrate guarded wrapper with controller:
+     - `scripts/llm_quality_guarded.sh` delegates acceptance launches to controller.
+     - Add strict deny message when user tries acceptance run directly.
+  9. Add mandatory handoff context artifact:
+     - `brief_for_next_agent.md` generated per chain step with:
+       - root causes,
+       - exact next command,
+       - allowed next transitions only.
+     - Missing brief blocks `advance`.
+  10. Extend reporting:
+      - `quality_artifact_report.py` adds chain view: current state, blocked reason, last canonical step.
+  11. Add deterministic tests:
+      - step-order enforcement,
+      - resume-only enforcement,
+      - run_id/mode mismatch fail,
+      - direct acceptance bypass fail,
+      - stop-loss trigger and unblock rules.
+  12. Add rollout + migration:
+      - bootstrap command to import existing run artifacts into chain state (for in-flight chains).
+      - fallback mode for old data = read-only + explicit migration required.
+
+- DoD:
+  - Acceptance run cannot start without chain-controller token.
+  - Interrupted acceptance step cannot be replaced by a new run-id; only resume allowed.
+  - `run_id/mode` mismatch blocked deterministically.
+  - Chain-level status shows exactly one active step and one allowed next action.
+  - Stop-loss blocks repeated budget burn without blocker improvement.
+  - Docs/runbook include exact operator flow (start/resume/advance/close).
+  - Tests green for all new gates.
+
+- Checks:
+  - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py`
+  - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py`
+  - `pytest -q truffles-api/tests/test_booking_quality_progress_gate.py`
+  - `python3 scripts/quality_artifact_report.py --hours 6 --show-commands`
+  - One dry acceptance simulation:
+    - start chain -> lock interrupt -> resume -> replay -> full.
+
+- Evidence:
+  - Chain state file snapshots (`_chain/{chain_id}.json`) for each transition.
+  - run manifests linked to chain id/step.
+  - blocked examples:
+    - direct acceptance call without token,
+    - run_id/mode mismatch,
+    - new run-id while resume pending,
+    - stop-loss trigger.
+  - Final canonical chain evidence:
+    - lock/replay/full summaries + manual audits + chain close event.
+
+- Rollback:
+  - Feature flag `QUALITY_CHAIN_CONTROLLER_MODE=warn` for temporary downgrade from block -> warn.
+  - Revert controller integration commit and restore previous guarded wrapper path.
+  - Keep artifacts/index untouched.
+
+- No-go:
+  - Нельзя добавлять bypass-флаг, который отключает chain-controller в acceptance lane.
+  - Нельзя ослаблять existing acceptance gates ради прохождения chain.
+  - Нельзя считать dev-lane canonical run закрытием acceptance chain.
+  - Нельзя обновлять baseline, если chain не в статусе `canonical_closed`.
+
+- Риски/блокеры:
+  - Ложные блокировки на старых run без chain metadata (решается bootstrap migration).
+  - Операторские ошибки при переходе на новый entrypoint (решается runbook + explicit errors).
+  - Конкурентный запуск нескольких контроллеров (решается file lock на chain_id).
+  - Частичный отказ записи chain state (решается atomic write + backup copy).
+
+## Execution Addendum (2026-02-28, Quality Operating Model v2, mandatory)
+
+### Why previous loop fails (root cause, not symptom)
+
+- Acceptance chain (`lock -> replay -> full`) использовался как debug loop вместо release gate.
+- Большая часть expensive runs завершалась non-canonical/invalid и не могла обновлять baseline.
+- Ошибки обнаруживались слишком поздно, потому что не было обязательного дешевого pre-gate.
+- Oracle stack был смещен в сторону judge verdict вместо contract-first (`decision_meta/decision_trace/outcome`).
+- Нет процессного SLA на forensic разбор артефактов до запуска следующего expensive run.
+
+### Binding Operating Model (L0-L3)
+
+- `L0 Static/Contract Lane`:
+  - Цель: поймать структурные регрессии без токенов.
+  - Состав: schema/contract/unit/static gates.
+  - Блокер: любой red = STOP.
+- `L1 Deterministic Targeted Lane`:
+  - Цель: доказать фикс по конкретному root-cause в узком контуре.
+  - Состав: targeted deterministic tests + contract assertions.
+  - Блокер: нет target test или target test не reproduces defect.
+- `L2 Micro Chaos Fail-Fast Lane`:
+  - Цель: дешево проверить устойчивость фикса на живом шуме.
+  - Состав: llm-quality micro run с fail-fast (`--max-failures`) и ограниченным budget.
+  - Блокер: regression по целевому blocker-классу.
+- `L3 Acceptance Release Lane`:
+  - Цель: финальная приемка only.
+  - Состав: canonical `lock -> replay -> full` в acceptance envelope.
+  - Ограничение: L3 запрещен без прохождения `Go-to-Full Gate`.
+
+### Go-to-Full Gate (PG0..PG6, required before L3)
+
+- `PG0 Root-Cause Evidence`:
+  - Есть формализованный root-cause statement с ссылкой на артефакты.
+- `PG1 Target Contract Test`:
+  - Есть новый/обновленный тест, который падал до фикса и зелен после фикса.
+- `PG2 Deterministic Green`:
+  - Обязательный deterministic subset зелен локально.
+- `PG3 Micro Chaos Improvement`:
+  - L2 показал улучшение в target blocker-class, без новых P0/P1 регрессий.
+- `PG4 Forensic Complete`:
+  - manual audit выполнен (`manual_audit.status=done`) и сверен с summary.
+- `PG5 Provenance/Preflight Valid`:
+  - runtime/provenance/preflight валидны; fingerprint согласован.
+- `PG6 No Pending Ambiguity`:
+  - Нет незакрытого interrupted/pending run в том же chain/fingerprint.
+
+### No-Loop Law (hard stop)
+
+- Запрещен повтор expensive run без нового evidence-сигнала по root-cause.
+- Запрещен новый `lock` после non-canonical `lock` с тем же fingerprint без:
+  - code/runtime delta, или
+  - доказанного process remediation evidence.
+- Любой `INVALID/NON-CANONICAL` в L3 автоматически возвращает процесс в `L1/L2`.
+- L3 не может быть "основным дневным циклом" разработки.
+
+### Oracle Stack Contract (binding)
+
+- Primary oracle:
+  - `decision_meta`, `decision_trace`, tool outcomes, state/outcome contract.
+- Secondary oracle:
+  - judge verdict/classification как advisory corroboration.
+- Tertiary oracle:
+  - text-level checks (`must_include`) только как debug hints, не acceptance basis.
+- Acceptance decision запрещено принимать по judge-only или text-only сигналу.
+
+### Judge Reliability Protocol (mandatory)
+
+- Judge используется как panel-consistency evaluator, не single authority.
+- При конфликте `judge` vs `contract`:
+  - фиксируется как отдельный finding в manual audit,
+  - приоритет у contract oracle,
+  - запускается отдельный remediation backlog для judge/rubric.
+- Для acceptance требуется явная пометка:
+  - `judge_alignment = corroborated | conflicted`.
+
+### Forensic SOP (mandatory before next expensive run)
+
+- Минимальный пакет ручного разбора:
+  - `summary.json`,
+  - `responses.jsonl`,
+  - `trace_bundle.jsonl`,
+  - `brief.md`,
+  - `manual_audit.json/md`.
+- В handoff обязателен блок:
+  - `root_causes`,
+  - `top_failures`,
+  - `what_changed_since_last_run`,
+  - `exact_next_command`,
+  - `why L3 is or is not allowed`.
+- Новый expensive run до закрытия forensic SOP = `INVALID process`.
+
+### Scenario Asset Governance (quality as product asset)
+
+- Сценарии делятся на пулы:
+  - `production-like`,
+  - `expert hard cases`,
+  - `chaos/noise`.
+- Для каждого пула фиксируются quality targets:
+  - coverage, drift, blocker rate.
+- Сценарии версионируются как baseline asset (`scenario_fingerprint`) и не меняются в середине цепочки.
+- Примитивные "идеальные" вопросы не могут быть единственным acceptance corpus.
+
+### Interruption/Resume Contract
+
+- Прерванный run должен:
+  - быть резюмирован через `resume`, или
+  - быть закрыт forensic-only с явной причиной.
+- Старт нового run-id вместо resume без причины = process violation.
+- Chain state обязан хранить:
+  - `resume_command`,
+  - `stop_reason`,
+  - `resume_required`.
+
+### Promotion Rules (L0 -> L1 -> L2 -> L3)
+
+- Переход на следующий lane разрешен только при явном green предыдущего lane.
+- `L3` разрешается только после `PG0..PG6`.
+- `L3 fail` не ведет к новому `L3`; сначала обязательный возврат в `L1/L2`.
+
+### Implementation Program (full rollout)
+
+- `Stage A: Governance Sync`
+  - Обновить TP/runbook/AGENTS references под модель L0-L3 + PG0..PG6.
+  - Exit criteria: doc gates консистентны и не противоречат charter.
+- `Stage B: Oracle Rebalance`
+  - Укрепить contract-first acceptance; judge понижен до corroboration role.
+  - Exit criteria: decision rule в tooling отражает oracle priority.
+- `Stage C: Forensic Automation`
+  - Стандартизовать manual audit output и handoff artifact template.
+  - Exit criteria: следующий шаг всегда имеет deterministic `next_command + reason`.
+- `Stage D: Scenario Governance`
+  - Версионировать scenario pools, добавить chaos realism requirements.
+  - Exit criteria: acceptance corpus содержит production-like + chaos buckets.
+- `Stage E: Fail-Fast Economics`
+  - Закрепить L2 micro fail-fast как обязательный pre-gate.
+  - Exit criteria: expensive runs происходят только после L2 green signal.
+- `Stage F: Chain Integrity`
+  - Довести chain controller до строгого enforcement resume/order/identity.
+  - Exit criteria: bypass/identity drift/resume abandonment блокируются hard.
+- `Stage G: Acceptance Re-enable`
+  - Запустить L3 только после прохождения Stage A-F и PG0..PG6.
+  - Exit criteria: `lock -> replay -> full` используется как release confirmation, не как debug loop.
+
+### Execution Status Update (2026-02-28, fact-checked)
+
+- Completed implementation (code + tests):
+  - Chain controller introduced and wired as acceptance step owner:
+    - `scripts/quality_chain_controller.sh`
+    - `scripts/llm_quality_guarded.sh`
+  - Acceptance token gate enforced in runtime preflight:
+    - `ops/diagnose.py` (`chain_controller_required`, step/token/mode checks).
+  - Resume/order/identity enforcement implemented:
+    - `chain_step_order_violation`, `chain_resume_required`, `run_id_mode_mismatch`.
+  - Go-to-Full enforcement upgraded from docs-only to runtime gate:
+    - acceptance `lock` requires `--pg-checklist`,
+    - checklist must include `PG0..PG6`,
+    - checklist must include `root_cause_statement`,
+    - checklist must include `defect_mapping` entries (`defect_class`, `target_test`, `gate`, `owner`),
+    - `target_test` is validated as real repository reference (`path::test_name` exists).
+  - Deterministic regression coverage exists and is green for this layer:
+    - `truffles-api/tests/test_booking_quality_chain_controller.py`
+    - `truffles-api/tests/test_booking_quality_guarded_wrapper.py`
+    - `truffles-api/tests/test_booking_quality_status_gate.py`
+    - `truffles-api/tests/test_booking_quality_progress_gate.py`
+
+- Partially completed (policy defined, enforcement not fully automated yet):
+  - Stage B Oracle Rebalance:
+    - contract-first is documented and partially enforced,
+    - full machine arbitration for oracle conflicts is still pending.
+  - Stage C Forensic Automation:
+    - manual-audit gating exists,
+    - SLA-grade forensic template validation is still pending.
+  - Stage D Scenario Governance:
+    - scenario contract checks exist,
+    - versioned scenario quality SLA and promotion policy are still pending.
+  - Stage E Fail-Fast Economics:
+    - run-economy and stop-loss signals exist,
+    - full lane scheduler enforcement across all run types is still pending.
+
+- Remaining implementation items before declaring Stage A-G complete:
+  - Implement executable defect taxonomy matrix `defect -> test -> gate -> owner` with mandatory validation artifact (beyond checklist presence).
+  - Add machine-enforced judge reliability conflict policy (`primary contract` wins, judge as corroboration) with explicit reason-codes.
+  - Add forensic SLA validator (`manual_audit` completeness + owner + timestamp + conflict resolution) as blocking preflight.
+  - Add scenario governance registry (version, realism bucket coverage, acceptance eligibility marker).
+  - Add promotion validator that blocks lane jump (`L1/L2 -> L3`) without evidence chain, not only checklist declaration.
+
+### DoD for this Addendum
+
+- TP явно фиксирует L0-L3 operating model.
+- `Go-to-Full Gate` и `No-Loop Law` закреплены как обязательные.
+- Oracle/judge responsibility разделены contract-first способом.
+- Определен полный rollout-план Stage A-G с exit criteria.
+
+### Checks
+
+- Документарная проверка:
+  - TP sections не противоречат `Architecture Charter` и текущим No-go.
+- Процессная проверка:
+  - любой предложенный L3 run должен проходить PG0..PG6 checklist перед запуском.
+- Аудиторская проверка:
+  - handoff содержит forensic SOP пакет и next-command rationale.
+
+### Evidence
+
+- Обновленный TP с этим addendum.
+- Пример заполненного PG0..PG6 чеклиста в session evidence перед следующим L3.
+- Пример forensic handoff, где объяснено почему L3 разрешен или заблокирован.
+
+### No-go (additional)
+
+- Нельзя запускать L3 "чтобы проверить, вдруг теперь пройдет", без PG0..PG6.
+- Нельзя повышать роль judge до primary acceptance oracle.
+- Нельзя заменять root-cause фиксы повтором expensive runs.
+- Нельзя принимать успех по "зелёным общим метрикам" при красных target blockers.

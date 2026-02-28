@@ -233,4 +233,51 @@
   - python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/booking-human-critical-hq1-20260228-timeoutfix-a1-r6-dev2 --status done --strict-artifacts
   - /tmp/booking_quality/booking-human-critical-hq1-20260228-timeoutfix-a1-r6-dev2/{summary.json,brief.md,responses.jsonl,trace_bundle.jsonl,manual_audit.json}
   - `r6-dev2` result: `infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`, `manual_audit=done`, `degraded_fallback_rate=0.0`, `judge(pass/fail)=35/0`, `hq1_bad_turn_count=0`.
-- last_updated: 2026-02-28T06:54:46+05:00
+  - Added chain-level acceptance enforcement packet:
+    - `scripts/quality_chain_controller.sh` (prepare/finalize/status/close/abort + resume-only + ROI stop-loss).
+    - `scripts/llm_quality_guarded.sh` integration with chain prepare/finalize + token injection.
+    - `ops/diagnose.py` acceptance preflight gate for `--chain-id/--chain-step/--chain-token`.
+  - Added deterministic regression suites:
+    - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py`
+  - Expanded runtime behavior coverage:
+    - master-query normalization under booking flow (`test_message_endpoint.py`).
+    - outbox fallback isolation for explicit `inbound_message_id` (`test_provider_gateway_integration.py`).
+  - Synced onboarding/operational docs:
+    - `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` ("LLM-quality start here", guarded quickstart).
+    - `docs/SESSION_START_PROMPT.txt`, `docs/runbooks/EXECUTION_CYCLE.md`, `docs/RUNBOOK.md`.
+    - TP addendum with `L0-L3`, `PG0..PG6`, `No-Loop Law`, and explicit budget-quality invariants.
+  - Local deterministic validation (green):
+    - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py truffles-api/tests/test_booking_quality_guarded_wrapper.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_progress_gate.py` (`75 passed`).
+    - `pytest -q truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_provider_gateway_integration.py` (`282 passed`, 2 warnings).
+    - `bash -n scripts/llm_quality_guarded.sh && bash -n scripts/quality_chain_controller.sh`.
+    - `scripts/session_check.sh`.
+  - Commit and PR:
+    - commit `235de808` pushed to `fix/llm-first-firebreak-2026-02-19`.
+    - PR opened: `https://github.com/k1ddy/Truffles-AI-Employee/pull/847`.
+  - Fact-check pass on PR `#847`:
+    - `session-gate` green,
+    - `unit-tests` green,
+    - `lint` red root-cause identified (`I001 import order` in `test_booking_quality_guarded_wrapper.py`) and fixed.
+  - Continued Stage B/Stage F implementation in code (not docs-only):
+    - Acceptance lock now requires `--pg-checklist` via guarded wrapper.
+    - Chain controller validates checklist hard-gates:
+      - `PG0..PG6`,
+      - `root_cause_statement`,
+      - `defect_mapping` required fields.
+    - Added executable mapping validation:
+      - `target_test` must resolve to existing `path::test_name` in repository.
+  - Added/updated deterministic tests for new gates:
+    - `test_chain_controller_blocks_lock_without_pg_checklist`
+    - `test_chain_controller_blocks_lock_with_pg_checklist_missing_mapping`
+    - `test_chain_controller_blocks_lock_with_pg_checklist_invalid_target_test`
+  - Updated operator docs for mandatory checklist schema and executable `target_test` rule:
+    - `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`
+    - `docs/SESSION_START_PROMPT.txt`
+    - `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md` (fact-checked status block: done/partial/remaining).
+  - Validation (green):
+    - `bash -n scripts/quality_chain_controller.sh && bash -n scripts/llm_quality_guarded.sh`
+    - `ruff check truffles-api/tests/test_booking_quality_chain_controller.py truffles-api/tests/test_booking_quality_guarded_wrapper.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py truffles-api/tests/test_booking_quality_guarded_wrapper.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_progress_gate.py` (`78 passed`)
+    - `scripts/session_check.sh`
+- last_updated: 2026-02-28T18:07:15+05:00
