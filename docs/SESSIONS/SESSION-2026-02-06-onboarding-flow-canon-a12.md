@@ -3,6 +3,10 @@
 - status: active
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-05-onboarding-billing-support-audit.md
+- research_gate: optional
+- root_cause_gate: optional
+- reuse_gate: optional
+- release_safety_gate: optional
 - branch: feat/2026-02-06-onboarding-flow-canon-a12
 - worktree: /home/zhan/worktrees/2026-02-06-onboarding-flow-canon-a12
 - base_ref: origin/main

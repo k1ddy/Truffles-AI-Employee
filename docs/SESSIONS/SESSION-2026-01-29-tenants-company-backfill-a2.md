@@ -3,6 +3,10 @@
 - status: active
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-29-tenants-company-backfill.md
+- research_gate: optional
+- root_cause_gate: optional
+- reuse_gate: optional
+- release_safety_gate: optional
 - branch: feat/2026-01-29-tenants-company-backfill-a2
 - worktree: /home/zhan/worktrees/2026-01-29-tenants-company-backfill-a2
 - base_ref: origin/main

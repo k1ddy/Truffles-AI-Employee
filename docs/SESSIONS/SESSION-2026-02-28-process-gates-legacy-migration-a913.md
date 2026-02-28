@@ -1,0 +1,28 @@
+# SESSION 2026-02-28-process-gates-legacy-migration-a913 — Session 2026-02-28-process-gates-legacy-migration-a913
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-28-process-gates-legacy-migration-a913.md
+- block_id: PROCESS-GATES-LEGACY-MIGRATION-2026Q2
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- branch: feat/2026-02-28-process-gates-legacy-migration-a913
+- worktree: /home/zhan/worktrees/2026-02-28-process-gates-legacy-migration-a913
+- base_ref: origin/main
+- scope: Migrate first stale legacy cohort from missing research-driven gate metadata to explicit optional modes.
+- done:
+  - Session created.
+  - Captured baseline adoption metrics in `/tmp/session_adoption_a913_before.json`.
+  - Migrated wave-1 cohort (20 stale active `legacy_missing` sessions) to explicit `optional` research-driven gate modes.
+  - Verified after-state metrics in `/tmp/session_adoption_a913_after.json` (`legacy_missing: 108 -> 88`, `optional: 0 -> 20`).
+  - Published canonical wave report `docs/REPORTS/2026-02-28-process-gates-legacy-migration-a913.md`.
+- next:
+  - Prepare PR handoff and unblock wave-2 migration block.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-28-process-gates-legacy-migration-a913.md
+  - `/tmp/session_adoption_a913_before.json`
+  - `/tmp/session_adoption_a913_after.json`
+  - docs/REPORTS/2026-02-28-process-gates-legacy-migration-a913.md
+- last_updated: 2026-02-28

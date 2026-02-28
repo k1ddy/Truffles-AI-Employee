@@ -3,6 +3,10 @@
 - status: active
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-02-console-calendar-past-dates.md
+- research_gate: optional
+- root_cause_gate: optional
+- reuse_gate: optional
+- release_safety_gate: optional
 - branch: feat/2026-02-02-console-calendar-past-dates-a5
 - worktree: /home/zhan/worktrees/2026-02-02-console-calendar-past-dates-a5
 - base_ref: origin/main

@@ -3,6 +3,10 @@
 - status: active
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md
+- research_gate: optional
+- root_cause_gate: optional
+- reuse_gate: optional
+- release_safety_gate: optional
 - branch: state/livecheck-recovery-2026-01-27
 - worktree: /home/zhan/truffles-main
 - base_ref: origin/main
