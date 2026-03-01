@@ -34,6 +34,7 @@ LLM-quality start here (mandatory for new agents)
    - `/tmp/booking_quality/<run-id>/brief.md`
    - `/tmp/booking_quality/<run-id>/manual_audit.json` and `/tmp/booking_quality/<run-id>/manual_audit.md`
    - scenario governance registry entry in `/tmp/booking_quality/_scenario_governance_registry.json`
+     (schema `>=2`, `realism_sla.valid=true`, lifecycle `candidate -> eligible -> approved`)
 5. Mandatory actions by status
    - `canonical`: continue to chain `next_command`.
    - `incomplete`: resume same `run-id` (`--resume --output-dir ...`), do not start new run-id.
@@ -571,7 +572,7 @@ Guarded llm-quality quickstart (single entrypoint)
    - Previous run has `manual_audit != done`.
    - Forensic SLA invalid (`manual_audit` missing analyst/timestamp/root-cause/next-step/oracle arbitration contract).
    - Oracle conflict unresolved (judge-vs-contract conflict without `winner=contract` and resolution).
-   - Scenario governance missing (acceptance replay/full scenarios are not registered or not promotion-eligible).
+   - Scenario governance missing (acceptance replay/full scenarios are not registered, or schema/promotion/realism SLA is invalid).
    - Duplicate fingerprint or reused run-id.
    - Chain-controller preflight failed (step-order/run_id-mode mismatch/resume-only/token mismatch).
    - Acceptance `lock` missing/failed `--pg-checklist` (`PG0..PG6`).

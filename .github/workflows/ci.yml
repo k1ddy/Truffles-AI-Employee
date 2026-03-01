@@ -95,7 +95,6 @@ jobs:
               - "truffles-api/app/services/state_machine.py"
               - "truffles-api/app/schemas/webhook.py"
               - "truffles-api/app/models/**"
-              - "ops/diagnose.py"
             deploy_required:
               - "truffles-api/app/**"
               - "truffles-api/migrations/**"
