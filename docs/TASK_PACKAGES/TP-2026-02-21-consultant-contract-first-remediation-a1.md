@@ -752,6 +752,18 @@ Forensic only (not acceptance):
   - enforce machine-check of L2 evidence artifact before any acceptance lock.
 - Rejected options:
   - allowing checklist-only self-declaration of PG3 without artifact validation.
+- Query: `pytest junitxml file and classname attributes`
+- Date/time: `2026-03-01T05:42:07Z`
+- Opened sources:
+  - `https://docs.pytest.org/en/stable/reference.html#confval-junit_family` (primary)
+- Ready solutions found:
+  - pytest JUnit XML carries deterministic testcase attributes (`name`, `classname`, optional `file`) suitable for machine linkage to target tests;
+  - JUnit artifact can be used as deterministic L1 evidence instead of self-declared flags.
+- Decision: `reuse/integrate`
+  - require `l1_evidence.junit_xml_path` in Go-to-Full checklist and match each `defect_mapping.target_test` against passed JUnit testcase;
+  - enforce freshness window across L1 (JUnit) and L2 (summary) evidence.
+- Rejected options:
+  - accepting checklist-only L1 pass declarations without artifact linkage.
 
 ## Rollback
 
@@ -1139,8 +1151,11 @@ Forensic only (not acceptance):
     - checklist must include `root_cause_statement`,
     - checklist must include `defect_mapping` entries (`defect_class`, `target_test`, `gate`, `owner`),
     - `target_test` is validated as real repository reference (`path::test_name` exists),
+    - checklist must include `l1_evidence.junit_xml_path`,
+    - every `defect_mapping.target_test` is machine-linked to a `passed` testcase in L1 JUnit artifact,
     - checklist must include `l2_evidence.summary_path`,
-    - `l2_evidence.summary_path` is machine-validated as green (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`) and non-acceptance lane.
+    - `l2_evidence.summary_path` is machine-validated as green (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`) and non-acceptance lane,
+    - L1/L2 evidence freshness window is enforced fail-closed (`evidence_freshness_hours`, default `24h`).
   - Deterministic regression coverage exists and is green for this layer:
     - `truffles-api/tests/test_booking_quality_chain_controller.py`
     - `truffles-api/tests/test_booking_quality_guarded_wrapper.py`
@@ -1165,12 +1180,10 @@ Forensic only (not acceptance):
     - versioned scenario quality SLA and lifecycle (`candidate -> eligible -> approved`) are pending.
   - Stage E Fail-Fast Economics:
     - run-economy and stop-loss signals exist,
-    - acceptance `lock` now fail-closes on missing/non-green L2 evidence artifact.
+    - acceptance `lock` now fail-closes on missing/non-green L1/L2 evidence and stale evidence windows.
 
 - Remaining implementation items before declaring Stage A-G complete:
-  - Implement executable defect taxonomy matrix `defect -> test -> gate -> owner` with mandatory validation artifact (beyond checklist presence).
   - Add scenario governance version policy (registry schema versioning + realism bucket SLA + promotion lifecycle).
-  - Extend promotion validator from current L2 artifact check to full `L1 + L2` evidence-chain validation (target deterministic run linkage + freshness window).
 
 ### DoD for this Addendum
 

@@ -141,6 +141,7 @@ import json
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 try:
@@ -168,6 +169,7 @@ BLOCKERS = ("wrong_action", "handoff_miss", "booking_flow_break", "run_completio
 GO_TO_FULL_KEYS = ("PG0", "PG1", "PG2", "PG3", "PG4", "PG5", "PG6")
 DEFECT_MAPPING_KEYS = ("defect_class", "target_test", "gate", "owner")
 VALID_DONE_AUDIT_STATES = {"done", "completed", "pass", "passed"}
+DEFAULT_EVIDENCE_FRESHNESS_HOURS = 24.0
 REPO_ROOT = os.path.abspath(
     os.path.expanduser(str(os.environ.get("LLM_QUALITY_REPO_ROOT") or os.getcwd()))
 )
@@ -241,6 +243,132 @@ def parse_status_bool(value):
     return None
 
 
+def parse_datetime_utc(raw_value):
+    token = str(raw_value or "").strip()
+    if not token:
+        return None
+    if token.endswith("Z"):
+        token = token[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(token)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def resolve_evidence_freshness_hours(payload: dict, source: dict):
+    raw_value = (
+        source.get("evidence_freshness_hours")
+        if isinstance(source, dict)
+        else None
+    )
+    if raw_value in (None, "") and isinstance(payload, dict):
+        raw_value = payload.get("evidence_freshness_hours")
+    if raw_value in (None, ""):
+        return DEFAULT_EVIDENCE_FRESHNESS_HOURS, None
+    try:
+        parsed = float(raw_value)
+    except Exception:
+        return None, "go_to_full_evidence_freshness_invalid"
+    if parsed <= 0:
+        return None, "go_to_full_evidence_freshness_invalid"
+    return parsed, None
+
+
+def validate_evidence_freshness(
+    *,
+    token,
+    freshness_hours,
+    primary_ts=None,
+    fallback_ts=None,
+):
+    observed = parse_datetime_utc(primary_ts) or parse_datetime_utc(fallback_ts)
+    if observed is None:
+        return None, f"{token}_timestamp_missing"
+    age_seconds = (datetime.now(timezone.utc) - observed).total_seconds()
+    limit_seconds = float(freshness_hours) * 3600.0
+    if age_seconds < 0:
+        age_seconds = 0.0
+    if age_seconds > limit_seconds:
+        age_hours = age_seconds / 3600.0
+        return None, f"{token}_stale:{age_hours:.2f}:{freshness_hours:.2f}"
+    return observed.isoformat(), None
+
+
+def normalize_path_token(path_value: str):
+    token = str(path_value or "").replace("\\", "/").strip()
+    while token.startswith("./"):
+        token = token[2:]
+    return token
+
+
+def target_symbol_from_reference(target_ref: str):
+    test_part = str(target_ref or "").split("::", 1)[1]
+    return test_part.split("[", 1)[0].strip()
+
+
+def pytest_entry_matches_target(entry: dict, target_path: str, target_symbol: str):
+    if str(entry.get("status") or "").strip().casefold() != "passed":
+        return False
+    case_name = str(entry.get("name") or "").strip()
+    if not case_name:
+        return False
+    case_symbol = case_name.split("[", 1)[0].strip()
+    if case_symbol != target_symbol:
+        return False
+
+    target_norm = normalize_path_token(target_path)
+    target_abs = os.path.abspath(os.path.join(REPO_ROOT, target_norm))
+    file_attr = normalize_path_token(entry.get("file") or "")
+    if file_attr:
+        file_abs = os.path.abspath(file_attr)
+        if os.path.isabs(file_attr):
+            return file_abs == target_abs
+        return file_attr.endswith(target_norm) or file_abs == target_abs
+
+    class_attr = str(entry.get("classname") or "").strip()
+    if class_attr:
+        class_path = normalize_path_token(class_attr.replace(".", "/"))
+        target_no_ext = target_norm[:-3] if target_norm.endswith(".py") else target_norm
+        if class_path.endswith(target_no_ext):
+            return True
+    return False
+
+
+def parse_pytest_junit(path: str):
+    try:
+        tree = ET.parse(path)
+    except Exception:
+        return None, "go_to_full_l1_report_unreadable"
+    root = tree.getroot()
+    testsuite = root
+    if root.tag == "testsuites":
+        testsuite = root.find("testsuite")
+    if testsuite is None:
+        return None, "go_to_full_l1_report_unreadable"
+    entries = []
+    for testcase in testsuite.iter("testcase"):
+        status = "passed"
+        if testcase.find("failure") is not None or testcase.find("error") is not None:
+            status = "failed"
+        elif testcase.find("skipped") is not None:
+            status = "skipped"
+        entries.append(
+            {
+                "name": testcase.attrib.get("name"),
+                "classname": testcase.attrib.get("classname"),
+                "file": testcase.attrib.get("file"),
+                "status": status,
+            }
+        )
+    return {
+        "entries": entries,
+        "timestamp": testsuite.attrib.get("timestamp"),
+    }, None
+
+
 def load_pg_checklist(path: str):
     token = str(path or "").strip()
     if not token:
@@ -311,7 +439,29 @@ def load_pg_checklist(path: str):
     if invalid_rows:
         return None, "go_to_full_mapping_invalid:" + ";".join(invalid_rows)
 
-    l2_evidence, l2_error = validate_l2_evidence(payload, source)
+    freshness_hours, freshness_error = resolve_evidence_freshness_hours(payload, source)
+    if freshness_error:
+        return None, freshness_error
+
+    target_tests = [
+        str(row.get("target_test") or "").strip()
+        for row in mapping
+        if isinstance(row, dict) and str(row.get("target_test") or "").strip()
+    ]
+    l1_evidence, l1_error = validate_l1_evidence(
+        payload,
+        source,
+        target_tests=target_tests,
+        freshness_hours=freshness_hours,
+    )
+    if l1_error:
+        return None, l1_error
+
+    l2_evidence, l2_error = validate_l2_evidence(
+        payload,
+        source,
+        freshness_hours=freshness_hours,
+    )
     if l2_error:
         return None, l2_error
 
@@ -321,6 +471,8 @@ def load_pg_checklist(path: str):
         "status": {key: bool(statuses.get(key)) for key in GO_TO_FULL_KEYS},
         "root_cause_statement": root_cause_statement,
         "defect_mapping_count": len(mapping),
+        "evidence_freshness_hours": freshness_hours,
+        "l1_evidence": l1_evidence,
         "l2_evidence": l2_evidence,
     }
     return result, None
@@ -359,7 +511,68 @@ def validate_target_test_reference(target_ref: str):
     return True, None
 
 
-def validate_l2_evidence(payload: dict, source: dict):
+def validate_l1_evidence(payload: dict, source: dict, *, target_tests, freshness_hours):
+    evidence = source.get("l1_evidence")
+    if not isinstance(evidence, dict):
+        evidence = payload.get("l1_evidence")
+    if not isinstance(evidence, dict):
+        return None, "go_to_full_l1_evidence_missing"
+
+    junit_path_token = str(
+        evidence.get("junit_xml_path")
+        or evidence.get("report_path")
+        or ""
+    ).strip()
+    if not junit_path_token:
+        return None, "go_to_full_l1_report_path_missing"
+    junit_path = os.path.abspath(os.path.expanduser(junit_path_token))
+    if not os.path.exists(junit_path) or not os.path.isfile(junit_path):
+        return None, f"go_to_full_l1_report_missing:{junit_path}"
+    parsed_report, report_error = parse_pytest_junit(junit_path)
+    if report_error:
+        return None, report_error
+    report_entries = parsed_report.get("entries") if isinstance(parsed_report, dict) else []
+    if not isinstance(report_entries, list):
+        report_entries = []
+
+    missing_targets = []
+    for target_ref in target_tests:
+        if "::" not in target_ref:
+            missing_targets.append(target_ref)
+            continue
+        path_part, _ = target_ref.split("::", 1)
+        symbol = target_symbol_from_reference(target_ref)
+        matched = any(
+            pytest_entry_matches_target(entry, path_part, symbol)
+            for entry in report_entries
+            if isinstance(entry, dict)
+        )
+        if not matched:
+            missing_targets.append(target_ref)
+    if missing_targets:
+        return None, "go_to_full_l1_target_not_passed:" + ",".join(missing_targets)
+
+    report_mtime_iso = datetime.fromtimestamp(
+        os.path.getmtime(junit_path),
+        tz=timezone.utc,
+    ).isoformat()
+    freshness_timestamp, freshness_error = validate_evidence_freshness(
+        token="go_to_full_l1_evidence",
+        freshness_hours=freshness_hours,
+        primary_ts=evidence.get("recorded_at") or (parsed_report or {}).get("timestamp"),
+        fallback_ts=report_mtime_iso,
+    )
+    if freshness_error:
+        return None, freshness_error
+
+    return {
+        "junit_xml_path": junit_path,
+        "target_tests": list(target_tests),
+        "recorded_at": freshness_timestamp,
+    }, None
+
+
+def validate_l2_evidence(payload: dict, source: dict, *, freshness_hours):
     evidence = source.get("l2_evidence")
     if not isinstance(evidence, dict):
         evidence = payload.get("l2_evidence")
@@ -418,6 +631,19 @@ def validate_l2_evidence(payload: dict, source: dict):
     if expected_run_id and observed_run_id and expected_run_id != observed_run_id:
         return None, f"go_to_full_l2_run_id_mismatch:{expected_run_id}:{observed_run_id}"
 
+    summary_mtime_iso = datetime.fromtimestamp(
+        os.path.getmtime(summary_path),
+        tz=timezone.utc,
+    ).isoformat()
+    freshness_timestamp, freshness_error = validate_evidence_freshness(
+        token="go_to_full_l2_evidence",
+        freshness_hours=freshness_hours,
+        primary_ts=evidence.get("recorded_at") or summary.get("finished_at"),
+        fallback_ts=summary_mtime_iso,
+    )
+    if freshness_error:
+        return None, freshness_error
+
     return {
         "summary_path": summary_path,
         "run_id": observed_run_id or expected_run_id or None,
@@ -426,6 +652,7 @@ def validate_l2_evidence(payload: dict, source: dict):
         "run_integrity_valid": True,
         "manual_audit_status": manual_audit_status or None,
         "lane_effective": lane_token or None,
+        "recorded_at": freshness_timestamp,
     }, None
 
 
