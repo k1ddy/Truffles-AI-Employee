@@ -27,7 +27,30 @@ def _load_module():
 _module = _load_module()
 
 
-def _write_pg_checklist(path: Path) -> None:
+def _write_l2_summary(path: Path, *, run_id: str, semantic_valid: bool = True) -> None:
+    payload = {
+        "run_id": run_id,
+        "quality_status": {
+            "infra_valid": True,
+            "semantic_valid": semantic_valid,
+            "run_integrity_valid": True,
+            "manual_audit_status": "done",
+            "quality_lane_effective": "dev",
+        },
+        "infra_valid": True,
+        "semantic_valid": semantic_valid,
+        "run_integrity_valid": True,
+        "config": {"quality_lane_effective": "dev"},
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_pg_checklist(
+    path: Path,
+    *,
+    l2_summary_path: Path | None = None,
+    l2_run_id: str | None = None,
+) -> None:
     payload = {
         "go_to_full": {
             "PG0": {"status": "pass"},
@@ -48,6 +71,11 @@ def _write_pg_checklist(path: Path) -> None:
             ],
         }
     }
+    if l2_summary_path is not None:
+        payload["go_to_full"]["l2_evidence"] = {
+            "summary_path": str(l2_summary_path),
+            "run_id": str(l2_run_id or ""),
+        }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -171,8 +199,14 @@ def test_chain_controller_prepare_and_finalize_advances_to_replay(tmp_path):
     run_id = "booking-lock-chain-e2e"
     output_dir = tmp_path / run_id
     pg_checklist = tmp_path / "pg_checklist.json"
+    l2_summary_path = tmp_path / "l2_summary.json"
     output_dir.mkdir(parents=True, exist_ok=True)
-    _write_pg_checklist(pg_checklist)
+    _write_l2_summary(l2_summary_path, run_id="booking-l2-chain-e2e")
+    _write_pg_checklist(
+        pg_checklist,
+        l2_summary_path=l2_summary_path,
+        l2_run_id="booking-l2-chain-e2e",
+    )
     env = dict(os.environ)
     env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
 
@@ -400,3 +434,85 @@ def test_chain_controller_blocks_lock_with_pg_checklist_invalid_target_test(tmp_
 
     assert prepare.returncode != 0
     assert "go_to_full_mapping_invalid:0:target_test_path_missing" in prepare.stderr
+
+
+def test_chain_controller_blocks_lock_with_pg_checklist_missing_l2_evidence(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    run_id = "booking-lock-chain-missing-l2-evidence"
+    output_dir = tmp_path / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pg_checklist = tmp_path / "pg_checklist_no_l2.json"
+    _write_pg_checklist(pg_checklist)
+
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
+
+    prepare = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "lock",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            str(output_dir),
+            "--pg-checklist",
+            str(pg_checklist),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+
+    assert prepare.returncode != 0
+    assert "go_to_full_l2_evidence_missing" in prepare.stderr
+
+
+def test_chain_controller_blocks_lock_with_pg_checklist_non_green_l2(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    run_id = "booking-lock-chain-bad-l2"
+    output_dir = tmp_path / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pg_checklist = tmp_path / "pg_checklist_bad_l2.json"
+    l2_summary_path = tmp_path / "l2_summary_bad.json"
+    _write_l2_summary(l2_summary_path, run_id="booking-l2-chain-bad", semantic_valid=False)
+    _write_pg_checklist(
+        pg_checklist,
+        l2_summary_path=l2_summary_path,
+        l2_run_id="booking-l2-chain-bad",
+    )
+
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
+
+    prepare = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "lock",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            str(output_dir),
+            "--pg-checklist",
+            str(pg_checklist),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+
+    assert prepare.returncode != 0
+    assert "go_to_full_l2_not_green" in prepare.stderr

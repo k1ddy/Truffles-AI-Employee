@@ -167,6 +167,7 @@ STEPS = ("lock", "replay", "full")
 BLOCKERS = ("wrong_action", "handoff_miss", "booking_flow_break", "run_completion_gap")
 GO_TO_FULL_KEYS = ("PG0", "PG1", "PG2", "PG3", "PG4", "PG5", "PG6")
 DEFECT_MAPPING_KEYS = ("defect_class", "target_test", "gate", "owner")
+VALID_DONE_AUDIT_STATES = {"done", "completed", "pass", "passed"}
 REPO_ROOT = os.path.abspath(
     os.path.expanduser(str(os.environ.get("LLM_QUALITY_REPO_ROOT") or os.getcwd()))
 )
@@ -224,6 +225,20 @@ def parse_pg_entry(entry) -> bool:
         if status:
             return status in {"pass", "passed", "ok", "done", "green", "true"}
     return False
+
+
+def parse_status_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        token = value.strip().casefold()
+        if token in {"true", "1", "yes", "ok", "pass", "passed", "green"}:
+            return True
+        if token in {"false", "0", "no", "fail", "failed", "red"}:
+            return False
+    return None
 
 
 def load_pg_checklist(path: str):
@@ -296,12 +311,17 @@ def load_pg_checklist(path: str):
     if invalid_rows:
         return None, "go_to_full_mapping_invalid:" + ";".join(invalid_rows)
 
+    l2_evidence, l2_error = validate_l2_evidence(payload, source)
+    if l2_error:
+        return None, l2_error
+
     result = {
         "path": normalized,
         "keys": list(GO_TO_FULL_KEYS),
         "status": {key: bool(statuses.get(key)) for key in GO_TO_FULL_KEYS},
         "root_cause_statement": root_cause_statement,
         "defect_mapping_count": len(mapping),
+        "l2_evidence": l2_evidence,
     }
     return result, None
 
@@ -337,6 +357,76 @@ def validate_target_test_reference(target_ref: str):
     if test_symbol not in content:
         return False, "target_test_symbol_missing"
     return True, None
+
+
+def validate_l2_evidence(payload: dict, source: dict):
+    evidence = source.get("l2_evidence")
+    if not isinstance(evidence, dict):
+        evidence = payload.get("l2_evidence")
+    if not isinstance(evidence, dict):
+        return None, "go_to_full_l2_evidence_missing"
+
+    summary_path_token = str(evidence.get("summary_path") or "").strip()
+    if not summary_path_token:
+        return None, "go_to_full_l2_summary_path_missing"
+    summary_path = os.path.abspath(os.path.expanduser(summary_path_token))
+    if not os.path.exists(summary_path) or not os.path.isfile(summary_path):
+        return None, f"go_to_full_l2_summary_missing:{summary_path}"
+    summary = load_json(summary_path)
+    if not isinstance(summary, dict):
+        return None, "go_to_full_l2_summary_unreadable"
+
+    quality_status = summary.get("quality_status")
+    if not isinstance(quality_status, dict):
+        quality_status = {}
+    infra_valid = parse_status_bool(quality_status.get("infra_valid"))
+    if infra_valid is None:
+        infra_valid = parse_status_bool(summary.get("infra_valid"))
+    semantic_valid = parse_status_bool(quality_status.get("semantic_valid"))
+    if semantic_valid is None:
+        semantic_valid = parse_status_bool(summary.get("semantic_valid"))
+    run_integrity_valid = parse_status_bool(quality_status.get("run_integrity_valid"))
+    if run_integrity_valid is None:
+        run_integrity_valid = parse_status_bool(summary.get("run_integrity_valid"))
+    if infra_valid is not True or semantic_valid is not True or run_integrity_valid is not True:
+        return None, "go_to_full_l2_not_green"
+
+    manual_audit_status = str(
+        quality_status.get("manual_audit_status")
+        or summary.get("manual_audit_status")
+        or ""
+    ).strip().casefold()
+    if manual_audit_status and manual_audit_status not in VALID_DONE_AUDIT_STATES:
+        return None, f"go_to_full_l2_manual_audit_incomplete:{manual_audit_status}"
+
+    config = summary.get("config")
+    if not isinstance(config, dict):
+        config = {}
+    lane_token = str(
+        quality_status.get("quality_lane_effective")
+        or config.get("quality_lane_effective")
+        or config.get("quality_lane")
+        or summary.get("quality_lane_effective")
+        or summary.get("quality_lane")
+        or ""
+    ).strip().casefold()
+    if lane_token == "acceptance":
+        return None, "go_to_full_l2_lane_invalid:acceptance"
+
+    expected_run_id = str(evidence.get("run_id") or "").strip()
+    observed_run_id = str(summary.get("run_id") or "").strip()
+    if expected_run_id and observed_run_id and expected_run_id != observed_run_id:
+        return None, f"go_to_full_l2_run_id_mismatch:{expected_run_id}:{observed_run_id}"
+
+    return {
+        "summary_path": summary_path,
+        "run_id": observed_run_id or expected_run_id or None,
+        "infra_valid": True,
+        "semantic_valid": True,
+        "run_integrity_valid": True,
+        "manual_audit_status": manual_audit_status or None,
+        "lane_effective": lane_token or None,
+    }, None
 
 
 def write_json_atomic(path: str, payload: dict) -> None:

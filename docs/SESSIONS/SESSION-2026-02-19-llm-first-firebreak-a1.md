@@ -287,4 +287,17 @@
   - Validation (green, post-merge hardening packet):
     - `ruff check ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py`
     - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`65 passed`)
-- last_updated: 2026-03-01T09:48:53+05:00
+  - Stage E fail-fast scheduler enforcement hardened in chain controller:
+    - acceptance `lock` now requires machine-validated `l2_evidence.summary_path` in PG checklist;
+    - gate fails closed when L2 artifact is missing/non-green (`infra/semantic/run_integrity`) or marked as acceptance lane.
+  - Added deterministic regression tests for new L2 evidence gate:
+    - `test_chain_controller_blocks_lock_with_pg_checklist_missing_l2_evidence`
+    - `test_chain_controller_blocks_lock_with_pg_checklist_non_green_l2`
+  - Updated runbook and TP schema with mandatory `l2_evidence` contract.
+  - One-query external research captured for this packet (`OWASP fail secure principle fail closed`, `https://owasp.org/www-community/Fail_securely`).
+  - Validation (green, Stage E packet):
+    - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py` (`9 passed`)
+    - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py truffles-api/tests/test_booking_quality_status_gate.py` (`67 passed`)
+    - `bash -n scripts/quality_chain_controller.sh`
+    - `scripts/session_check.sh`
+- last_updated: 2026-03-01T10:11:47+05:00
