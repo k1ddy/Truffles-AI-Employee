@@ -280,4 +280,11 @@
     - `ruff check truffles-api/tests/test_booking_quality_chain_controller.py truffles-api/tests/test_booking_quality_guarded_wrapper.py`
     - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py truffles-api/tests/test_booking_quality_guarded_wrapper.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_progress_gate.py` (`78 passed`)
     - `scripts/session_check.sh`
-- last_updated: 2026-02-28T18:07:15+05:00
+  - PR `#848` (`2b59f75f`) merged into `main` as merge commit `1698d74f`; collected fail-package for red `session-gate` (`run 22534877828`) and confirmed root cause (`Missing session log updates (docs/SESSIONS + docs/SESSION_INDEX.md)`).
+  - Continued hardening after merge: forensic/oracle preflight now chain-scoped (`chain_id`) and fail-closed when acceptance run has no chain id; this removes cross-chain manual-audit contamination in acceptance gating.
+  - Synced TP status block with factual closure of Oracle Conflict Gate / Forensic SLA Gate / Scenario Governance Registry + promotion preflight after `#848`.
+  - Added mandatory one-query research record in TP (`site:docs.python.org os.replace atomic write json file`, 2026-03-01) and captured reuse decision for atomic state updates.
+  - Validation (green, post-merge hardening packet):
+    - `ruff check ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`65 passed`)
+- last_updated: 2026-03-01T09:48:53+05:00

@@ -725,6 +725,22 @@ Forensic only (not acceptance):
   - LangGraph v1.0 durable agent orchestration: `https://blog.langchain.com/langgraph-v1/`
   - Qdrant 1.16 hybrid retrieval and multitenancy capabilities: `https://qdrant.tech/blog/qdrant-1.16.x/`
 
+### One web search (mandatory before implementation)
+
+- Query: `site:docs.python.org os.replace atomic write json file`
+- Date/time: `2026-03-01T04:48:53Z`
+- Opened sources:
+  - `https://docs.python.org/3.12/library/os.html#os.replace` (primary)
+  - `https://docs.python.org/3/library/fcntl.html`
+- Ready solutions found:
+  - atomic file replacement (`tmp write -> os.replace`) for process state/registry updates;
+  - OS file-lock primitives (`fcntl`) for cross-process coordination when needed.
+- Decision: `reuse/integrate`
+  - keep existing atomic `os.replace` write path in runner state/registry updates;
+  - apply chain-scoped filtering in forensic/oracle gates (no lock-subsystem rewrite in this packet).
+- Rejected options:
+  - introducing a new lock daemon/DB lock for this remediation wave (out of scope, high migration cost).
+
 ## Rollback
 
 - Runtime/code rollback: revert commit(s) in this branch and rerun deterministic suite.
@@ -1095,7 +1111,7 @@ Forensic only (not acceptance):
   - Запустить L3 только после прохождения Stage A-F и PG0..PG6.
   - Exit criteria: `lock -> replay -> full` используется как release confirmation, не как debug loop.
 
-### Execution Status Update (2026-02-28, fact-checked)
+### Execution Status Update (2026-03-01, fact-checked)
 
 - Completed implementation (code + tests):
   - Chain controller introduced and wired as acceptance step owner:
@@ -1116,27 +1132,29 @@ Forensic only (not acceptance):
     - `truffles-api/tests/test_booking_quality_guarded_wrapper.py`
     - `truffles-api/tests/test_booking_quality_status_gate.py`
     - `truffles-api/tests/test_booking_quality_progress_gate.py`
+  - PR `#848` merged to `main` (`1698d74f`) with acceptance preflight packet:
+    - `oracle_conflict_gate` (contract-first arbitration),
+    - `forensic_sla_gate` (manual audit SLA completeness),
+    - `scenario_governance_gate` + governance registry promotion checks.
+  - Post-merge hardening delivered in current branch:
+    - forensic/oracle gates now filter by `chain_id` to avoid cross-chain audit contamination,
+    - acceptance lane fails closed if forensic/oracle gate is requested without `chain_id`,
+    - deterministic coverage extended in `test_booking_quality_status_gate.py` for chain filter/missing-chain-id cases.
 
 - Partially completed (policy defined, enforcement not fully automated yet):
-  - Stage B Oracle Rebalance:
-    - contract-first is documented and partially enforced,
-    - full machine arbitration for oracle conflicts is still pending.
-  - Stage C Forensic Automation:
-    - manual-audit gating exists,
-    - SLA-grade forensic template validation is still pending.
   - Stage D Scenario Governance:
-    - scenario contract checks exist,
-    - versioned scenario quality SLA and promotion policy are still pending.
+    - base registry/promotion gate is implemented,
+    - versioned scenario quality SLA and lifecycle (`candidate -> eligible -> approved`) are pending.
   - Stage E Fail-Fast Economics:
     - run-economy and stop-loss signals exist,
     - full lane scheduler enforcement across all run types is still pending.
 
 - Remaining implementation items before declaring Stage A-G complete:
   - Implement executable defect taxonomy matrix `defect -> test -> gate -> owner` with mandatory validation artifact (beyond checklist presence).
-  - Add machine-enforced judge reliability conflict policy (`primary contract` wins, judge as corroboration) with explicit reason-codes.
-  - Add forensic SLA validator (`manual_audit` completeness + owner + timestamp + conflict resolution) as blocking preflight.
-  - Add scenario governance registry (version, realism bucket coverage, acceptance eligibility marker).
-  - Add promotion validator that blocks lane jump (`L1/L2 -> L3`) without evidence chain, not only checklist declaration.
+  - Enforce branch protection on `main` with required checks (`session-gate`, `lint`, `unit-tests`, `core-eval`) to prevent red-gate merge.
+  - Add scenario governance version policy (registry schema versioning + realism bucket SLA + promotion lifecycle).
+  - Add promotion validator that blocks lane jump (`L1/L2 -> L3`) by machine-checking evidence chain, not only checklist declaration.
+  - Add lane scheduler enforcement for Stage E so expensive acceptance starts only after L2 green + Go-to-Full.
 
 ### DoD for this Addendum
 

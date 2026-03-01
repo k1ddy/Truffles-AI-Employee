@@ -83,6 +83,7 @@ def _load_quality_helpers():
         "_llm_quality_collect_artifact_integrity",
         "_llm_quality_load_json_object",
         "_llm_quality_is_iso_timestamp",
+        "_llm_quality_extract_chain_id",
         "_llm_quality_extract_oracle_conflict_count",
         "_llm_quality_validate_manual_audit_sla",
         "_llm_quality_resolve_manual_audit_status",
@@ -1586,7 +1587,7 @@ def test_manual_audit_sync_updates_summary_and_quality_status(tmp_path):
     assert updated["quality_status"]["manual_audit_path"] == str(run_dir / "manual_audit.md")
 
 
-def _write_run_summary(run_dir, run_id):
+def _write_run_summary(run_dir, run_id, *, chain_id=None):
     summary = {
         "run_id": run_id,
         "quality_status": {"manual_audit_required": True},
@@ -1597,6 +1598,8 @@ def _write_run_summary(run_dir, run_id):
             "json_path": str(run_dir / "manual_audit.json"),
         },
     }
+    if chain_id:
+        summary["config"] = {"chain_id": chain_id}
     (run_dir / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -1609,7 +1612,7 @@ def test_forensic_sla_gate_blocks_incomplete_manual_audit_payload(tmp_path):
 
     run_dir = tmp_path / "run-audit-incomplete"
     run_dir.mkdir()
-    _write_run_summary(run_dir, "run-audit-incomplete")
+    _write_run_summary(run_dir, "run-audit-incomplete", chain_id="chain-a")
     (run_dir / "manual_audit.json").write_text(
         json.dumps(
             {
@@ -1631,6 +1634,7 @@ def test_forensic_sla_gate_blocks_incomplete_manual_audit_payload(tmp_path):
         mode="block",
         output_dir=str(tmp_path / "run-next"),
         lane_effective="acceptance",
+        chain_id="chain-a",
     )
 
     assert gate["valid"] is False
@@ -1643,7 +1647,7 @@ def test_oracle_conflict_gate_blocks_when_conflict_winner_is_not_contract(tmp_pa
 
     run_dir = tmp_path / "run-oracle-conflict"
     run_dir.mkdir()
-    _write_run_summary(run_dir, "run-oracle-conflict")
+    _write_run_summary(run_dir, "run-oracle-conflict", chain_id="chain-a")
     (run_dir / "manual_audit.json").write_text(
         json.dumps(
             {
@@ -1671,10 +1675,171 @@ def test_oracle_conflict_gate_blocks_when_conflict_winner_is_not_contract(tmp_pa
         mode="block",
         output_dir=str(tmp_path / "run-next"),
         lane_effective="acceptance",
+        chain_id="chain-a",
     )
 
     assert gate["valid"] is False
     assert any("oracle_winner_must_be_contract:run-oracle-conflict:judge" == reason for reason in gate["reasons"])
+
+
+def test_forensic_sla_gate_filters_latest_run_by_chain_id(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_forensic_sla_gate_status"]
+
+    run_chain = tmp_path / "run-chain-a"
+    run_chain.mkdir()
+    _write_run_summary(run_chain, "run-chain-a", chain_id="chain-a")
+    (run_chain / "manual_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-chain-a",
+                "status": "done",
+                "generated_at": "2026-03-01T08:00:00Z",
+                "analyst": "a1",
+                "analyst_root_causes": ["stable"],
+                "analyst_next_steps": ["continue"],
+                "findings": [],
+                "oracle_arbitration": {
+                    "judge_alignment": "corroborated",
+                    "winner": "contract",
+                    "conflict_count": 0,
+                    "resolution_summary": "aligned",
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    run_other = tmp_path / "run-chain-b-invalid"
+    run_other.mkdir()
+    _write_run_summary(run_other, "run-chain-b-invalid", chain_id="chain-b")
+    (run_other / "manual_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-chain-b-invalid",
+                "status": "done",
+                "generated_at": "2026-03-01T08:00:01Z",
+                "analyst": "a2",
+                "analyst_root_causes": ["missing arbitration"],
+                "analyst_next_steps": ["fix"],
+                "findings": [],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    gate = build_gate(
+        mode="block",
+        output_dir=str(tmp_path / "run-next"),
+        lane_effective="acceptance",
+        chain_id="chain-a",
+    )
+
+    assert gate["valid"] is True
+    assert gate["latest_run"]["run_id"] == "run-chain-a"
+    assert gate["reasons"] == []
+
+
+def test_forensic_sla_gate_requires_chain_id_in_acceptance_mode(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_forensic_sla_gate_status"]
+
+    gate = build_gate(
+        mode="block",
+        output_dir=str(tmp_path / "run-next"),
+        lane_effective="acceptance",
+        chain_id=None,
+    )
+
+    assert gate["valid"] is False
+    assert "forensic_sla_chain_id_missing" in gate["reasons"]
+
+
+def test_oracle_conflict_gate_filters_latest_run_by_chain_id(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_oracle_conflict_gate_status"]
+
+    run_chain = tmp_path / "run-oracle-chain-a"
+    run_chain.mkdir()
+    _write_run_summary(run_chain, "run-oracle-chain-a", chain_id="chain-a")
+    (run_chain / "manual_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-oracle-chain-a",
+                "status": "done",
+                "generated_at": "2026-03-01T08:10:00Z",
+                "analyst": "a1",
+                "analyst_root_causes": ["none"],
+                "analyst_next_steps": ["continue"],
+                "findings": [],
+                "oracle_arbitration": {
+                    "judge_alignment": "corroborated",
+                    "winner": "contract",
+                    "conflict_count": 0,
+                    "resolution_summary": "aligned",
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    run_other = tmp_path / "run-oracle-chain-b-conflict"
+    run_other.mkdir()
+    _write_run_summary(run_other, "run-oracle-chain-b-conflict", chain_id="chain-b")
+    (run_other / "manual_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-oracle-chain-b-conflict",
+                "status": "done",
+                "generated_at": "2026-03-01T08:10:01Z",
+                "analyst": "a2",
+                "analyst_root_causes": ["judge mismatch"],
+                "analyst_next_steps": ["fix rubric"],
+                "findings": [{"id": "judge_eval_conflict", "severity": "medium"}],
+                "oracle_arbitration": {
+                    "judge_alignment": "conflicted",
+                    "winner": "judge",
+                    "conflict_count": 1,
+                    "resolution_summary": "picked judge",
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    gate = build_gate(
+        mode="block",
+        output_dir=str(tmp_path / "run-next"),
+        lane_effective="acceptance",
+        chain_id="chain-a",
+    )
+
+    assert gate["valid"] is True
+    assert gate["latest_run"]["run_id"] == "run-oracle-chain-a"
+    assert gate["reasons"] == []
+
+
+def test_oracle_conflict_gate_requires_chain_id_in_acceptance_mode(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_oracle_conflict_gate_status"]
+
+    gate = build_gate(
+        mode="block",
+        output_dir=str(tmp_path / "run-next"),
+        lane_effective="acceptance",
+        chain_id=None,
+    )
+
+    assert gate["valid"] is False
+    assert "oracle_conflict_chain_id_missing" in gate["reasons"]
 
 
 def test_scenario_governance_gate_blocks_replay_without_registry_entry(tmp_path):
