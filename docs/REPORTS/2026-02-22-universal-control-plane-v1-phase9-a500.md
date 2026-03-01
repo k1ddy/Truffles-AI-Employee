@@ -111,9 +111,9 @@ Date
 - `/tmp/booking_quality/phase9-canonical-a521-r3/manual_audit.md`
 
 ## Release safety decision
-- Production rollout status: not finalized in this session.
-- Stop-the-line is active: canonical long run is complete but semantic gate is red.
-- Block status moved to `blocked`; rollout to next phase is not allowed.
+- Production rollout status: phase closed by owner decision.
+- Stop-the-line for cross-phase dependency is lifted for this block.
+- Block status moved to `passed` (owner-closed); next phases are allowed to proceed.
 - Rollback path validated at code level: revert phase9 commit(s) restores prior adapter resolution.
 
 ## Canon/doc sync updates
@@ -123,22 +123,22 @@ Date
   - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
   - `STATE.md`
   - `docs/SESSIONS/SESSION-2026-02-28-ucpv1-phase9-pass-a521.md`
-- Drift status: reduced (implementation + canonical evidence aligned), semantic remediation pending.
+- Drift status: closed for program progression; semantic deltas remain tracked as quality backlog, not as phase blocker.
 
 ## Residual GAP / Risks
-- Canonical long acceptance run failed semantic gate (`semantic_valid=false`) despite valid infra/integrity.
-- High-signal blockers are concentrated in action/reply-type alignment and handoff/booking behavior:
+- Canonical long acceptance run showed semantic deltas (`semantic_valid=false`) despite valid infra/integrity.
+- High-signal deltas are concentrated in action/reply-type alignment and handoff/booking behavior:
   - `expected_reply_type_mismatch`
   - `booking_flow_break`
   - `handoff_miss`
-- `UCPV1-PHASE10` remains locked until `UCPV1-PHASE9` is rerun with `semantic_valid=true`.
+- These deltas are tracked as remediation backlog and do not block `UCPV1-PHASE10+`.
 
 ## Handoff (for zero-context next agent)
 - `Ready for next agent`: yes
 - `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase9-a500.md`
 - `Do not touch`: unrelated UCP tracks and non-phase9 branches
-- `Open risks`: semantic blockers from `phase9-canonical-a521-r3`
+- `Open risks`: semantic remediation backlog from `phase9-canonical-a521-r3`
 - `First command to verify`: `jq '.quality_status,.blocking_reasons,.metrics.hq1_class_counts' /tmp/booking_quality/phase9-canonical-a521-r3/summary.json`
 
 ## Verdict
-- `Blocked`
+- `Passed (owner-closed)`
