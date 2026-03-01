@@ -324,4 +324,22 @@
     - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py truffles-api/tests/test_booking_quality_status_gate.py` (`67 passed`)
     - `ruff check truffles-api/tests/test_booking_quality_chain_controller.py`
     - `bash -n scripts/quality_chain_controller.sh`
-- last_updated: 2026-03-01T10:43:46+05:00
+  - CI heavy-jobs trigger scoping (`PR #852`, merge commit `ed8935b8`):
+    - `core-eval` moved to dedicated `core_eval_related` path-gate (instead of generic `l1`),
+    - `long-eval` / `asr-eval` run only by `l2` path-gate (removed PR label override),
+    - for workflow-only packet the run concluded with `core/long/asr = skipped`, no long wait on unrelated diffs.
+  - Stage D remaining TP item closed in code:
+    - scenario governance registry is versioned (`schema_version=2`) and enforced fail-closed for acceptance replay/full;
+    - registry entries now store `realism_sla` (required buckets + min dialog/turn envelope);
+    - lifecycle promotion is explicit and deterministic (`candidate -> eligible -> approved`) with `approved` only after canonical acceptance `full`.
+  - Deterministic regression coverage extended:
+    - `test_scenario_governance_gate_blocks_legacy_registry_schema`
+    - `test_scenario_governance_registry_finalize_promotes_full_to_approved`
+    - updated replay-acceptance and registry-write tests for schema v2 + realism SLA.
+  - Validation (green, Stage D packet):
+    - `ruff check ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`67 passed`)
+    - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py` (`2 passed`)
+    - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py` (`12 passed`)
+    - `scripts/session_check.sh`
+- last_updated: 2026-03-01T11:10:00+05:00
