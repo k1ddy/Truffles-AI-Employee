@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+from datetime import datetime, timedelta, timezone
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,10 @@ def _load_module():
 
 
 _module = _load_module()
+_TARGET_TEST_REF = (
+    "truffles-api/tests/test_message_endpoint.py::"
+    "test_llm_policy_core_info_lateness_signal_uses_lateness_reply"
+)
 
 
 def _write_l2_summary(path: Path, *, run_id: str, semantic_valid: bool = True) -> None:
@@ -45,11 +50,53 @@ def _write_l2_summary(path: Path, *, run_id: str, semantic_valid: bool = True) -
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _write_l1_junit(
+    path: Path,
+    *,
+    target_refs: list[str],
+    failed_targets: set[str] | None = None,
+) -> None:
+    failed_targets = failed_targets or set()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    failure_count = 0
+    testcase_lines = []
+    for target_ref in target_refs:
+        path_part, test_name = target_ref.split("::", 1)
+        test_symbol = test_name.split("[", 1)[0].strip()
+        class_name = path_part.replace("/", ".").removesuffix(".py")
+        base = (
+            f'  <testcase classname="{class_name}" '
+            f'name="{test_symbol}" file="{path_part}">'
+        )
+        if target_ref in failed_targets:
+            failure_count += 1
+            testcase_lines.append(
+                base + "<failure message=\"assertion failed\" />" + "</testcase>"
+            )
+        else:
+            testcase_lines.append(base + "</testcase>")
+    payload = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        (
+            f'<testsuite name="pytest" tests="{len(target_refs)}" '
+            f'failures="{failure_count}" errors="0" skipped="0" '
+            f'timestamp="{now_iso}">'
+        ),
+        *testcase_lines,
+        "</testsuite>",
+        "",
+    ]
+    path.write_text("\n".join(payload), encoding="utf-8")
+
+
 def _write_pg_checklist(
     path: Path,
     *,
+    l1_junit_path: Path | None = None,
+    l1_recorded_at: str | None = None,
     l2_summary_path: Path | None = None,
     l2_run_id: str | None = None,
+    freshness_hours: float | None = None,
 ) -> None:
     payload = {
         "go_to_full": {
@@ -64,18 +111,26 @@ def _write_pg_checklist(
             "defect_mapping": [
                 {
                     "defect_class": "booking_flow_break",
-                    "target_test": "truffles-api/tests/test_message_endpoint.py::test_llm_policy_core_info_lateness_signal_uses_lateness_reply",
+                    "target_test": _TARGET_TEST_REF,
                     "gate": "PG1",
                     "owner": "a1",
                 }
             ],
         }
     }
+    if l1_junit_path is not None:
+        payload["go_to_full"]["l1_evidence"] = {
+            "junit_xml_path": str(l1_junit_path),
+        }
+        if l1_recorded_at:
+            payload["go_to_full"]["l1_evidence"]["recorded_at"] = str(l1_recorded_at)
     if l2_summary_path is not None:
         payload["go_to_full"]["l2_evidence"] = {
             "summary_path": str(l2_summary_path),
             "run_id": str(l2_run_id or ""),
         }
+    if freshness_hours is not None:
+        payload["go_to_full"]["evidence_freshness_hours"] = float(freshness_hours)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -199,11 +254,14 @@ def test_chain_controller_prepare_and_finalize_advances_to_replay(tmp_path):
     run_id = "booking-lock-chain-e2e"
     output_dir = tmp_path / run_id
     pg_checklist = tmp_path / "pg_checklist.json"
+    l1_junit_path = tmp_path / "l1_junit.xml"
     l2_summary_path = tmp_path / "l2_summary.json"
     output_dir.mkdir(parents=True, exist_ok=True)
+    _write_l1_junit(l1_junit_path, target_refs=[_TARGET_TEST_REF])
     _write_l2_summary(l2_summary_path, run_id="booking-l2-chain-e2e")
     _write_pg_checklist(
         pg_checklist,
+        l1_junit_path=l1_junit_path,
         l2_summary_path=l2_summary_path,
         l2_run_id="booking-l2-chain-e2e",
     )
@@ -445,8 +503,10 @@ def test_chain_controller_blocks_lock_with_pg_checklist_missing_l2_evidence(tmp_
     run_id = "booking-lock-chain-missing-l2-evidence"
     output_dir = tmp_path / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
+    l1_junit_path = tmp_path / "l1_junit_missing_l2.xml"
+    _write_l1_junit(l1_junit_path, target_refs=[_TARGET_TEST_REF])
     pg_checklist = tmp_path / "pg_checklist_no_l2.json"
-    _write_pg_checklist(pg_checklist)
+    _write_pg_checklist(pg_checklist, l1_junit_path=l1_junit_path)
 
     env = dict(os.environ)
     env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
@@ -484,10 +544,13 @@ def test_chain_controller_blocks_lock_with_pg_checklist_non_green_l2(tmp_path):
     output_dir = tmp_path / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     pg_checklist = tmp_path / "pg_checklist_bad_l2.json"
+    l1_junit_path = tmp_path / "l1_junit_bad_l2.xml"
     l2_summary_path = tmp_path / "l2_summary_bad.json"
+    _write_l1_junit(l1_junit_path, target_refs=[_TARGET_TEST_REF])
     _write_l2_summary(l2_summary_path, run_id="booking-l2-chain-bad", semantic_valid=False)
     _write_pg_checklist(
         pg_checklist,
+        l1_junit_path=l1_junit_path,
         l2_summary_path=l2_summary_path,
         l2_run_id="booking-l2-chain-bad",
     )
@@ -516,3 +579,148 @@ def test_chain_controller_blocks_lock_with_pg_checklist_non_green_l2(tmp_path):
 
     assert prepare.returncode != 0
     assert "go_to_full_l2_not_green" in prepare.stderr
+
+
+def test_chain_controller_blocks_lock_with_pg_checklist_missing_l1_evidence(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    run_id = "booking-lock-chain-missing-l1-evidence"
+    output_dir = tmp_path / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pg_checklist = tmp_path / "pg_checklist_no_l1.json"
+    l2_summary_path = tmp_path / "l2_summary_no_l1.json"
+    _write_l2_summary(l2_summary_path, run_id="booking-l2-no-l1")
+    _write_pg_checklist(
+        pg_checklist,
+        l2_summary_path=l2_summary_path,
+        l2_run_id="booking-l2-no-l1",
+    )
+
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
+
+    prepare = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "lock",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            str(output_dir),
+            "--pg-checklist",
+            str(pg_checklist),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+
+    assert prepare.returncode != 0
+    assert "go_to_full_l1_evidence_missing" in prepare.stderr
+
+
+def test_chain_controller_blocks_lock_with_pg_checklist_failed_l1_target(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    run_id = "booking-lock-chain-failed-l1"
+    output_dir = tmp_path / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pg_checklist = tmp_path / "pg_checklist_failed_l1.json"
+    l1_junit_path = tmp_path / "l1_junit_failed.xml"
+    l2_summary_path = tmp_path / "l2_summary_failed_l1.json"
+    _write_l1_junit(
+        l1_junit_path,
+        target_refs=[_TARGET_TEST_REF],
+        failed_targets={_TARGET_TEST_REF},
+    )
+    _write_l2_summary(l2_summary_path, run_id="booking-l2-failed-l1")
+    _write_pg_checklist(
+        pg_checklist,
+        l1_junit_path=l1_junit_path,
+        l2_summary_path=l2_summary_path,
+        l2_run_id="booking-l2-failed-l1",
+    )
+
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
+
+    prepare = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "lock",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            str(output_dir),
+            "--pg-checklist",
+            str(pg_checklist),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+
+    assert prepare.returncode != 0
+    assert "go_to_full_l1_target_not_passed" in prepare.stderr
+
+
+def test_chain_controller_blocks_lock_with_pg_checklist_stale_l1_evidence(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    run_id = "booking-lock-chain-stale-l1"
+    output_dir = tmp_path / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pg_checklist = tmp_path / "pg_checklist_stale_l1.json"
+    l1_junit_path = tmp_path / "l1_junit_stale.xml"
+    l2_summary_path = tmp_path / "l2_summary_stale_l1.json"
+    _write_l1_junit(l1_junit_path, target_refs=[_TARGET_TEST_REF])
+    _write_l2_summary(l2_summary_path, run_id="booking-l2-stale-l1")
+    stale_recorded_at = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
+    _write_pg_checklist(
+        pg_checklist,
+        l1_junit_path=l1_junit_path,
+        l1_recorded_at=stale_recorded_at,
+        l2_summary_path=l2_summary_path,
+        l2_run_id="booking-l2-stale-l1",
+        freshness_hours=24.0,
+    )
+
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
+
+    prepare = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "lock",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            str(output_dir),
+            "--pg-checklist",
+            str(pg_checklist),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+
+    assert prepare.returncode != 0
+    assert "go_to_full_l1_evidence_stale" in prepare.stderr
