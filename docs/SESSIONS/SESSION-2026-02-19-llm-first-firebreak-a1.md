@@ -300,4 +300,13 @@
     - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py truffles-api/tests/test_booking_quality_status_gate.py` (`67 passed`)
     - `bash -n scripts/quality_chain_controller.sh`
     - `scripts/session_check.sh`
-- last_updated: 2026-03-01T10:11:47+05:00
+  - Branch protection rollout (TP remaining item `main required checks`) completed:
+    - applied GitHub branch protection on `main` with required checks `session-gate`, `lint`, `unit-tests`, `core-eval`,
+    - `required_status_checks.strict=true`,
+    - `enforce_admins=true`.
+  - PR cycle closure:
+    - `#850` merged to `main` (`merge commit c8fa73b6`) with green required checks and `core-eval`.
+  - Verification:
+    - `gh api repos/k1ddy/Truffles-AI-Employee/branches/main/protection`
+    - `gh pr view 850 --repo k1ddy/Truffles-AI-Employee --json state,mergedAt,mergeCommit,url`
+- last_updated: 2026-03-01T10:31:35+05:00
