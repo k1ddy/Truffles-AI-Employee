@@ -1154,6 +1154,10 @@ Forensic only (not acceptance):
     - forensic/oracle gates now filter by `chain_id` to avoid cross-chain audit contamination,
     - acceptance lane fails closed if forensic/oracle gate is requested without `chain_id`,
     - deterministic coverage extended in `test_booking_quality_status_gate.py` for chain filter/missing-chain-id cases.
+  - Branch protection enforced on `main` (`2026-03-01`):
+    - required checks: `session-gate`, `lint`, `unit-tests`, `core-eval`,
+    - `required_status_checks.strict=true`,
+    - `enforce_admins=true`.
 
 - Partially completed (policy defined, enforcement not fully automated yet):
   - Stage D Scenario Governance:
@@ -1165,7 +1169,6 @@ Forensic only (not acceptance):
 
 - Remaining implementation items before declaring Stage A-G complete:
   - Implement executable defect taxonomy matrix `defect -> test -> gate -> owner` with mandatory validation artifact (beyond checklist presence).
-  - Enforce branch protection on `main` with required checks (`session-gate`, `lint`, `unit-tests`, `core-eval`) to prevent red-gate merge.
   - Add scenario governance version policy (registry schema versioning + realism bucket SLA + promotion lifecycle).
   - Extend promotion validator from current L2 artifact check to full `L1 + L2` evidence-chain validation (target deterministic run linkage + freshness window).
 
