@@ -33,6 +33,7 @@ LLM-quality start here (mandatory for new agents)
    - `/tmp/booking_quality/<run-id>/trace_bundle.jsonl`
    - `/tmp/booking_quality/<run-id>/brief.md`
    - `/tmp/booking_quality/<run-id>/manual_audit.json` and `/tmp/booking_quality/<run-id>/manual_audit.md`
+   - scenario governance registry entry in `/tmp/booking_quality/_scenario_governance_registry.json`
 5. Mandatory actions by status
    - `canonical`: continue to chain `next_command`.
    - `incomplete`: resume same `run-id` (`--resume --output-dir ...`), do not start new run-id.
@@ -549,11 +550,16 @@ Guarded llm-quality quickstart (single entrypoint)
    - `scripts/llm_quality_guarded.sh --mode full --run-id booking-full-<id> -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json`
 5. Mandatory post-run audit
    - `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/<run-id> --status done --strict-artifacts`
+   - For conflict runs, include explicit arbitration:
+     `--oracle-judge-alignment conflicted --oracle-winner contract --oracle-resolution-summary "<contract evidence wins>"`
 6. Resume one interrupted run
    - `scripts/llm_quality_guarded.sh --mode <lock|replay|full> --run-id <same-run-id> -- --base-url <url> --client-slug demo_salon --resume --output-dir /tmp/booking_quality/<run-id> ...`
 7. Why a run can be blocked by guard
    - Previous run in same mode is `incomplete/invalid/failed`.
    - Previous run has `manual_audit != done`.
+   - Forensic SLA invalid (`manual_audit` missing analyst/timestamp/root-cause/next-step/oracle arbitration contract).
+   - Oracle conflict unresolved (judge-vs-contract conflict without `winner=contract` and resolution).
+   - Scenario governance missing (acceptance replay/full scenarios are not registered or not promotion-eligible).
    - Duplicate fingerprint or reused run-id.
    - Chain-controller preflight failed (step-order/run_id-mode mismatch/resume-only/token mismatch).
    - Acceptance `lock` missing/failed `--pg-checklist` (`PG0..PG6`).

@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -36,6 +37,9 @@ def _load_quality_helpers():
         "LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE",
         "LLM_QUALITY_PROGRESS_SKIP_TAGS",
         "LLM_QUALITY_REQUIRED_RUN_ARTIFACTS",
+        "LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY",
+        "LLM_QUALITY_ORACLE_ALIGNMENT_VALUES",
+        "LLM_QUALITY_ORACLE_WINNER_VALUES",
     }
     wanted_functions = {
         "_llm_quality_normalize_tool_token",
@@ -78,10 +82,22 @@ def _load_quality_helpers():
         "_llm_quality_required_artifact_paths",
         "_llm_quality_collect_artifact_integrity",
         "_llm_quality_load_json_object",
+        "_llm_quality_is_iso_timestamp",
+        "_llm_quality_extract_oracle_conflict_count",
+        "_llm_quality_validate_manual_audit_sla",
         "_llm_quality_resolve_manual_audit_status",
         "_llm_quality_sync_manual_audit_summary",
         "_llm_quality_find_latest_pending_manual_audit",
+        "_llm_quality_find_latest_completed_manual_audit",
         "_llm_quality_build_manual_audit_gate_status",
+        "_llm_quality_build_forensic_sla_gate_status",
+        "_llm_quality_build_oracle_conflict_gate_status",
+        "_llm_quality_load_scenario_governance_registry",
+        "_llm_quality_save_scenario_governance_registry",
+        "_llm_quality_build_scenario_governance_status",
+        "_llm_quality_update_scenario_governance_registry",
+        "_llm_quality_chain_resolve_requested_mode",
+        "_llm_quality_digest_file",
         "_llm_quality_hq1_normalize_text",
         "_llm_quality_hq1_contains_any",
         "_llm_quality_hq1_has_hallucination_signal",
@@ -101,6 +117,8 @@ def _load_quality_helpers():
 
     module = ast.Module(body=selected_nodes, type_ignores=[])
     namespace = {
+        "datetime": datetime,
+        "timezone": timezone,
         "hashlib": hashlib,
         "json": json,
         "os": os,
@@ -1566,3 +1584,202 @@ def test_manual_audit_sync_updates_summary_and_quality_status(tmp_path):
     assert updated["manual_audit"]["status"] == "done"
     assert updated["quality_status"]["manual_audit_status"] == "done"
     assert updated["quality_status"]["manual_audit_path"] == str(run_dir / "manual_audit.md")
+
+
+def _write_run_summary(run_dir, run_id):
+    summary = {
+        "run_id": run_id,
+        "quality_status": {"manual_audit_required": True},
+        "manual_audit": {
+            "required": True,
+            "status": "done",
+            "path": str(run_dir / "manual_audit.md"),
+            "json_path": str(run_dir / "manual_audit.json"),
+        },
+    }
+    (run_dir / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def test_forensic_sla_gate_blocks_incomplete_manual_audit_payload(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_forensic_sla_gate_status"]
+
+    run_dir = tmp_path / "run-audit-incomplete"
+    run_dir.mkdir()
+    _write_run_summary(run_dir, "run-audit-incomplete")
+    (run_dir / "manual_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-audit-incomplete",
+                "status": "done",
+                "generated_at": "2026-02-28T10:00:00Z",
+                "analyst": "a1",
+                "analyst_root_causes": ["reason"],
+                "analyst_next_steps": ["step"],
+                "findings": [],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    gate = build_gate(
+        mode="block",
+        output_dir=str(tmp_path / "run-next"),
+        lane_effective="acceptance",
+    )
+
+    assert gate["valid"] is False
+    assert any(reason.startswith("forensic_sla_invalid:run-audit-incomplete") for reason in gate["reasons"])
+
+
+def test_oracle_conflict_gate_blocks_when_conflict_winner_is_not_contract(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_oracle_conflict_gate_status"]
+
+    run_dir = tmp_path / "run-oracle-conflict"
+    run_dir.mkdir()
+    _write_run_summary(run_dir, "run-oracle-conflict")
+    (run_dir / "manual_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-oracle-conflict",
+                "status": "done",
+                "generated_at": "2026-02-28T10:00:00Z",
+                "analyst": "a1",
+                "analyst_root_causes": ["judge mismatch"],
+                "analyst_next_steps": ["fix rubric"],
+                "findings": [{"id": "judge_eval_conflict", "severity": "medium"}],
+                "oracle_arbitration": {
+                    "judge_alignment": "conflicted",
+                    "winner": "judge",
+                    "conflict_count": 1,
+                    "resolution_summary": "picked judge verdict",
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    gate = build_gate(
+        mode="block",
+        output_dir=str(tmp_path / "run-next"),
+        lane_effective="acceptance",
+    )
+
+    assert gate["valid"] is False
+    assert any("oracle_winner_must_be_contract:run-oracle-conflict:judge" == reason for reason in gate["reasons"])
+
+
+def test_scenario_governance_gate_blocks_replay_without_registry_entry(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_scenario_governance_status"]
+
+    scenarios_path = tmp_path / "scenarios.json"
+    scenarios_path.write_text(
+        json.dumps({"dialogs": [{"turns": [{"text": "hi"}]}]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    gate = build_gate(
+        mode="block",
+        output_dir=str(tmp_path / "run-next"),
+        lane_effective="acceptance",
+        run_mode="llm",
+        run_id="booking-replay-test",
+        scenarios_file=str(scenarios_path),
+        baseline_summary=None,
+        scenario_contract={"valid": True},
+        registry_path=str(tmp_path / "scenario_registry.json"),
+        chain_controller_status={"mode": "replay"},
+    )
+
+    assert gate["valid"] is False
+    assert "scenario_registry_missing_entry" in gate["reasons"]
+
+
+def test_scenario_governance_gate_accepts_registered_replay_scenarios(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_scenario_governance_status"]
+    digest_file = ns["_llm_quality_digest_file"]
+
+    scenarios_path = tmp_path / "scenarios.json"
+    scenarios_path.write_text(
+        json.dumps({"dialogs": [{"turns": [{"text": "hi"}]}]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    scenario_fp = digest_file(str(scenarios_path))
+    registry_path = tmp_path / "scenario_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    scenario_fp: {
+                        "scenario_fingerprint": scenario_fp,
+                        "acceptance_eligible": True,
+                        "coverage_tokens": ["booking", "info", "interrupt", "handoff"],
+                        "promotion": {"status": "eligible"},
+                    }
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    gate = build_gate(
+        mode="block",
+        output_dir=str(tmp_path / "run-next"),
+        lane_effective="acceptance",
+        run_mode="llm",
+        run_id="booking-replay-test",
+        scenarios_file=str(scenarios_path),
+        baseline_summary=None,
+        scenario_contract={"valid": True},
+        registry_path=str(registry_path),
+        chain_controller_status={"mode": "replay"},
+    )
+
+    assert gate["valid"] is True
+    assert gate["reasons"] == []
+
+
+def test_scenario_governance_registry_update_writes_entry(tmp_path):
+    ns = _load_quality_helpers()
+    update_registry = ns["_llm_quality_update_scenario_governance_registry"]
+
+    scenarios_path = tmp_path / "scenarios.json"
+    scenarios_path.write_text(
+        json.dumps({"dialogs": [{"turns": [{"text": "hi"}]}]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    result = update_registry(
+        registry_path=str(tmp_path / "scenario_registry.json"),
+        scenario_path=str(scenarios_path),
+        run_id="booking-lock-abc",
+        lane_effective="acceptance",
+        scenario_contract={
+            "valid": True,
+            "coverage_tokens": ["booking", "info", "interrupt", "handoff"],
+            "dialog_count": 10,
+            "turn_count": 120,
+            "weak_expectation_ratio": 0.0,
+            "reply_type_coverage": 0.95,
+            "action_coverage": 0.9,
+            "info_coverage": 0.85,
+        },
+        chain_controller_status={"mode": "lock", "chain_id": "demo"},
+    )
+
+    assert result["updated"] is True
+    assert result["scenario_fingerprint"]
+    payload = json.loads((tmp_path / "scenario_registry.json").read_text(encoding="utf-8"))
+    assert result["scenario_fingerprint"] in payload["entries"]
