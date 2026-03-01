@@ -862,6 +862,9 @@ LLM_QUALITY_BLOCKING_REASONS = (
     "hardcode_core_violation",
     "manual_audit_gate_violation",
     "quality_constant_violation",
+    "oracle_conflict_violation",
+    "forensic_sla_violation",
+    "scenario_governance_violation",
     "workaround_register_violation",
 )
 LLM_QUALITY_DELIVERY_WAIVER_REASONS = {
@@ -880,6 +883,9 @@ LLM_QUALITY_MANIFEST_MAX_LATEST = 200
 LLM_QUALITY_CHAIN_ROOT = "/tmp/booking_quality/_chain"
 LLM_QUALITY_CHAIN_STEPS = ("lock", "replay", "full")
 LLM_QUALITY_CHAIN_BLOCKED_STATUSES = {"blocked", "aborted"}
+LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY = "/tmp/booking_quality/_scenario_governance_registry.json"
+LLM_QUALITY_ORACLE_ALIGNMENT_VALUES = {"corroborated", "conflicted", "not_applicable"}
+LLM_QUALITY_ORACLE_WINNER_VALUES = {"contract", "judge", "mixed", "not_applicable"}
 LLM_QUALITY_MANIFEST_REDACT_KEYS = {
     "admin_token",
     "console_token",
@@ -1021,6 +1027,9 @@ LLM_QUALITY_REASON_LABELS = {
     "lexicon_regex_delta_violation": "lexicon/regex delta without resolver + contract test delta",
     "hardcode_core_violation": "core hardcode gate detected raw keyword/regex branching in core diff",
     "quality_constant_violation": "quality-constant gate detected acceptance-lane downgrade or debug override",
+    "oracle_conflict_violation": "oracle conflict gate requires contract-first arbitration before next acceptance run",
+    "forensic_sla_violation": "forensic SLA gate detected incomplete manual audit contract fields",
+    "scenario_governance_violation": "scenario governance gate missing eligible registry entry for acceptance promotion",
     "workaround_register_violation": "WORKAROUND_ID marker found without register contract entry",
     "wrong_action": "HQ1: wrong product outcome (FACT/COLLECT/HANDOFF mismatch)",
     "handoff_miss": "HQ1: manager/handoff intent not escalated to pending",
@@ -1078,6 +1087,9 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "lexicon_regex_delta_violation": "canon",
     "hardcode_core_violation": "canon",
     "quality_constant_violation": "process",
+    "oracle_conflict_violation": "process",
+    "forensic_sla_violation": "process",
+    "scenario_governance_violation": "process",
     "workaround_register_violation": "process",
     "wrong_action": "expectation",
     "handoff_miss": "expectation",
@@ -5684,6 +5696,22 @@ def _llm_quality_is_doc_only_changed_file(path):
     return normalized in {"STATE.md", "STRUCTURE.md", "AGENTS.md"}
 
 
+def _llm_quality_digest_file(path):
+    if not isinstance(path, str) or not path.strip():
+        return None
+    normalized = os.path.abspath(os.path.expanduser(path.strip()))
+    if not os.path.exists(normalized) or not os.path.isfile(normalized):
+        return None
+    digest = hashlib.sha256()
+    with open(normalized, "rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _llm_quality_build_run_economy_status(
     *,
     mode,
@@ -5789,26 +5817,11 @@ def _llm_quality_build_run_economy_status(
     jid_mode_token = str(jid_mode or "").strip().casefold()
     reasons = []
 
-    def _digest_file(path):
-        if not isinstance(path, str) or not path.strip():
-            return None
-        normalized = os.path.abspath(os.path.expanduser(path.strip()))
-        if not os.path.exists(normalized) or not os.path.isfile(normalized):
-            return None
-        digest = hashlib.sha256()
-        with open(normalized, "rb") as handle:
-            while True:
-                chunk = handle.read(1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
-        return digest.hexdigest()
-
     code_entries = []
     for path in non_doc_files:
         normalized_path = str(path or "").strip().replace("\\", "/")
         abs_path = os.path.abspath(os.path.join(repo_root, normalized_path))
-        file_digest = _digest_file(abs_path)
+        file_digest = _llm_quality_digest_file(abs_path)
         code_entries.append(f"{normalized_path}:{file_digest or 'missing'}")
     code_fingerprint = None
     if code_entries:
@@ -5816,13 +5829,13 @@ def _llm_quality_build_run_economy_status(
 
     scenario_fingerprint = None
     if is_replay:
-        scenario_digest = _digest_file(str(scenarios_file))
+        scenario_digest = _llm_quality_digest_file(str(scenarios_file))
         scenario_token = scenario_digest or os.path.abspath(os.path.expanduser(str(scenarios_file)))
         scenario_fingerprint = hashlib.sha256(str(scenario_token).encode("utf-8")).hexdigest()
 
     baseline_fingerprint = None
     if is_replay and baseline_summary:
-        baseline_digest = _digest_file(str(baseline_summary))
+        baseline_digest = _llm_quality_digest_file(str(baseline_summary))
         baseline_token = baseline_digest or os.path.abspath(os.path.expanduser(str(baseline_summary)))
         baseline_fingerprint = hashlib.sha256(str(baseline_token).encode("utf-8")).hexdigest()
 
@@ -6254,6 +6267,135 @@ def _llm_quality_load_json_object(path):
     return payload if isinstance(payload, dict) else None
 
 
+def _llm_quality_is_iso_timestamp(value):
+    token = str(value or "").strip()
+    if not token:
+        return False
+    if token.endswith("Z"):
+        token = f"{token[:-1]}+00:00"
+    try:
+        datetime.fromisoformat(token)
+    except Exception:
+        return False
+    return True
+
+
+def _llm_quality_extract_oracle_conflict_count(payload):
+    if not isinstance(payload, dict):
+        return 0
+    arbitration = payload.get("oracle_arbitration")
+    if isinstance(arbitration, dict):
+        try:
+            count = int(arbitration.get("conflict_count") or 0)
+        except Exception:
+            count = 0
+        if count > 0:
+            return count
+    findings = payload.get("findings")
+    if not isinstance(findings, list):
+        return 0
+    count = 0
+    for item in findings:
+        if not isinstance(item, dict):
+            continue
+        finding_id = str(item.get("id") or "").strip().casefold()
+        if finding_id in {"judge_eval_conflict", "oracle_conflict"}:
+            count += 1
+    return count
+
+
+def _llm_quality_validate_manual_audit_sla(payload, *, expected_run_id=None):
+    reasons = []
+    if not isinstance(payload, dict):
+        return {
+            "valid": False,
+            "reasons": ["manual_audit_json_missing"],
+            "status": None,
+            "analyst": None,
+            "generated_at": None,
+            "judge_alignment": None,
+            "winner": None,
+            "resolution_summary": None,
+            "conflict_count": 0,
+        }
+
+    status = str(payload.get("status") or "").strip().casefold()
+    analyst = str(payload.get("analyst") or "").strip()
+    generated_at = str(payload.get("generated_at") or "").strip()
+    run_id = str(payload.get("run_id") or "").strip()
+    if status not in {"done", "completed", "pass", "passed"}:
+        reasons.append("manual_audit_status_not_done")
+    if not analyst:
+        reasons.append("analyst_missing")
+    if not generated_at:
+        reasons.append("generated_at_missing")
+    elif not _llm_quality_is_iso_timestamp(generated_at):
+        reasons.append("generated_at_invalid")
+    if expected_run_id and run_id and run_id != str(expected_run_id).strip():
+        reasons.append("manual_audit_run_id_mismatch")
+
+    analyst_root_causes = payload.get("analyst_root_causes")
+    if isinstance(analyst_root_causes, str):
+        analyst_root_causes = [analyst_root_causes]
+    analyst_root_causes = [
+        str(item).strip()
+        for item in (analyst_root_causes or [])
+        if str(item).strip()
+    ]
+    if not analyst_root_causes:
+        reasons.append("analyst_root_causes_missing")
+
+    analyst_next_steps = payload.get("analyst_next_steps")
+    if isinstance(analyst_next_steps, str):
+        analyst_next_steps = [analyst_next_steps]
+    analyst_next_steps = [
+        str(item).strip()
+        for item in (analyst_next_steps or [])
+        if str(item).strip()
+    ]
+    if not analyst_next_steps:
+        reasons.append("analyst_next_steps_missing")
+
+    findings = payload.get("findings")
+    if not isinstance(findings, list):
+        reasons.append("findings_missing")
+
+    arbitration = payload.get("oracle_arbitration")
+    if not isinstance(arbitration, dict):
+        reasons.append("oracle_arbitration_missing")
+        arbitration = {}
+    judge_alignment = str(arbitration.get("judge_alignment") or "").strip().casefold()
+    winner = str(arbitration.get("winner") or "").strip().casefold()
+    resolution_summary = str(arbitration.get("resolution_summary") or "").strip()
+    conflict_count = _llm_quality_extract_oracle_conflict_count(payload)
+
+    if judge_alignment not in LLM_QUALITY_ORACLE_ALIGNMENT_VALUES:
+        reasons.append("oracle_alignment_missing")
+    if winner not in LLM_QUALITY_ORACLE_WINNER_VALUES:
+        reasons.append("oracle_winner_missing")
+    if conflict_count > 0:
+        if judge_alignment != "conflicted":
+            reasons.append("oracle_conflict_alignment_mismatch")
+        if winner != "contract":
+            reasons.append("oracle_conflict_contract_winner_required")
+        if not resolution_summary:
+            reasons.append("oracle_conflict_resolution_missing")
+    elif judge_alignment == "conflicted" and not resolution_summary:
+        reasons.append("oracle_conflict_resolution_missing")
+
+    return {
+        "valid": not reasons,
+        "reasons": reasons,
+        "status": status or None,
+        "analyst": analyst or None,
+        "generated_at": generated_at or None,
+        "judge_alignment": judge_alignment or None,
+        "winner": winner or None,
+        "resolution_summary": resolution_summary or None,
+        "conflict_count": int(conflict_count or 0),
+    }
+
+
 def _llm_quality_resolve_manual_audit_status(run_dir):
     normalized_dir = os.path.abspath(os.path.expanduser(str(run_dir or "").strip() or "."))
     summary_path = os.path.join(normalized_dir, "summary.json")
@@ -6281,6 +6423,10 @@ def _llm_quality_resolve_manual_audit_status(run_dir):
         status_token = str(manual_audit_json.get("status") or "").strip().casefold()
         if status_token:
             manual_audit_status = status_token
+    forensic_sla = _llm_quality_validate_manual_audit_sla(
+        manual_audit_json,
+        expected_run_id=run_id,
+    )
     manual_done = manual_audit_status in {"done", "completed", "pass", "passed"}
     if not manual_required:
         manual_done = True
@@ -6296,6 +6442,11 @@ def _llm_quality_resolve_manual_audit_status(run_dir):
         "manual_audit_path": manual_audit_path,
         "manual_audit_json_path": manual_audit_json_path,
         "manual_audit_command": manual_meta.get("command"),
+        "forensic_sla_valid": bool(forensic_sla.get("valid")),
+        "forensic_sla_reasons": list(forensic_sla.get("reasons") or []),
+        "oracle_alignment": forensic_sla.get("judge_alignment"),
+        "oracle_winner": forensic_sla.get("winner"),
+        "oracle_conflict_count": int(forensic_sla.get("conflict_count") or 0),
     }
 
 
@@ -6481,6 +6632,38 @@ def _llm_quality_find_latest_pending_manual_audit(output_root, current_output_di
     return pending[0]
 
 
+def _llm_quality_find_latest_completed_manual_audit(output_root, current_output_dir=None):
+    normalized_root = os.path.abspath(os.path.expanduser(str(output_root or "").strip() or "."))
+    if not os.path.isdir(normalized_root):
+        return None
+    current_dir = (
+        os.path.abspath(os.path.expanduser(str(current_output_dir).strip()))
+        if isinstance(current_output_dir, str) and str(current_output_dir).strip()
+        else None
+    )
+    completed = []
+    for entry in os.scandir(normalized_root):
+        if not entry.is_dir():
+            continue
+        if current_dir and os.path.abspath(entry.path) == current_dir:
+            continue
+        if entry.name.startswith("."):
+            continue
+        summary_path = os.path.join(entry.path, "summary.json")
+        if not os.path.exists(summary_path):
+            continue
+        status = _llm_quality_resolve_manual_audit_status(entry.path)
+        if not status.get("manual_audit_required"):
+            continue
+        if not status.get("manual_audit_done"):
+            continue
+        completed.append(status)
+    if not completed:
+        return None
+    completed.sort(key=lambda item: item.get("summary_mtime") or 0.0, reverse=True)
+    return completed[0]
+
+
 def _llm_quality_build_manual_audit_gate_status(*, mode, output_dir):
     normalized_mode = str(mode or "off").strip().casefold()
     if normalized_mode not in {"off", "warn", "block"}:
@@ -6509,6 +6692,304 @@ def _llm_quality_build_manual_audit_gate_status(*, mode, output_dir):
     if gate_status["enforced"]:
         gate_status["valid"] = False
     return gate_status
+
+
+def _llm_quality_build_forensic_sla_gate_status(*, mode, output_dir, lane_effective=None):
+    normalized_mode = str(mode or "off").strip().casefold()
+    if normalized_mode not in {"off", "warn", "block"}:
+        normalized_mode = "block"
+    normalized_output_dir = os.path.abspath(
+        os.path.expanduser(str(output_dir or "").strip() or ".")
+    )
+    lane_token = str(lane_effective or "").strip().casefold()
+    required = lane_token == "acceptance"
+    gate_status = {
+        "mode": normalized_mode,
+        "valid": True,
+        "enforced": normalized_mode == "block" and required,
+        "required": required,
+        "lane_effective": lane_token or "unknown",
+        "reasons": [],
+        "output_root": os.path.dirname(normalized_output_dir),
+        "latest_run": None,
+        "forensic_sla": None,
+    }
+    if normalized_mode == "off":
+        return gate_status
+
+    latest = _llm_quality_find_latest_completed_manual_audit(
+        gate_status["output_root"],
+        current_output_dir=normalized_output_dir,
+    )
+    if not latest:
+        return gate_status
+    gate_status["latest_run"] = latest
+
+    sla_valid = bool(latest.get("forensic_sla_valid"))
+    sla_reasons = [str(item).strip() for item in (latest.get("forensic_sla_reasons") or []) if str(item).strip()]
+    gate_status["forensic_sla"] = {
+        "valid": sla_valid,
+        "reasons": sla_reasons,
+        "oracle_alignment": latest.get("oracle_alignment"),
+        "oracle_winner": latest.get("oracle_winner"),
+        "oracle_conflict_count": int(latest.get("oracle_conflict_count") or 0),
+    }
+    if not sla_valid:
+        run_id = str(latest.get("run_id") or "").strip() or "unknown"
+        gate_status["reasons"].append(f"forensic_sla_invalid:{run_id}")
+        for reason in sla_reasons:
+            gate_status["reasons"].append(f"forensic_sla:{reason}")
+    if gate_status["enforced"] and gate_status["reasons"]:
+        gate_status["valid"] = False
+    return gate_status
+
+
+def _llm_quality_build_oracle_conflict_gate_status(*, mode, output_dir, lane_effective=None):
+    normalized_mode = str(mode or "off").strip().casefold()
+    if normalized_mode not in {"off", "warn", "block"}:
+        normalized_mode = "block"
+    normalized_output_dir = os.path.abspath(
+        os.path.expanduser(str(output_dir or "").strip() or ".")
+    )
+    lane_token = str(lane_effective or "").strip().casefold()
+    required = lane_token == "acceptance"
+    gate_status = {
+        "mode": normalized_mode,
+        "valid": True,
+        "enforced": normalized_mode == "block" and required,
+        "required": required,
+        "lane_effective": lane_token or "unknown",
+        "reasons": [],
+        "output_root": os.path.dirname(normalized_output_dir),
+        "latest_run": None,
+        "oracle_conflict_count": 0,
+        "judge_alignment": None,
+        "winner": None,
+    }
+    if normalized_mode == "off":
+        return gate_status
+
+    latest = _llm_quality_find_latest_completed_manual_audit(
+        gate_status["output_root"],
+        current_output_dir=normalized_output_dir,
+    )
+    if not latest:
+        return gate_status
+    gate_status["latest_run"] = latest
+    conflict_count = int(latest.get("oracle_conflict_count") or 0)
+    judge_alignment = str(latest.get("oracle_alignment") or "").strip().casefold() or None
+    winner = str(latest.get("oracle_winner") or "").strip().casefold() or None
+    gate_status["oracle_conflict_count"] = conflict_count
+    gate_status["judge_alignment"] = judge_alignment
+    gate_status["winner"] = winner
+    run_id = str(latest.get("run_id") or "").strip() or "unknown"
+    sla_valid = bool(latest.get("forensic_sla_valid"))
+    if not sla_valid:
+        gate_status["reasons"].append(f"oracle_conflict_requires_sla:{run_id}")
+    if conflict_count > 0:
+        if judge_alignment != "conflicted":
+            gate_status["reasons"].append(
+                f"oracle_alignment_mismatch:{run_id}:{judge_alignment or 'missing'}"
+            )
+        if winner != "contract":
+            gate_status["reasons"].append(
+                f"oracle_winner_must_be_contract:{run_id}:{winner or 'missing'}"
+            )
+    if gate_status["enforced"] and gate_status["reasons"]:
+        gate_status["valid"] = False
+    return gate_status
+
+
+def _llm_quality_load_scenario_governance_registry(path):
+    normalized = os.path.abspath(
+        os.path.expanduser(
+            str(path or "").strip() or LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY
+        )
+    )
+    if not os.path.exists(normalized):
+        return {"path": normalized, "payload": {"version": 1, "entries": {}}, "error": "missing"}
+    try:
+        with open(normalized, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception as exc:
+        return {"path": normalized, "payload": None, "error": f"parse_error:{exc}"}
+    if not isinstance(payload, dict):
+        return {"path": normalized, "payload": None, "error": "invalid_payload"}
+    entries = payload.get("entries")
+    if not isinstance(entries, dict):
+        payload["entries"] = {}
+    return {"path": normalized, "payload": payload, "error": None}
+
+
+def _llm_quality_save_scenario_governance_registry(path, payload):
+    normalized = os.path.abspath(
+        os.path.expanduser(
+            str(path or "").strip() or LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY
+        )
+    )
+    os.makedirs(os.path.dirname(normalized), exist_ok=True)
+    tmp_path = f"{normalized}.tmp.{os.getpid()}"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(payload if isinstance(payload, dict) else {}, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, normalized)
+    return normalized
+
+
+def _llm_quality_build_scenario_governance_status(
+    *,
+    mode,
+    output_dir,
+    lane_effective,
+    run_mode,
+    run_id,
+    scenarios_file,
+    baseline_summary,
+    scenario_contract,
+    registry_path,
+    chain_controller_status,
+):
+    normalized_mode = str(mode or "off").strip().casefold()
+    if normalized_mode not in {"off", "warn", "block"}:
+        normalized_mode = "block"
+    lane_token = str(lane_effective or "").strip().casefold()
+    required = lane_token == "acceptance"
+    step_mode = str((chain_controller_status or {}).get("mode") or "").strip().casefold()
+    if step_mode not in {"lock", "replay", "full"}:
+        step_mode = _llm_quality_chain_resolve_requested_mode(
+            args=type("S", (), {"scenarios_file": scenarios_file})(),
+            run_id=run_id,
+        )[0]
+    registry_status = _llm_quality_load_scenario_governance_registry(registry_path)
+    registry_payload = registry_status.get("payload") if isinstance(registry_status, dict) else None
+    entries = registry_payload.get("entries") if isinstance(registry_payload, dict) else {}
+    if not isinstance(entries, dict):
+        entries = {}
+    gate = {
+        "mode": normalized_mode,
+        "valid": True,
+        "enforced": normalized_mode == "block" and required,
+        "required": required,
+        "lane_effective": lane_token or "unknown",
+        "step_mode": step_mode,
+        "registry_path": registry_status.get("path"),
+        "registry_error": registry_status.get("error"),
+        "reasons": [],
+        "scenario_fingerprint": None,
+        "entry": None,
+    }
+    if normalized_mode == "off":
+        return gate
+    if registry_status.get("error") and registry_status.get("error") != "missing":
+        gate["reasons"].append(f"scenario_registry_unreadable:{registry_status.get('error')}")
+    if required and step_mode in {"replay", "full"}:
+        source_path = None
+        if step_mode == "replay":
+            source_path = str(scenarios_file or "").strip() or None
+        else:
+            baseline_payload = _llm_quality_load_json_object(baseline_summary)
+            if isinstance(baseline_payload, dict):
+                source_path = str(baseline_payload.get("scenarios_path") or "").strip() or None
+            if not source_path:
+                gate["reasons"].append("scenario_registry_missing_baseline_scenarios_path")
+        if source_path:
+            scenario_digest = _llm_quality_digest_file(source_path)
+            if not scenario_digest:
+                gate["reasons"].append("scenario_registry_scenarios_unreadable")
+            gate["scenario_fingerprint"] = scenario_digest
+            entry = entries.get(scenario_digest) if isinstance(entries, dict) else None
+            if not isinstance(entry, dict):
+                gate["reasons"].append("scenario_registry_missing_entry")
+            else:
+                gate["entry"] = entry
+                if not bool(entry.get("acceptance_eligible")):
+                    gate["reasons"].append("scenario_registry_not_eligible")
+                coverage_tokens = {
+                    str(item).strip().casefold()
+                    for item in (entry.get("coverage_tokens") or [])
+                    if str(item).strip()
+                }
+                for required_token in ("booking", "info", "interrupt", "handoff"):
+                    if required_token not in coverage_tokens:
+                        gate["reasons"].append(f"scenario_registry_missing_coverage:{required_token}")
+                promotion = entry.get("promotion") if isinstance(entry.get("promotion"), dict) else {}
+                promotion_status = str(promotion.get("status") or "").strip().casefold()
+                if promotion_status not in {"eligible", "approved"}:
+                    gate["reasons"].append("scenario_registry_promotion_missing")
+    if gate["enforced"] and gate["reasons"]:
+        gate["valid"] = False
+    return gate
+
+
+def _llm_quality_update_scenario_governance_registry(
+    *,
+    registry_path,
+    scenario_path,
+    run_id,
+    lane_effective,
+    scenario_contract,
+    chain_controller_status,
+):
+    scenario_digest = _llm_quality_digest_file(scenario_path)
+    if not scenario_digest:
+        return {"updated": False, "reason": "scenario_digest_missing", "path": registry_path}
+    loaded = _llm_quality_load_scenario_governance_registry(registry_path)
+    payload = loaded.get("payload") if isinstance(loaded, dict) and isinstance(loaded.get("payload"), dict) else {"version": 1, "entries": {}}
+    entries = payload.get("entries")
+    if not isinstance(entries, dict):
+        entries = {}
+    promotion_status = "candidate"
+    if str(lane_effective or "").strip().casefold() == "acceptance":
+        promotion_status = "eligible"
+    chain_state_path = (chain_controller_status or {}).get("state_path")
+    chain_id = (chain_controller_status or {}).get("chain_id")
+    step_mode = str((chain_controller_status or {}).get("mode") or "").strip().casefold() or "lock"
+    go_to_full = None
+    if isinstance(chain_state_path, str) and chain_state_path.strip():
+        chain_state = _llm_quality_load_json_object(chain_state_path)
+        if isinstance(chain_state, dict):
+            steps = chain_state.get("steps") if isinstance(chain_state.get("steps"), dict) else {}
+            lock_step = steps.get("lock") if isinstance(steps.get("lock"), dict) else {}
+            if isinstance(lock_step.get("go_to_full"), dict):
+                go_to_full = lock_step.get("go_to_full")
+    entries[scenario_digest] = {
+        "scenario_fingerprint": scenario_digest,
+        "scenarios_path": os.path.abspath(os.path.expanduser(str(scenario_path))),
+        "run_id": str(run_id or "").strip(),
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "lane_effective": str(lane_effective or "").strip().casefold() or "unknown",
+        "step_mode": step_mode,
+        "coverage_tokens": list((scenario_contract or {}).get("coverage_tokens") or []),
+        "dialog_count": int((scenario_contract or {}).get("dialog_count") or 0),
+        "turn_count": int((scenario_contract or {}).get("turn_count") or 0),
+        "weak_expectation_ratio": float((scenario_contract or {}).get("weak_expectation_ratio") or 0.0),
+        "reply_type_coverage": float((scenario_contract or {}).get("reply_type_coverage") or 0.0),
+        "action_coverage": float((scenario_contract or {}).get("action_coverage") or 0.0),
+        "info_coverage": float((scenario_contract or {}).get("info_coverage") or 0.0),
+        "acceptance_eligible": bool(
+            promotion_status in {"eligible", "approved"}
+            and bool((scenario_contract or {}).get("valid"))
+        ),
+        "promotion": {
+            "status": promotion_status,
+            "chain_id": chain_id,
+            "go_to_full_present": bool(go_to_full),
+            "go_to_full_root_cause": (
+                str((go_to_full or {}).get("root_cause_statement") or "").strip()
+                if isinstance(go_to_full, dict)
+                else None
+            ),
+        },
+    }
+    payload["version"] = 1
+    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    payload["entries"] = entries
+    registry_abs_path = _llm_quality_save_scenario_governance_registry(registry_path, payload)
+    return {
+        "updated": True,
+        "path": registry_abs_path,
+        "scenario_fingerprint": scenario_digest,
+        "entry": entries.get(scenario_digest),
+    }
 
 
 def _llm_quality_collect_blocking_reasons(failure_counts, extra_counts=None):
@@ -6711,6 +7192,9 @@ def _llm_quality_next_step_for_reason(reason):
         "delivery_waiver_billing": "classify as delivery waiver and keep semantic acceptance on contract checks",
         "manual_audit_gate_violation": "complete manual audit for previous run (manual_audit.md/json) before starting a new run",
         "quality_constant_violation": "run acceptance lane with full canonical envelope (judge/media/coverage/gates) or switch explicitly to dev lane",
+        "oracle_conflict_violation": "resolve judge-vs-contract conflicts in manual audit and keep contract as primary oracle before rerun",
+        "forensic_sla_violation": "fill manual audit SLA fields (analyst/timestamp/root cause/next steps/oracle arbitration) and mark done",
+        "scenario_governance_violation": "register scenarios with acceptance_eligible promotion evidence before replay/full acceptance run",
         "workaround_register_violation": "register WORKAROUND_ID in workaround register with owner/expiry/removal condition before rerun",
         "false_booking_confirmation": "verify booking confirmation text against appointment_id and calendar outcome",
         "calendar_tool_contract_miss": "inspect tool_signals.calendar + appointment_status before confirming booking",
@@ -7093,6 +7577,13 @@ def _llm_quality_build_command_from_args(
     add("--run-economy-gate", getattr(args, "run_economy_gate", None))
     add("--run-economy-base-ref", getattr(args, "run_economy_base_ref", None))
     add("--manual-audit-gate", getattr(args, "manual_audit_gate", None))
+    add("--forensic-sla-gate", getattr(args, "forensic_sla_gate", None))
+    add("--oracle-conflict-gate", getattr(args, "oracle_conflict_gate", None))
+    add("--scenario-governance-gate", getattr(args, "scenario_governance_gate", None))
+    add(
+        "--scenario-governance-registry",
+        getattr(args, "scenario_governance_registry", None),
+    )
     add_bool("--allow-no-code-delta", getattr(args, "allow_no_code_delta", False))
     add("--judge-mode", getattr(args, "judge_mode", None))
     add("--judge-sample", getattr(args, "judge_sample", None))
@@ -7689,8 +8180,14 @@ def _llm_quality_write_failure_artifacts(
             "run_economy_gate": getattr(args, "run_economy_gate", None),
             "run_economy_base_ref": getattr(args, "run_economy_base_ref", None),
             "manual_audit_gate": getattr(args, "manual_audit_gate", None),
+            "forensic_sla_gate": getattr(args, "forensic_sla_gate", None),
+            "oracle_conflict_gate": getattr(args, "oracle_conflict_gate", None),
             "quality_constant_gate": getattr(args, "quality_constant_gate", None),
             "quality_lane": getattr(args, "quality_lane", None),
+            "scenario_governance_gate": getattr(args, "scenario_governance_gate", None),
+            "scenario_governance_registry": getattr(
+                args, "scenario_governance_registry", None
+            ),
             "chain_id": getattr(args, "chain_id", None),
             "chain_step": getattr(args, "chain_step", None),
             "workaround_register_gate": getattr(args, "workaround_register_gate", None),
@@ -7838,8 +8335,14 @@ def _llm_quality_write_checkpoint_summary(
             "jid_mode": getattr(args, "jid_mode", None),
             "baseline_summary": getattr(args, "baseline_summary", None),
             "manual_audit_gate": getattr(args, "manual_audit_gate", None),
+            "forensic_sla_gate": getattr(args, "forensic_sla_gate", None),
+            "oracle_conflict_gate": getattr(args, "oracle_conflict_gate", None),
             "quality_constant_gate": getattr(args, "quality_constant_gate", None),
             "quality_lane": getattr(args, "quality_lane", None),
+            "scenario_governance_gate": getattr(args, "scenario_governance_gate", None),
+            "scenario_governance_registry": getattr(
+                args, "scenario_governance_registry", None
+            ),
             "chain_id": getattr(args, "chain_id", None),
             "chain_step": getattr(args, "chain_step", None),
             "workaround_register_gate": getattr(args, "workaround_register_gate", None),
@@ -10124,6 +10627,18 @@ def _parse_llm_quality_args(argv):
         help="Stop or warn when previous run is missing mandatory manual audit artifacts.",
     )
     parser.add_argument(
+        "--forensic-sla-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_FORENSIC_SLA_GATE", "block"),
+        help="Validate manual audit SLA completeness before acceptance lane runs.",
+    )
+    parser.add_argument(
+        "--oracle-conflict-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_ORACLE_CONFLICT_GATE", "block"),
+        help="Enforce contract-first oracle arbitration before acceptance lane runs.",
+    )
+    parser.add_argument(
         "--quality-constant-gate",
         choices=["off", "warn", "block"],
         default=os.environ.get("LLM_QUALITY_CONSTANT_GATE", "block"),
@@ -10137,6 +10652,20 @@ def _parse_llm_quality_args(argv):
         choices=["auto", "dev", "acceptance"],
         default=os.environ.get("LLM_QUALITY_LANE", "auto"),
         help="Operating lane for this run (auto infers from fail/update flags).",
+    )
+    parser.add_argument(
+        "--scenario-governance-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_SCENARIO_GOVERNANCE_GATE", "block"),
+        help="Require scenario registry + promotion contract for acceptance replay/full.",
+    )
+    parser.add_argument(
+        "--scenario-governance-registry",
+        default=os.environ.get(
+            "LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY",
+            LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY,
+        ),
+        help="JSON registry path for scenario governance/promotion entries.",
     )
     parser.add_argument(
         "--workaround-register-gate",
@@ -10403,6 +10932,23 @@ def _parse_llm_quality_audit_args(argv):
         help="Manual next action item (repeatable).",
     )
     parser.add_argument(
+        "--oracle-judge-alignment",
+        choices=sorted(LLM_QUALITY_ORACLE_ALIGNMENT_VALUES),
+        default=None,
+        help="Oracle alignment verdict for this audit (defaults to inferred value).",
+    )
+    parser.add_argument(
+        "--oracle-winner",
+        choices=sorted(LLM_QUALITY_ORACLE_WINNER_VALUES),
+        default=None,
+        help="Winner when oracle signals conflict (defaults to contract-first).",
+    )
+    parser.add_argument(
+        "--oracle-resolution-summary",
+        default=None,
+        help="Required when oracle alignment is conflicted.",
+    )
+    parser.add_argument(
         "--strict-artifacts",
         action="store_true",
         help="Exit 2 when required run artifacts are missing.",
@@ -10638,6 +11184,39 @@ def _run_llm_quality_audit(args):
 
     analyst_root_causes = [str(item).strip() for item in (args.root_cause or []) if str(item).strip()]
     analyst_next_steps = [str(item).strip() for item in (args.next_step or []) if str(item).strip()]
+    if not analyst_root_causes:
+        analyst_root_causes = list(inferred_root_causes)
+    if not analyst_root_causes:
+        analyst_root_causes = ["no_critical_findings_confirmed"]
+    if not analyst_next_steps:
+        suggested_steps = []
+        for item in findings:
+            next_step = str(item.get("next_step") or "").strip()
+            if next_step and next_step not in suggested_steps:
+                suggested_steps.append(next_step)
+        analyst_next_steps = suggested_steps[:3] if suggested_steps else ["continue deterministic validation lane"]
+
+    inferred_alignment = "conflicted" if judge_eval_conflicts > 0 else "corroborated"
+    judge_alignment = str(args.oracle_judge_alignment or inferred_alignment or "").strip().casefold()
+    if judge_alignment not in LLM_QUALITY_ORACLE_ALIGNMENT_VALUES:
+        judge_alignment = inferred_alignment
+    oracle_winner = str(args.oracle_winner or "contract").strip().casefold()
+    if oracle_winner not in LLM_QUALITY_ORACLE_WINNER_VALUES:
+        oracle_winner = "contract"
+    resolution_summary = str(args.oracle_resolution_summary or "").strip()
+    if judge_alignment == "conflicted" and not resolution_summary:
+        resolution_summary = (
+            "Contract-first arbitration applied; conflicting judge verdict kept as advisory "
+            "until rubric refinement."
+        )
+
+    oracle_arbitration = {
+        "judge_alignment": judge_alignment,
+        "winner": oracle_winner,
+        "conflict_count": int(judge_eval_conflicts or 0),
+        "resolution_summary": resolution_summary or None,
+    }
+
     notes = str(args.notes or "").strip()
     status = str(args.status or "pending").strip().lower()
     generated_at = datetime.now(timezone.utc).isoformat()
@@ -10709,6 +11288,12 @@ def _run_llm_quality_audit(args):
             f"- inferred: `{inferred_root_causes}`",
             f"- analyst: `{analyst_root_causes}`",
             "",
+            "## Oracle Arbitration",
+            f"- judge_alignment: `{oracle_arbitration.get('judge_alignment')}`",
+            f"- winner: `{oracle_arbitration.get('winner')}`",
+            f"- conflict_count: `{oracle_arbitration.get('conflict_count')}`",
+            f"- resolution_summary: `{oracle_arbitration.get('resolution_summary')}`",
+            "",
             "## Next Steps",
             f"- analyst: `{analyst_next_steps}`",
             "",
@@ -10747,6 +11332,7 @@ def _run_llm_quality_audit(args):
         "inferred_root_causes": inferred_root_causes,
         "analyst_root_causes": analyst_root_causes,
         "analyst_next_steps": analyst_next_steps,
+        "oracle_arbitration": oracle_arbitration,
         "notes": notes,
         "manual_audit_markdown": md_output,
         "manual_audit_json": json_output,
@@ -13230,6 +13816,75 @@ def _run_llm_quality(args):
             "llm-quality: INVALID RUN - manual audit gate failed "
             f"({','.join(reason_tokens)})"
         )
+    forensic_sla_gate_status = _llm_quality_build_forensic_sla_gate_status(
+        mode=getattr(args, "forensic_sla_gate", "block"),
+        output_dir=output_dir,
+        lane_effective=quality_constant_status.get("lane_effective"),
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_forensic_sla_preflight",
+                "mode": forensic_sla_gate_status.get("mode"),
+                "valid": forensic_sla_gate_status.get("valid"),
+                "enforced": forensic_sla_gate_status.get("enforced"),
+                "required": forensic_sla_gate_status.get("required"),
+                "reasons": forensic_sla_gate_status.get("reasons"),
+                "latest_run": (
+                    (forensic_sla_gate_status.get("latest_run") or {}).get("run_id")
+                    if isinstance(forensic_sla_gate_status.get("latest_run"), dict)
+                    else None
+                ),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if (
+        forensic_sla_gate_status.get("enforced")
+        and not forensic_sla_gate_status.get("valid", True)
+    ):
+        reason_tokens = forensic_sla_gate_status.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - forensic SLA gate failed "
+            f"({','.join(reason_tokens)})"
+        )
+    oracle_conflict_gate_status = _llm_quality_build_oracle_conflict_gate_status(
+        mode=getattr(args, "oracle_conflict_gate", "block"),
+        output_dir=output_dir,
+        lane_effective=quality_constant_status.get("lane_effective"),
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_oracle_conflict_preflight",
+                "mode": oracle_conflict_gate_status.get("mode"),
+                "valid": oracle_conflict_gate_status.get("valid"),
+                "enforced": oracle_conflict_gate_status.get("enforced"),
+                "required": oracle_conflict_gate_status.get("required"),
+                "reasons": oracle_conflict_gate_status.get("reasons"),
+                "oracle_conflict_count": oracle_conflict_gate_status.get(
+                    "oracle_conflict_count"
+                ),
+                "judge_alignment": oracle_conflict_gate_status.get("judge_alignment"),
+                "winner": oracle_conflict_gate_status.get("winner"),
+                "latest_run": (
+                    (oracle_conflict_gate_status.get("latest_run") or {}).get("run_id")
+                    if isinstance(oracle_conflict_gate_status.get("latest_run"), dict)
+                    else None
+                ),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if (
+        oracle_conflict_gate_status.get("enforced")
+        and not oracle_conflict_gate_status.get("valid", True)
+    ):
+        reason_tokens = oracle_conflict_gate_status.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - oracle conflict gate failed "
+            f"({','.join(reason_tokens)})"
+        )
     base_url = args.base_url.rstrip("/")
     runtime_preflight = _llm_quality_runtime_fingerprint_preflight(
         base_url=base_url,
@@ -13667,6 +14322,49 @@ def _run_llm_quality(args):
             "llm-quality: INVALID RUN - scenario contract failed "
             f"({','.join(reason_tokens)})"
         )
+    scenario_governance_status = _llm_quality_build_scenario_governance_status(
+        mode=getattr(args, "scenario_governance_gate", "block"),
+        output_dir=output_dir,
+        lane_effective=quality_constant_status.get("lane_effective"),
+        run_mode=args.mode,
+        run_id=run_id,
+        scenarios_file=args.scenarios_file,
+        baseline_summary=args.baseline_summary,
+        scenario_contract=scenario_contract,
+        registry_path=getattr(
+            args,
+            "scenario_governance_registry",
+            LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY,
+        ),
+        chain_controller_status=chain_controller_status,
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_scenario_governance_preflight",
+                "mode": scenario_governance_status.get("mode"),
+                "valid": scenario_governance_status.get("valid"),
+                "enforced": scenario_governance_status.get("enforced"),
+                "required": scenario_governance_status.get("required"),
+                "step_mode": scenario_governance_status.get("step_mode"),
+                "reasons": scenario_governance_status.get("reasons"),
+                "registry_path": scenario_governance_status.get("registry_path"),
+                "scenario_fingerprint": scenario_governance_status.get(
+                    "scenario_fingerprint"
+                ),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if (
+        scenario_governance_status.get("enforced")
+        and not scenario_governance_status.get("valid", True)
+    ):
+        reason_tokens = scenario_governance_status.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - scenario governance gate failed "
+            f"({','.join(reason_tokens)})"
+        )
 
     replay_state_path = _llm_quality_replay_fingerprint_state_path()
     replay_state_payload = _llm_quality_load_replay_fingerprint_state(replay_state_path)
@@ -13799,6 +14497,31 @@ def _run_llm_quality(args):
     scenarios_path = os.path.join(output_dir, "scenarios.json")
     with open(scenarios_path, "w", encoding="utf-8") as handle:
         json.dump(scenarios_payload, handle, ensure_ascii=False, indent=2)
+    scenario_governance_registry_update = _llm_quality_update_scenario_governance_registry(
+        registry_path=getattr(
+            args,
+            "scenario_governance_registry",
+            LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY,
+        ),
+        scenario_path=scenarios_path,
+        run_id=run_id,
+        lane_effective=quality_constant_status.get("lane_effective"),
+        scenario_contract=scenario_contract,
+        chain_controller_status=chain_controller_status,
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_scenario_governance_registry",
+                "updated": scenario_governance_registry_update.get("updated"),
+                "path": scenario_governance_registry_update.get("path"),
+                "scenario_fingerprint": scenario_governance_registry_update.get(
+                    "scenario_fingerprint"
+                ),
+            },
+            ensure_ascii=False,
+        )
+    )
     replay_command = _llm_quality_build_replay_command(args, scenarios_path, len(dialogs))
     brief_path = (
         os.path.abspath(os.path.expanduser(args.brief_file))
@@ -16115,6 +16838,30 @@ def _run_llm_quality(args):
             1,
         )
     if (
+        not forensic_sla_gate_status.get("valid", True)
+        and forensic_sla_gate_status.get("mode") in {"warn", "block"}
+    ):
+        process_blocking_counts["forensic_sla_violation"] = max(
+            len(forensic_sla_gate_status.get("reasons") or []),
+            1,
+        )
+    if (
+        not oracle_conflict_gate_status.get("valid", True)
+        and oracle_conflict_gate_status.get("mode") in {"warn", "block"}
+    ):
+        process_blocking_counts["oracle_conflict_violation"] = max(
+            len(oracle_conflict_gate_status.get("reasons") or []),
+            1,
+        )
+    if (
+        not scenario_governance_status.get("valid", True)
+        and scenario_governance_status.get("mode") in {"warn", "block"}
+    ):
+        process_blocking_counts["scenario_governance_violation"] = max(
+            len(scenario_governance_status.get("reasons") or []),
+            1,
+        )
+    if (
         not workaround_register_status.get("valid", True)
         and workaround_register_status.get("mode") in {"warn", "block"}
     ):
@@ -16318,7 +17065,11 @@ def _run_llm_quality(args):
         "run_economy_gate": args.run_economy_gate,
         "run_economy_base_ref": args.run_economy_base_ref,
         "manual_audit_gate": args.manual_audit_gate,
+        "forensic_sla_gate": args.forensic_sla_gate,
+        "oracle_conflict_gate": args.oracle_conflict_gate,
         "quality_constant_gate": args.quality_constant_gate,
+        "scenario_governance_gate": args.scenario_governance_gate,
+        "scenario_governance_registry": args.scenario_governance_registry,
         "quality_lane_requested": quality_constant_status.get("lane_requested"),
         "quality_lane_effective": quality_constant_status.get("lane_effective"),
         "chain_id": args.chain_id,
@@ -16382,7 +17133,11 @@ def _run_llm_quality(args):
         "hardcode_core_gate": hardcode_core_gate,
         "run_economy": run_economy_status,
         "manual_audit_gate": manual_audit_gate_status,
+        "forensic_sla_gate": forensic_sla_gate_status,
+        "oracle_conflict_gate": oracle_conflict_gate_status,
         "quality_constant_gate": quality_constant_status,
+        "scenario_governance_gate": scenario_governance_status,
+        "scenario_governance_registry": scenario_governance_registry_update,
         "chain_controller_gate": chain_controller_status,
         "workaround_register_gate": workaround_register_status,
         "top_failures": top_failures,
@@ -16457,9 +17212,32 @@ def _run_llm_quality(args):
             "manual_audit_gate_valid": manual_audit_gate_status.get("valid", True),
             "manual_audit_gate_enforced": manual_audit_gate_status.get("enforced", False),
             "manual_audit_gate_reasons": manual_audit_gate_status.get("reasons", []),
+            "forensic_sla_gate_valid": forensic_sla_gate_status.get("valid", True),
+            "forensic_sla_gate_enforced": forensic_sla_gate_status.get(
+                "enforced", False
+            ),
+            "forensic_sla_gate_reasons": forensic_sla_gate_status.get("reasons", []),
+            "oracle_conflict_gate_valid": oracle_conflict_gate_status.get("valid", True),
+            "oracle_conflict_gate_enforced": oracle_conflict_gate_status.get(
+                "enforced", False
+            ),
+            "oracle_conflict_gate_reasons": oracle_conflict_gate_status.get("reasons", []),
             "quality_constant_gate_valid": quality_constant_status.get("valid", True),
             "quality_constant_gate_enforced": quality_constant_status.get("enforced", False),
             "quality_constant_gate_reasons": quality_constant_status.get("reasons", []),
+            "scenario_governance_gate_valid": scenario_governance_status.get("valid", True),
+            "scenario_governance_gate_enforced": scenario_governance_status.get(
+                "enforced", False
+            ),
+            "scenario_governance_gate_reasons": scenario_governance_status.get(
+                "reasons", []
+            ),
+            "scenario_governance_registry_path": scenario_governance_status.get(
+                "registry_path"
+            ),
+            "scenario_governance_fingerprint": scenario_governance_status.get(
+                "scenario_fingerprint"
+            ),
             "quality_lane_requested": quality_constant_status.get("lane_requested"),
             "quality_lane_effective": quality_constant_status.get("lane_effective"),
             "quality_lane_missing_coverage": quality_constant_status.get("missing_coverage", []),
