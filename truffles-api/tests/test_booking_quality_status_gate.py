@@ -38,6 +38,11 @@ def _load_quality_helpers():
         "LLM_QUALITY_PROGRESS_SKIP_TAGS",
         "LLM_QUALITY_REQUIRED_RUN_ARTIFACTS",
         "LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY",
+        "LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION",
+        "LLM_QUALITY_SCENARIO_REALISM_POLICY_VERSION",
+        "LLM_QUALITY_SCENARIO_REALISM_REQUIRED_BUCKETS",
+        "LLM_QUALITY_SCENARIO_REALISM_MIN_DIALOG_COUNT",
+        "LLM_QUALITY_SCENARIO_REALISM_MIN_TURN_COUNT",
         "LLM_QUALITY_ORACLE_ALIGNMENT_VALUES",
         "LLM_QUALITY_ORACLE_WINNER_VALUES",
     }
@@ -95,8 +100,11 @@ def _load_quality_helpers():
         "_llm_quality_build_oracle_conflict_gate_status",
         "_llm_quality_load_scenario_governance_registry",
         "_llm_quality_save_scenario_governance_registry",
+        "_llm_quality_build_scenario_realism_sla",
+        "_llm_quality_next_scenario_promotion_status",
         "_llm_quality_build_scenario_governance_status",
         "_llm_quality_update_scenario_governance_registry",
+        "_llm_quality_finalize_scenario_governance_registry",
         "_llm_quality_chain_resolve_requested_mode",
         "_llm_quality_digest_file",
         "_llm_quality_hq1_normalize_text",
@@ -1869,7 +1877,7 @@ def test_scenario_governance_gate_blocks_replay_without_registry_entry(tmp_path)
     assert "scenario_registry_missing_entry" in gate["reasons"]
 
 
-def test_scenario_governance_gate_accepts_registered_replay_scenarios(tmp_path):
+def test_scenario_governance_gate_blocks_legacy_registry_schema(tmp_path):
     ns = _load_quality_helpers()
     build_gate = ns["_llm_quality_build_scenario_governance_status"]
     digest_file = ns["_llm_quality_digest_file"]
@@ -1913,6 +1921,67 @@ def test_scenario_governance_gate_accepts_registered_replay_scenarios(tmp_path):
         chain_controller_status={"mode": "replay"},
     )
 
+    assert gate["valid"] is False
+    assert "scenario_registry_schema_version_unsupported" in gate["reasons"]
+
+
+def test_scenario_governance_gate_accepts_registered_replay_scenarios(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_scenario_governance_status"]
+    digest_file = ns["_llm_quality_digest_file"]
+    schema_version = ns["LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION"]
+    policy_version = ns["LLM_QUALITY_SCENARIO_REALISM_POLICY_VERSION"]
+
+    scenarios_path = tmp_path / "scenarios.json"
+    scenarios_path.write_text(
+        json.dumps({"dialogs": [{"turns": [{"text": "hi"}]}]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    scenario_fp = digest_file(str(scenarios_path))
+    registry_path = tmp_path / "scenario_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": schema_version,
+                "version": schema_version,
+                "entries": {
+                    scenario_fp: {
+                        "scenario_fingerprint": scenario_fp,
+                        "acceptance_eligible": True,
+                        "coverage_tokens": ["booking", "info", "interrupt", "handoff"],
+                        "promotion": {"status": "eligible"},
+                        "realism_sla": {
+                            "policy_version": policy_version,
+                            "valid": True,
+                            "bucket_presence": {
+                                "booking": True,
+                                "info": True,
+                                "interrupt": True,
+                                "handoff": True,
+                            },
+                        },
+                    }
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    gate = build_gate(
+        mode="block",
+        output_dir=str(tmp_path / "run-next"),
+        lane_effective="acceptance",
+        run_mode="llm",
+        run_id="booking-replay-test",
+        scenarios_file=str(scenarios_path),
+        baseline_summary=None,
+        scenario_contract={"valid": True},
+        registry_path=str(registry_path),
+        chain_controller_status={"mode": "replay"},
+    )
+
     assert gate["valid"] is True
     assert gate["reasons"] == []
 
@@ -1920,6 +1989,7 @@ def test_scenario_governance_gate_accepts_registered_replay_scenarios(tmp_path):
 def test_scenario_governance_registry_update_writes_entry(tmp_path):
     ns = _load_quality_helpers()
     update_registry = ns["_llm_quality_update_scenario_governance_registry"]
+    schema_version = ns["LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION"]
 
     scenarios_path = tmp_path / "scenarios.json"
     scenarios_path.write_text(
@@ -1947,4 +2017,59 @@ def test_scenario_governance_registry_update_writes_entry(tmp_path):
     assert result["updated"] is True
     assert result["scenario_fingerprint"]
     payload = json.loads((tmp_path / "scenario_registry.json").read_text(encoding="utf-8"))
+    assert payload["schema_version"] == schema_version
     assert result["scenario_fingerprint"] in payload["entries"]
+    entry = payload["entries"][result["scenario_fingerprint"]]
+    assert entry["realism_sla"]["valid"] is True
+    assert entry["promotion"]["status"] == "eligible"
+    assert entry["promotion"]["lifecycle"][-1]["status"] == "eligible"
+
+
+def test_scenario_governance_registry_finalize_promotes_full_to_approved(tmp_path):
+    ns = _load_quality_helpers()
+    update_registry = ns["_llm_quality_update_scenario_governance_registry"]
+    finalize_registry = ns["_llm_quality_finalize_scenario_governance_registry"]
+
+    registry_path = tmp_path / "scenario_registry.json"
+    scenarios_path = tmp_path / "scenarios.json"
+    scenarios_path.write_text(
+        json.dumps({"dialogs": [{"turns": [{"text": "hi"}]}]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    update = update_registry(
+        registry_path=str(registry_path),
+        scenario_path=str(scenarios_path),
+        run_id="booking-lock-abc",
+        lane_effective="acceptance",
+        scenario_contract={
+            "valid": True,
+            "coverage_tokens": ["booking", "info", "interrupt", "handoff"],
+            "dialog_count": 10,
+            "turn_count": 120,
+            "weak_expectation_ratio": 0.0,
+            "reply_type_coverage": 0.95,
+            "action_coverage": 0.9,
+            "info_coverage": 0.85,
+        },
+        chain_controller_status={"mode": "lock", "chain_id": "demo"},
+    )
+    assert update["updated"] is True
+
+    finalize = finalize_registry(
+        registry_path=str(registry_path),
+        scenario_path=str(scenarios_path),
+        run_id="booking-full-abc",
+        lane_effective="acceptance",
+        chain_controller_status={"mode": "full", "chain_id": "demo"},
+        summary_path=str(tmp_path / "summary.json"),
+        infra_valid=True,
+        semantic_valid=True,
+        run_integrity_valid=True,
+    )
+    assert finalize["updated"] is True
+
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    entry = payload["entries"][update["scenario_fingerprint"]]
+    assert entry["promotion"]["status"] == "approved"
+    assert entry["promotion"]["approved_run_id"] == "booking-full-abc"
+    assert entry["promotion"]["lifecycle"][-1]["status"] == "approved"

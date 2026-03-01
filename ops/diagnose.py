@@ -884,6 +884,11 @@ LLM_QUALITY_CHAIN_ROOT = "/tmp/booking_quality/_chain"
 LLM_QUALITY_CHAIN_STEPS = ("lock", "replay", "full")
 LLM_QUALITY_CHAIN_BLOCKED_STATUSES = {"blocked", "aborted"}
 LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY = "/tmp/booking_quality/_scenario_governance_registry.json"
+LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION = 2
+LLM_QUALITY_SCENARIO_REALISM_POLICY_VERSION = "2026-03-01"
+LLM_QUALITY_SCENARIO_REALISM_REQUIRED_BUCKETS = ("booking", "info", "interrupt", "handoff")
+LLM_QUALITY_SCENARIO_REALISM_MIN_DIALOG_COUNT = 10
+LLM_QUALITY_SCENARIO_REALISM_MIN_TURN_COUNT = 100
 LLM_QUALITY_ORACLE_ALIGNMENT_VALUES = {"corroborated", "conflicted", "not_applicable"}
 LLM_QUALITY_ORACLE_WINNER_VALUES = {"contract", "judge", "mixed", "not_applicable"}
 LLM_QUALITY_MANIFEST_REDACT_KEYS = {
@@ -6862,8 +6867,13 @@ def _llm_quality_load_scenario_governance_registry(path):
             str(path or "").strip() or LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY
         )
     )
+    default_payload = {
+        "schema_version": LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION,
+        "version": LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION,
+        "entries": {},
+    }
     if not os.path.exists(normalized):
-        return {"path": normalized, "payload": {"version": 1, "entries": {}}, "error": "missing"}
+        return {"path": normalized, "payload": default_payload, "error": "missing"}
     try:
         with open(normalized, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
@@ -6871,6 +6881,17 @@ def _llm_quality_load_scenario_governance_registry(path):
         return {"path": normalized, "payload": None, "error": f"parse_error:{exc}"}
     if not isinstance(payload, dict):
         return {"path": normalized, "payload": None, "error": "invalid_payload"}
+    schema_version_raw = payload.get("schema_version")
+    if schema_version_raw is None:
+        schema_version_raw = payload.get("version")
+    try:
+        schema_version = int(schema_version_raw or 0)
+    except Exception:
+        schema_version = 0
+    if schema_version <= 0:
+        schema_version = 1
+    payload["schema_version"] = schema_version
+    payload["version"] = schema_version
     entries = payload.get("entries")
     if not isinstance(entries, dict):
         payload["entries"] = {}
@@ -6889,6 +6910,54 @@ def _llm_quality_save_scenario_governance_registry(path, payload):
         json.dump(payload if isinstance(payload, dict) else {}, handle, ensure_ascii=False, indent=2)
     os.replace(tmp_path, normalized)
     return normalized
+
+
+def _llm_quality_build_scenario_realism_sla(scenario_contract):
+    contract = scenario_contract if isinstance(scenario_contract, dict) else {}
+    coverage_tokens = {
+        str(item).strip().casefold()
+        for item in (contract.get("coverage_tokens") or [])
+        if str(item).strip()
+    }
+    bucket_presence = {
+        bucket: bucket in coverage_tokens
+        for bucket in LLM_QUALITY_SCENARIO_REALISM_REQUIRED_BUCKETS
+    }
+    dialog_count = int(contract.get("dialog_count") or 0)
+    turn_count = int(contract.get("turn_count") or 0)
+    reasons = []
+    for bucket, present in bucket_presence.items():
+        if not present:
+            reasons.append(f"bucket_missing:{bucket}")
+    if dialog_count < LLM_QUALITY_SCENARIO_REALISM_MIN_DIALOG_COUNT:
+        reasons.append(
+            f"dialog_count_lt_{LLM_QUALITY_SCENARIO_REALISM_MIN_DIALOG_COUNT}"
+        )
+    if turn_count < LLM_QUALITY_SCENARIO_REALISM_MIN_TURN_COUNT:
+        reasons.append(f"turn_count_lt_{LLM_QUALITY_SCENARIO_REALISM_MIN_TURN_COUNT}")
+    if not bool(contract.get("valid")):
+        reasons.append("scenario_contract_invalid")
+    return {
+        "policy_version": LLM_QUALITY_SCENARIO_REALISM_POLICY_VERSION,
+        "required_buckets": list(LLM_QUALITY_SCENARIO_REALISM_REQUIRED_BUCKETS),
+        "bucket_presence": bucket_presence,
+        "dialog_count": dialog_count,
+        "turn_count": turn_count,
+        "valid": not reasons,
+        "reasons": reasons,
+    }
+
+
+def _llm_quality_next_scenario_promotion_status(
+    *, current_status, lane_effective, realism_valid
+):
+    current = str(current_status or "").strip().casefold()
+    lane_token = str(lane_effective or "").strip().casefold()
+    if current == "approved":
+        return "approved"
+    if lane_token == "acceptance" and bool(realism_valid):
+        return "eligible"
+    return "candidate"
 
 
 def _llm_quality_build_scenario_governance_status(
@@ -6920,6 +6989,16 @@ def _llm_quality_build_scenario_governance_status(
     entries = registry_payload.get("entries") if isinstance(registry_payload, dict) else {}
     if not isinstance(entries, dict):
         entries = {}
+    schema_version = 0
+    if isinstance(registry_payload, dict):
+        try:
+            schema_version = int(
+                registry_payload.get("schema_version")
+                or registry_payload.get("version")
+                or 0
+            )
+        except Exception:
+            schema_version = 0
     gate = {
         "mode": normalized_mode,
         "valid": True,
@@ -6929,6 +7008,7 @@ def _llm_quality_build_scenario_governance_status(
         "step_mode": step_mode,
         "registry_path": registry_status.get("path"),
         "registry_error": registry_status.get("error"),
+        "registry_schema_version": schema_version,
         "reasons": [],
         "scenario_fingerprint": None,
         "entry": None,
@@ -6938,6 +7018,10 @@ def _llm_quality_build_scenario_governance_status(
     if registry_status.get("error") and registry_status.get("error") != "missing":
         gate["reasons"].append(f"scenario_registry_unreadable:{registry_status.get('error')}")
     if required and step_mode in {"replay", "full"}:
+        if schema_version < LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION:
+            gate["reasons"].append(
+                "scenario_registry_schema_version_unsupported"
+            )
         source_path = None
         if step_mode == "replay":
             source_path = str(scenarios_file or "").strip() or None
@@ -6971,6 +7055,22 @@ def _llm_quality_build_scenario_governance_status(
                 promotion_status = str(promotion.get("status") or "").strip().casefold()
                 if promotion_status not in {"eligible", "approved"}:
                     gate["reasons"].append("scenario_registry_promotion_missing")
+                realism_sla = entry.get("realism_sla") if isinstance(entry.get("realism_sla"), dict) else {}
+                if not bool(realism_sla.get("valid")):
+                    gate["reasons"].append("scenario_registry_realism_sla_failed")
+                bucket_presence = (
+                    realism_sla.get("bucket_presence")
+                    if isinstance(realism_sla.get("bucket_presence"), dict)
+                    else {}
+                )
+                for required_bucket in LLM_QUALITY_SCENARIO_REALISM_REQUIRED_BUCKETS:
+                    if not bool(bucket_presence.get(required_bucket)):
+                        gate["reasons"].append(
+                            f"scenario_registry_realism_bucket_missing:{required_bucket}"
+                        )
+                policy_version = str(realism_sla.get("policy_version") or "").strip()
+                if not policy_version:
+                    gate["reasons"].append("scenario_registry_realism_policy_missing")
     if gate["enforced"] and gate["reasons"]:
         gate["valid"] = False
     return gate
@@ -6989,13 +7089,30 @@ def _llm_quality_update_scenario_governance_registry(
     if not scenario_digest:
         return {"updated": False, "reason": "scenario_digest_missing", "path": registry_path}
     loaded = _llm_quality_load_scenario_governance_registry(registry_path)
-    payload = loaded.get("payload") if isinstance(loaded, dict) and isinstance(loaded.get("payload"), dict) else {"version": 1, "entries": {}}
+    payload = (
+        loaded.get("payload")
+        if isinstance(loaded, dict) and isinstance(loaded.get("payload"), dict)
+        else {
+            "schema_version": LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION,
+            "version": LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION,
+            "entries": {},
+        }
+    )
     entries = payload.get("entries")
     if not isinstance(entries, dict):
         entries = {}
-    promotion_status = "candidate"
-    if str(lane_effective or "").strip().casefold() == "acceptance":
-        promotion_status = "eligible"
+    existing_entry = entries.get(scenario_digest) if isinstance(entries.get(scenario_digest), dict) else {}
+    existing_promotion = (
+        existing_entry.get("promotion")
+        if isinstance(existing_entry.get("promotion"), dict)
+        else {}
+    )
+    realism_sla = _llm_quality_build_scenario_realism_sla(scenario_contract)
+    promotion_status = _llm_quality_next_scenario_promotion_status(
+        current_status=existing_promotion.get("status"),
+        lane_effective=lane_effective,
+        realism_valid=realism_sla.get("valid"),
+    )
     chain_state_path = (chain_controller_status or {}).get("state_path")
     chain_id = (chain_controller_status or {}).get("chain_id")
     step_mode = str((chain_controller_status or {}).get("mode") or "").strip().casefold() or "lock"
@@ -7007,11 +7124,35 @@ def _llm_quality_update_scenario_governance_registry(
             lock_step = steps.get("lock") if isinstance(steps.get("lock"), dict) else {}
             if isinstance(lock_step.get("go_to_full"), dict):
                 go_to_full = lock_step.get("go_to_full")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    lifecycle = list(existing_promotion.get("lifecycle") or [])
+    previous_status = str(existing_promotion.get("status") or "").strip().casefold()
+    if not lifecycle or previous_status != promotion_status:
+        lifecycle.append(
+            {
+                "status": promotion_status,
+                "at": now_iso,
+                "run_id": str(run_id or "").strip() or None,
+                "step_mode": step_mode,
+            }
+        )
+    promotion_payload = {
+        "status": promotion_status,
+        "chain_id": chain_id,
+        "go_to_full_present": bool(go_to_full),
+        "go_to_full_root_cause": (
+            str((go_to_full or {}).get("root_cause_statement") or "").strip()
+            if isinstance(go_to_full, dict)
+            else None
+        ),
+        "lifecycle": lifecycle[-20:],
+        "last_transition_at": now_iso,
+    }
     entries[scenario_digest] = {
         "scenario_fingerprint": scenario_digest,
         "scenarios_path": os.path.abspath(os.path.expanduser(str(scenario_path))),
         "run_id": str(run_id or "").strip(),
-        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "recorded_at": now_iso,
         "lane_effective": str(lane_effective or "").strip().casefold() or "unknown",
         "step_mode": step_mode,
         "coverage_tokens": list((scenario_contract or {}).get("coverage_tokens") or []),
@@ -7021,23 +7162,100 @@ def _llm_quality_update_scenario_governance_registry(
         "reply_type_coverage": float((scenario_contract or {}).get("reply_type_coverage") or 0.0),
         "action_coverage": float((scenario_contract or {}).get("action_coverage") or 0.0),
         "info_coverage": float((scenario_contract or {}).get("info_coverage") or 0.0),
+        "realism_sla": realism_sla,
         "acceptance_eligible": bool(
             promotion_status in {"eligible", "approved"}
-            and bool((scenario_contract or {}).get("valid"))
+            and bool(realism_sla.get("valid"))
         ),
-        "promotion": {
-            "status": promotion_status,
-            "chain_id": chain_id,
-            "go_to_full_present": bool(go_to_full),
-            "go_to_full_root_cause": (
-                str((go_to_full or {}).get("root_cause_statement") or "").strip()
-                if isinstance(go_to_full, dict)
-                else None
-            ),
-        },
+        "promotion": promotion_payload,
     }
-    payload["version"] = 1
-    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    payload["schema_version"] = LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION
+    payload["version"] = LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION
+    payload["updated_at"] = now_iso
+    payload["entries"] = entries
+    registry_abs_path = _llm_quality_save_scenario_governance_registry(registry_path, payload)
+    return {
+        "updated": True,
+        "path": registry_abs_path,
+        "scenario_fingerprint": scenario_digest,
+        "entry": entries.get(scenario_digest),
+    }
+
+
+def _llm_quality_finalize_scenario_governance_registry(
+    *,
+    registry_path,
+    scenario_path,
+    run_id,
+    lane_effective,
+    chain_controller_status,
+    summary_path,
+    infra_valid,
+    semantic_valid,
+    run_integrity_valid,
+):
+    scenario_digest = _llm_quality_digest_file(scenario_path)
+    if not scenario_digest:
+        return {"updated": False, "reason": "scenario_digest_missing", "path": registry_path}
+    lane_token = str(lane_effective or "").strip().casefold()
+    step_mode = str((chain_controller_status or {}).get("mode") or "").strip().casefold()
+    if lane_token != "acceptance" or step_mode != "full":
+        return {
+            "updated": False,
+            "reason": "approval_not_applicable",
+            "path": registry_path,
+            "scenario_fingerprint": scenario_digest,
+        }
+    if not (bool(infra_valid) and bool(semantic_valid) and bool(run_integrity_valid)):
+        return {
+            "updated": False,
+            "reason": "approval_requires_canonical_full",
+            "path": registry_path,
+            "scenario_fingerprint": scenario_digest,
+        }
+    loaded = _llm_quality_load_scenario_governance_registry(registry_path)
+    payload = loaded.get("payload") if isinstance(loaded, dict) else None
+    entries = payload.get("entries") if isinstance(payload, dict) else {}
+    if not isinstance(entries, dict):
+        entries = {}
+    entry = entries.get(scenario_digest) if isinstance(entries.get(scenario_digest), dict) else None
+    if not isinstance(entry, dict):
+        return {
+            "updated": False,
+            "reason": "scenario_registry_entry_missing",
+            "path": loaded.get("path") if isinstance(loaded, dict) else registry_path,
+            "scenario_fingerprint": scenario_digest,
+        }
+    promotion = entry.get("promotion") if isinstance(entry.get("promotion"), dict) else {}
+    lifecycle = list(promotion.get("lifecycle") or [])
+    now_iso = datetime.now(timezone.utc).isoformat()
+    previous_status = str(promotion.get("status") or "").strip().casefold()
+    if previous_status != "approved":
+        lifecycle.append(
+            {
+                "status": "approved",
+                "at": now_iso,
+                "run_id": str(run_id or "").strip() or None,
+                "step_mode": step_mode,
+            }
+        )
+    promotion["status"] = "approved"
+    promotion["approved_at"] = now_iso
+    promotion["approved_run_id"] = str(run_id or "").strip() or None
+    promotion["approved_summary_path"] = (
+        os.path.abspath(os.path.expanduser(str(summary_path)))
+        if isinstance(summary_path, str) and summary_path.strip()
+        else None
+    )
+    promotion["chain_id"] = (chain_controller_status or {}).get("chain_id")
+    promotion["lifecycle"] = lifecycle[-20:]
+    promotion["last_transition_at"] = now_iso
+    entry["promotion"] = promotion
+    entry["acceptance_eligible"] = True
+    entries[scenario_digest] = entry
+    payload["schema_version"] = LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION
+    payload["version"] = LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION
+    payload["updated_at"] = now_iso
     payload["entries"] = entries
     registry_abs_path = _llm_quality_save_scenario_governance_registry(registry_path, payload)
     return {
@@ -17379,6 +17597,42 @@ def _run_llm_quality(args):
         },
         "reason_labels": LLM_QUALITY_REASON_LABELS,
     }
+    scenario_governance_registry_finalize = _llm_quality_finalize_scenario_governance_registry(
+        registry_path=getattr(
+            args,
+            "scenario_governance_registry",
+            LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY,
+        ),
+        scenario_path=scenarios_path,
+        run_id=run_id,
+        lane_effective=quality_constant_status.get("lane_effective"),
+        chain_controller_status=chain_controller_status,
+        summary_path=os.path.join(output_dir, "summary.json"),
+        infra_valid=infra_status.get("valid"),
+        semantic_valid=semantic_status.get("valid"),
+        run_integrity_valid=run_integrity_status.get("valid"),
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_scenario_governance_promotion",
+                "updated": scenario_governance_registry_finalize.get("updated"),
+                "reason": scenario_governance_registry_finalize.get("reason"),
+                "path": scenario_governance_registry_finalize.get("path"),
+                "scenario_fingerprint": scenario_governance_registry_finalize.get(
+                    "scenario_fingerprint"
+                ),
+            },
+            ensure_ascii=False,
+        )
+    )
+    summary["scenario_governance_registry_finalize"] = scenario_governance_registry_finalize
+    summary["quality_status"]["scenario_governance_registry_finalize_updated"] = bool(
+        scenario_governance_registry_finalize.get("updated")
+    )
+    summary["quality_status"]["scenario_governance_registry_finalize_reason"] = (
+        scenario_governance_registry_finalize.get("reason")
+    )
     if judge_enabled and judge_cache_file:
         _llm_quality_save_judge_cache(
             judge_cache_file, judge_cache, args.judge_cache_max_entries
