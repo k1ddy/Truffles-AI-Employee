@@ -764,6 +764,19 @@ Forensic only (not acceptance):
   - enforce freshness window across L1 (JUnit) and L2 (summary) evidence.
 - Rejected options:
   - accepting checklist-only L1 pass declarations without artifact linkage.
+- Query: `json schema versioning best practices`
+- Date/time: `2026-03-01T06:03:10Z`
+- Opened sources:
+  - `https://json-schema.org/understanding-json-schema/reference/schema` (primary)
+  - `https://www.sourcemeta.com/blog/how-we-built-jsonschema-for-modern-c` (secondary)
+- Ready solutions found:
+  - registry contracts should carry explicit schema version for controlled evolution;
+  - consumers should fail-closed on unsupported schema when strict compatibility is required.
+- Decision: `reuse/integrate`
+  - add explicit scenario governance `schema_version` and enforce fail-closed in acceptance replay/full;
+  - version and persist realism SLA + lifecycle metadata inside registry entries.
+- Rejected options:
+  - keeping unversioned registry shape with implicit field assumptions.
 
 ## Rollback
 
@@ -1174,16 +1187,20 @@ Forensic only (not acceptance):
     - `required_status_checks.strict=true`,
     - `enforce_admins=true`.
 
+- Completed implementation (code + tests, post-#852 hardening):
+  - Stage D Scenario Governance version policy:
+    - registry schema is versioned (`schema_version=2`) and checked fail-closed for acceptance replay/full,
+    - registry entries now carry `realism_sla` contract (required buckets + minimum dialog/turn envelope),
+    - promotion lifecycle is explicit and stateful (`candidate -> eligible -> approved`), with deterministic full-run promotion only on canonical acceptance full (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`),
+    - deterministic coverage extended in `truffles-api/tests/test_booking_quality_status_gate.py` for schema-version gating, realism SLA enforcement, and full-promotion lifecycle.
+
 - Partially completed (policy defined, enforcement not fully automated yet):
-  - Stage D Scenario Governance:
-    - base registry/promotion gate is implemented,
-    - versioned scenario quality SLA and lifecycle (`candidate -> eligible -> approved`) are pending.
   - Stage E Fail-Fast Economics:
     - run-economy and stop-loss signals exist,
     - acceptance `lock` now fail-closes on missing/non-green L1/L2 evidence and stale evidence windows.
 
 - Remaining implementation items before declaring Stage A-G complete:
-  - Add scenario governance version policy (registry schema versioning + realism bucket SLA + promotion lifecycle).
+  - None in this TP track; next cycle is operational evidence run through `L0 -> L1 -> L2 -> L3` with PG0..PG6 checklist.
 
 ### DoD for this Addendum
 
