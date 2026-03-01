@@ -740,6 +740,18 @@ Forensic only (not acceptance):
   - apply chain-scoped filtering in forensic/oracle gates (no lock-subsystem rewrite in this packet).
 - Rejected options:
   - introducing a new lock daemon/DB lock for this remediation wave (out of scope, high migration cost).
+- Query: `OWASP fail secure principle fail closed`
+- Date/time: `2026-03-01T05:11:47Z`
+- Opened sources:
+  - `https://owasp.org/www-community/Fail_securely` (primary)
+- Ready solutions found:
+  - fail-closed gate is preferred for security/reliability-critical transitions;
+  - permissive fallback on missing evidence is a control failure.
+- Decision: `reuse/integrate`
+  - keep acceptance promotion fail-closed;
+  - enforce machine-check of L2 evidence artifact before any acceptance lock.
+- Rejected options:
+  - allowing checklist-only self-declaration of PG3 without artifact validation.
 
 ## Rollback
 
@@ -1126,7 +1138,9 @@ Forensic only (not acceptance):
     - checklist must include `PG0..PG6`,
     - checklist must include `root_cause_statement`,
     - checklist must include `defect_mapping` entries (`defect_class`, `target_test`, `gate`, `owner`),
-    - `target_test` is validated as real repository reference (`path::test_name` exists).
+    - `target_test` is validated as real repository reference (`path::test_name` exists),
+    - checklist must include `l2_evidence.summary_path`,
+    - `l2_evidence.summary_path` is machine-validated as green (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`) and non-acceptance lane.
   - Deterministic regression coverage exists and is green for this layer:
     - `truffles-api/tests/test_booking_quality_chain_controller.py`
     - `truffles-api/tests/test_booking_quality_guarded_wrapper.py`
@@ -1147,14 +1161,13 @@ Forensic only (not acceptance):
     - versioned scenario quality SLA and lifecycle (`candidate -> eligible -> approved`) are pending.
   - Stage E Fail-Fast Economics:
     - run-economy and stop-loss signals exist,
-    - full lane scheduler enforcement across all run types is still pending.
+    - acceptance `lock` now fail-closes on missing/non-green L2 evidence artifact.
 
 - Remaining implementation items before declaring Stage A-G complete:
   - Implement executable defect taxonomy matrix `defect -> test -> gate -> owner` with mandatory validation artifact (beyond checklist presence).
   - Enforce branch protection on `main` with required checks (`session-gate`, `lint`, `unit-tests`, `core-eval`) to prevent red-gate merge.
   - Add scenario governance version policy (registry schema versioning + realism bucket SLA + promotion lifecycle).
-  - Add promotion validator that blocks lane jump (`L1/L2 -> L3`) by machine-checking evidence chain, not only checklist declaration.
-  - Add lane scheduler enforcement for Stage E so expensive acceptance starts only after L2 green + Go-to-Full.
+  - Extend promotion validator from current L2 artifact check to full `L1 + L2` evidence-chain validation (target deterministic run linkage + freshness window).
 
 ### DoD for this Addendum
 
