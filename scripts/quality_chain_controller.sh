@@ -326,13 +326,20 @@ def pytest_entry_matches_target(entry: dict, target_path: str, target_symbol: st
         file_abs = os.path.abspath(file_attr)
         if os.path.isabs(file_attr):
             return file_abs == target_abs
-        return file_attr.endswith(target_norm) or file_abs == target_abs
+        # Pytest reports can emit paths relative to a nested package root
+        # (e.g. tests/...) while checklist targets stay repo-rooted
+        # (e.g. truffles-api/tests/...). Accept equivalent suffixes both ways.
+        return (
+            file_attr.endswith(target_norm)
+            or target_norm.endswith(file_attr)
+            or file_abs == target_abs
+        )
 
     class_attr = str(entry.get("classname") or "").strip()
     if class_attr:
         class_path = normalize_path_token(class_attr.replace(".", "/"))
         target_no_ext = target_norm[:-3] if target_norm.endswith(".py") else target_norm
-        if class_path.endswith(target_no_ext):
+        if class_path.endswith(target_no_ext) or target_no_ext.endswith(class_path):
             return True
     return False
 

@@ -8147,6 +8147,30 @@ def _llm_quality_chain_resolve_requested_mode(*, args, run_id):
     return "lock", "default"
 
 
+def _llm_quality_acceptance_entrypoint_hint(*, args, run_id):
+    requested_mode, _ = _llm_quality_chain_resolve_requested_mode(args=args, run_id=run_id)
+    run_token = str(run_id or "").strip() or "booking-lock-<id>"
+    base_url = str(getattr(args, "base_url", "") or "").strip() or "<base-url>"
+    client_slug = str(getattr(args, "client_slug", "") or "").strip() or "<client-slug>"
+    head = (
+        "scripts/llm_quality_guarded.sh "
+        f"--mode {requested_mode} --run-id {run_token} -- --base-url {base_url} "
+        f"--client-slug {client_slug} --quality-lane acceptance"
+    )
+    if requested_mode == "lock":
+        return f"{head} --pg-checklist /tmp/booking_quality/pg_checklist-<id>.json"
+    if requested_mode == "replay":
+        return (
+            f"{head} --scenarios-file /tmp/booking_quality/booking-lock-<id>/scenarios.json "
+            "--baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json "
+            "--reset-before-dialog --fail-on-regression"
+        )
+    return (
+        f"{head} --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json "
+        "--fail-on-regression"
+    )
+
+
 def _llm_quality_chain_validate_run_id_mode_contract(run_id, requested_mode):
     normalized_mode = str(requested_mode or "").strip().casefold()
     if normalized_mode not in {"lock", "replay", "full"}:
@@ -14051,6 +14075,9 @@ def _run_llm_quality(args):
                 "mode": chain_controller_status.get("mode"),
                 "mode_source": chain_controller_status.get("mode_source"),
                 "state_path": chain_controller_status.get("state_path"),
+                "entrypoint_hint": _llm_quality_acceptance_entrypoint_hint(
+                    args=args, run_id=run_id
+                ),
             },
             ensure_ascii=False,
         )
@@ -14060,9 +14087,10 @@ def _run_llm_quality(args):
         and not chain_controller_status.get("valid", True)
     ):
         reason_tokens = chain_controller_status.get("reasons") or ["unknown"]
+        hint_command = _llm_quality_acceptance_entrypoint_hint(args=args, run_id=run_id)
         raise SystemExit(
             "llm-quality: INVALID RUN - chain controller gate failed "
-            f"({','.join(reason_tokens)})"
+            f"({','.join(reason_tokens)}); use acceptance single-entrypoint: {hint_command}"
         )
     manual_audit_gate_status = _llm_quality_build_manual_audit_gate_status(
         mode=getattr(args, "manual_audit_gate", "block"),

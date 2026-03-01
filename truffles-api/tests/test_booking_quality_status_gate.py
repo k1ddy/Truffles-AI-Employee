@@ -106,6 +106,7 @@ def _load_quality_helpers():
         "_llm_quality_update_scenario_governance_registry",
         "_llm_quality_finalize_scenario_governance_registry",
         "_llm_quality_chain_resolve_requested_mode",
+        "_llm_quality_acceptance_entrypoint_hint",
         "_llm_quality_digest_file",
         "_llm_quality_hq1_normalize_text",
         "_llm_quality_hq1_contains_any",
@@ -2073,3 +2074,38 @@ def test_scenario_governance_registry_finalize_promotes_full_to_approved(tmp_pat
     assert entry["promotion"]["status"] == "approved"
     assert entry["promotion"]["approved_run_id"] == "booking-full-abc"
     assert entry["promotion"]["lifecycle"][-1]["status"] == "approved"
+
+
+def test_acceptance_entrypoint_hint_lock_mode_contains_guarded_wrapper():
+    ns = _load_quality_helpers()
+    build_hint = ns["_llm_quality_acceptance_entrypoint_hint"]
+
+    args = SimpleNamespace(
+        scenarios_file=None,
+        base_url="http://127.0.0.1:18100",
+        client_slug="demo_salon",
+    )
+    hint = build_hint(args=args, run_id="booking-lock-20260301-a1")
+
+    assert hint.startswith("scripts/llm_quality_guarded.sh --mode lock")
+    assert "--run-id booking-lock-20260301-a1" in hint
+    assert "--quality-lane acceptance" in hint
+    assert "--pg-checklist" in hint
+
+
+def test_acceptance_entrypoint_hint_replay_mode_contains_required_flags():
+    ns = _load_quality_helpers()
+    build_hint = ns["_llm_quality_acceptance_entrypoint_hint"]
+
+    args = SimpleNamespace(
+        scenarios_file="/tmp/booking_quality/booking-lock-42/scenarios.json",
+        base_url="http://127.0.0.1:18100",
+        client_slug="demo_salon",
+    )
+    hint = build_hint(args=args, run_id="booking-replay-20260301-a1")
+
+    assert hint.startswith("scripts/llm_quality_guarded.sh --mode replay")
+    assert "--scenarios-file /tmp/booking_quality/booking-lock-<id>/scenarios.json" in hint
+    assert "--baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json" in hint
+    assert "--reset-before-dialog" in hint
+    assert "--fail-on-regression" in hint
