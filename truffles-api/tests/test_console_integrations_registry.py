@@ -231,6 +231,67 @@ def test_build_branch_integration_status_rebind_required_forces_error():
     assert "provider_binding_rebind_required" in result.drift_issues
 
 
+def test_build_provider_lifecycle_item_applies_sla_profile_action_override(monkeypatch):
+    now = datetime.now(timezone.utc)
+    client_id = uuid4()
+    branch_id = uuid4()
+    company_id = uuid4()
+    profile_id = uuid4()
+
+    status = ConsoleBranchIntegrationStatus(
+        client_id=client_id,
+        client_slug="demo",
+        branch_id=branch_id,
+        branch_slug="branch-a",
+        branch_name="Branch A",
+        is_active=True,
+        instance_id="instance-1",
+        telegram_chat_id="12345",
+        webhook_url="https://api.truffles.kz/webhook/demo?webhook_secret=abc",
+        webhook_url_valid=True,
+        whatsapp_status="ok",
+        telegram_status="ok",
+        provider_binding_alert_state="warn",
+        drift_issues=["provider_binding_alert_warn"],
+        status="warn",
+    )
+    branch = SimpleNamespace(
+        id=branch_id,
+        slug="branch-a",
+        name="Branch A",
+        phone="+77000000001",
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_sla_action_for_scope",
+        lambda *_args, **_kwargs: console_router._SlaActionResolution(
+            action="escalate",
+            profile_id=profile_id,
+            profile_version=7,
+            profile_scope="branch",
+        ),
+    )
+
+    item = console_router._build_provider_lifecycle_item(
+        db=Mock(),
+        status=status,
+        branch=branch,
+        company_id=company_id,
+        company_name="Company",
+        domain_key="beauty",
+        generated_at=now,
+        now=now,
+    )
+
+    assert item.priority == "p1"
+    assert item.next_action == "integration_reconcile"
+    assert item.sla_violation_action == "escalate"
+    assert item.sla_profile_id == profile_id
+    assert item.sla_profile_version == 7
+    assert item.sla_profile_scope == "branch"
+
+
 def test_emit_integration_drift_signals_detect_and_clear(monkeypatch):
     with console_router._INTEGRATION_DRIFT_LOCK:
         console_router._INTEGRATION_DRIFT_STATE.clear()
@@ -381,6 +442,16 @@ async def test_list_integrations_is_read_only_without_drift_side_effects(monkeyp
     )
     monkeypatch.setattr(
         console_router,
+        "_resolve_sla_action_for_scope",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_sla_action_for_scope",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        console_router,
         "_build_branch_integration_status",
         lambda **kwargs: ConsoleBranchIntegrationStatus(
             client_id=kwargs["client_id"],
@@ -498,6 +569,16 @@ async def test_list_integrations_supports_cursor_pagination(monkeypatch):
     )
     monkeypatch.setattr(
         console_router,
+        "_resolve_sla_action_for_scope",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_sla_action_for_scope",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        console_router,
         "_build_branch_integration_status",
         lambda **kwargs: ConsoleBranchIntegrationStatus(
             client_id=kwargs["client_id"],
@@ -604,6 +685,11 @@ async def test_list_provider_lifecycle_only_problematic(monkeypatch):
         console_router,
         "_build_provider_binding_lifecycle_map",
         lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_sla_action_for_scope",
+        lambda *_args, **_kwargs: None,
     )
 
     def _status_for_branch(**kwargs):
@@ -734,6 +820,11 @@ async def test_list_provider_lifecycle_pagination(monkeypatch):
         console_router,
         "_build_provider_binding_lifecycle_map",
         lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_sla_action_for_scope",
+        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
         console_router,
