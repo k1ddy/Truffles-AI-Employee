@@ -2,6 +2,7 @@
 
 Date
 - 2026-02-28
+- 2026-03-01 (provider/outbox SLA action mapping slice)
 
 ## Block identity
 - `BLOCK_ID`: UCPV1-PHASE10
@@ -76,6 +77,8 @@ Date
 - `truffles-api/tests/test_sla_runtime_service.py`
 - `truffles-api/tests/test_pending_pack_lexicons.py`
 - `truffles-api/tests/test_reminders.py`
+- `truffles-api/tests/test_console_integrations_registry.py`
+- `truffles-api/tests/test_console_owner_business.py`
 
 ## Checks + outcomes
 - `cd truffles-api && ruff check app/models/sla_profile_version.py app/schemas/sla_profile.py app/services/sla_profile_registry_service.py tests/test_sla_profile_registry_service.py` -> `All checks passed`.
@@ -86,6 +89,11 @@ Date
 - `scripts/session_check.sh` -> `Session OK`.
 - `cd truffles-api && ruff check app/services/sla_runtime_service.py app/routers/webhook/pending.py app/services/reminder_service.py app/routers/webhook/guards.py app/routers/webhook/decision.py tests/test_sla_runtime_service.py tests/test_pending_pack_lexicons.py tests/test_reminders.py` -> `All checks passed`.
 - `cd truffles-api && pytest -q tests/test_sla_runtime_service.py tests/test_pending_pack_lexicons.py tests/test_reminders.py tests/test_sla_profile_registry_service.py tests/test_console_sla_profile_registry.py` -> `31 passed`.
+- `cd truffles-api && python3 scripts/generate_openapi.py --check` -> `OpenAPI specification generated ...` (exit `0`).
+- `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_integrations_registry.py tests/test_console_owner_business.py` -> `All checks passed`.
+- `cd truffles-api && pytest -q tests/test_console_integrations_registry.py tests/test_console_owner_business.py` -> `67 passed`.
+- `cd truffles-api && pytest -q tests/test_console_onboarding_state.py tests/test_console_integrations_registry.py tests/test_console_cases_helpers.py` -> `74 passed`.
+- `cd truffles-api && pytest -q tests/test_message_endpoint.py -k "sla or escalation"` -> `1 passed`.
 
 ## Iteration budget outcomes
 - `Planned max runs` -> 0 expensive long quality runs for this slice.
@@ -140,8 +148,9 @@ Date
 - `Drift resolved`: `yes` (phase10 graph references are now backed by concrete TP/report docs).
 
 ## Residual GAP / Risks
-- Full phase10 is not complete: current runtime resolver covers `pending/reminder/no_response + collect_only guard`, but provider/outbox-wide SLA action mapping is still pending.
+- Residual gap `provider/outbox-wide SLA action mapping` is closed in this slice: provider lifecycle and outbox incidents now consume effective SLA profile action with profile/version/scope evidence.
 - Program-level graph/status was synchronized to `UCPV1-PHASE9=passed`, `UCPV1-PHASE10=in_progress`.
+- `PROCESS-GATES` remains owner-closed non-blocking backlog and does not block `UCPV1-PHASE10` delivery.
 - Migration risk remains high if SLA islands are partially migrated without unified merge contract.
 - Violation-action misconfiguration can over-escalate if rollout lacks staged gates.
 
