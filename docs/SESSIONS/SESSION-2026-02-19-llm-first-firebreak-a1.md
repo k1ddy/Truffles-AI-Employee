@@ -309,4 +309,19 @@
   - Verification:
     - `gh api repos/k1ddy/Truffles-AI-Employee/branches/main/protection`
     - `gh pr view 850 --repo k1ddy/Truffles-AI-Employee --json state,mergedAt,mergeCommit,url`
-- last_updated: 2026-03-01T10:31:35+05:00
+  - Extended promotion validator to full L1+L2 evidence chain:
+    - `scripts/quality_chain_controller.sh` now requires `l1_evidence.junit_xml_path` in Go-to-Full checklist,
+    - every `defect_mapping.target_test` must be linked to `passed` testcase in L1 JUnit artifact,
+    - L1/L2 evidence freshness window enforced fail-closed (`evidence_freshness_hours`, default `24h`).
+  - Added deterministic coverage for new L1 gate behaviors:
+    - `test_chain_controller_blocks_lock_with_pg_checklist_missing_l1_evidence`
+    - `test_chain_controller_blocks_lock_with_pg_checklist_failed_l1_target`
+    - `test_chain_controller_blocks_lock_with_pg_checklist_stale_l1_evidence`
+  - Synced runbook/TP contract with mandatory `l1_evidence` + freshness policy.
+  - One-query external research captured for this packet (`pytest junitxml file and classname attributes`, `https://docs.pytest.org/en/stable/reference.html#confval-junit_family`).
+  - Validation (green, promotion validator packet):
+    - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py` (`12 passed`)
+    - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py truffles-api/tests/test_booking_quality_status_gate.py` (`67 passed`)
+    - `ruff check truffles-api/tests/test_booking_quality_chain_controller.py`
+    - `bash -n scripts/quality_chain_controller.sh`
+- last_updated: 2026-03-01T10:43:46+05:00

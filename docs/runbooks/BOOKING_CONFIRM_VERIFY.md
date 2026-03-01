@@ -539,15 +539,22 @@ Guarded llm-quality quickstart (single entrypoint)
              "owner": "a1"
            }
          ],
+         "l1_evidence": {
+           "junit_xml_path": "/tmp/booking_quality/<l1-run-id>/pytest-junit.xml",
+           "recorded_at": "2026-03-01T05:40:00Z"
+         },
          "l2_evidence": {
            "summary_path": "/tmp/booking_quality/<l2-run-id>/summary.json",
            "run_id": "<l2-run-id>"
-         }
+         },
+         "evidence_freshness_hours": 24
        }
      }
      ```
    - `target_test` is enforced as executable reference: `path/to/test_file.py::test_name` must exist in repository.
+   - `l1_evidence.junit_xml_path` is mandatory and machine-validated against every `defect_mapping.target_test` (must be `passed` in JUnit report).
    - `l2_evidence.summary_path` is mandatory and fail-closed validated (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`, `quality_lane_effective != acceptance`).
+   - `evidence_freshness_hours` (default `24`) fail-closes stale L1/L2 evidence.
    - `scripts/llm_quality_guarded.sh --mode lock --run-id booking-lock-<id> --pg-checklist /tmp/booking_quality/pg_checklist-<id>.json -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds`
 3. Replay run (same scenarios + baseline)
    - `scripts/llm_quality_guarded.sh --mode replay --run-id booking-replay-<id> -- --base-url <url> --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-<id>/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --max-failures 20`
@@ -713,6 +720,7 @@ Go-to-Full checklist (must pass before any L3 run)
 3. `PG2`: deterministic subset green.
 4. `PG3`: micro fail-fast run shows improvement on target blocker class.
    - Machine evidence: checklist includes green `l2_evidence.summary_path`.
+   - Promotion linkage: checklist includes green `l1_evidence.junit_xml_path` proving deterministic target tests are passed.
 5. `PG4`: manual audit done and consistent with summary.
 6. `PG5`: runtime/provenance/preflight valid.
 7. `PG6`: no pending interrupted run in same chain/fingerprint.
@@ -729,3 +737,4 @@ Hard no-go
 - Do not use judge-only success as acceptance evidence.
 - Do not skip manual audit before next expensive run.
 - Do not start new run-id when `resume` is required.
+- Do not launch `L3 lock` with stale (`> evidence_freshness_hours`) or self-declared-only L1/L2 evidence.
