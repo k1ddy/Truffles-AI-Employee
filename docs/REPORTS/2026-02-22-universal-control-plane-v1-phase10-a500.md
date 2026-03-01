@@ -35,7 +35,7 @@ Date
 - `What was reused` -> objective/policy decomposition approach (service/indicator/objective/alert policy) adapted to Truffles scope layering.
 
 ## Root cause validation
-- `Symptom` -> B10 remains planned with no central SLA/SLO engine despite multiple SLA signals in runtime/console.
+- `Symptom (historical, before current closure slice)` -> B10 was planned with no central SLA/SLO engine despite multiple SLA signals in runtime/console.
 - `Minimal reproduction` -> inspect SLA helpers in `router_sla.py`, `onboarding_state.py`, and `console.py`; no shared profile registry or effective merge path exists.
 - `Root cause statement` -> SLA logic evolved per feature area, but profile registry + hierarchy merge + runtime enforcement were never consolidated.
 - `Proof after fix` -> analysis package defines explicit contract delta/touch-list/migration plan; implementation proceeds by slices with bounded checks.
@@ -149,7 +149,7 @@ Date
 
 ## Residual GAP / Risks
 - Residual gap `provider/outbox-wide SLA action mapping` is closed in this slice: provider lifecycle and outbox incidents now consume effective SLA profile action with profile/version/scope evidence.
-- Program-level graph/status was synchronized to `UCPV1-PHASE9=passed`, `UCPV1-PHASE10=in_progress`.
+- Program-level graph/status is synchronized to `UCPV1-PHASE9=passed`, `UCPV1-PHASE10=passed`.
 - `PROCESS-GATES` remains owner-closed non-blocking backlog and does not block `UCPV1-PHASE10` delivery.
 - Migration risk remains high if SLA islands are partially migrated without unified merge contract.
 - Violation-action misconfiguration can over-escalate if rollout lacks staged gates.
@@ -159,7 +159,7 @@ Date
 - `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase10-a500.md`
 - `Do not touch`: unrelated parallel tracks.
 - `Open risks`: merge consistency across current SLA islands.
-- `First command to verify`: `rg -n "UCPV1-PHASE10|in_progress" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
+- `First command to verify`: `rg -n "UCPV1-PHASE10|passed" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
 
 ## Verdict
-- `In Progress`
+- `Passed`
