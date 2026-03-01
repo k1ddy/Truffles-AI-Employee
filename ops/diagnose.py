@@ -6280,6 +6280,23 @@ def _llm_quality_is_iso_timestamp(value):
     return True
 
 
+def _llm_quality_extract_chain_id(summary_payload):
+    if not isinstance(summary_payload, dict):
+        return None
+    config = summary_payload.get("config")
+    if isinstance(config, dict):
+        chain_id = str(config.get("chain_id") or "").strip()
+        if chain_id:
+            return chain_id
+    quality_status = summary_payload.get("quality_status")
+    if isinstance(quality_status, dict):
+        chain_id = str(quality_status.get("chain_id") or "").strip()
+        if chain_id:
+            return chain_id
+    chain_id = str(summary_payload.get("chain_id") or "").strip()
+    return chain_id or None
+
+
 def _llm_quality_extract_oracle_conflict_count(payload):
     if not isinstance(payload, dict):
         return 0
@@ -6413,6 +6430,7 @@ def _llm_quality_resolve_manual_audit_status(run_dir):
     run_id = str(summary.get("run_id") or "").strip() if isinstance(summary, dict) else ""
     if not run_id:
         run_id = os.path.basename(normalized_dir)
+    chain_id = _llm_quality_extract_chain_id(summary)
     manual_audit_path = manual_meta.get("path") or os.path.join(normalized_dir, "manual_audit.md")
     manual_audit_json_path = (
         manual_meta.get("json_path") or os.path.join(normalized_dir, "manual_audit.json")
@@ -6433,6 +6451,7 @@ def _llm_quality_resolve_manual_audit_status(run_dir):
     summary_mtime = os.path.getmtime(summary_path) if os.path.exists(summary_path) else 0.0
     return {
         "run_id": run_id,
+        "chain_id": chain_id,
         "run_dir": normalized_dir,
         "summary_path": summary_path,
         "summary_mtime": float(summary_mtime),
@@ -6632,7 +6651,12 @@ def _llm_quality_find_latest_pending_manual_audit(output_root, current_output_di
     return pending[0]
 
 
-def _llm_quality_find_latest_completed_manual_audit(output_root, current_output_dir=None):
+def _llm_quality_find_latest_completed_manual_audit(
+    output_root,
+    current_output_dir=None,
+    *,
+    chain_id=None,
+):
     normalized_root = os.path.abspath(os.path.expanduser(str(output_root or "").strip() or "."))
     if not os.path.isdir(normalized_root):
         return None
@@ -6641,6 +6665,7 @@ def _llm_quality_find_latest_completed_manual_audit(output_root, current_output_
         if isinstance(current_output_dir, str) and str(current_output_dir).strip()
         else None
     )
+    chain_filter = str(chain_id or "").strip() or None
     completed = []
     for entry in os.scandir(normalized_root):
         if not entry.is_dir():
@@ -6656,6 +6681,9 @@ def _llm_quality_find_latest_completed_manual_audit(output_root, current_output_
         if not status.get("manual_audit_required"):
             continue
         if not status.get("manual_audit_done"):
+            continue
+        status_chain_id = str(status.get("chain_id") or "").strip() or None
+        if chain_filter and status_chain_id != chain_filter:
             continue
         completed.append(status)
     if not completed:
@@ -6694,7 +6722,13 @@ def _llm_quality_build_manual_audit_gate_status(*, mode, output_dir):
     return gate_status
 
 
-def _llm_quality_build_forensic_sla_gate_status(*, mode, output_dir, lane_effective=None):
+def _llm_quality_build_forensic_sla_gate_status(
+    *,
+    mode,
+    output_dir,
+    lane_effective=None,
+    chain_id=None,
+):
     normalized_mode = str(mode or "off").strip().casefold()
     if normalized_mode not in {"off", "warn", "block"}:
         normalized_mode = "block"
@@ -6703,12 +6737,14 @@ def _llm_quality_build_forensic_sla_gate_status(*, mode, output_dir, lane_effect
     )
     lane_token = str(lane_effective or "").strip().casefold()
     required = lane_token == "acceptance"
+    chain_token = str(chain_id or "").strip() or None
     gate_status = {
         "mode": normalized_mode,
         "valid": True,
         "enforced": normalized_mode == "block" and required,
         "required": required,
         "lane_effective": lane_token or "unknown",
+        "chain_id": chain_token,
         "reasons": [],
         "output_root": os.path.dirname(normalized_output_dir),
         "latest_run": None,
@@ -6716,10 +6752,16 @@ def _llm_quality_build_forensic_sla_gate_status(*, mode, output_dir, lane_effect
     }
     if normalized_mode == "off":
         return gate_status
+    if required and not chain_token:
+        gate_status["reasons"].append("forensic_sla_chain_id_missing")
+        if gate_status["enforced"]:
+            gate_status["valid"] = False
+        return gate_status
 
     latest = _llm_quality_find_latest_completed_manual_audit(
         gate_status["output_root"],
         current_output_dir=normalized_output_dir,
+        chain_id=chain_token,
     )
     if not latest:
         return gate_status
@@ -6744,7 +6786,13 @@ def _llm_quality_build_forensic_sla_gate_status(*, mode, output_dir, lane_effect
     return gate_status
 
 
-def _llm_quality_build_oracle_conflict_gate_status(*, mode, output_dir, lane_effective=None):
+def _llm_quality_build_oracle_conflict_gate_status(
+    *,
+    mode,
+    output_dir,
+    lane_effective=None,
+    chain_id=None,
+):
     normalized_mode = str(mode or "off").strip().casefold()
     if normalized_mode not in {"off", "warn", "block"}:
         normalized_mode = "block"
@@ -6753,12 +6801,14 @@ def _llm_quality_build_oracle_conflict_gate_status(*, mode, output_dir, lane_eff
     )
     lane_token = str(lane_effective or "").strip().casefold()
     required = lane_token == "acceptance"
+    chain_token = str(chain_id or "").strip() or None
     gate_status = {
         "mode": normalized_mode,
         "valid": True,
         "enforced": normalized_mode == "block" and required,
         "required": required,
         "lane_effective": lane_token or "unknown",
+        "chain_id": chain_token,
         "reasons": [],
         "output_root": os.path.dirname(normalized_output_dir),
         "latest_run": None,
@@ -6768,10 +6818,16 @@ def _llm_quality_build_oracle_conflict_gate_status(*, mode, output_dir, lane_eff
     }
     if normalized_mode == "off":
         return gate_status
+    if required and not chain_token:
+        gate_status["reasons"].append("oracle_conflict_chain_id_missing")
+        if gate_status["enforced"]:
+            gate_status["valid"] = False
+        return gate_status
 
     latest = _llm_quality_find_latest_completed_manual_audit(
         gate_status["output_root"],
         current_output_dir=normalized_output_dir,
+        chain_id=chain_token,
     )
     if not latest:
         return gate_status
@@ -13816,10 +13872,14 @@ def _run_llm_quality(args):
             "llm-quality: INVALID RUN - manual audit gate failed "
             f"({','.join(reason_tokens)})"
         )
+    chain_id_token = str(
+        chain_controller_status.get("chain_id") or getattr(args, "chain_id", "") or ""
+    ).strip() or None
     forensic_sla_gate_status = _llm_quality_build_forensic_sla_gate_status(
         mode=getattr(args, "forensic_sla_gate", "block"),
         output_dir=output_dir,
         lane_effective=quality_constant_status.get("lane_effective"),
+        chain_id=chain_id_token,
     )
     print(
         json.dumps(
@@ -13829,6 +13889,7 @@ def _run_llm_quality(args):
                 "valid": forensic_sla_gate_status.get("valid"),
                 "enforced": forensic_sla_gate_status.get("enforced"),
                 "required": forensic_sla_gate_status.get("required"),
+                "chain_id": forensic_sla_gate_status.get("chain_id"),
                 "reasons": forensic_sla_gate_status.get("reasons"),
                 "latest_run": (
                     (forensic_sla_gate_status.get("latest_run") or {}).get("run_id")
@@ -13852,6 +13913,7 @@ def _run_llm_quality(args):
         mode=getattr(args, "oracle_conflict_gate", "block"),
         output_dir=output_dir,
         lane_effective=quality_constant_status.get("lane_effective"),
+        chain_id=chain_id_token,
     )
     print(
         json.dumps(
@@ -13861,6 +13923,7 @@ def _run_llm_quality(args):
                 "valid": oracle_conflict_gate_status.get("valid"),
                 "enforced": oracle_conflict_gate_status.get("enforced"),
                 "required": oracle_conflict_gate_status.get("required"),
+                "chain_id": oracle_conflict_gate_status.get("chain_id"),
                 "reasons": oracle_conflict_gate_status.get("reasons"),
                 "oracle_conflict_count": oracle_conflict_gate_status.get(
                     "oracle_conflict_count"
