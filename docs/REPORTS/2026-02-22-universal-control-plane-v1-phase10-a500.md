@@ -10,8 +10,7 @@ Date
 - `UNLOCKS`: UCPV1-PHASE11
 
 ## Input baseline (FACT)
-- `UCPV1-PHASE9` remains `blocked` in `docs/BLOCK_GRAPH.yaml`, but owner override allows phase10 implementation slices with bounded checks.
-- `UCPV1-PHASE9` remains `blocked` in `docs/BLOCK_GRAPH.yaml`, so phase10 implementation is dependency-locked.
+- `UCPV1-PHASE9` is marked `passed` by owner closure decision; dependency lock for phase10 is removed.
 - SLA/SLO logic exists as separate islands:
   - router in-memory SLA counters,
   - inbox case age SLA statuses,
@@ -38,8 +37,7 @@ Date
 - `Symptom` -> B10 remains planned with no central SLA/SLO engine despite multiple SLA signals in runtime/console.
 - `Minimal reproduction` -> inspect SLA helpers in `router_sla.py`, `onboarding_state.py`, and `console.py`; no shared profile registry or effective merge path exists.
 - `Root cause statement` -> SLA logic evolved per feature area, but profile registry + hierarchy merge + runtime enforcement were never consolidated.
-- `Proof after fix` -> analysis package now defines explicit contract delta/touch-list/migration plan for consolidated engine; implementation can proceed by slices with bounded checks.
-- `Proof after fix` -> analysis package now defines explicit contract delta/touch-list/migration plan for consolidated engine; implementation intentionally deferred until phase9 unblocks.
+- `Proof after fix` -> analysis package defines explicit contract delta/touch-list/migration plan; implementation proceeds by slices with bounded checks.
 
 ## Reuse-first outcome
 - `Internal reuse applied` -> yes; existing onboarding/provider/KPI SLA producers are retained as signal sources.
@@ -133,9 +131,6 @@ Date
 - `Strategy used` -> code implemented in isolated branch/worktree with deterministic-only checks (no deploy).
 - `Go/no-go signals observed` -> slice goals achieved (`registry+merge+console API`) with green deterministic tests.
 - `Rollback readiness` -> ready (single migration + bounded service/API additions can be reverted by commit rollback).
-- `Strategy used` -> n/a (analysis-only; no runtime changes shipped).
-- `Go/no-go signals observed` -> dependency lock (`UCPV1-PHASE9` blocked) keeps phase10 code path closed.
-- `Rollback readiness` -> not required for this doc-only step.
 
 ## Canon/doc sync updates
 - `Updated docs/specs`:
@@ -146,8 +141,7 @@ Date
 
 ## Residual GAP / Risks
 - Full phase10 is not complete: current runtime resolver covers `pending/reminder/no_response + collect_only guard`, but provider/outbox-wide SLA action mapping is still pending.
-- Program-level graph/status still references old dependency chain and needs explicit sync decision.
-- Phase10 implementation cannot start until phase9 semantic blocker is resolved.
+- Program-level graph/status was synchronized to `UCPV1-PHASE9=passed`, `UCPV1-PHASE10=in_progress`.
 - Migration risk remains high if SLA islands are partially migrated without unified merge contract.
 - Violation-action misconfiguration can over-escalate if rollout lacks staged gates.
 
@@ -156,13 +150,7 @@ Date
 - `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase10-a500.md`
 - `Do not touch`: unrelated parallel tracks.
 - `Open risks`: merge consistency across current SLA islands.
-- `First command to verify`: `rg -n "UCPV1-PHASE9|UCPV1-PHASE10" docs/BLOCK_GRAPH.yaml STATE.md docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
+- `First command to verify`: `rg -n "UCPV1-PHASE10|in_progress" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
 
 ## Verdict
 - `In Progress`
-- `Do not touch`: phase9 remediation branch scope and unrelated parallel tracks.
-- `Open risks`: dependency lock + merge consistency across current SLA islands.
-- `First command to verify`: `rg -n "UCPV1-PHASE9|UCPV1-PHASE10" docs/BLOCK_GRAPH.yaml STATE.md docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
-
-## Verdict
-- `Blocked`
