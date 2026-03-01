@@ -2177,6 +2177,7 @@ _PROVIDER_OPS_ACTIONS = {
     "provider_webhook_updated",
     "provider_send_reminder",
 }
+# Escalate provider actions only when SLA mapping suggests a higher-priority remedy.
 _SLA_PROVIDER_ACTION_PRIORITY = {
     "provider_send_reminder": 1,
     "provider_renewal_confirmed": 2,
