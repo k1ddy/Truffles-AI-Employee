@@ -3941,6 +3941,62 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/control-tower/migration-program:
+    get:
+      tags:
+      - console
+      summary: Get Admin Control Tower Migration Program
+      operationId: get_admin_control_tower_migration_program_console_v1_admin_control_tower_migration_program_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          title: Limit
+      - name: stale_after_minutes
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1440
+          minimum: 5
+          default: 60
+          title: Stale After Minutes
+      - name: include_p2
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Include P2
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationProgramResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/companies/{company_id}:
     patch:
       tags:
@@ -7279,6 +7335,125 @@ components:
       - code
       - count
       title: ConsoleAdminControlTowerIssueCount
+    ConsoleAdminControlTowerMigrationProgramResponse:
+      properties:
+        generated_at:
+          type: string
+          title: Generated At
+        stale_after_minutes:
+          type: integer
+          title: Stale After Minutes
+        limit:
+          type: integer
+          title: Limit
+        include_p2:
+          type: boolean
+          title: Include P2
+          default: true
+        summary:
+          $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationProgramSummary'
+        waves:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationWave'
+          type: array
+          title: Waves
+      type: object
+      required:
+      - generated_at
+      - stale_after_minutes
+      - limit
+      - summary
+      - waves
+      title: ConsoleAdminControlTowerMigrationProgramResponse
+    ConsoleAdminControlTowerMigrationProgramSummary:
+      properties:
+        active_clients_total:
+          type: integer
+          title: Active Clients Total
+        total_branches:
+          type: integer
+          title: Total Branches
+        ready_branches:
+          type: integer
+          title: Ready Branches
+        blocked_branches:
+          type: integer
+          title: Blocked Branches
+        p0_actions:
+          type: integer
+          title: P0 Actions
+        p1_actions:
+          type: integer
+          title: P1 Actions
+        p2_actions:
+          type: integer
+          title: P2 Actions
+        waves_go:
+          type: integer
+          title: Waves Go
+        waves_hold:
+          type: integer
+          title: Waves Hold
+      type: object
+      required:
+      - active_clients_total
+      - total_branches
+      - ready_branches
+      - blocked_branches
+      - p0_actions
+      - p1_actions
+      - p2_actions
+      - waves_go
+      - waves_hold
+      title: ConsoleAdminControlTowerMigrationProgramSummary
+    ConsoleAdminControlTowerMigrationWave:
+      properties:
+        wave:
+          type: string
+          enum:
+          - canary
+          - cohort
+          - fleet
+          title: Wave
+        gate:
+          type: string
+          enum:
+          - go
+          - hold
+          title: Gate
+        reason:
+          type: string
+          title: Reason
+        candidate_clients_total:
+          type: integer
+          title: Candidate Clients Total
+        candidate_branches_total:
+          type: integer
+          title: Candidate Branches Total
+        blockers_total:
+          type: integer
+          title: Blockers Total
+        rollback_triggers:
+          items:
+            type: string
+          type: array
+          title: Rollback Triggers
+          default: []
+        top_blockers:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerIssueCount'
+          type: array
+          title: Top Blockers
+          default: []
+      type: object
+      required:
+      - wave
+      - gate
+      - reason
+      - candidate_clients_total
+      - candidate_branches_total
+      - blockers_total
+      title: ConsoleAdminControlTowerMigrationWave
     ConsoleAdminControlTowerOverviewResponse:
       properties:
         generated_at:

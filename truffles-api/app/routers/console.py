@@ -88,6 +88,9 @@ from app.schemas.console import (
     ConsoleAdminControlTowerDriftBoardResponse,
     ConsoleAdminControlTowerDriftSummary,
     ConsoleAdminControlTowerIssueCount,
+    ConsoleAdminControlTowerMigrationProgramResponse,
+    ConsoleAdminControlTowerMigrationProgramSummary,
+    ConsoleAdminControlTowerMigrationWave,
     ConsoleAdminControlTowerOverviewResponse,
     ConsoleAdminControlTowerOverviewSummary,
     ConsoleAdminControlTowerReadinessBoardResponse,
@@ -8819,6 +8822,224 @@ def _build_admin_control_tower_action_center(
         summary=summary,
         top_reasons=_build_control_tower_issue_counts(reason_counter, limit=10),
         items=scoped_items[:limit],
+    )
+
+
+def _merge_control_tower_issue_counts(
+    *groups: list[ConsoleAdminControlTowerIssueCount],
+) -> dict[str, int]:
+    merged: dict[str, int] = {}
+    for group in groups:
+        for item in group:
+            code = (item.code or "").strip()
+            if not code:
+                continue
+            merged[code] = merged.get(code, 0) + int(item.count or 0)
+    return merged
+
+
+def _build_migration_wave(
+    *,
+    wave: Literal["canary", "cohort", "fleet"],
+    candidate_clients_total: int,
+    candidate_branches_total: int,
+    hard_blockers_total: int,
+    soft_blockers_total: int,
+    blocked_branches_total: int,
+    soft_blocker_budget: int,
+    top_blockers: list[ConsoleAdminControlTowerIssueCount],
+) -> ConsoleAdminControlTowerMigrationWave:
+    gate: Literal["go", "hold"] = "go"
+    reasons: list[str] = []
+    rollback_triggers: list[str] = []
+
+    if candidate_branches_total <= 0:
+        gate = "hold"
+        reasons.append("no_ready_candidates")
+        rollback_triggers.append("no_ready_candidates")
+
+    if hard_blockers_total > 0:
+        gate = "hold"
+        reasons.append("hard_blockers_present")
+        rollback_triggers.extend(
+            [
+                "incident_p0_open",
+                "readiness_hard_gate_failed",
+                "provider_ops_p0_queue",
+            ]
+        )
+
+    if soft_blockers_total > soft_blocker_budget:
+        gate = "hold"
+        reasons.append("soft_blocker_budget_exceeded")
+        rollback_triggers.append("soft_blocker_burn_rate")
+
+    if wave == "fleet" and blocked_branches_total > 0:
+        gate = "hold"
+        reasons.append("blocked_branches_remaining")
+        rollback_triggers.append("blocked_branches_remaining")
+
+    if gate == "go":
+        reason_text = "wave_ready_for_promotion"
+    else:
+        reason_text = "+".join(_dedupe_non_empty(reasons)) or "wave_hold"
+
+    blockers_total = hard_blockers_total + max(0, soft_blockers_total - soft_blocker_budget)
+    return ConsoleAdminControlTowerMigrationWave(
+        wave=wave,
+        gate=gate,
+        reason=reason_text,
+        candidate_clients_total=max(candidate_clients_total, 0),
+        candidate_branches_total=max(candidate_branches_total, 0),
+        blockers_total=max(blockers_total, 0),
+        rollback_triggers=_dedupe_non_empty(rollback_triggers),
+        top_blockers=top_blockers,
+    )
+
+
+def _build_admin_control_tower_migration_program(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    stale_after_minutes: int,
+    include_p2_mode: bool,
+    limit: int,
+    now: datetime,
+) -> ConsoleAdminControlTowerMigrationProgramResponse:
+    if not active_clients:
+        empty_waves = [
+            ConsoleAdminControlTowerMigrationWave(
+                wave=wave,
+                gate="hold",
+                reason="no_active_clients",
+                candidate_clients_total=0,
+                candidate_branches_total=0,
+                blockers_total=0,
+                rollback_triggers=["no_active_clients"],
+                top_blockers=[],
+            )
+            for wave in ("canary", "cohort", "fleet")
+        ]
+        return ConsoleAdminControlTowerMigrationProgramResponse(
+            generated_at=now.isoformat(),
+            stale_after_minutes=stale_after_minutes,
+            limit=limit,
+            include_p2=include_p2_mode,
+            summary=ConsoleAdminControlTowerMigrationProgramSummary(
+                active_clients_total=0,
+                total_branches=0,
+                ready_branches=0,
+                blocked_branches=0,
+                p0_actions=0,
+                p1_actions=0,
+                p2_actions=0,
+                waves_go=0,
+                waves_hold=3,
+            ),
+            waves=empty_waves,
+        )
+
+    board_limit = max(limit, 200)
+    readiness_board = _build_admin_control_tower_readiness_board(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        include_ready_mode=True,
+        limit=board_limit,
+        now=now,
+    )
+    drift_board = _build_admin_control_tower_drift_board(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        only_problematic_mode=False,
+        limit=board_limit,
+        now=now,
+    )
+    action_center = _build_admin_control_tower_action_center(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_p2_mode=include_p2_mode,
+        limit=board_limit,
+        now=now,
+    )
+
+    merged_top_blockers = _build_control_tower_issue_counts(
+        _merge_control_tower_issue_counts(
+            readiness_board.top_blockers,
+            drift_board.top_issues,
+            action_center.top_reasons,
+        ),
+        limit=5,
+    )
+
+    active_clients_total = len(active_clients)
+    total_branches = readiness_board.summary.total_branches
+    ready_branches = readiness_board.summary.ready_branches
+    blocked_branches = readiness_board.summary.blocked_branches
+    p0_actions = action_center.summary.p0_actions
+    p1_actions = action_center.summary.p1_actions
+    p2_actions = action_center.summary.p2_actions
+    hard_blockers_total = (
+        readiness_board.summary.hard_gate_failed_branches
+        + drift_board.summary.queue_p0
+        + p0_actions
+    )
+    soft_blockers_total = drift_board.summary.queue_p1 + p1_actions
+
+    canary_wave = _build_migration_wave(
+        wave="canary",
+        candidate_clients_total=1 if ready_branches > 0 else 0,
+        candidate_branches_total=min(ready_branches, 3),
+        hard_blockers_total=hard_blockers_total,
+        soft_blockers_total=soft_blockers_total,
+        blocked_branches_total=blocked_branches,
+        soft_blocker_budget=2,
+        top_blockers=merged_top_blockers,
+    )
+    cohort_wave = _build_migration_wave(
+        wave="cohort",
+        candidate_clients_total=min(active_clients_total, 5) if ready_branches > 0 else 0,
+        candidate_branches_total=min(ready_branches, 25),
+        hard_blockers_total=hard_blockers_total,
+        soft_blockers_total=soft_blockers_total,
+        blocked_branches_total=blocked_branches,
+        soft_blocker_budget=5,
+        top_blockers=merged_top_blockers,
+    )
+    fleet_wave = _build_migration_wave(
+        wave="fleet",
+        candidate_clients_total=active_clients_total if ready_branches > 0 else 0,
+        candidate_branches_total=ready_branches,
+        hard_blockers_total=hard_blockers_total,
+        soft_blockers_total=soft_blockers_total + (p2_actions if include_p2_mode else 0),
+        blocked_branches_total=blocked_branches,
+        soft_blocker_budget=0,
+        top_blockers=merged_top_blockers,
+    )
+    waves = [canary_wave, cohort_wave, fleet_wave]
+
+    return ConsoleAdminControlTowerMigrationProgramResponse(
+        generated_at=now.isoformat(),
+        stale_after_minutes=stale_after_minutes,
+        limit=limit,
+        include_p2=include_p2_mode,
+        summary=ConsoleAdminControlTowerMigrationProgramSummary(
+            active_clients_total=active_clients_total,
+            total_branches=total_branches,
+            ready_branches=ready_branches,
+            blocked_branches=blocked_branches,
+            p0_actions=p0_actions,
+            p1_actions=p1_actions,
+            p2_actions=p2_actions,
+            waves_go=sum(1 for wave in waves if wave.gate == "go"),
+            waves_hold=sum(1 for wave in waves if wave.gate == "hold"),
+        ),
+        waves=waves,
     )
 
 
@@ -19849,6 +20070,52 @@ async def get_admin_control_tower_action_center(
     ]
     companies_by_id = {company.id: company for company in (context.companies or [])}
     return _build_admin_control_tower_action_center(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_p2_mode=include_p2_mode,
+        limit=limit,
+        now=now,
+    )
+
+
+@router.get(
+    "/admin/control-tower/migration-program",
+    response_model=ConsoleAdminControlTowerMigrationProgramResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_admin_control_tower_migration_program(
+    request: Request,
+    limit: int = 50,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    include_p2: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleAdminControlTowerMigrationProgramResponse:
+    _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_p2"})
+    _validate_limit(limit)
+    include_p2_mode = _parse_bool_param("include_p2", include_p2, default=True)
+    if not isinstance(stale_after_minutes, int):
+        stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
+
+    now = datetime.now(timezone.utc)
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    companies_by_id = {company.id: company for company in (context.companies or [])}
+    return _build_admin_control_tower_migration_program(
         db,
         active_clients=active_clients,
         companies_by_id=companies_by_id,

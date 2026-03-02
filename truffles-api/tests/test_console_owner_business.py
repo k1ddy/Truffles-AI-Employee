@@ -1380,6 +1380,86 @@ async def test_admin_control_tower_action_center_passes_scope_and_flags(monkeypa
     assert response.include_p2 is False
 
 
+@pytest.mark.asyncio
+async def test_admin_control_tower_migration_program_requires_platform_admin(monkeypatch):
+    context = _build_context(role="owner")
+    context.accessible_clients = []
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_admin_control_tower_migration_program(
+            request=SimpleNamespace(query_params={}),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_control_tower_migration_program_passes_scope_and_flags(monkeypatch):
+    client_id = uuid4()
+    company_id = uuid4()
+    context = _build_context(role="platform_admin")
+    context.companies = [SimpleNamespace(id=company_id, name="Acme")]
+    context.accessible_clients = [
+        SimpleNamespace(id=client_id, name="alpha", status="active", company_id=company_id, config={})
+    ]
+    captured: dict[str, object] = {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_control_tower_migration_program",
+        lambda _db, *, active_clients, companies_by_id, stale_after_minutes, include_p2_mode, limit, now: (
+            captured.update(
+                {
+                    "active_clients": active_clients,
+                    "companies_by_id": companies_by_id,
+                    "stale_after_minutes": stale_after_minutes,
+                    "include_p2_mode": include_p2_mode,
+                    "limit": limit,
+                }
+            )
+            or console_router.ConsoleAdminControlTowerMigrationProgramResponse(
+                generated_at=now_iso,
+                stale_after_minutes=stale_after_minutes,
+                limit=limit,
+                include_p2=include_p2_mode,
+                summary=console_router.ConsoleAdminControlTowerMigrationProgramSummary(
+                    active_clients_total=1,
+                    total_branches=3,
+                    ready_branches=3,
+                    blocked_branches=0,
+                    p0_actions=0,
+                    p1_actions=0,
+                    p2_actions=0,
+                    waves_go=3,
+                    waves_hold=0,
+                ),
+                waves=[],
+            )
+        ),
+    )
+
+    response = await console_router.get_admin_control_tower_migration_program(
+        request=SimpleNamespace(query_params={"include_p2": "false", "stale_after_minutes": "90", "limit": "13"}),
+        include_p2="false",
+        stale_after_minutes=90,
+        limit=13,
+        db=SimpleNamespace(),
+    )
+
+    assert captured["limit"] == 13
+    assert captured["stale_after_minutes"] == 90
+    assert captured["include_p2_mode"] is False
+    assert captured["active_clients"][0].id == client_id
+    assert company_id in captured["companies_by_id"]
+    assert response.limit == 13
+    assert response.include_p2 is False
+
+
 def test_build_admin_control_tower_action_center_aggregates_sources_and_filters_p2(monkeypatch) -> None:
     client_id = uuid4()
     company_id = uuid4()
@@ -1546,6 +1626,125 @@ def test_build_admin_control_tower_action_center_aggregates_sources_and_filters_
     assert any(item.source == "provider_ops" and item.provider_action == "provider_start_rebind" for item in response.items)
     assert any(item.source == "readiness" and item.href == "/tenants" for item in response.items)
     assert any(item.source == "incident" and item.job_type == "integration_reconcile" for item in response.items)
+
+
+def test_build_admin_control_tower_migration_program_aggregates_wave_gates(monkeypatch) -> None:
+    client_id = uuid4()
+    company_id = uuid4()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    active_clients = [SimpleNamespace(id=client_id, name="alpha", company_id=company_id, status="active", config={})]
+    companies_by_id = {company_id: SimpleNamespace(id=company_id, name="Acme")}
+
+    readiness_board = console_router.ConsoleAdminControlTowerReadinessBoardResponse(
+        generated_at=now_iso,
+        limit=50,
+        include_ready=True,
+        summary=console_router.ConsoleAdminControlTowerReadinessSummary(
+            total_branches=4,
+            ready_branches=3,
+            blocked_branches=1,
+            hard_gate_failed_branches=1,
+            go_live_draft_branches=1,
+            go_live_approved_branches=2,
+            go_live_rejected_branches=1,
+            degraded_branches=1,
+        ),
+        top_blockers=[
+            console_router.ConsoleAdminControlTowerIssueCount(
+                code="delivery:failed_24h_critical",
+                count=4,
+            )
+        ],
+        items=[],
+    )
+    drift_board = console_router.ConsoleAdminControlTowerDriftBoardResponse(
+        generated_at=now_iso,
+        stale_after_minutes=60,
+        limit=50,
+        only_problematic=False,
+        summary=console_router.ConsoleAdminControlTowerDriftSummary(
+            total_branches=4,
+            ok_branches=1,
+            warn_branches=2,
+            error_branches=1,
+            degraded_branches=1,
+            queue_p0=1,
+            queue_p1=2,
+            queue_p2=1,
+        ),
+        top_issues=[
+            console_router.ConsoleAdminControlTowerIssueCount(
+                code="provider_binding_alert_critical",
+                count=3,
+            )
+        ],
+        items=[],
+        provider_ops_queue=[],
+    )
+    action_center = console_router.ConsoleAdminControlTowerActionCenterResponse(
+        generated_at=now_iso,
+        stale_after_minutes=60,
+        limit=50,
+        include_p2=True,
+        summary=console_router.ConsoleAdminControlTowerActionCenterSummary(
+            total_actions=5,
+            p0_actions=1,
+            p1_actions=1,
+            p2_actions=1,
+            incident_actions=2,
+            provider_ops_actions=2,
+            readiness_actions=1,
+        ),
+        top_reasons=[
+            console_router.ConsoleAdminControlTowerIssueCount(
+                code="delivery:failed_24h_critical",
+                count=2,
+            )
+        ],
+        items=[],
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_control_tower_readiness_board",
+        lambda *_args, **_kwargs: readiness_board,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_control_tower_drift_board",
+        lambda *_args, **_kwargs: drift_board,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_control_tower_action_center",
+        lambda *_args, **_kwargs: action_center,
+    )
+
+    response = console_router._build_admin_control_tower_migration_program(
+        SimpleNamespace(),
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=60,
+        include_p2_mode=True,
+        limit=20,
+        now=now,
+    )
+
+    assert response.summary.active_clients_total == 1
+    assert response.summary.total_branches == 4
+    assert response.summary.ready_branches == 3
+    assert response.summary.blocked_branches == 1
+    assert response.summary.p0_actions == 1
+    assert response.summary.p1_actions == 1
+    assert response.summary.p2_actions == 1
+    assert response.summary.waves_hold == 3
+    assert response.summary.waves_go == 0
+    assert [wave.wave for wave in response.waves] == ["canary", "cohort", "fleet"]
+    assert all(wave.gate == "hold" for wave in response.waves)
+    assert "incident_p0_open" in response.waves[0].rollback_triggers
+    assert response.waves[0].top_blockers[0].code == "delivery:failed_24h_critical"
+    assert response.waves[0].top_blockers[0].count == 6
 
 
 @pytest.mark.asyncio
