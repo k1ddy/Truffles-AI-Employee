@@ -1169,8 +1169,8 @@ Forensic only (not acceptance):
   - runtime loader: `truffles-api/app/services/signal_manifest_service.py`
   - consumers migrated: `truffles-api/app/services/booking_signal_service.py`, `truffles-api/app/services/info_signal_service.py`
   - deterministic evidence: `pytest -q truffles-api/tests/test_signal_manifest_service.py`, `pytest -q truffles-api/tests/test_booking_appointments.py`, `pytest -q truffles-api/tests/test_master_info_flow.py`, `pytest -q truffles-api/tests/test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply"`.
-- `S2 Signal Runtime Compiler` pending (not implemented): no dedicated signal manifest compiler/loader with schema validation + cache/version contract found in `truffles-api/app/services/*`.
-- `S3 No-Hardcode Gate v2` partial: hardcode gate covers signal-layer now, but allow/deny policy still needs explicit runtime-core/signal whitelist policy hardening as a standalone block.
+- `S2 Signal Runtime Compiler` done: signal loader now builds compiled runtime bundle with explicit version/fingerprint/signature metadata and cache-by-signature contract in `truffles-api/app/services/signal_manifest_service.py` (`CompiledSignalManifest`, `compiled_version`, `manifest_fingerprint`, `manifest_signature`, `get_signal_manifest_runtime_meta`); deterministic proof in `truffles-api/tests/test_signal_manifest_service.py` (`8 passed`).
+- `S3 No-Hardcode Gate v2` done for scope enforcement: hardcode gate path policy in `ops/diagnose.py` now fail-checks `runtime/core/signal` scope (`webhook/*.py`, `*_signal_service.py`, `*_runtime_service.py`, `pack_runtime_service.py`, `tool_registry_service.py`) with deterministic scope tests in `truffles-api/tests/test_booking_quality_status_gate.py` (`8 passed` for scope/gate slice).
 - `S4 Cross-domain Contract Suite` pending (not implemented): deterministic/quality coverage for minimum two non-salon packs is not present as a dedicated contract suite artifact in `truffles-api/tests/*`.
 
 ### DoD for this Addendum

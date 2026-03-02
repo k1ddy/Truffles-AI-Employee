@@ -33,6 +33,10 @@ def _load_quality_helpers():
         "LLM_QUALITY_REGEX_LEXICON_RESOLVER_PREFIXES",
         "LLM_QUALITY_REGEX_LEXICON_TEST_PREFIX",
         "LLM_QUALITY_HARDCODE_CORE_PREFIXES",
+        "LLM_QUALITY_HARDCODE_SCOPE_WEBHOOK_PREFIX",
+        "LLM_QUALITY_HARDCODE_SCOPE_SERVICE_PREFIX",
+        "LLM_QUALITY_HARDCODE_SCOPE_SERVICE_FILES",
+        "LLM_QUALITY_HARDCODE_SCOPE_SERVICE_SUFFIXES",
         "LLM_QUALITY_HARDCODE_ALLOW_MARKER",
         "LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS",
         "LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE",
@@ -1263,6 +1267,17 @@ def test_hardcode_core_gate_scopes_signal_services():
 
     assert "truffles-api/app/services/booking_signal_service.py" in core_paths
     assert "truffles-api/app/services/info_signal_service.py" in core_paths
+
+
+def test_hardcode_core_scope_includes_webhook_and_runtime_signal_files():
+    ns = _load_quality_helpers()
+    is_scope_file = ns["_llm_quality_is_hardcode_core_file"]
+
+    assert is_scope_file("truffles-api/app/routers/webhook/policy.py")
+    assert is_scope_file("truffles-api/app/services/booking_signal_service.py")
+    assert is_scope_file("truffles-api/app/services/any_runtime_service.py")
+    assert is_scope_file("truffles-api/app/services/pack_runtime_service.py")
+    assert not is_scope_file("docs/REPORTS/sample.md")
 
 
 def test_hq1_classifier_detects_handoff_miss():

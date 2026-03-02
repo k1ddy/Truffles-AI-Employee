@@ -3,7 +3,9 @@ from app.services.signal_manifest_service import (
     get_booking_regex_pattern,
     get_booking_regex_replacements,
     get_booking_text_tokens,
+    get_compiled_signal_manifest,
     get_info_regex_pattern,
+    get_signal_manifest_runtime_meta,
     load_signal_manifest,
 )
 
@@ -11,6 +13,21 @@ from app.services.signal_manifest_service import (
 def test_signal_manifest_loads_with_expected_schema_version():
     manifest = load_signal_manifest()
     assert manifest.get("schema_version") == "signal_manifest.v1"
+
+
+def test_signal_manifest_runtime_meta_has_compiled_version_and_fingerprint():
+    meta = get_signal_manifest_runtime_meta()
+    assert meta["schema_version"] == "signal_manifest.v1"
+    assert meta["compiled_version"].startswith("signal_manifest.v1:")
+    assert len(meta["manifest_fingerprint"]) == 64
+    assert meta["manifest_path"].endswith("SIGNAL_MANIFEST.yaml")
+
+
+def test_signal_manifest_compiler_cache_reuses_bundle_for_same_signature():
+    first = get_compiled_signal_manifest()
+    second = get_compiled_signal_manifest()
+    assert first is second
+    assert first.compiled_version == second.compiled_version
 
 
 def test_booking_relative_day_patterns_come_from_manifest():

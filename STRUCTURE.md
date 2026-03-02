@@ -94,7 +94,7 @@
 | `truffles-api/app/services/tool_registry_service.py` | Tool registry executor (calendar/catalog) for LLM plan | Backend |
 | `truffles-api/app/services/info_signal_service.py` | Info/lexicon signal helpers (routing-neutral) | Backend |
 | `truffles-api/app/services/booking_signal_service.py` | Booking/date/time signal helpers (manifest-backed regex/tokens + lexicon) | Backend |
-| `truffles-api/app/services/signal_manifest_service.py` | Signal manifest loader + schema validation + regex/token accessors | Backend |
+| `truffles-api/app/services/signal_manifest_service.py` | Signal manifest runtime compiler/loader (schema validation + signature cache + version meta) | Backend |
 | `truffles-api/app/services/appointment_reminder_service.py` | Appointment reminder/follow-up jobs + outbox enqueue | Backend |
 | `truffles-api/app/services/metrics_daily_service.py` | Daily metrics snapshot (metrics_daily) | Backend |
 | `truffles-api/app/services/marketing/service.py` | Marketing Pro lifecycle/audience/preflight/execute/retry logic | Backend |
@@ -188,6 +188,7 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-multi-seed-drift-gate-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-chain-controller-bootstrap-a1.md`

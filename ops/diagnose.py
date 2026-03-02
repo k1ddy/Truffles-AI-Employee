@@ -983,6 +983,16 @@ LLM_QUALITY_HARDCODE_CORE_PREFIXES = (
     "truffles-api/app/services/booking_signal_service.py",
     "truffles-api/app/services/info_signal_service.py",
 )
+LLM_QUALITY_HARDCODE_SCOPE_WEBHOOK_PREFIX = "truffles-api/app/routers/webhook/"
+LLM_QUALITY_HARDCODE_SCOPE_SERVICE_PREFIX = "truffles-api/app/services/"
+LLM_QUALITY_HARDCODE_SCOPE_SERVICE_FILES = (
+    "truffles-api/app/services/tool_registry_service.py",
+    "truffles-api/app/services/pack_runtime_service.py",
+)
+LLM_QUALITY_HARDCODE_SCOPE_SERVICE_SUFFIXES = (
+    "_signal_service.py",
+    "_runtime_service.py",
+)
 LLM_QUALITY_HARDCODE_ALLOW_MARKER = "hardcode-gate: allow"
 LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS = (
     're.findall(r"\\w+",',
@@ -1043,7 +1053,7 @@ LLM_QUALITY_REASON_LABELS = {
     "semantic_intent_override_reason_unknown": "semantic intent override used non-whitelist reason-code",
     "semantic_intent_override_count_mismatch": "semantic intent override audit count mismatches recorded events",
     "lexicon_regex_delta_violation": "lexicon/regex delta without resolver + contract test delta",
-    "hardcode_core_violation": "core hardcode gate detected raw keyword/regex branching in core diff",
+    "hardcode_core_violation": "hardcode gate detected raw keyword/regex branching in runtime/core/signal diff",
     "quality_constant_violation": "quality-constant gate detected acceptance-lane downgrade or debug override",
     "oracle_conflict_violation": "oracle conflict gate requires contract-first arbitration before next acceptance run",
     "forensic_sla_violation": "forensic SLA gate detected incomplete manual audit contract fields",
@@ -5506,7 +5516,15 @@ def _llm_quality_is_hardcode_core_file(path):
     normalized = str(path or "").strip().replace("\\", "/")
     if not normalized:
         return False
-    return normalized in LLM_QUALITY_HARDCODE_CORE_PREFIXES
+    if normalized in LLM_QUALITY_HARDCODE_CORE_PREFIXES:
+        return True
+    if normalized.startswith(LLM_QUALITY_HARDCODE_SCOPE_WEBHOOK_PREFIX) and normalized.endswith(".py"):
+        return True
+    if not normalized.startswith(LLM_QUALITY_HARDCODE_SCOPE_SERVICE_PREFIX):
+        return False
+    if normalized in LLM_QUALITY_HARDCODE_SCOPE_SERVICE_FILES:
+        return True
+    return normalized.endswith(LLM_QUALITY_HARDCODE_SCOPE_SERVICE_SUFFIXES)
 
 
 def _llm_quality_line_has_phrase_branching(line, *, path=None):
@@ -7522,7 +7540,7 @@ def _llm_quality_next_step_for_reason(reason):
         "semantic_intent_override_reason_unknown": "replace semantic intent override reason-code with whitelist-approved value",
         "semantic_intent_override_count_mismatch": "align semantic_arbiter.audit.intent_override_count with semantic_intent_overrides events",
         "lexicon_regex_delta_violation": "pair lexicon/regex changes with resolver update and contract regression tests",
-        "hardcode_core_violation": "remove raw phrase/regex branching from core files or move it to resolver/data with explicit allow marker",
+        "hardcode_core_violation": "remove raw phrase/regex branching from runtime/core/signal files or move it to resolver/data with explicit allow marker",
         "wrong_action": "inspect plan/final action routing and tighten intent arbitration for this turn class",
         "handoff_miss": "ensure manager-request/reschedule intents transition to handoff+pending with trace proof",
         "non_actionable_reply": "replace dead-end fallback with actionable FACT/COLLECT continuation",
@@ -10917,12 +10935,12 @@ def _parse_llm_quality_args(argv):
         "--hardcode-core-gate",
         choices=["off", "warn", "block"],
         default=os.environ.get("LLM_QUALITY_HARDCODE_CORE_GATE", "block"),
-        help="Static AST/diff gate for raw phrase/regex branching in webhook core files.",
+        help="Static AST/diff gate for raw phrase/regex branching in runtime/core/signal files.",
     )
     parser.add_argument(
         "--hardcode-core-base-ref",
         default=os.environ.get("LLM_QUALITY_HARDCODE_CORE_BASE_REF", "origin/main"),
-        help="Base ref used to scan changed files for hardcode core gate.",
+        help="Base ref used to scan changed files for hardcode gate scope.",
     )
     parser.add_argument(
         "--run-economy-gate",
@@ -11064,12 +11082,12 @@ def _parse_llm_quality_gates_args(argv):
         "--hardcode-core-gate",
         choices=["off", "warn", "block"],
         default=os.environ.get("LLM_QUALITY_HARDCODE_CORE_GATE", "block"),
-        help="Static guard for phrase/regex branching in webhook core files.",
+        help="Static guard for phrase/regex branching in runtime/core/signal files.",
     )
     parser.add_argument(
         "--hardcode-core-base-ref",
         default=os.environ.get("LLM_QUALITY_HARDCODE_CORE_BASE_REF", "origin/main"),
-        help="Base ref used for hardcode-core scan.",
+        help="Base ref used for hardcode gate scan.",
     )
     parser.add_argument(
         "--run-economy-gate",
