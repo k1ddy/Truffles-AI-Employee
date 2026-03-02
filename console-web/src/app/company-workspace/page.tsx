@@ -144,18 +144,26 @@ function providerSlaLabel(value?: string | null): string {
 }
 
 function lifecycleBlockerLabel(value: string): string {
-    const labels: Record<string, string> = {
-        provider_binding_rebind_required: "Требуется перепривязка",
-        provider_binding_expired: "Подписка provider истекла",
-        provider_binding_expiring_soon: "Подписка provider скоро истекает",
-        no_recent_inbound: "Нет недавнего inbound",
-        instance_id_mismatch: "Несовпадение instance_id",
-        invalid_webhook_url: "Webhook URL невалиден",
-        integration_degraded: "Интеграция degraded",
-        provider_binding_alert_critical: "Критичный alert provider",
-        provider_binding_alert_warn: "Alert provider (warn)",
-    };
-    return labels[value] ?? value;
+    return providerOpsReasonLabel(value);
+}
+
+function recommendedActionSourceLabel(value?: string | null): string {
+    if (!value) {
+        return "не указан";
+    }
+    if (value === "query") {
+        return "из перехода по ссылке";
+    }
+    if (value === "matrix") {
+        return "из матрицы филиалов";
+    }
+    if (value === "today") {
+        return "из режима «Текущий день»";
+    }
+    if (value === "action_center") {
+        return "из очереди действий";
+    }
+    return value.replaceAll("_", " ");
 }
 
 function defaultExecuteReason(action: ProviderOpsAction): string {
@@ -215,16 +223,16 @@ function formatThroughputPercent(value?: number | null): string {
 function workspaceIncidentSteps(item: IncidentItem): string[] {
     if (item.reason_code === "integration_degraded") {
         return [
-            "Проверьте webhook/instance_id в панели WhatsApp для выбранного филиала.",
+            "Проверьте webhook и ID канала (instance_id) в панели WhatsApp для выбранного филиала.",
             "Запустите «Проверить без записи» (integration_reconcile dry-run).",
             "Если результат подтверждает drift, выполните execute и перепроверьте метрики в OPS.",
         ];
     }
     if (item.reason_code === "provider_auth" || item.reason_code === "provider_unavailable" || item.reason_code === "provider_rate_limited" || item.reason_code === "provider_billing_blocked") {
         return [
-            "Проверьте provider binding facts (owner, paid_until, webhook_status).",
-            "Выполните целевое provider-действие в режиме dry-run/execute.",
-            "После действия откройте OPS и проверьте снижение failed_24h.",
+            "Проверьте данные канала у провайдера (ответственный, оплачено до, статус webhook).",
+            "Выполните целевое действие провайдера в режиме проверки или выполнения.",
+            "После действия откройте OPS и проверьте, что ошибки отправки за 24 часа снижаются.",
         ];
     }
     if (item.reason_code === "outbox_backlog") {
@@ -276,7 +284,7 @@ export default function CompanyWorkspacePage() {
 
     const [branchPhone, setBranchPhone] = useState("");
     const [branchInstanceId, setBranchInstanceId] = useState("");
-    const [goLiveReason, setGoLiveReason] = useState("go-live подтвержден из центра компании");
+    const [goLiveReason, setGoLiveReason] = useState("запуск подтвержден из центра компании");
 
     const [webhookSecret, setWebhookSecret] = useState("");
     const [webhookUrl, setWebhookUrl] = useState("");
@@ -712,7 +720,7 @@ export default function CompanyWorkspacePage() {
             const paidUntil = dialog.paidUntil.trim();
             const nextRenewalAt = dialog.nextRenewalAt.trim();
             if (!paidUntil && !nextRenewalAt) {
-                reportValidationError("Укажите paid_until или next_renewal_at");
+                reportValidationError("Укажите дату оплаты или дату следующего продления");
                 return null;
             }
             return {
@@ -764,7 +772,7 @@ export default function CompanyWorkspacePage() {
         const normalizedPhone = branchPhone.trim();
         const normalizedInstanceId = branchInstanceId.trim();
         if (!normalizedPhone || !normalizedInstanceId) {
-            reportValidationError("Телефон и instance_id обязательны");
+            reportValidationError("Телефон и ID канала обязательны");
             return;
         }
         setBranchSaving(true);
@@ -808,13 +816,13 @@ export default function CompanyWorkspacePage() {
         }
         const reason = goLiveReason.trim();
         if (!reason) {
-            reportValidationError("Причина для go-live обязательна");
+            reportValidationError("Причина для запуска обязательна");
             return;
         }
         setGoLiveSaving("approve");
         try {
             await adminApi.approveBranchGoLive(scopeBranchId, { reason });
-            toast.success("Go-live подтвержден");
+            toast.success("Запуск подтвержден");
             await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
         } catch (error) {
             reportError(error);
@@ -836,7 +844,7 @@ export default function CompanyWorkspacePage() {
         setGoLiveSaving("reject");
         try {
             await adminApi.rejectBranchGoLive(scopeBranchId, { reason });
-            toast.success("Go-live отклонен");
+            toast.success("Запуск отклонен");
             await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
         } catch (error) {
             reportError(error);
@@ -852,13 +860,13 @@ export default function CompanyWorkspacePage() {
         }
         const reason = goLiveReason.trim();
         if (!reason) {
-            reportValidationError("Причина waiver обязательна");
+            reportValidationError("Причина отсрочки обязательна");
             return;
         }
         setGoLiveSaving("waive");
         try {
             await adminApi.waiveBranchGoLive(scopeBranchId, { reason, ttl_hours: 24 });
-            toast.success("Отсрочка go-live применена на 24 часа");
+            toast.success("Отсрочка запуска применена на 24 часа");
             await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
         } catch (error) {
             reportError(error);
@@ -911,35 +919,35 @@ export default function CompanyWorkspacePage() {
                 title: "Шаг 1: Выберите компанию/клиента/филиал",
                 passed: hasContext,
                 detail: hasContext ? "Контекст выбран" : "Компания, клиент и филиал обязательны",
-                fix: "Заполните Scope и нажмите «Применить контекст»",
+                fix: "Заполните контекст и нажмите «Применить контекст»",
             },
             {
                 id: "identity",
                 title: "Шаг 2: Запишите WhatsApp-идентичность",
                 passed: hasIdentity,
-                detail: hasIdentity ? "Телефон и instance_id заполнены" : "Телефон филиала и instance_id обязательны",
-                fix: "Сохраните WA-идентичность филиала (телефон + instance_id)",
+                detail: hasIdentity ? "Телефон и ID канала заполнены" : "Телефон филиала и ID канала обязательны",
+                fix: "Сохраните WA-идентичность филиала (телефон + ID канала)",
             },
             {
                 id: "webhook",
                 title: "Шаг 3: Проверьте webhook и связь с provider",
                 passed: webhookConfigured,
-                detail: webhookConfigured ? "Webhook настроен" : "Webhook должен быть валидным и webhook_status=configured",
+                detail: webhookConfigured ? "Webhook настроен" : "Webhook должен быть валидным и активным у провайдера",
                 fix: "Обновите webhook и отметьте «Webhook обновлен» или «Завершить перепривязку»",
             },
             {
                 id: "renewal",
                 title: "Шаг 4: Зафиксируйте продление и владельца",
                 passed: renewalTracked,
-                detail: renewalTracked ? "Данные продления заполнены" : "Нужны владелец и paid_until/next_renewal_at",
+                detail: renewalTracked ? "Данные продления заполнены" : "Нужны ответственный и дата оплаты/продления",
                 fix: "Выполните действие «Подтвердить продление»",
             },
             {
                 id: "go-live",
-                title: "Шаг 5: Готовность и допуск go-live",
+                title: "Шаг 5: Готовность и допуск к запуску",
                 passed: scorecardReady,
                 detail: scorecardReady ? "Проверка готовности пройдена" : "Проверка готовности не пройдена",
-                fix: "Закройте незаполненные проверки до подтверждения go-live",
+                fix: "Закройте незаполненные проверки до подтверждения запуска",
             },
         ];
     }, [hasContext, hasIdentity, renewalTracked, scorecardReady, webhookConfigured]);
@@ -953,11 +961,11 @@ export default function CompanyWorkspacePage() {
         const steps: string[] = [];
         for (const reason of reasons) {
             if (reason === "provider_binding_rebind_required" || reason === "instance_id_mismatch") {
-                steps.push("Проверьте instance_id и нажмите «Старт перепривязки», затем «Завершить перепривязку».");
+                steps.push("Проверьте ID канала и нажмите «Старт перепривязки», затем «Завершить перепривязку».");
                 continue;
             }
             if (reason === "provider_binding_expired" || reason === "provider_binding_expiring_soon") {
-                steps.push("Уточните оплату у provider и выполните «Подтвердить продление» с актуальной датой.");
+                steps.push("Уточните оплату у провайдера и выполните «Подтвердить продление» с актуальной датой.");
                 continue;
             }
             if (reason === "invalid_webhook_url") {
@@ -969,7 +977,7 @@ export default function CompanyWorkspacePage() {
                 continue;
             }
             if (reason === "provider_binding_alert_critical" || reason === "provider_binding_alert_warn") {
-                steps.push("Проверьте карточку provider и отправьте напоминание/перепривяжите по регламенту.");
+                steps.push("Проверьте карточку провайдера и отправьте напоминание или перепривяжите канал по регламенту.");
                 continue;
             }
         }
@@ -995,7 +1003,7 @@ export default function CompanyWorkspacePage() {
                     <div>
                         <h1 className="text-2xl font-bold">Центр управления компанией</h1>
                         <p className="mt-1 text-sm text-muted-foreground">
-                            Один экран для подключения, перепривязки, продления и допуска go-live по филиалу.
+                            Один экран для подключения, перепривязки, продления и допуска к запуску по филиалу.
                         </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -1037,7 +1045,7 @@ export default function CompanyWorkspacePage() {
                 </div>
                 <div className={`rounded-lg border p-3 text-xs ${statusCardClass(hasIdentity)}`}>
                     <div className="font-semibold uppercase tracking-[0.15em]">WA-идентичность</div>
-                    <div className="mt-1 text-sm">{hasIdentity ? "Заполнена" : "Нет телефона/instance_id"}</div>
+                    <div className="mt-1 text-sm">{hasIdentity ? "Заполнена" : "Нет телефона или ID канала"}</div>
                 </div>
                 <div className={`rounded-lg border p-3 text-xs ${statusCardClass(webhookConfigured)}`}>
                     <div className="font-semibold uppercase tracking-[0.15em]">Webhook</div>
@@ -1048,7 +1056,7 @@ export default function CompanyWorkspacePage() {
                     <div className="mt-1 text-sm">{renewalTracked ? "Зафиксировано" : "Нужен владелец + даты"}</div>
                 </div>
                 <div className={`rounded-lg border p-3 text-xs ${statusCardClass(scorecardReady)}`}>
-                    <div className="font-semibold uppercase tracking-[0.15em]">Go-live</div>
+                    <div className="font-semibold uppercase tracking-[0.15em]">Запуск</div>
                     <div className="mt-1 text-sm">{scorecardReady ? "Допуск возможен" : "Есть блокеры"}</div>
                 </div>
             </section>
@@ -1063,19 +1071,19 @@ export default function CompanyWorkspacePage() {
                     </div>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                            <div className="text-[11px] text-muted-foreground">Median time to go-live</div>
+                            <div className="text-[11px] text-muted-foreground">Медианное время до запуска</div>
                             <div className="text-base font-semibold">{formatThroughputHours(onboardingThroughput.time_to_go_live_median_hours)}</div>
                         </div>
                         <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                            <div className="text-[11px] text-muted-foreground">Blocker age p95</div>
+                            <div className="text-[11px] text-muted-foreground">Возраст блокера p95</div>
                             <div className="text-base font-semibold">{formatThroughputHours(onboardingThroughput.blocker_age_p95_hours)}</div>
                         </div>
                         <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                            <div className="text-[11px] text-muted-foreground">First-pass go-live rate</div>
+                            <div className="text-[11px] text-muted-foreground">Запуск с первой попытки</div>
                             <div className="text-base font-semibold">{formatThroughputPercent(onboardingThroughput.first_pass_go_live_rate_pct)}</div>
                         </div>
                         <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                            <div className="text-[11px] text-muted-foreground">Incident reopen &lt;24h</div>
+                            <div className="text-[11px] text-muted-foreground">Повтор инцидента &lt;24ч</div>
                             <div className="text-base font-semibold">{formatThroughputPercent(onboardingThroughput.incident_reopen_rate_24h_pct)}</div>
                         </div>
                     </div>
@@ -1091,7 +1099,7 @@ export default function CompanyWorkspacePage() {
                         </p>
                     </div>
                     <span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
-                        source: {recommendedActionContext?.source ?? "-"}
+                        источник подсказки: {recommendedActionSourceLabel(recommendedActionContext?.source)}
                     </span>
                 </div>
 
@@ -1268,7 +1276,7 @@ export default function CompanyWorkspacePage() {
                     </div>
                 ) : (
                     <div className="mt-3 rounded-lg border border-emerald-300/60 bg-emerald-50 p-3 text-xs text-emerald-800">
-                        Для текущего контекста нет активного инцидента. Если этот раздел не даёт действий, значит сейчас нет branch-level проблемы: работайте через обычные панели Integrations/OPS по факту сигнала.
+                        Для текущего контекста нет активного инцидента. Если здесь нет действий, значит сейчас нет проблемы на уровне филиала: работайте через стандартные панели Integrations и Ops по факту сигнала.
                     </div>
                 )}
             </section>
@@ -1278,7 +1286,7 @@ export default function CompanyWorkspacePage() {
                     <div>
                         <h2 className="text-sm font-semibold">Today по выбранному филиалу</h2>
                         <p className="mt-1 text-xs text-muted-foreground">
-                            Следующее действие и SLA из provider lifecycle registry.
+                            Следующее действие и SLA из реестра жизненного цикла провайдера.
                         </p>
                     </div>
                     {lifecycleTodayFact ? (
@@ -1295,7 +1303,7 @@ export default function CompanyWorkspacePage() {
                 {lifecycleTodayFact ? (
                     <div className="mt-3 grid gap-2 md:grid-cols-2">
                         <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
-                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Next action</div>
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Следующий шаг</div>
                             <div className="mt-1 text-sm font-medium text-foreground">{providerOpsActionCodeLabel(lifecycleTodayFact.next_action)}</div>
                             <div className="mt-1 text-muted-foreground">
                                 дедлайн: <span className="font-mono">{formatDateLabel(lifecycleTodayFact.sla_deadline_at)}</span>
@@ -1305,17 +1313,17 @@ export default function CompanyWorkspacePage() {
                             </div>
                         </div>
                         <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
-                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Provider facts</div>
-                            <div className="mt-1 text-muted-foreground">owner: {lifecycleTodayFact.provider_binding_owner ?? "-"}</div>
-                            <div className="text-muted-foreground">paid_until: {lifecycleTodayFact.provider_binding_paid_until ?? "-"}</div>
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Данные канала у провайдера</div>
+                            <div className="mt-1 text-muted-foreground">Ответственный: {lifecycleTodayFact.provider_binding_owner ?? "-"}</div>
+                            <div className="text-muted-foreground">Оплачено до: {lifecycleTodayFact.provider_binding_paid_until ?? "-"}</div>
                             <div className="text-muted-foreground break-all">
-                                instance: {lifecycleTodayFact.instance_id ?? "-"} · binding: {lifecycleTodayFact.provider_binding_instance_id ?? "-"}
+                                ID канала: {lifecycleTodayFact.instance_id ?? "-"} · ID у провайдера: {lifecycleTodayFact.provider_binding_instance_id ?? "-"}
                             </div>
                         </div>
                     </div>
                 ) : (
                     <div className="mt-3 rounded-lg border border-emerald-300/60 bg-emerald-50 p-3 text-xs text-emerald-800">
-                        Для выбранного филиала сейчас нет проблемных lifecycle-сигналов.
+                        Для выбранного филиала сейчас нет проблемных сигналов жизненного цикла.
                     </div>
                 )}
             </section>
@@ -1426,7 +1434,7 @@ export default function CompanyWorkspacePage() {
                         />
                     </label>
                     <label className="text-xs text-muted-foreground">
-                        instance_id ChatFlow
+                        ID канала в ChatFlow (instance_id)
                         <input
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono"
                             value={branchInstanceId}
@@ -1458,7 +1466,7 @@ export default function CompanyWorkspacePage() {
                 <div className="mt-3 grid gap-2 md:grid-cols-2">
                     <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
                         <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold">instance_id филиала</span>
+                            <span className="font-semibold">ID канала филиала (instance_id)</span>
                             <button className="btn-ghost px-2 py-1 text-[11px]" onClick={() => void copyToClipboard("instance_id", branchInstanceId || selectedIntegration?.instance_id)}>Копировать</button>
                         </div>
                         <div className="mt-1 overflow-x-auto rounded bg-background/60 px-2 py-1">
@@ -1492,12 +1500,12 @@ export default function CompanyWorkspacePage() {
                         </div>
                         <div className="mt-1 font-mono text-[11px] break-all">{selectedIntegration?.provider_binding_owner || "-"}</div>
                         <div className="mt-1 text-[11px] text-muted-foreground">
-                            paid_until: <span className="font-mono break-all">{selectedIntegration?.provider_binding_paid_until || "-"}</span>
-                            {" "}· next_renewal_at: <span className="font-mono break-all">{selectedIntegration?.provider_binding_next_renewal_at || "-"}</span>
+                            Оплачено до: <span className="font-mono break-all">{selectedIntegration?.provider_binding_paid_until || "-"}</span>
+                            {" "}· следующее продление: <span className="font-mono break-all">{selectedIntegration?.provider_binding_next_renewal_at || "-"}</span>
                         </div>
-                        <div className="mt-1 text-[11px] text-muted-foreground">
-                            webhook_status: <span className="font-mono">{selectedIntegration?.provider_binding_webhook_status || "-"}</span>
-                            {" "}· last inbound: <span className="font-mono">{formatDateLabel(selectedIntegration?.last_inbound_at)}</span>
+                    <div className="mt-1 text-[11px] text-muted-foreground">
+                            статус webhook: <span className="font-mono">{selectedIntegration?.provider_binding_webhook_status || "-"}</span>
+                            {" "}· последнее входящее: <span className="font-mono">{formatDateLabel(selectedIntegration?.last_inbound_at)}</span>
                         </div>
                     </div>
                 </div>
@@ -1518,7 +1526,7 @@ export default function CompanyWorkspacePage() {
             <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-hardstop-wizard">
                 <h2 className="text-lg font-semibold">Линейный hard-stop онбординга</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                    Поток: контекст -&gt; WA-идентичность -&gt; webhook -&gt; продление -&gt; go-live.
+                    Поток: контекст -&gt; WA-идентичность -&gt; webhook -&gt; продление -&gt; запуск.
                 </p>
 
                 {currentBlocker ? (
@@ -1528,7 +1536,7 @@ export default function CompanyWorkspacePage() {
                     </div>
                 ) : (
                     <div className="mt-3 rounded-lg border border-emerald-300/70 bg-emerald-50 p-3 text-xs text-emerald-800">
-                        Все обязательные шаги пройдены, можно принимать go-live.
+                        Все обязательные шаги пройдены, можно подтверждать запуск (go-live).
                     </div>
                 )}
 
@@ -1546,7 +1554,7 @@ export default function CompanyWorkspacePage() {
                                 <div className="mt-1 text-xs text-muted-foreground">{step.detail}</div>
                                 {!step.passed ? (
                                     <div className={`mt-1 text-xs ${isCurrentBlocker ? "text-red-700" : "text-muted-foreground"}`}>
-                                        fix: {step.fix}{isCurrentBlocker ? " (текущий блокер)" : ""}
+                                        что исправить: {step.fix}{isCurrentBlocker ? " (текущий блокер)" : ""}
                                     </div>
                                 ) : null}
                             </div>
@@ -1555,7 +1563,7 @@ export default function CompanyWorkspacePage() {
                 </div>
 
                 <div className="mt-4 rounded-lg border border-border/60 bg-background p-3">
-                    <div className="text-sm font-medium">Решение по go-live</div>
+                    <div className="text-sm font-medium">Решение по запуску (go-live)</div>
                     <label className="mt-2 block text-xs text-muted-foreground">
                         причина
                         <textarea
@@ -1572,7 +1580,7 @@ export default function CompanyWorkspacePage() {
                             onClick={() => void approveGoLive()}
                             disabled={!scopeBranchId || !canWriteTenants || hardStopActive || goLiveSaving !== null}
                         >
-                            {goLiveSaving === "approve" ? "Подтверждаю..." : "Подтвердить go-live"}
+                            {goLiveSaving === "approve" ? "Подтверждаю..." : "Подтвердить запуск"}
                         </button>
                         <button
                             className="btn-ghost"
@@ -1635,7 +1643,7 @@ export default function CompanyWorkspacePage() {
 
                             {providerActionDialog.action === "provider_complete_rebind" || providerActionDialog.action === "provider_webhook_updated" ? (
                                 <label className="text-xs text-muted-foreground">
-                                    instance_id
+                                    ID канала (instance_id)
                                     <input
                                         className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                         value={providerActionDialog.instanceId}
@@ -1648,7 +1656,7 @@ export default function CompanyWorkspacePage() {
                             {providerActionDialog.action === "provider_renewal_confirmed" ? (
                                 <div className="grid gap-3 sm:grid-cols-2">
                                     <label className="text-xs text-muted-foreground">
-                                        paid_until
+                                        Оплачено до (paid_until)
                                         <input
                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                             value={providerActionDialog.paidUntil}
@@ -1657,7 +1665,7 @@ export default function CompanyWorkspacePage() {
                                         />
                                     </label>
                                     <label className="text-xs text-muted-foreground">
-                                        next_renewal_at
+                                        Дата следующего продления (next_renewal_at)
                                         <input
                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                             value={providerActionDialog.nextRenewalAt}

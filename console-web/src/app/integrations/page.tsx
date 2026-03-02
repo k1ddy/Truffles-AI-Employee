@@ -105,6 +105,10 @@ function normalizeText(value?: string | null): string {
     return (value ?? "").trim().toLowerCase();
 }
 
+function humanizeCode(value: string): string {
+    return value.replaceAll("_", " ");
+}
+
 function statusBadgeClass(status: string): string {
     if (status === "error") {
         return "bg-red-100 text-red-800";
@@ -121,23 +125,23 @@ function statusLabel(status: string): string {
         warn: "Предупреждение",
         error: "Ошибка",
         inactive: "Неактивно",
-        missing_instance_id: "Нет instance_id",
-        instance_id_mismatch: "Несовпадение instance_id",
-        invalid_webhook_url: "Невалидный webhook URL",
-        invalid_webhook_secret: "Невалидный webhook secret",
-        webhook_secret_drift: "Webhook secret drift",
-        no_recent_inbound: "Нет недавнего inbound",
-        inbound_without_outbound: "Inbound без outbound",
-        missing_bot_token: "Нет bot token",
-        missing_chat_id: "Нет chat id",
+        missing_instance_id: "Не указан ID канала",
+        instance_id_mismatch: "ID канала не совпадает",
+        invalid_webhook_url: "Некорректный адрес webhook",
+        invalid_webhook_secret: "Некорректный ключ webhook",
+        webhook_secret_drift: "Ключ webhook не совпадает",
+        no_recent_inbound: "Давно нет входящих",
+        inbound_without_outbound: "Есть входящие без исходящих",
+        missing_bot_token: "Не задан токен бота",
+        missing_chat_id: "Не задан ID чата",
         provider_binding_rebind_required: "Нужна перепривязка",
         provider_binding_expired: "Подписка истекла",
         provider_binding_expiring_soon: "Скоро истекает подписка",
-        provider_binding_alert_critical: "Критичный alert provider",
-        provider_binding_alert_warn: "Alert provider (warn)",
-        integration_degraded: "Интеграция degraded",
+        provider_binding_alert_critical: "Критичный сигнал провайдера",
+        provider_binding_alert_warn: "Предупреждение провайдера",
+        integration_degraded: "Интеграция нестабильна",
     };
-    return labels[status] ?? status;
+    return labels[status] ?? humanizeCode(status);
 }
 
 function providerBindingExpiryLabel(status?: string | null): string {
@@ -168,15 +172,15 @@ function providerBindingExpiryBadgeClass(status?: string | null): string {
 
 function providerBindingAlertLabel(status?: string | null): string {
     if (status === "ok") {
-        return "Alert OK";
+        return "Сигналов нет";
     }
     if (status === "warn") {
-        return "Alert WARN";
+        return "Есть предупреждение";
     }
     if (status === "critical") {
-        return "Alert CRITICAL";
+        return "Критичный сигнал";
     }
-    return "Alert UNKNOWN";
+    return "Сигнал неизвестен";
 }
 
 function providerBindingAlertBadgeClass(status?: string | null): string {
@@ -235,7 +239,7 @@ function formatReferenceScopeReason(value?: string | null): string {
     if (!value) {
         return "не задан";
     }
-    return REFERENCE_SCOPE_REASON_LABELS[value] ?? value;
+    return REFERENCE_SCOPE_REASON_LABELS[value] ?? humanizeCode(value);
 }
 
 function providerPriorityBadgeClass(priority?: string | null): string {
@@ -268,15 +272,15 @@ function providerLifecycleActionHint(action?: string | null): string | null {
 
 function goLiveStateLabel(value?: string | null): string {
     if (!value) {
-        return "pending";
+        return "ожидает решения";
     }
     if (value === "approved") {
-        return "approved";
+        return "запуск подтвержден";
     }
     if (value === "rejected") {
-        return "rejected";
+        return "запуск отклонен";
     }
-    return value;
+    return humanizeCode(value);
 }
 
 function goLiveBadgeClass(allowed: boolean, state?: string | null): string {
@@ -314,9 +318,21 @@ function teamBadgeClass(issue: string | null): string {
 
 function onboardingStateLabel(value?: string | null): string {
     if (!value) {
-        return "unknown";
+        return "статус не задан";
     }
-    return value;
+    if (value === "approved") {
+        return "готов к запуску";
+    }
+    if (value === "rejected") {
+        return "запуск отклонен";
+    }
+    if (value === "pending") {
+        return "ожидает проверки";
+    }
+    if (value === "blocked") {
+        return "есть блокеры";
+    }
+    return humanizeCode(value);
 }
 
 function rowSeverityWeight(row: EnrichedRow): number {
@@ -1160,7 +1176,7 @@ export default function IntegrationsPage() {
                 <div>
                     <h1 className="text-2xl font-bold" data-testid="integrations-title">Центр управления компаниями</h1>
                     <p className="mt-1 text-sm text-muted-foreground">
-                        Единый факт-слой по компаниям: каналы, provider-подписки, команда, онбординг и go-live.
+                        Единый обзор по компаниям: состояние каналов, оплата, команда и готовность к запуску.
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1184,7 +1200,7 @@ export default function IntegrationsPage() {
             <section className="mb-4 rounded-xl border border-border/60 bg-card p-3" data-testid="integrations-view-mode">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-xs text-muted-foreground">
-                        Режим экрана: {viewMode === "overview" ? "обзор по всем филиалам" : "today: только проблемные филиалы с next action"}
+                        Режим экрана: {viewMode === "overview" ? "обзор по всем филиалам" : "операционный день: только проблемные филиалы и следующий шаг"}
                     </div>
                     <div className="inline-flex rounded-full border border-border/60 bg-muted/20 p-1">
                         <button
@@ -1212,12 +1228,12 @@ export default function IntegrationsPage() {
                     <div>
                         <div className="text-sm font-semibold text-blue-900">Операции выполняются через Workspace</div>
                         <div className="mt-1 text-xs text-blue-800/80">
-                            Действия по филиалу (rebind, renewal, webhook update, reconcile) выполняются только в `Company Workspace`.
+                            Действия по филиалу (перепривязка, подтверждение оплаты, обновление webhook, сверка) выполняются только в `Company Workspace`.
                         </div>
                     </div>
                     <div className="text-xs text-blue-900/80">
-                        stale_after_minutes: <span className="font-mono">{integrationsData?.stale_after_minutes ?? staleAfterMinutes}</span> мин
-                        {" "}· page_limit: <span className="font-mono">{INTEGRATIONS_PAGE_LIMIT}</span>
+                        данные устаревают через <span className="font-mono">{integrationsData?.stale_after_minutes ?? staleAfterMinutes}</span> мин
+                        {" "}· лимит страницы: <span className="font-mono">{INTEGRATIONS_PAGE_LIMIT}</span>
                         {" "}· загружено: <span className="font-mono">{integrationsItems.length}</span>/<span className="font-mono">{integrationsTotalInScope}</span>
                     </div>
                 </div>
@@ -1448,7 +1464,7 @@ export default function IntegrationsPage() {
                 <KpiCard
                     title="Подписка Provider"
                     value={`${kpi.expiredBindings} истекло · ${kpi.expiringSoon} скоро`}
-                    description="риски paid_until / renewal"
+                    description="риски оплаты канала и даты продления"
                     tone={kpi.expiredBindings > 0 ? "critical" : kpi.expiringSoon > 0 ? "warn" : "good"}
                 />
                 <KpiCard
@@ -1553,8 +1569,8 @@ export default function IntegrationsPage() {
 
                                         <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
                                             <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Провайдер</div>
-                                            <div className="mt-1 text-muted-foreground">owner: {row.provider_binding_owner ?? "-"}</div>
-                                            <div className="text-muted-foreground">paid_until: {row.provider_binding_paid_until ?? "-"}</div>
+                                            <div className="mt-1 text-muted-foreground">Ответственный: {row.provider_binding_owner ?? "-"}</div>
+                                            <div className="text-muted-foreground">Оплачено до: {row.provider_binding_paid_until ?? "-"}</div>
                                             <div className="mt-1 flex flex-wrap items-center gap-1">
                                                 <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingExpiryBadgeClass(row.provider_binding_expiry_status)}`}>
                                                     {providerBindingExpiryLabel(row.provider_binding_expiry_status)}
@@ -1579,10 +1595,10 @@ export default function IntegrationsPage() {
 
                                         <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
                                             <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Онбординг</div>
-                                            <div className="mt-1 text-muted-foreground">state: {onboardingStateLabel(row.onboarding_state)}</div>
+                                            <div className="mt-1 text-muted-foreground">Статус: {onboardingStateLabel(row.onboarding_state)}</div>
                                             <div className="mt-1">
                                                 <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${goLiveBadgeClass(row.go_live_allowed, row.go_live_state)}`}>
-                                                    go-live: {goLiveStateLabel(row.go_live_state)}{row.go_live_allowed ? " (разрешен)" : ""}
+                                                    Запуск: {goLiveStateLabel(row.go_live_state)}{row.go_live_allowed ? " (разрешен)" : ""}
                                                 </span>
                                             </div>
                                         </div>
@@ -1595,11 +1611,11 @@ export default function IntegrationsPage() {
                                     <details className="mt-2 rounded-lg border border-border/60 bg-muted/10 p-2">
                                         <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">Больше фактов</summary>
                                         <div className="mt-2 space-y-1 text-muted-foreground">
-                                            <div>instance: <span className="font-mono break-all">{row.instance_id ?? "-"}</span></div>
-                                            <div>binding instance: <span className="font-mono break-all">{row.provider_binding_instance_id ?? "-"}</span></div>
-                                            <div>next_renewal: <span className="font-mono break-all">{row.provider_binding_next_renewal_at ?? "-"}</span></div>
-                                            <div>days left: {row.provider_binding_days_until_expiry ?? "-"} · rebind_required: {row.provider_binding_rebind_required ? "yes" : "no"}</div>
-                                            <div>last inbound instance: <span className="font-mono break-all">{row.last_inbound_instance_id ?? "-"}</span></div>
+                                            <div>ID канала филиала: <span className="font-mono break-all">{row.instance_id ?? "-"}</span></div>
+                                            <div>ID канала у провайдера: <span className="font-mono break-all">{row.provider_binding_instance_id ?? "-"}</span></div>
+                                            <div>Следующее продление: <span className="font-mono break-all">{row.provider_binding_next_renewal_at ?? "-"}</span></div>
+                                            <div>Осталось дней оплаты: {row.provider_binding_days_until_expiry ?? "-"} · нужна перепривязка: {row.provider_binding_rebind_required ? "да" : "нет"}</div>
+                                            <div>Последний входящий ID канала: <span className="font-mono break-all">{row.last_inbound_instance_id ?? "-"}</span></div>
                                             <div className="pt-1"><DriftIssues item={row} /></div>
                                         </div>
                                     </details>
@@ -1689,10 +1705,10 @@ export default function IntegrationsPage() {
                                     </div>
                                     <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
                                         <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Данные канала</div>
-                                        <div className="mt-1 text-muted-foreground">owner: {item.provider_binding_owner ?? "-"}</div>
-                                        <div className="text-muted-foreground">paid_until: {item.provider_binding_paid_until ?? "-"}</div>
+                                        <div className="mt-1 text-muted-foreground">Ответственный: {item.provider_binding_owner ?? "-"}</div>
+                                        <div className="text-muted-foreground">Оплачено до: {item.provider_binding_paid_until ?? "-"}</div>
                                         <div className="text-muted-foreground break-all">
-                                            instance: {item.instance_id ?? "-"} · binding: {item.provider_binding_instance_id ?? "-"}
+                                            ID канала: {item.instance_id ?? "-"} · ID у провайдера: {item.provider_binding_instance_id ?? "-"}
                                         </div>
                                     </div>
                                 </div>

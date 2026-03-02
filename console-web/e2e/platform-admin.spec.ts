@@ -1119,6 +1119,37 @@ test.describe('Platform Admin Tenants', () => {
         await expect(recommendationSection).toContainText('Что это значит:');
         await expect(recommendationSection).toContainText('Причины');
         await expect(recommendationSection).toContainText('нужна перепривязка канала');
+        await expect(recommendationSection).toContainText('источник подсказки:');
+        await expect(recommendationSection).not.toContainText('source:');
+    });
+
+    test('should keep Integrations and Workspace labels plain-language @smoke', async ({ page }) => {
+        await openIntegrations(page);
+
+        const integrationsPage = page.getByTestId('integrations-page');
+        await expect(integrationsPage).not.toContainText('owner:');
+        await expect(integrationsPage).not.toContainText('paid_until');
+        await expect(integrationsPage).not.toContainText('next_renewal_at');
+
+        const row = page.getByTestId('integrations-row').first();
+        if (!(await row.isVisible().catch(() => false))) {
+            await expect(page.getByTestId('integrations-empty')).toBeVisible();
+            return;
+        }
+
+        await expect(row).toContainText('Ответственный:');
+        await expect(row).toContainText('Оплачено до:');
+        await expect(row).toContainText('ID канала');
+
+        await page.getByTestId('integrations-row-open-workspace').first().click();
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+
+        const workspacePage = page.getByTestId('company-workspace-page');
+        await expect(workspacePage).toContainText('источник подсказки:');
+        await expect(workspacePage).not.toContainText('source:');
+        await expect(workspacePage).not.toContainText('owner:');
+        await expect(workspacePage).not.toContainText('paid_until');
+        await expect(workspacePage).not.toContainText('next_renewal_at');
     });
 
     test('should ignore legacy workspace recommendation storage without query context @smoke', async ({ page }) => {
