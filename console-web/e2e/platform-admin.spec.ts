@@ -848,6 +848,16 @@ test.describe('Platform Admin Navigation', () => {
 
         await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
         await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await expect(page.getByTestId('workspace-recommended-open-execute')).toBeVisible();
+
+        const deepLinkParams = await page.evaluate(() => ({
+            branchId: new URL(window.location.href).searchParams.get('branch_id'),
+            recommendedAction: new URL(window.location.href).searchParams.get('recommended_action'),
+            source: new URL(window.location.href).searchParams.get('action_source'),
+        }));
+        expect(deepLinkParams.branchId).toBeTruthy();
+        expect(deepLinkParams.recommendedAction).toBe('provider_start_rebind');
+        expect(deepLinkParams.source).toBe('matrix');
 
         const storedContext = await page.evaluate(() => ({
             clientId: window.localStorage.getItem('console:client_id'),
@@ -1086,6 +1096,27 @@ test.describe('Platform Admin Tenants', () => {
         expect(deepLinkParams.source).toBeTruthy();
     });
 
+    test('should ignore legacy workspace recommendation storage without query context @smoke', async ({ page }) => {
+        await page.evaluate((branchId) => {
+            window.localStorage.setItem(
+                'console:workspace_recommended_action',
+                JSON.stringify({
+                    branch_id: branchId,
+                    action: 'provider_start_rebind',
+                    reasons: ['provider_binding_rebind_required'],
+                    source: 'legacy-storage',
+                    captured_at: new Date().toISOString(),
+                }),
+            );
+        }, TENANTS_FIXTURE_BRANCH_ID);
+
+        await page.goto(`${resolvedBaseURL}/company-workspace?branch_id=${TENANTS_FIXTURE_BRANCH_ID}`, { waitUntil: 'domcontentloaded' });
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await expect(page.getByTestId('workspace-recommended-open-execute')).toHaveCount(0);
+        await expect(page.getByText(/нет активной подсказки/i)).toBeVisible();
+    });
+
     test('should show explicit field contracts in Tenants branch editor @smoke', async ({ page }) => {
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
@@ -1320,7 +1351,7 @@ test.describe('Platform Admin Tenants', () => {
             await page.getByTestId('tenants-mode-portfolio').click();
         }
 
-        const refreshKpiButton = page.getByRole('button', { name: /Обновить/i });
+        const refreshKpiButton = page.getByRole('button', { name: /Обновить сводку/i });
         if (await refreshKpiButton.isVisible().catch(() => false)) {
             await refreshKpiButton.click();
         }

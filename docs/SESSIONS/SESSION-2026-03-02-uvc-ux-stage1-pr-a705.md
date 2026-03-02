@@ -1,0 +1,22 @@
+# SESSION 2026-03-02-uvc-ux-stage1-pr-a705 — Session 2026-03-02-uvc-ux-stage1-pr-a705
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
+- block_id: UVC-UX-STAGE1-A705
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
+- worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
+- base_ref: origin/main
+- scope: <fill scope>
+- done:
+  - Session created.
+- next:
+  - Fill Task Package and execute plan.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
+- last_updated: 2026-03-02

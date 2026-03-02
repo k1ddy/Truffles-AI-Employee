@@ -18,6 +18,12 @@ import {
     type ProviderOpsQueueItem,
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
+import {
+    parseProviderOpsAction,
+    providerOpsActionCodeLabel,
+    providerOpsActionHint,
+    providerOpsReasonLabels,
+} from "@/lib/provider-ops-language";
 import { useConsoleContextScope } from "@/lib/use-console-context-scope";
 import type { components } from "@/types/api.generated";
 
@@ -193,24 +199,6 @@ function formatTimestamp(value?: string | null): string {
     return new Date(value).toLocaleString("ru-RU");
 }
 
-function parseProviderAction(value?: string | null): ProviderOpsQueueItem["recommended_action"] | null {
-    if (!value) {
-        return null;
-    }
-    const normalized = value.trim();
-    if (
-        normalized === "integration_reconcile"
-        || normalized === "provider_start_rebind"
-        || normalized === "provider_complete_rebind"
-        || normalized === "provider_renewal_confirmed"
-        || normalized === "provider_webhook_updated"
-        || normalized === "provider_send_reminder"
-    ) {
-        return normalized;
-    }
-    return null;
-}
-
 function providerSlaBadgeClass(value?: string | null): string {
     if (value === "overdue") {
         return "bg-red-100 text-red-800";
@@ -238,8 +226,8 @@ function providerSlaLabel(value?: string | null): string {
 }
 
 const REFERENCE_SCOPE_REASON_LABELS: Record<string, string> = {
-    active_live_signals: "live-сигналы активных филиалов",
-    active_fallback_best_candidate: "fallback на лучший активный филиал",
+    active_live_signals: "сигналы активных филиалов",
+    active_fallback_best_candidate: "резервный выбор лучшего активного филиала",
     no_active_branches: "нет активных филиалов",
 };
 
@@ -270,29 +258,12 @@ function providerPriorityLabel(priority?: string | null): string {
     return priority.toUpperCase();
 }
 
-function providerLifecycleNextActionLabel(action?: string | null): string {
-    if (!action) {
-        return "Нет действия";
+function providerLifecycleActionHint(action?: string | null): string | null {
+    const parsed = parseProviderOpsAction(action);
+    if (!parsed) {
+        return null;
     }
-    if (action === "provider_start_rebind") {
-        return "Старт перепривязки";
-    }
-    if (action === "provider_complete_rebind") {
-        return "Завершить перепривязку";
-    }
-    if (action === "provider_renewal_confirmed") {
-        return "Подтвердить продление";
-    }
-    if (action === "provider_webhook_updated") {
-        return "Webhook обновлен";
-    }
-    if (action === "provider_send_reminder") {
-        return "Отправить напоминание";
-    }
-    if (action === "integration_reconcile") {
-        return "Сверка интеграции";
-    }
-    return action;
+    return providerOpsActionHint(parsed);
 }
 
 function goLiveStateLabel(value?: string | null): string {
@@ -1042,7 +1013,7 @@ export default function IntegrationsPage() {
     };
 
     const openWorkspaceForLifecycleItem = (item: ProviderLifecycleItem) => {
-        const lifecycleAction = parseProviderAction(item.next_action);
+        const lifecycleAction = parseProviderOpsAction(item.next_action);
         persistScopeAndOpenWorkspace(
             {
                 companyId: item.company_id,
@@ -1488,8 +1459,8 @@ export default function IntegrationsPage() {
                 />
                 <KpiCard
                     title="Команда"
-                    value={`${kpi.teamGaps} gaps · ${kpi.goLiveAllowed} go-live`}
-                    description="пробелы команды + сколько филиалов готовы к go-live"
+                    value={`${kpi.teamGaps} пробелов · ${kpi.goLiveAllowed} готово к запуску`}
+                    description="пробелы команды и число филиалов, готовых к запуску"
                     tone={kpi.teamGaps > 0 ? "warn" : "good"}
                 />
             </section>
@@ -1502,20 +1473,20 @@ export default function IntegrationsPage() {
                         <div className="text-xs text-red-900/80">клиенты высокого риска</div>
                     </div>
                     <div className="rounded-xl border border-amber-300/70 bg-amber-50 p-4">
-                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-800">Stale / Ошибки</div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-800">Неактуальные и ошибки</div>
                         <div className="mt-2 text-2xl font-semibold text-amber-900">{fleetAttentionSummary.stale_branches_total + fleetAttentionSummary.integration_error_branches_total}</div>
-                        <div className="text-xs text-amber-900/80">stale + проблемные филиалы</div>
+                        <div className="text-xs text-amber-900/80">неактуальные + проблемные филиалы</div>
                     </div>
                     <div className="rounded-xl border border-blue-300/70 bg-blue-50 p-4">
                         <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-800">Очереди</div>
                         <div className="mt-2 text-2xl font-semibold text-blue-900">{fleetAttentionSummary.outbox_failed_24h_total + fleetAttentionSummary.pending_handovers_total}</div>
-                        <div className="text-xs text-blue-900/80">outbox failed + pending handovers</div>
+                        <div className="text-xs text-blue-900/80">ошибки отправки + ожидание передачи</div>
                     </div>
                 </section>
             )}
             {fleetAttentionSummary ? (
                 <div className="mt-2 text-xs text-muted-foreground">
-                    scope: reference branches (fleet metrics без тестового branch noise)
+                    опорный контур: расчет по рабочим филиалам без тестового шума
                 </div>
             ) : null}
 
@@ -1532,13 +1503,13 @@ export default function IntegrationsPage() {
                                     </span>
                                 </div>
                                 <div className="mt-1 text-muted-foreground">
-                                    действие: {item.next_action} · причины: {item.reasons.join(", ") || "-"}
+                                    действие: {providerOpsActionCodeLabel(item.next_action)} · причины: {providerOpsReasonLabels(item.reasons, 3).join(", ") || "-"}
                                 </div>
                                 <div className="mt-1 text-muted-foreground">
-                                    филиалы {item.active_branches}/{item.total_branches} · stale {item.stale_branches} · degraded {item.degraded_branches}
+                                    филиалы {item.active_branches}/{item.total_branches} · неактуальные {item.stale_branches} · деградация {item.degraded_branches}
                                 </div>
                                 <div className="mt-1 text-muted-foreground">
-                                    reference scope: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
+                                    опорный контур: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
                                 </div>
                             </div>
                         ))}
@@ -1672,9 +1643,9 @@ export default function IntegrationsPage() {
                 <section className="mt-4 rounded-xl border border-border/60 bg-card p-3 sm:p-4" data-testid="integrations-today-mode">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                         <div>
-                            <div className="text-sm font-semibold">Today mode: проблемные филиалы</div>
+                            <div className="text-sm font-semibold">Текущий день: проблемные филиалы</div>
                             <div className="text-xs text-muted-foreground">
-                                Только actionable-факты: next action, SLA, блокеры и переход в Workspace.
+                                Только факты для действий: следующий шаг, SLA, блокеры и переход в Workspace.
                             </div>
                         </div>
                         <div className="text-xs text-muted-foreground">
@@ -1707,14 +1678,17 @@ export default function IntegrationsPage() {
 
                                 <div className="mt-2 grid gap-2 md:grid-cols-2">
                                     <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Next action</div>
-                                        <div className="mt-1 font-medium text-foreground">{providerLifecycleNextActionLabel(item.next_action)}</div>
+                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Следующий шаг</div>
+                                        <div className="mt-1 font-medium text-foreground">{providerOpsActionCodeLabel(item.next_action)}</div>
+                                        {providerLifecycleActionHint(item.next_action) ? (
+                                            <div className="mt-1 text-muted-foreground">{providerLifecycleActionHint(item.next_action)}</div>
+                                        ) : null}
                                         <div className="mt-1 text-muted-foreground">
                                             дедлайн: {formatTimestamp(item.sla_deadline_at)} · inbound: {formatTimestamp(item.last_inbound_at)}
                                         </div>
                                     </div>
                                     <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Provider facts</div>
+                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Данные канала</div>
                                         <div className="mt-1 text-muted-foreground">owner: {item.provider_binding_owner ?? "-"}</div>
                                         <div className="text-muted-foreground">paid_until: {item.provider_binding_paid_until ?? "-"}</div>
                                         <div className="text-muted-foreground break-all">
@@ -1724,7 +1698,7 @@ export default function IntegrationsPage() {
                                 </div>
 
                                 <div className="mt-2 text-muted-foreground">
-                                    блокеры: {item.blockers.length ? item.blockers.map((blocker) => statusLabel(blocker)).join(", ") : "нет"}
+                                    блокеры: {item.blockers.length ? providerOpsReasonLabels(item.blockers, item.blockers.length).join(", ") : "нет"}
                                 </div>
 
                                 <div className="mt-3 flex items-center justify-end">

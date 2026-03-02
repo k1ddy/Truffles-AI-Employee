@@ -21,11 +21,15 @@ import {
     type IntegrationBranchActionRequest,
     type ProviderOpsAction,
 } from "@/lib/api-client";
-import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
+import {
+    parseProviderOpsAction,
+    providerOpsActionCodeLabel,
+    providerOpsActionHint,
+    providerOpsActionLabel,
+    providerOpsReasonLabel,
+} from "@/lib/provider-ops-language";
 import { useConsoleContextScope } from "@/lib/use-console-context-scope";
 import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
-
-const WORKSPACE_RECOMMENDED_ACTION_KEY = "console:workspace_recommended_action";
 
 type ProviderActionDialogState = {
     action: ProviderOpsAction;
@@ -69,45 +73,11 @@ type ProviderLifecycleFact = {
     provider_binding_instance_id?: string | null;
 };
 
-function readWorkspaceRecommendedActionContext(): WorkspaceRecommendedActionContext | null {
-    const raw = readBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY);
-    if (!raw) {
-        return null;
-    }
-    try {
-        const parsed = JSON.parse(raw) as WorkspaceRecommendedActionContext;
-        if (!parsed?.branch_id || !parsed?.action) {
-            return null;
-        }
-        return parsed;
-    } catch {
-        return null;
-    }
-}
-
-function parseWorkspaceProviderAction(value?: string | null): ProviderOpsAction | null {
-    if (!value) {
-        return null;
-    }
-    const normalized = value.trim();
-    if (
-        normalized === "integration_reconcile"
-        || normalized === "provider_start_rebind"
-        || normalized === "provider_complete_rebind"
-        || normalized === "provider_renewal_confirmed"
-        || normalized === "provider_webhook_updated"
-        || normalized === "provider_send_reminder"
-    ) {
-        return normalized;
-    }
-    return null;
-}
-
 function readWorkspaceRecommendedActionFromQuery(
     searchParams: ReturnType<typeof useSearchParams>,
 ): WorkspaceRecommendedActionContext | null {
     const branchId = (searchParams?.get("branch_id") ?? "").trim();
-    const recommendedAction = parseWorkspaceProviderAction(searchParams?.get("recommended_action"));
+    const recommendedAction = parseProviderOpsAction(searchParams?.get("recommended_action"));
     if (!branchId || !recommendedAction) {
         return null;
     }
@@ -145,65 +115,6 @@ function statusPill(status: "ok" | "warn" | "error"): string {
         return "bg-amber-100 text-amber-700";
     }
     return "bg-green-100 text-green-700";
-}
-
-function providerOpsActionLabel(action: ProviderOpsAction): string {
-    if (action === "provider_start_rebind") {
-        return "Старт перепривязки";
-    }
-    if (action === "provider_complete_rebind") {
-        return "Завершить перепривязку";
-    }
-    if (action === "provider_renewal_confirmed") {
-        return "Подтвердить продление";
-    }
-    if (action === "provider_webhook_updated") {
-        return "Webhook обновлен";
-    }
-    if (action === "provider_send_reminder") {
-        return "Отправить напоминание";
-    }
-    return "Сверка интеграции";
-}
-
-function providerOpsReasonLabel(reason: string): string {
-    const labels: Record<string, string> = {
-        provider_binding_rebind_required: "нужна перепривязка provider",
-        provider_binding_expired: "подписка provider истекла",
-        provider_binding_expiring_soon: "подписка provider скоро истекает",
-        no_recent_inbound: "давно нет входящих сообщений",
-        instance_id_mismatch: "instance_id не совпадает",
-        invalid_webhook_url: "webhook URL невалиден",
-        integration_degraded: "интеграция деградировала",
-        provider_binding_alert_critical: "критичный alert у provider",
-        provider_binding_alert_warn: "предупреждение у provider",
-    };
-    return labels[reason] ?? reason;
-}
-
-function providerLifecycleActionLabel(action?: string | null): string {
-    if (!action) {
-        return "Нет действия";
-    }
-    if (action === "integration_reconcile") {
-        return "Сверка интеграции";
-    }
-    if (action === "provider_start_rebind") {
-        return "Старт перепривязки";
-    }
-    if (action === "provider_complete_rebind") {
-        return "Завершить перепривязку";
-    }
-    if (action === "provider_renewal_confirmed") {
-        return "Подтвердить продление";
-    }
-    if (action === "provider_webhook_updated") {
-        return "Webhook обновлен";
-    }
-    if (action === "provider_send_reminder") {
-        return "Отправить напоминание";
-    }
-    return action;
 }
 
 function providerSlaPillClass(value?: string | null): string {
@@ -681,9 +592,7 @@ export default function CompanyWorkspacePage() {
     }, [selectedIntegration?.branch_id, selectedIntegration?.webhook_url]);
 
     useEffect(() => {
-        const recommendation =
-            readWorkspaceRecommendedActionFromQuery(searchParams)
-            ?? readWorkspaceRecommendedActionContext();
+        const recommendation = readWorkspaceRecommendedActionFromQuery(searchParams);
         if (!recommendation) {
             setRecommendedActionContext(null);
             return;
@@ -752,7 +661,6 @@ export default function CompanyWorkspacePage() {
             setActionSummary(`${providerOpsActionLabel(action)}: ${JSON.stringify(result)}`);
             toast.success(mode === "dry_run" ? "Проверка завершена (без записи)" : "Операция выполнена");
             if (mode === "execute") {
-                writeBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
                 setRecommendedActionContext(null);
                 clearRecommendedActionQuery();
             }
@@ -1192,6 +1100,9 @@ export default function CompanyWorkspacePage() {
                         <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900">
                             <span className="font-semibold">Рекомендуется:</span>{" "}
                             {providerOpsActionLabel(recommendedActionContext.action)}
+                            <div className="mt-1 text-xs text-amber-900/90">
+                                Что это значит: {providerOpsActionHint(recommendedActionContext.action)}
+                            </div>
                         </div>
 
                         <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
@@ -1240,7 +1151,6 @@ export default function CompanyWorkspacePage() {
                             <button
                                 className="btn-ghost"
                                 onClick={() => {
-                                    writeBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
                                     setRecommendedActionContext(null);
                                     clearRecommendedActionQuery();
                                 }}
@@ -1386,7 +1296,7 @@ export default function CompanyWorkspacePage() {
                     <div className="mt-3 grid gap-2 md:grid-cols-2">
                         <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
                             <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Next action</div>
-                            <div className="mt-1 text-sm font-medium text-foreground">{providerLifecycleActionLabel(lifecycleTodayFact.next_action)}</div>
+                            <div className="mt-1 text-sm font-medium text-foreground">{providerOpsActionCodeLabel(lifecycleTodayFact.next_action)}</div>
                             <div className="mt-1 text-muted-foreground">
                                 дедлайн: <span className="font-mono">{formatDateLabel(lifecycleTodayFact.sla_deadline_at)}</span>
                             </div>

@@ -4,6 +4,12 @@ import { useCallback, useMemo } from "react";
 import type { components } from "@/types/api.generated";
 import type { TenantsActionQueueItem } from "@/components/TenantsActionQueuePanel";
 import type { ProviderOpsAction } from "@/lib/api-client";
+import {
+    providerOpsActionHint,
+    parseProviderOpsAction,
+    providerOpsActionCodeLabel,
+    providerOpsReasonLabels,
+} from "@/lib/provider-ops-language";
 
 type TenantLifecycleMode = "active" | "archived" | "all";
 type FleetAttentionLevel = "high" | "medium" | "low";
@@ -49,39 +55,6 @@ type UseTenantsActionQueueParams = {
         archived_clients?: number;
     } | null | undefined;
 };
-
-const PROVIDER_ACTIONS: ProviderOpsAction[] = [
-    "integration_reconcile",
-    "provider_start_rebind",
-    "provider_complete_rebind",
-    "provider_renewal_confirmed",
-    "provider_webhook_updated",
-    "provider_send_reminder",
-];
-
-function isProviderOpsAction(value: string | null): value is ProviderOpsAction {
-    if (!value) {
-        return false;
-    }
-    return PROVIDER_ACTIONS.includes(value as ProviderOpsAction);
-}
-
-function normalizeReasonLabel(reason: string): string {
-    const labels: Record<string, string> = {
-        provider_binding_rebind_required: "канал требует перепривязки",
-        provider_binding_expired: "подписка канала истекла",
-        provider_binding_expiring_soon: "подписка канала скоро истекает",
-        provider_binding_alert_critical: "критичный сигнал у канала",
-        provider_binding_alert_warn: "предупреждение у канала",
-        no_recent_inbound: "давно нет входящих сообщений",
-        instance_id_mismatch: "не совпадает instance_id",
-        invalid_webhook_url: "некорректный webhook URL",
-        integration_degraded: "интеграция нестабильна",
-        outbox_backlog: "очередь отправки растёт",
-        readiness_blocked: "не закрыт чек-лист запуска",
-    };
-    return labels[reason] ?? reason.replaceAll("_", " ");
-}
 
 function resolveIntentByControlTowerItem(
     item: components["schemas"]["ConsoleAdminControlTowerActionItem"],
@@ -230,17 +203,18 @@ export function useTenantsActionQueue({
             const providerActionRaw =
                 (typeof item.provider_action === "string" ? item.provider_action : null)
                 ?? readParamString(params, "action");
-            const providerAction = isProviderOpsAction(providerActionRaw) ? providerActionRaw : null;
+            const providerAction = parseProviderOpsAction(providerActionRaw);
             const modeParam = readParamString(params, "mode");
             const intent = resolveIntentByControlTowerItem(item, providerAction);
-            const reasonLabels = (item.reasons ?? []).slice(0, 3).map((reason) => normalizeReasonLabel(reason));
+            const reasonLabels = providerOpsReasonLabels(item.reasons, 3);
+            const actionHint = providerAction ? providerOpsActionHint(providerAction) : null;
             collected.push({
                 id: item.id,
                 priority: mapPriority(item.priority),
                 title: item.title,
                 detail: reasonLabels.length
-                    ? `${item.description}. Причины: ${reasonLabels.join(", ")}`
-                    : item.description,
+                    ? `${item.description}. Причины: ${reasonLabels.join(", ")}${actionHint ? `. Что делать: ${actionHint}` : ""}`
+                    : `${item.description}${actionHint ? `. Что делать: ${actionHint}` : ""}`,
                 intent,
                 actionLabel: resolveActionLabel(intent),
                 clientId: clientId ?? undefined,
@@ -288,11 +262,13 @@ export function useTenantsActionQueue({
         const attentionTop = attentionItems.slice(0, 4);
         for (const item of attentionTop) {
             const defaultIntent: ActionQueueIntent = item.pending_handovers > 0 ? "open_cases" : "open_integrations";
+            const nextActionLabel = providerOpsActionCodeLabel(item.next_action);
+            const reasonLabels = providerOpsReasonLabels(item.reasons, 2);
             collected.push({
                 id: `attention-${item.client_id}`,
                 priority: item.attention_level as FleetAttentionLevel,
                 title: `${item.client_name ?? item.client_slug} · score ${item.attention_score}`,
-                detail: `Следующее действие: ${item.next_action}. Причины: ${item.reasons?.slice(0, 2).join(", ") || "—"}`,
+                detail: `Следующее действие: ${nextActionLabel}. Причины: ${reasonLabels.join(", ") || "—"}`,
                 intent: defaultIntent,
                 actionLabel: resolveActionLabel(defaultIntent),
                 clientId: item.client_id,
