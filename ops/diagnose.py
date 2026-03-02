@@ -877,6 +877,16 @@ LLM_QUALITY_REQUIRED_RUN_ARTIFACTS = (
     "responses.jsonl",
     "trace_bundle.jsonl",
 )
+LLM_QUALITY_EVIDENCE_HANDOFF_REQUIRED_ARTIFACTS = (
+    "summary.json",
+    "brief.md",
+    "scenarios.json",
+    "responses.jsonl",
+    "trace_bundle.jsonl",
+    "run_manifest.json",
+    "manual_audit.md",
+    "manual_audit.json",
+)
 LLM_QUALITY_MANIFEST_VERSION = 1
 LLM_QUALITY_INDEX_ROOT = "/tmp/booking_quality/_index"
 LLM_QUALITY_MANIFEST_MAX_LATEST = 200
@@ -7755,6 +7765,9 @@ def _llm_quality_manifest_mode(args, run_id, run_economy_status):
         if "full" in lowered:
             mode = "full"
             source = "run_id"
+        elif "canary" in lowered:
+            mode = "canary"
+            source = "run_id"
         elif "replay" in lowered:
             mode = "replay"
             source = "run_id"
@@ -8014,6 +8027,15 @@ def _llm_quality_write_run_manifest(
     if not isinstance(runtime_preflight, dict):
         runtime_preflight = summary.get("runtime_preflight") if isinstance(summary.get("runtime_preflight"), dict) else {}
     artifact_integrity = summary.get("artifact_integrity") if isinstance(summary.get("artifact_integrity"), dict) else _llm_quality_collect_artifact_integrity(output_dir)
+    evidence_handoff = (
+        summary.get("evidence_handoff")
+        if isinstance(summary.get("evidence_handoff"), dict)
+        else _llm_quality_collect_evidence_handoff_status(
+            output_dir=output_dir,
+            summary=summary,
+            artifact_integrity=artifact_integrity,
+        )
+    )
     mode, mode_source = _llm_quality_manifest_mode(args, run_id, run_economy_status)
     manual_audit = summary.get("manual_audit") if isinstance(summary.get("manual_audit"), dict) else {}
     resolved_manual_audit = _llm_quality_resolve_manual_audit_status(output_dir)
@@ -8065,6 +8087,8 @@ def _llm_quality_write_run_manifest(
         "manual_audit_status": manual_audit_status,
         "artifact_integrity_valid": artifact_integrity.get("valid"),
         "artifact_integrity_missing": artifact_integrity.get("missing"),
+        "evidence_handoff_valid": evidence_handoff.get("valid"),
+        "evidence_handoff_reasons": list(evidence_handoff.get("reasons") or []),
         "artifacts": {
             "summary": summary.get("summary_path") or summary_path,
             "brief": summary.get("brief_path") or os.path.join(output_dir, "brief.md"),
@@ -8113,6 +8137,72 @@ def _llm_quality_collect_artifact_integrity(output_dir):
         "paths": paths,
         "missing": missing,
         "valid": not missing,
+    }
+
+
+def _llm_quality_collect_evidence_handoff_status(
+    *,
+    output_dir,
+    summary=None,
+    artifact_integrity=None,
+):
+    normalized_dir = os.path.abspath(os.path.expanduser(str(output_dir or "").strip() or "."))
+    summary_payload = summary if isinstance(summary, dict) else {}
+    if not isinstance(artifact_integrity, dict):
+        artifact_integrity = _llm_quality_collect_artifact_integrity(normalized_dir)
+
+    extra_paths = {
+        name: os.path.join(normalized_dir, name)
+        for name in ("run_manifest.json", "manual_audit.md", "manual_audit.json")
+    }
+    missing = list(artifact_integrity.get("missing") or [])
+    missing.extend(
+        name
+        for name, path in extra_paths.items()
+        if name not in missing and not os.path.exists(path)
+    )
+    missing = sorted(set(str(item).strip() for item in missing if str(item).strip()))
+
+    resolved_manual = _llm_quality_resolve_manual_audit_status(normalized_dir)
+    manual_status = str(
+        resolved_manual.get("manual_audit_status")
+        or ((summary_payload.get("manual_audit") or {}).get("status"))
+        or (summary_payload.get("quality_status") or {}).get("manual_audit_status")
+        or summary_payload.get("manual_audit_status")
+        or ""
+    ).strip().casefold()
+    manual_done = manual_status in {"done", "completed", "pass", "passed"}
+    forensic_valid = bool(resolved_manual.get("forensic_sla_valid"))
+    forensic_reasons = list(resolved_manual.get("forensic_sla_reasons") or [])
+    if not forensic_reasons and not forensic_valid:
+        forensic_reasons = ["manual_audit_sla_unavailable"]
+
+    reasons = []
+    if missing:
+        reasons.append("evidence_artifacts_missing:" + ",".join(missing))
+    if not manual_done:
+        reasons.append("manual_audit_not_done")
+    if not forensic_valid:
+        if forensic_reasons:
+            reasons.append(
+                "manual_audit_sla_invalid:" + ",".join(str(item) for item in forensic_reasons)
+            )
+        else:
+            reasons.append("manual_audit_sla_invalid")
+
+    return {
+        "valid": not reasons,
+        "reasons": reasons,
+        "required": list(LLM_QUALITY_EVIDENCE_HANDOFF_REQUIRED_ARTIFACTS),
+        "missing": missing,
+        "paths": {
+            **(artifact_integrity.get("paths") or {}),
+            **extra_paths,
+        },
+        "manual_audit_status": manual_status or None,
+        "manual_audit_done": manual_done,
+        "manual_audit_forensic_sla_valid": forensic_valid,
+        "manual_audit_forensic_sla_reasons": forensic_reasons,
     }
 
 
@@ -8595,6 +8685,15 @@ def _llm_quality_write_failure_artifacts(
     summary["quality_status"]["artifact_integrity_missing"] = list(
         summary["artifact_integrity"]["missing"]
     )
+    summary["evidence_handoff"] = _llm_quality_collect_evidence_handoff_status(
+        output_dir=output_dir,
+        summary=summary,
+        artifact_integrity=summary["artifact_integrity"],
+    )
+    summary["quality_status"]["evidence_handoff_valid"] = summary["evidence_handoff"]["valid"]
+    summary["quality_status"]["evidence_handoff_reasons"] = list(
+        summary["evidence_handoff"]["reasons"]
+    )
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
     _llm_quality_write_brief(brief_path, summary)
@@ -8752,6 +8851,15 @@ def _llm_quality_write_checkpoint_summary(
     summary["quality_status"]["artifact_integrity_valid"] = summary["artifact_integrity"]["valid"]
     summary["quality_status"]["artifact_integrity_missing"] = list(
         summary["artifact_integrity"]["missing"]
+    )
+    summary["evidence_handoff"] = _llm_quality_collect_evidence_handoff_status(
+        output_dir=output_dir,
+        summary=summary,
+        artifact_integrity=summary["artifact_integrity"],
+    )
+    summary["quality_status"]["evidence_handoff_valid"] = summary["evidence_handoff"]["valid"]
+    summary["quality_status"]["evidence_handoff_reasons"] = list(
+        summary["evidence_handoff"]["reasons"]
     )
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
@@ -17819,6 +17927,15 @@ def _run_llm_quality(args):
     summary["quality_status"]["artifact_integrity_valid"] = summary["artifact_integrity"]["valid"]
     summary["quality_status"]["artifact_integrity_missing"] = list(
         summary["artifact_integrity"]["missing"]
+    )
+    summary["evidence_handoff"] = _llm_quality_collect_evidence_handoff_status(
+        output_dir=output_dir,
+        summary=summary,
+        artifact_integrity=summary["artifact_integrity"],
+    )
+    summary["quality_status"]["evidence_handoff_valid"] = summary["evidence_handoff"]["valid"]
+    summary["quality_status"]["evidence_handoff_reasons"] = list(
+        summary["evidence_handoff"]["reasons"]
     )
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)

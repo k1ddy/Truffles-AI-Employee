@@ -765,6 +765,55 @@ def _summary_manual_audit_status(summary: dict) -> str:
     ).strip().casefold()
 
 
+def _summary_evidence_handoff_status(summary: dict, output_dir: str):
+    quality_status = (
+        summary.get("quality_status") if isinstance(summary.get("quality_status"), dict) else {}
+    )
+    explicit_valid = parse_status_bool(quality_status.get("evidence_handoff_valid"))
+    if explicit_valid is True:
+        return True, None
+    if explicit_valid is False:
+        reasons = [str(item).strip() for item in (quality_status.get("evidence_handoff_reasons") or []) if str(item).strip()]
+        if reasons:
+            return False, f"summary_evidence_handoff_invalid:{';'.join(reasons)}"
+        return False, "summary_evidence_handoff_invalid"
+
+    # Legacy fallback when explicit evidence_handoff status is absent.
+    artifact_integrity = (
+        summary.get("artifact_integrity") if isinstance(summary.get("artifact_integrity"), dict) else {}
+    )
+    artifact_valid = parse_status_bool(quality_status.get("artifact_integrity_valid"))
+    if artifact_valid is None:
+        artifact_valid = parse_status_bool(artifact_integrity.get("valid"))
+    if artifact_valid is False:
+        missing = list(quality_status.get("artifact_integrity_missing") or artifact_integrity.get("missing") or [])
+        if missing:
+            normalized = ",".join(sorted({str(item).strip() for item in missing if str(item).strip()}))
+            return False, f"summary_artifact_incomplete:{normalized}"
+        return False, "summary_artifact_incomplete"
+
+    required_paths = {
+        "summary.json": os.path.join(output_dir, "summary.json"),
+        "brief.md": os.path.join(output_dir, "brief.md"),
+        "scenarios.json": os.path.join(output_dir, "scenarios.json"),
+        "responses.jsonl": os.path.join(output_dir, "responses.jsonl"),
+        "trace_bundle.jsonl": os.path.join(output_dir, "trace_bundle.jsonl"),
+        "run_manifest.json": os.path.join(output_dir, "run_manifest.json"),
+        "manual_audit.md": os.path.join(output_dir, "manual_audit.md"),
+        "manual_audit.json": os.path.join(output_dir, "manual_audit.json"),
+    }
+    missing_required = [
+        name for name, path in required_paths.items() if not os.path.exists(path)
+    ]
+    if missing_required:
+        return False, f"summary_artifact_incomplete:{','.join(missing_required)}"
+
+    manual_status = _summary_manual_audit_status(summary)
+    if manual_status not in VALID_DONE_AUDIT_STATES:
+        return False, f"summary_manual_audit_incomplete:{manual_status or 'missing'}"
+    return True, None
+
+
 def validate_multi_seed_evidence(payload: dict, source: dict, *, freshness_hours):
     evidence = source.get("multi_seed_evidence")
     if not isinstance(evidence, dict):
@@ -1188,6 +1237,17 @@ def ensure_previous_step_brief(state: dict, mode: str):
     brief_path = os.path.join(output_dir, "brief_for_next_agent.md")
     if not os.path.exists(brief_path):
         return False, f"missing_brief_for_next_agent:{prev_mode}"
+    summary_path = str(prev_entry.get("summary_path") or "").strip() or os.path.join(
+        output_dir, "summary.json"
+    )
+    summary_payload = load_json(summary_path)
+    if not isinstance(summary_payload, dict):
+        return False, f"missing_summary_for_previous_step:{prev_mode}"
+    evidence_ok, evidence_reason = _summary_evidence_handoff_status(
+        summary_payload, output_dir
+    )
+    if not evidence_ok:
+        return False, f"missing_evidence_handoff:{prev_mode}:{evidence_reason}"
     return True, None
 
 

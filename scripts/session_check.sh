@@ -75,6 +75,36 @@ summary_gate_validate_candidate() {
     echo "${candidate}: missing_valid_llm_openai_preflight"
     return 1
   fi
+  if ! jq -e '(["done","completed","pass","passed"] | index(((.quality_status.manual_audit_status // .manual_audit.status // .manual_audit_status // "") | ascii_downcase)) != null' "$summary_path" >/dev/null 2>&1; then
+    echo "${candidate}: manual_audit_not_done"
+    return 1
+  fi
+  if ! jq -e 'if (.quality_status.evidence_handoff_valid? == null) then true else (.quality_status.evidence_handoff_valid == true) end' "$summary_path" >/dev/null 2>&1; then
+    echo "${candidate}: evidence_handoff_invalid"
+    return 1
+  fi
+  local summary_dir
+  summary_dir=$(dirname "$summary_path")
+  local required_artifacts=(
+    "brief.md"
+    "scenarios.json"
+    "responses.jsonl"
+    "trace_bundle.jsonl"
+    "run_manifest.json"
+    "manual_audit.md"
+    "manual_audit.json"
+  )
+  local artifact
+  local missing=()
+  for artifact in "${required_artifacts[@]}"; do
+    if [[ ! -f "$summary_dir/$artifact" ]]; then
+      missing+=("$artifact")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "${candidate}: missing_artifacts:${missing[*]}"
+    return 1
+  fi
   echo "$summary_path"
   return 0
 }
@@ -128,10 +158,24 @@ enforce_llm_evidence_gate() {
 
   if [[ -z "$valid_summary" ]]; then
     echo "ERROR: Core behavior change requires valid LLM-quality evidence." >&2
-    echo "Expected: infra_valid=true, semantic_valid=true, config.dry_run=false, judge.enabled=true, config.mode=llm, llm openai_preflight valid." >&2
+    echo "Expected: infra_valid=true, semantic_valid=true, config.dry_run=false, judge.enabled=true, config.mode=llm, llm openai_preflight valid, manual_audit done, evidence bundle complete." >&2
     for item in "${errors[@]}"; do
       echo "  - $item" >&2
     done
+    exit 1
+  fi
+
+  local state_updated="false"
+  while read -r file; do
+    [[ -z "$file" ]] && continue
+    if [[ "$file" == "STATE.md" ]]; then
+      state_updated="true"
+      break
+    fi
+  done <<< "$changed_files"
+  if [[ "$state_updated" != "true" ]]; then
+    echo "ERROR: Core behavior change with session status '${status}' requires STATE.md handoff update in the same change-set." >&2
+    echo "Add FACT evidence entry to STATE.md before closing session." >&2
     exit 1
   fi
 }

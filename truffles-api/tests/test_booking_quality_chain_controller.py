@@ -57,8 +57,11 @@ def _write_l2_summary(
             "semantic_valid": semantic_valid,
             "run_integrity_valid": True,
             "manual_audit_status": "done",
+            "evidence_handoff_valid": True,
+            "evidence_handoff_reasons": [],
             "quality_lane_effective": lane,
         },
+        "evidence_handoff": {"valid": True, "reasons": []},
         "infra_valid": True,
         "semantic_valid": semantic_valid,
         "run_integrity_valid": True,
@@ -1001,7 +1004,10 @@ def test_chain_controller_replay_finalize_advances_to_canary(tmp_path):
             "infra_valid": True,
             "semantic_valid": True,
             "run_integrity_valid": True,
+            "evidence_handoff_valid": True,
+            "evidence_handoff_reasons": [],
         },
+        "evidence_handoff": {"valid": True, "reasons": []},
         "blocking_reasons": {"reasons": {}},
         "judge": {"counts": {"judged": 40}},
     }
@@ -1056,6 +1062,82 @@ def test_chain_controller_replay_finalize_advances_to_canary(tmp_path):
     assert payload["steps"]["replay"]["status"] == "canonical"
     assert payload["active"]["step"] == "canary"
     assert "--mode canary" in (payload.get("next_command") or "")
+
+
+def test_chain_controller_blocks_prepare_when_previous_step_evidence_handoff_invalid(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    chain_id = "chain-evidence-handoff-block"
+    chain_root = tmp_path / "chain"
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(chain_root)
+
+    lock_run_id = f"booking-lock-{chain_id}"
+    lock_output_dir = tmp_path / lock_run_id
+    lock_output_dir.mkdir(parents=True, exist_ok=True)
+    lock_summary_path = lock_output_dir / "summary.json"
+    lock_summary = {
+        "run_id": lock_run_id,
+        "stop_reason": "done",
+        "quality_status": {
+            "infra_valid": True,
+            "semantic_valid": True,
+            "run_integrity_valid": True,
+            "manual_audit_status": "done",
+            "evidence_handoff_valid": False,
+            "evidence_handoff_reasons": ["manual_audit_not_done"],
+        },
+        "blocking_reasons": {"reasons": {}},
+        "judge": {"counts": {"judged": 40}},
+    }
+    lock_summary_path.write_text(
+        json.dumps(lock_summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    bootstrap = subprocess.run(
+        [
+            str(script_path),
+            "bootstrap",
+            "--mode",
+            "lock",
+            "--run-id",
+            lock_run_id,
+            "--output-dir",
+            str(lock_output_dir),
+            "--summary-path",
+            str(lock_summary_path),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert bootstrap.returncode == 0, bootstrap.stderr
+
+    replay_run_id = f"booking-replay-{chain_id}"
+    replay_output_dir = tmp_path / replay_run_id
+    replay_output_dir.mkdir(parents=True, exist_ok=True)
+    prepare_replay = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "replay",
+            "--run-id",
+            replay_run_id,
+            "--output-dir",
+            str(replay_output_dir),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert prepare_replay.returncode != 0
+    assert "missing_evidence_handoff:lock:summary_evidence_handoff_invalid:manual_audit_not_done" in prepare_replay.stderr
 
 
 def test_chain_controller_canary_failure_executes_rollback(tmp_path):
@@ -1122,7 +1204,10 @@ def test_chain_controller_canary_failure_executes_rollback(tmp_path):
             "infra_valid": True,
             "semantic_valid": True,
             "run_integrity_valid": True,
+            "evidence_handoff_valid": True,
+            "evidence_handoff_reasons": [],
         },
+        "evidence_handoff": {"valid": True, "reasons": []},
         "blocking_reasons": {"reasons": {}},
         "judge": {"counts": {"judged": 40}},
     }

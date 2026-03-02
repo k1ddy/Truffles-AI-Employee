@@ -153,7 +153,7 @@
 - `Expiry/trigger to stop deferral`: n/a.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: finalize parent TP closure report for all open blocks.
+- `Next block objective`: keep parent TP synced with `P14=done` and continue remaining blocked block (`P12`) by separate unblock decision.
 - `First deterministic check command`: `scripts/session_check.sh`
 - `Blocked-by conditions`: red evidence/handoff gate tests.
 - `Owner role for closure`: Brain + Top Architect.
@@ -164,3 +164,29 @@
 - `Do not touch`: runtime semantic logic in webhook routers.
 - `Open risks`: legacy compatibility path in session checks.
 - `First command to verify`: `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "handoff or artifact"`.
+
+## Execution status (2026-03-02)
+- `Status`: `done`
+- `Implementation facts`:
+  - Added fail-closed evidence handoff status builder and manifest/summary sync:
+    - `ops/diagnose.py`:
+      - `LLM_QUALITY_EVIDENCE_HANDOFF_REQUIRED_ARTIFACTS`
+      - `_llm_quality_collect_evidence_handoff_status`
+      - `evidence_handoff_valid`/`evidence_handoff_reasons` in run manifest + summary quality status.
+  - Enforced previous-step evidence handoff in chain controller before next canonical step:
+    - `scripts/quality_chain_controller.sh`:
+      - `_summary_evidence_handoff_status`
+      - `ensure_previous_step_brief` blocks on `missing_evidence_handoff:*`.
+  - Enforced merge-time handoff bundle in session gate for core behavior changes:
+    - `scripts/session_check.sh`:
+      - manual audit done + evidence bundle completeness checks,
+      - explicit `STATE.md` handoff requirement when evidence gate is active.
+  - Added deterministic coverage:
+    - `truffles-api/tests/test_booking_quality_status_gate.py`
+    - `truffles-api/tests/test_booking_quality_chain_controller.py`
+- `Deterministic evidence`:
+  - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "handoff or artifact or evidence"` (`7 passed, 73 deselected`).
+  - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py -k "handoff or evidence"` (`4 passed, 15 deselected`).
+  - `bash -n scripts/session_check.sh` (ok).
+  - `bash -n scripts/quality_chain_controller.sh` (ok).
+  - `ruff check ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_chain_controller.py` (ok).
