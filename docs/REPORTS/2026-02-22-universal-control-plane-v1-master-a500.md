@@ -86,7 +86,7 @@
 | B09 Runtime Pack-Agnostic Decoupling | `UCPV1-PHASE9` | passed (owner-closed) | Runtime независим от demo-пака | Нет прямых demo imports в core runtime; adapter boundaries + neutral fallback |
 | B10 SLA/SLO Engine (Multi-level) | `UCPV1-PHASE10` | passed | SLA/SLO профили реально влияют на runtime и escalation | Policy-driven thresholds + predictable actions + auditability on each violation |
 | B11 Compliance KZ Retention/Lifecycle | `UCPV1-PHASE11` | passed | KZ boundary и lifecycle соблюдаются автоматически | Retention/delete/export jobs с owner+TTL+audit trail по каждому data class |
-| B12 Control Tower for Platform Admin | `UCPV1-PHASE12` | in_progress (slice3 delivered) | Fleet управляется через Console без CLI как основного пути | Risk queue + readiness board + drift board + action center с evidence links |
+| B12 Control Tower for Platform Admin | `UCPV1-PHASE12` | passed | Fleet управляется через Console без CLI как основного пути | Risk queue + readiness board + drift board + action center с evidence links |
 | B13 Migration Program (Current -> Target) | `UCPV1-PHASE13` | planned | Переход без stop-the-world | Waves (`canary -> cohort -> fleet`) с pass/fail gates и rollback triggers |
 
 ## 7) Execution status (FACT)
@@ -106,14 +106,15 @@ Completed in this program chain:
 - `UCPV1-PHASE8` passed.
 - `UCPV1-PHASE10` passed.
 - `UCPV1-PHASE11` passed.
+- `UCPV1-PHASE12` passed.
 
 Current active block:
-- `UCPV1-PHASE12` in progress (analysis + slice1/slice2 runtime integrations delivered).
+- none (`UCPV1-PHASE12` closed; next queue head is planning track for `UCPV1-PHASE13`).
 
 Current queue head:
-- `UCPV1-PHASE12` analysis track (`docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase12-a500.md`, `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase12-a500.md`).
-- Latest completed block (2026-03-02): `UCPV1-PHASE11` closure with deterministic pass-gate evidence (`44 passed`) plus governance/contract checks (`SESSION_AGENT=a700 scripts/session_check.sh`, `scripts/zero_context_gate.sh`, `python3 scripts/generate_openapi.py --check`).
-- Latest active-slice update (2026-03-02): `UCPV1-PHASE12` slice3 added `GET /console/v1/admin/control-tower/action-center` (incident + provider-ops + readiness aggregation) with deterministic validation (`101 passed`) and synchronized OpenAPI contract.
+- `UCPV1-PHASE13` planning track (`docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md`, `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md`).
+- Latest completed block (2026-03-02): `UCPV1-PHASE12` closure with deterministic pass-gate evidence (`101 passed`) plus governance/contract checks (`SESSION_AGENT=a700 scripts/session_check.sh`, `scripts/zero_context_gate.sh`, `python3 scripts/generate_openapi.py --check`).
+- Latest closed slice update (2026-03-02): `UCPV1-PHASE12` slice3 added `GET /console/v1/admin/control-tower/action-center` (incident + provider-ops + readiness aggregation) with synchronized OpenAPI contract.
 
 ## 8) Program-level DoD
 
