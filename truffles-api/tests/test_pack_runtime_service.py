@@ -3,6 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.services import demo_salon_knowledge as demo_runtime
+from app.services import pack_query_backend_service
 from app.services import pack_runtime_default as default_runtime
 from app.services import pack_runtime_service as runtime
 from app.services.knowledge_runtime import RuntimeTruth, set_runtime_truth
@@ -239,3 +240,157 @@ def test_pack_runtime_service_get_pack_service_hint_uses_runtime_fallback_when_s
             client_slug="demo_salon",
         )
     assert service_hint == "Fallback Service"
+
+
+def test_pack_runtime_service_backend_shadow_keeps_runtime_local_contract(monkeypatch) -> None:
+    pack_query_backend_service.clear_backend_driver_registry()
+    monkeypatch.setenv("PACK_QUERY_RETRIEVAL_MODE", "backend_shadow")
+    monkeypatch.setenv("PACK_QUERY_BACKEND_DRIVER", "test_shadow")
+    pack_query_backend_service.register_backend_driver(
+        "test_shadow",
+        lambda **_kwargs: {
+            "candidates": [
+                {
+                    "canonical_name": "Профессиональная чистка зубов",
+                    "score": 0.99,
+                    "dense_score": 0.95,
+                    "sparse_score": 0.9,
+                }
+            ]
+        },
+    )
+    truth = {
+        "services_catalog": [
+            {
+                "name": "Профессиональная чистка зубов",
+                "aliases": ["чистка зубов"],
+                "tenant_slug": "dental_pack",
+            }
+        ]
+    }
+    try:
+        with _runtime_truth(truth, slug="dental_pack"):
+            result = runtime.semantic_service_match("чистка зубов", "dental_pack")
+    finally:
+        pack_query_backend_service.clear_backend_driver_registry()
+
+    assert result is not None
+    assert result.canonical_name == "Профессиональная чистка зубов"
+    assert isinstance(result.meta, dict)
+    assert result.meta.get("retrieval_mode") == "backend_shadow"
+    assert result.meta.get("selected_source") == "runtime_local"
+    assert result.meta.get("backend_candidate_count") == 1
+    assert result.meta.get("backend", {}).get("available") is True
+
+
+def test_pack_runtime_service_backend_primary_prefers_backend_candidates(monkeypatch) -> None:
+    pack_query_backend_service.clear_backend_driver_registry()
+    monkeypatch.setenv("PACK_QUERY_RETRIEVAL_MODE", "backend_primary")
+    monkeypatch.setenv("PACK_QUERY_BACKEND_DRIVER", "test_primary")
+    pack_query_backend_service.register_backend_driver(
+        "test_primary",
+        lambda **_kwargs: {
+            "meta": {
+                "engine": "pack_query_backend.v1",
+                "engine_version": "2026-03-03",
+                "method": "distributed_hybrid_rrf",
+            },
+            "candidates": [
+                {
+                    "canonical_name": "Лечение кариеса",
+                    "score": 0.88,
+                    "dense_score": 0.9,
+                    "sparse_score": 0.72,
+                }
+            ],
+        },
+    )
+    truth = {
+        "services_catalog": [
+            {
+                "name": "Профессиональная чистка зубов",
+                "aliases": ["чистка зубов"],
+                "tenant_slug": "dental_pack",
+            },
+            {
+                "name": "Лечение кариеса",
+                "aliases": ["лечение зуба", "кариес лечение"],
+                "tenant_slug": "dental_pack",
+            },
+        ]
+    }
+    try:
+        with _runtime_truth(truth, slug="dental_pack"):
+            result = runtime.semantic_service_match("чистка зубов", "dental_pack")
+    finally:
+        pack_query_backend_service.clear_backend_driver_registry()
+
+    assert result is not None
+    assert result.canonical_name == "Лечение кариеса"
+    assert isinstance(result.meta, dict)
+    assert result.meta.get("retrieval_mode") == "backend_primary"
+    assert result.meta.get("selected_source") == "backend_primary"
+    assert result.meta.get("backend", {}).get("available") is True
+
+
+def test_pack_runtime_service_backend_primary_fallback_is_explicit(monkeypatch) -> None:
+    pack_query_backend_service.clear_backend_driver_registry()
+    monkeypatch.setenv("PACK_QUERY_RETRIEVAL_MODE", "backend_primary")
+    monkeypatch.setenv("PACK_QUERY_BACKEND_DRIVER", "missing_driver")
+    truth = {
+        "services_catalog": [
+            {
+                "name": "Профессиональная чистка зубов",
+                "aliases": ["чистка зубов"],
+                "tenant_slug": "dental_pack",
+            }
+        ]
+    }
+    with _runtime_truth(truth, slug="dental_pack"):
+        result = runtime.semantic_service_match("чистка зубов", "dental_pack")
+
+    assert result is not None
+    assert result.canonical_name == "Профессиональная чистка зубов"
+    assert isinstance(result.meta, dict)
+    assert result.meta.get("retrieval_mode") == "backend_primary"
+    assert result.meta.get("selected_source") == "runtime_local_fallback"
+    assert result.meta.get("fallback_reason") == "backend_unavailable"
+    assert result.meta.get("backend", {}).get("available") is False
+
+
+def test_pack_runtime_service_backend_primary_filters_out_of_scope_backend_candidates(monkeypatch) -> None:
+    pack_query_backend_service.clear_backend_driver_registry()
+    monkeypatch.setenv("PACK_QUERY_RETRIEVAL_MODE", "backend_primary")
+    monkeypatch.setenv("PACK_QUERY_BACKEND_DRIVER", "scope_driver")
+    pack_query_backend_service.register_backend_driver(
+        "scope_driver",
+        lambda **_kwargs: {
+            "candidates": [
+                {
+                    "canonical_name": "Сервис вне каталога",
+                    "score": 0.97,
+                    "dense_score": 0.97,
+                }
+            ]
+        },
+    )
+    truth = {
+        "services_catalog": [
+            {
+                "name": "Профессиональная чистка зубов",
+                "aliases": ["чистка зубов"],
+                "tenant_slug": "dental_pack",
+            }
+        ]
+    }
+    try:
+        with _runtime_truth(truth, slug="dental_pack"):
+            result = runtime.semantic_service_match("чистка зубов", "dental_pack")
+    finally:
+        pack_query_backend_service.clear_backend_driver_registry()
+
+    assert result is not None
+    assert result.canonical_name == "Профессиональная чистка зубов"
+    assert isinstance(result.meta, dict)
+    assert result.meta.get("selected_source") == "runtime_local_fallback"
+    assert result.meta.get("fallback_reason") == "backend_scope_filtered"

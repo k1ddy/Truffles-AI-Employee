@@ -92,6 +92,7 @@
 | `truffles-api/app/services/learned_response_service.py` | Auto-ingest + approval wiring for learned responses | Backend |
 | `truffles-api/app/services/calendar_sync_service.py` | Calendar provider sync via outbox + cursors + busy blocks | Backend |
 | `truffles-api/app/services/tool_registry_service.py` | Tool registry executor (calendar/catalog) for LLM plan | Backend |
+| `truffles-api/app/services/pack_query_backend_service.py` | Distributed pack-query backend adapter contract (runtime_local/shadow/primary) | Backend |
 | `truffles-api/app/services/info_signal_service.py` | Info/lexicon signal helpers (routing-neutral) | Backend |
 | `truffles-api/app/services/booking_signal_service.py` | Booking/date/time signal helpers (manifest-backed regex/tokens + lexicon) | Backend |
 | `truffles-api/app/services/signal_manifest_service.py` | Signal manifest runtime compiler/loader (schema validation + signature cache + version meta) | Backend |
@@ -361,6 +362,7 @@
 - Решения/GAP: `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml`.
 - Outbox payload contract: `contracts/events/outbox.webhook_payload.v1.jsonschema`.
 - Runtime pack: `truffles-api/app/knowledge/demo_salon/*`; RAG docs: `knowledge/demo_salon/*`.
+- Canonical non-salon reference packs (deterministic cross-domain): `truffles-api/app/knowledge/clinic_pack/*`, `truffles-api/app/knowledge/dental_pack/*`.
 - Generic pack scaffold (CI/tests): `truffles-api/app/knowledge/generic/*`; RAG docs: `knowledge/generic/*`.
 - Derived/статусы: `docs/TECH_STATUS.md`, `SUMMARY.md`, `docs/IMPERIUM_CONTEXT.yaml` (не канон).
 

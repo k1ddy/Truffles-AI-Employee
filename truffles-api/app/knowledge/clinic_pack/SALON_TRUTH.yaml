@@ -1,0 +1,31 @@
+salon:
+  name: "Clinic Pack"
+  instagram: "https://instagram.com/clinic_pack"
+  services_summary: "Делаем диагностику и базовые обследования."
+
+services_catalog:
+  - name: "УЗИ брюшной полости"
+    aliases:
+      - "узи брюшной полости"
+      - "узи живота"
+      - "обследование живота"
+    price: "15000 тг"
+    duration: "30 мин"
+  - name: "Консультация терапевта"
+    aliases:
+      - "прием терапевта"
+      - "консультация врача"
+    price: "12000 тг"
+    duration: "30 мин"
+
+client_pack:
+  signals:
+    services_overview_phrases:
+      - "какие обследования"
+      - "перечень обследований"
+    service_question_keywords:
+      - "какие услуги"
+      - "что по обследованиям"
+    portfolio_question_keywords:
+      - "покажите примеры работ"
+      - "есть фото результатов"

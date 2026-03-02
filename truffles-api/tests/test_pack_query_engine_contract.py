@@ -126,6 +126,8 @@ def test_pack_query_engine_contract_hybrid_meta_propagates_to_resolver_contract(
     assert retrieval.get("method") == "hybrid_sparse_semantic_rerank"
     assert retrieval.get("best_candidate") == "УЗИ брюшной полости"
     assert retrieval.get("candidate_count", 0) >= 1
+    assert retrieval.get("retrieval_mode") == "runtime_local"
+    assert retrieval.get("selected_source") == "runtime_local"
     assert retrieval.get("filters", {}).get("tenant_slug") == "clinic_pack"
     assert retrieval.get("filters", {}).get("branch_id") == str(branch_id)
     contract = meta.get("resolver_contract")

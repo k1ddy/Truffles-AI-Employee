@@ -167,3 +167,21 @@
 - `Do not touch`: policy-core semantics in webhook routers.
 - `Open risks`: backend format mismatch.
 - `First command to verify`: `pytest -q truffles-api/tests/test_pack_query_engine_contract.py`.
+
+## Execution status (2026-03-02)
+- `Status`: `done`
+- `Implementation facts`:
+  - Added distributed backend adapter contract in `truffles-api/app/services/pack_query_backend_service.py` with retrieval modes `runtime_local|backend_shadow|backend_primary`, driver registry, and explicit unavailable reason codes.
+  - Wired mode-switch orchestration into `truffles-api/app/services/pack_runtime_service.py`:
+    - local path remains canonical,
+    - `backend_shadow` keeps local output and records backend parity meta,
+    - `backend_primary` uses backend candidates when valid and falls back to local with explicit `fallback_reason`.
+  - Extended retrieval contract normalization so `resolver_contract.retrieval` preserves mode/source/backend/fallback fields.
+- `Deterministic evidence`:
+  - `ruff check truffles-api/app/services/pack_runtime_service.py truffles-api/app/services/pack_query_backend_service.py truffles-api/tests/test_pack_runtime_service.py truffles-api/tests/test_pack_query_engine_contract.py truffles-api/tests/test_pack_query_backend_service.py truffles-api/tests/test_cross_domain_signal_contract_suite.py` (`All checks passed`).
+  - `pytest -q truffles-api/tests/test_pack_query_backend_service.py truffles-api/tests/test_pack_runtime_service.py truffles-api/tests/test_pack_query_engine_contract.py truffles-api/tests/test_cross_domain_signal_contract_suite.py` (`26 passed`).
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "semantic_service_matcher or service_not_found"` (`6 passed, 264 deselected`).
+- `DoD verdict`:
+  - Adapter path in `backend_shadow/backend_primary`: `pass` (deterministic tests).
+  - Fallback contract explicit/auditable: `pass`.
+  - Parent TP status update required in same change-set: `pending in this packet`.
