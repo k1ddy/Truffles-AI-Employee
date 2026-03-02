@@ -13,7 +13,7 @@ from app.services.console_errors import ConsoleAPIError
 
 def _build_context():
     return SimpleNamespace(
-        client=SimpleNamespace(id=uuid4()),
+        client=SimpleNamespace(id=uuid4(), company_id=uuid4()),
         effective_branch_id=None,
         branch_restricted=False,
         branches=[],
@@ -170,6 +170,80 @@ async def test_run_ops_job_incident_state_success(monkeypatch):
     assert response.job.status == "success"
     assert response.job.result_payload["incident_state"] == "resolved"
     assert response.job.result_payload["artifact"]["artifact_type"] == "incident_state_report"
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_ops_job_compliance_lifecycle_success(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    db = _build_db_with_job_identity()
+    context = _build_context()
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "_require_ops_access", lambda _context, action="read": None)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+
+    async def _fake_runner(_db, *, context, mode, params):
+        assert mode == "dry_run"
+        assert params["operation"] == "retention_scan"
+        assert context.client.id
+        return {
+            "mode": "dry_run",
+            "run_id": str(uuid4()),
+            "status": "completed",
+            "summary": {"candidate_count": 2},
+        }
+
+    monkeypatch.setattr(console_router, "_run_compliance_lifecycle_job", _fake_runner)
+
+    response = await console_router.run_ops_job(
+        body=ConsoleOpsJobRunRequest(
+            job_type="compliance_lifecycle",
+            mode="dry_run",
+            params={"operation": "retention_scan", "max_items": 10},
+        ),
+        request=request,
+        db=db,
+    )
+
+    assert response.job.status == "success"
+    assert response.job.result_payload["summary"]["candidate_count"] == 2
+    assert response.job.result_payload["artifact"]["artifact_type"] == "compliance_lifecycle_report"
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_ops_job_compliance_lifecycle_failure_audit_payload(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    db = _build_db_with_job_identity()
+    context = _build_context()
+    audit_calls: list[dict] = []
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "_require_ops_access", lambda _context, action="read": None)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: audit_calls.append(kwargs))
+
+    async def _fake_runner(_db, *, context, mode, params):
+        _ = (context, mode, params)
+        raise ConsoleAPIError(400, "INVALID_PARAM", "operation must be retention_scan|export_preview|destruction_preview")
+
+    monkeypatch.setattr(console_router, "_run_compliance_lifecycle_job", _fake_runner)
+
+    response = await console_router.run_ops_job(
+        body=ConsoleOpsJobRunRequest(
+            job_type="compliance_lifecycle",
+            mode="execute",
+            params={"operation": "bad"},
+        ),
+        request=request,
+        db=db,
+    )
+
+    assert response.job.status == "failed"
+    assert response.job.result_payload["error"]["code"] == "INVALID_PARAM"
+    assert audit_calls
+    assert audit_calls[0]["payload"]["job_type"] == "compliance_lifecycle"
+    assert audit_calls[0]["payload"]["status"] == "failed"
+    assert audit_calls[0]["payload"]["error_code"] == "INVALID_PARAM"
     db.commit.assert_called_once()
 
 

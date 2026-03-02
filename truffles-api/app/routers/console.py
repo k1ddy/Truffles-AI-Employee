@@ -43,6 +43,10 @@ from app.models import (
     ClientPolicyVersion,
     ClientSettings,
     Company,
+    ComplianceLifecycleArtifact,
+    ComplianceLifecycleRecord,
+    ComplianceLifecycleRun,
+    CompliancePolicyVersion,
     ConsoleBranchChange,
     ConsoleOpsJob,
     Conversation,
@@ -76,6 +80,7 @@ from app.schemas.capabilities import (
     CapabilitiesPayload,
     CapabilityPolicyOverrides,
 )
+from app.schemas.compliance_policy import CompliancePolicyPayload
 from app.schemas.console import (
     ConsoleAgent,
     ConsoleAgentCreateRequest,
@@ -125,6 +130,18 @@ from app.schemas.console import (
     ConsoleCompanyCreateResponse,
     ConsoleCompanyListResponse,
     ConsoleCompanyUpdateRequest,
+    ConsoleComplianceLifecycleArtifactRecord,
+    ConsoleComplianceLifecycleArtifactResponse,
+    ConsoleComplianceLifecycleRecord,
+    ConsoleComplianceLifecycleRunRecord,
+    ConsoleComplianceLifecycleRunRequest,
+    ConsoleComplianceLifecycleRunResponse,
+    ConsoleComplianceLifecycleRunsResponse,
+    ConsoleCompliancePolicyRegistryMutationResponse,
+    ConsoleCompliancePolicyRegistryPublishRequest,
+    ConsoleCompliancePolicyRegistryResponse,
+    ConsoleCompliancePolicyRegistryRollbackRequest,
+    ConsoleCompliancePolicyVersionRecord,
     ConsoleConfirmationCreateRequest,
     ConsoleConfirmationResponse,
     ConsoleDataTrustSummaryResponse,
@@ -316,6 +333,27 @@ from app.services.capabilities_service import (
     payload_to_dict,
 )
 from app.services.chatflow_service import get_instance_id, send_bot_response
+from app.services.compliance_lifecycle_artifact_service import (
+    get_lifecycle_artifact,
+    publish_lifecycle_artifact,
+)
+from app.services.compliance_lifecycle_service import (
+    create_lifecycle_run,
+    execute_lifecycle_preview,
+    finalize_lifecycle_run,
+    get_lifecycle_run,
+    list_lifecycle_records,
+    list_lifecycle_runs,
+)
+from app.services.compliance_policy_registry_service import (
+    COMPLIANCE_POLICY_SCHEMA_VERSION,
+    get_latest_compliance_policy_version,
+    list_compliance_policy_history,
+    publish_compliance_policy_version,
+    resolve_effective_compliance_policy_payload,
+    resolve_effective_compliance_policy_version,
+    rollback_compliance_policy_version,
+)
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
@@ -8094,10 +8132,34 @@ _OPS_JOB_DEFINITIONS = {
         "description": "Set incident workflow state (open/in_progress/resolved) with audit metadata.",
         "supports_dry_run": True,
     },
+    "compliance_lifecycle": {
+        "label": "Compliance Lifecycle",
+        "description": "Run tenant-scoped compliance lifecycle preview (retention/export/destruction) with ledger evidence.",
+        "supports_dry_run": True,
+    },
 }
 
 _INCIDENT_STATE_ALERT_TYPE = "console_incident_state"
 _INCIDENT_STATES = {"open", "in_progress", "resolved"}
+_COMPLIANCE_LIFECYCLE_LANES = {"manual", "auto"}
+_COMPLIANCE_LIFECYCLE_PROFILE_DEFAULTS = {
+    "retention_hourly": {
+        "operation": "retention_scan",
+        "cadence_minutes": 60,
+        "max_items": 200,
+    },
+    "export_daily": {
+        "operation": "export_preview",
+        "cadence_minutes": 1440,
+        "max_items": 200,
+    },
+    "destruction_daily": {
+        "operation": "destruction_preview",
+        "cadence_minutes": 1440,
+        "max_items": 200,
+    },
+}
+_COMPLIANCE_LIFECYCLE_APPLY_MAX_ITEMS = 50
 
 
 def _require_ops_access(context: ConsoleAuthContext, *, action: str = "read") -> None:
@@ -8984,6 +9046,385 @@ async def _run_integration_reconcile_job(
         "branch_ids": [str(branch_id) for branch_id in selected_branch_ids or []],
     }
     return result
+
+
+def _normalize_compliance_lifecycle_lane(value: str | None) -> str:
+    lane = str(value or "manual").strip().lower()
+    if lane not in _COMPLIANCE_LIFECYCLE_LANES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "lane must be manual|auto")
+    return lane
+
+
+def _resolve_compliance_lifecycle_profile_defaults(
+    profile: str | None,
+) -> dict[str, int | str] | None:
+    if profile is None:
+        return None
+    token = profile.strip().lower()
+    defaults = _COMPLIANCE_LIFECYCLE_PROFILE_DEFAULTS.get(token)
+    if defaults is None:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "profile must be retention_hourly|export_daily|destruction_daily",
+        )
+    return defaults
+
+
+def _find_recent_compliance_lifecycle_ops_job(
+    db: Session,
+    *,
+    client_id: UUID,
+    scope: str,
+    branch_id: UUID | None,
+    data_class: str,
+    operation: str,
+    lane: str,
+) -> ConsoleOpsJob | None:
+    rows = (
+        db.query(ConsoleOpsJob)
+        .filter(
+            ConsoleOpsJob.client_id == client_id,
+            ConsoleOpsJob.job_type == "compliance_lifecycle",
+            ConsoleOpsJob.status == "success",
+            ConsoleOpsJob.mode == "execute",
+        )
+        .order_by(ConsoleOpsJob.created_at.desc(), ConsoleOpsJob.id.desc())
+        .limit(200)
+        .all()
+    )
+    expected_branch_text = str(branch_id) if branch_id else None
+    expected_scope = scope.strip().lower()
+    expected_data_class = data_class.strip().lower()
+    expected_operation = operation.strip().lower()
+    expected_lane = lane.strip().lower()
+
+    for row in rows:
+        request_payload = row.request_payload if isinstance(row.request_payload, dict) else {}
+        params = request_payload.get("params")
+        if not isinstance(params, dict):
+            continue
+        row_scope = str(params.get("scope") or "").strip().lower() or (
+            "branch" if params.get("branch_id") else "client"
+        )
+        row_branch_raw = params.get("branch_id")
+        row_branch_text = str(row_branch_raw).strip() if row_branch_raw else None
+        row_data_class = str(params.get("data_class") or "learned_responses").strip().lower()
+        row_operation = str(params.get("operation") or "retention_scan").strip().lower()
+        try:
+            row_lane = _normalize_compliance_lifecycle_lane(
+                str(params.get("lane") or "manual").strip().lower()
+            )
+        except ConsoleAPIError:
+            continue
+        if row_scope != expected_scope:
+            continue
+        if row_branch_text != expected_branch_text:
+            continue
+        if row_data_class != expected_data_class:
+            continue
+        if row_operation != expected_operation:
+            continue
+        if row_lane != expected_lane:
+            continue
+        return row
+    return None
+
+
+def _execute_compliance_lifecycle_preview_run(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    scope: str,
+    branch_id: UUID | None,
+    data_class: str,
+    operation: str,
+    max_items: int,
+    run_mode: str,
+    apply_actions: bool = False,
+    approval_token: str | None = None,
+) -> tuple[ComplianceLifecycleRun, list[ComplianceLifecycleRecord]]:
+    run: ComplianceLifecycleRun | None = None
+    try:
+        policy_version = resolve_effective_compliance_policy_version(
+            db,
+            data_class=data_class,
+            company_id=context.client.company_id,
+            domain_key=None,
+            client_id=context.client.id,
+            branch_id=branch_id,
+        )
+        policy_payload = resolve_effective_compliance_policy_payload(
+            db,
+            data_class=data_class,
+            company_id=context.client.company_id,
+            domain_key=None,
+            client_id=context.client.id,
+            branch_id=branch_id,
+        )
+        run = create_lifecycle_run(
+            db,
+            scope=scope,
+            data_class=data_class,
+            operation=operation,
+            client_id=context.client.id,
+            branch_id=branch_id,
+            company_id=context.client.company_id,
+            domain_key=None,
+            policy_version_id=policy_version.id if policy_version else None,
+            policy_scope=policy_version.scope if policy_version else None,
+            policy_schema_version=policy_version.schema_version if policy_version else None,
+            policy_snapshot=policy_payload.model_dump(exclude_none=True) if policy_payload else {},
+            actor_id=context.agent.id,
+            run_mode=run_mode,
+        )
+        summary = execute_lifecycle_preview(
+            db,
+            run=run,
+            max_items=max_items,
+            apply_actions=apply_actions,
+            approval_token=approval_token,
+        )
+        run = finalize_lifecycle_run(
+            db,
+            run=run,
+            status="completed",
+            summary=summary,
+            error_message=None,
+        )
+        records = list_lifecycle_records(db, run_id=run.id, limit=max_items)
+        artifact = publish_lifecycle_artifact(
+            db,
+            run=run,
+            records=records,
+            actor_id=context.agent.id,
+        )
+        run_summary = run.summary_json if isinstance(run.summary_json, dict) else {}
+        run_summary["artifact_id"] = str(artifact.id)
+        run_summary["artifact_digest"] = artifact.artifact_digest
+        run.summary_json = run_summary
+        run.updated_at = datetime.now(timezone.utc)
+        db.flush()
+        return run, records
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+    except ConsoleAPIError:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive safety branch
+        if run is not None:
+            finalize_lifecycle_run(
+                db,
+                run=run,
+                status="failed",
+                summary={"error": "runtime_failure"},
+                error_message=str(exc),
+            )
+            db.commit()
+        raise ConsoleAPIError(500, "COMPLIANCE_LIFECYCLE_FAILED", "Compliance lifecycle run failed") from exc
+
+
+async def _run_compliance_lifecycle_job(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    mode: str,
+    params: dict,
+) -> dict:
+    scope_raw = _parse_ops_job_text_param(params, name="scope", required=False, max_length=16)
+    default_scope = "branch" if context.effective_branch_id else "client"
+    normalized_scope = (scope_raw or default_scope).strip().lower()
+    if normalized_scope not in {"client", "branch"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "scope must be client|branch")
+
+    branch_id_raw = _parse_ops_job_text_param(params, name="branch_id", required=False, max_length=64)
+    if branch_id_raw:
+        requested_branch_id = _parse_uuid_param("branch_id", branch_id_raw)
+    elif normalized_scope == "branch":
+        requested_branch_id = context.effective_branch_id
+    else:
+        requested_branch_id = None
+
+    profile = _parse_ops_job_text_param(
+        params,
+        name="profile",
+        required=False,
+        max_length=64,
+    )
+    profile_defaults = _resolve_compliance_lifecycle_profile_defaults(profile)
+
+    data_class = (
+        _parse_ops_job_text_param(params, name="data_class", required=False, max_length=64)
+        or "learned_responses"
+    )
+    default_operation = (
+        str(profile_defaults["operation"])
+        if profile_defaults and isinstance(profile_defaults.get("operation"), str)
+        else "retention_scan"
+    )
+    operation = (
+        _parse_ops_job_text_param(params, name="operation", required=False, max_length=64)
+        or default_operation
+    )
+    if profile_defaults and operation != default_operation:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "operation must match selected profile",
+        )
+    default_max_items = (
+        int(profile_defaults["max_items"])
+        if profile_defaults and isinstance(profile_defaults.get("max_items"), int)
+        else 200
+    )
+    max_items = _parse_ops_job_int_param(
+        params,
+        name="max_items",
+        default=default_max_items,
+        min_value=1,
+        max_value=500,
+    )
+    lane = _normalize_compliance_lifecycle_lane(
+        _parse_ops_job_text_param(params, name="lane", required=False, max_length=16)
+    )
+    default_cadence = (
+        int(profile_defaults["cadence_minutes"])
+        if profile_defaults and isinstance(profile_defaults.get("cadence_minutes"), int)
+        else 60
+    )
+    cadence_minutes = _parse_ops_job_int_param(
+        params,
+        name="cadence_minutes",
+        default=default_cadence,
+        min_value=15,
+        max_value=10080,
+    )
+    apply_actions = _parse_ops_job_bool_param(
+        params,
+        name="apply_actions",
+        default=False,
+    )
+    approval_token = _parse_ops_job_text_param(
+        params,
+        name="approval_token",
+        required=False,
+        max_length=64,
+    )
+    reason = _parse_ops_job_text_param(params, name="reason", required=False, max_length=500)
+    if apply_actions and mode != "execute":
+        raise ConsoleAPIError(400, "INVALID_PARAM", "apply_actions requires execute mode")
+    if apply_actions and lane != "manual":
+        raise ConsoleAPIError(400, "INVALID_PARAM", "apply_actions requires lane=manual")
+    if apply_actions and not reason:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "reason is required when apply_actions=true")
+    if apply_actions and not approval_token:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "approval_token is required when apply_actions=true")
+    if apply_actions and max_items > _COMPLIANCE_LIFECYCLE_APPLY_MAX_ITEMS:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"max_items must be <= {_COMPLIANCE_LIFECYCLE_APPLY_MAX_ITEMS} when apply_actions=true",
+        )
+
+    resolved_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=normalized_scope,
+        branch_id=requested_branch_id,
+    )
+    now = datetime.now(timezone.utc)
+    if lane == "auto" and mode == "execute":
+        recent_job = _find_recent_compliance_lifecycle_ops_job(
+            db,
+            client_id=context.client.id,
+            scope=resolved_scope,
+            branch_id=resolved_branch_id,
+            data_class=data_class,
+            operation=operation,
+            lane=lane,
+        )
+        if recent_job and recent_job.created_at:
+            recent_created_at = (
+                recent_job.created_at
+                if recent_job.created_at.tzinfo
+                else recent_job.created_at.replace(tzinfo=timezone.utc)
+            )
+            next_due_at = recent_created_at + timedelta(minutes=cadence_minutes)
+            if next_due_at > now:
+                return {
+                    "mode": mode,
+                    "scope": {
+                        "client_id": str(context.client.id),
+                        "scope": resolved_scope,
+                        "branch_id": str(resolved_branch_id) if resolved_branch_id else None,
+                    },
+                    "data_class": data_class,
+                    "operation": operation,
+                    "lane": lane,
+                    "profile": profile.strip().lower() if isinstance(profile, str) else None,
+                    "cadence_minutes": cadence_minutes,
+                    "apply_actions": apply_actions,
+                    "approval_token": approval_token,
+                    "skipped": True,
+                    "skip_reason": "cadence_not_due",
+                    "last_run_job_id": str(recent_job.id),
+                    "last_run_at": recent_created_at.isoformat(),
+                    "next_due_at": next_due_at.isoformat(),
+                }
+
+    lifecycle_run_mode = "preview" if mode == "dry_run" else "manual"
+    run, records = _execute_compliance_lifecycle_preview_run(
+        db,
+        context=context,
+        scope=resolved_scope,
+        branch_id=resolved_branch_id,
+        data_class=data_class,
+        operation=operation,
+        max_items=max_items,
+        run_mode=lifecycle_run_mode,
+        apply_actions=apply_actions,
+        approval_token=approval_token,
+    )
+    artifact = get_lifecycle_artifact(
+        db,
+        run_id=run.id,
+        client_id=context.client.id,
+        scope=resolved_scope,
+        branch_id=resolved_branch_id,
+    )
+    artifact_ref = (
+        {
+            "artifact_id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "artifact_digest": artifact.artifact_digest,
+            "api_path": f"/console/v1/admin/compliance-lifecycle/runs/{run.id}/artifact",
+        }
+        if artifact is not None
+        else None
+    )
+    return {
+        "mode": mode,
+        "scope": {
+            "client_id": str(context.client.id),
+            "scope": resolved_scope,
+            "branch_id": str(resolved_branch_id) if resolved_branch_id else None,
+        },
+        "data_class": run.data_class,
+        "operation": run.operation,
+        "lane": lane,
+        "profile": profile.strip().lower() if isinstance(profile, str) else None,
+        "cadence_minutes": cadence_minutes,
+        "apply_actions": apply_actions,
+        "approval_token": approval_token,
+        "run_mode": run.run_mode,
+        "reason": reason,
+        "run_id": str(run.id),
+        "status": run.status,
+        "skipped": False,
+        "summary": run.summary_json or {},
+        "records_count": len(records),
+        "policy_version_id": str(run.policy_version_id) if run.policy_version_id else None,
+        "evidence_artifact": artifact_ref,
+    }
 
 
 def _build_ops_job_artifact(
@@ -14318,6 +14759,13 @@ async def run_ops_job(
             )
         elif body.job_type == "incident_state":
             result_payload = await _run_incident_state_job(
+                db,
+                context=context,
+                mode=body.mode,
+                params=params,
+            )
+        elif body.job_type == "compliance_lifecycle":
+            result_payload = await _run_compliance_lifecycle_job(
                 db,
                 context=context,
                 mode=body.mode,
@@ -20635,6 +21083,103 @@ def _serialize_policy_version_record(record: ClientPolicyVersion) -> ConsolePoli
     )
 
 
+def _serialize_compliance_policy_version_record(
+    record: CompliancePolicyVersion,
+) -> ConsoleCompliancePolicyVersionRecord:
+    try:
+        payload = CompliancePolicyPayload.model_validate(record.payload_json or {})
+    except ValidationError as exc:
+        raise ConsoleAPIError(
+            500,
+            "COMPLIANCE_POLICY_REGISTRY_INVALID",
+            "Stored compliance policy payload is invalid",
+        ) from exc
+    return ConsoleCompliancePolicyVersionRecord(
+        id=record.id,
+        scope=record.scope,
+        data_class=record.data_class,
+        company_id=record.company_id,
+        domain_key=record.domain_key,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        status=record.status,
+        schema_version=record.schema_version,
+        version_number=record.version_number,
+        payload=payload,
+        reason=record.reason,
+        source_version_id=record.source_version_id,
+        created_by=record.created_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+        published_by=record.published_by,
+        published_at=record.published_at.isoformat() if record.published_at else None,
+    )
+
+
+def _serialize_compliance_lifecycle_run_record(
+    record: ComplianceLifecycleRun,
+) -> ConsoleComplianceLifecycleRunRecord:
+    return ConsoleComplianceLifecycleRunRecord(
+        id=record.id,
+        scope=record.scope,
+        data_class=record.data_class,
+        operation=record.operation,
+        run_mode=record.run_mode,
+        status=record.status,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        policy_version_id=record.policy_version_id,
+        policy_scope=record.policy_scope,
+        summary=record.summary_json or {},
+        error_message=record.error_message,
+        started_at=record.started_at.isoformat() if record.started_at else None,
+        finished_at=record.finished_at.isoformat() if record.finished_at else None,
+        triggered_by=record.triggered_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
+def _serialize_compliance_lifecycle_record(
+    record: ComplianceLifecycleRecord,
+) -> ConsoleComplianceLifecycleRecord:
+    return ConsoleComplianceLifecycleRecord(
+        id=record.id,
+        run_id=record.run_id,
+        entity_type=record.entity_type,
+        entity_id=record.entity_id,
+        action=record.action,
+        result=record.result,
+        payload=record.payload_json or {},
+        occurred_at=record.occurred_at.isoformat() if record.occurred_at else None,
+    )
+
+
+def _serialize_compliance_lifecycle_artifact_record(
+    record: ComplianceLifecycleArtifact,
+) -> ConsoleComplianceLifecycleArtifactRecord:
+    return ConsoleComplianceLifecycleArtifactRecord(
+        id=record.id,
+        run_id=record.run_id,
+        scope=record.scope,
+        data_class=record.data_class,
+        operation=record.operation,
+        run_mode=record.run_mode,
+        status=record.status,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        artifact_type=record.artifact_type,
+        artifact_digest=record.artifact_digest,
+        payload=record.payload_json if isinstance(record.payload_json, dict) else {},
+        records_count=int(record.records_count or 0),
+        evidence_record_count=int(record.evidence_record_count or 0),
+        published_by=record.published_by,
+        published_at=record.published_at.isoformat() if record.published_at else None,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
 def _serialize_sla_profile_version_record(record: SlaProfileVersion) -> ConsoleSlaProfileVersionRecord:
     try:
         payload = SlaProfilePayload.model_validate(record.payload_json or {})
@@ -21239,6 +21784,470 @@ async def rollback_policy_registry(
         success=True,
         record=_serialize_policy_version_record(record),
         from_version_id=source_record.id,
+    )
+
+
+@router.get(
+    "/admin/compliance-policy-registry",
+    response_model=ConsoleCompliancePolicyRegistryResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def get_compliance_policy_registry(
+    request: Request,
+    data_class: str = Query(..., min_length=2, max_length=64),
+    scope: Literal["global", "domain", "client", "branch"] = Query("client"),
+    domain_key: Optional[str] = Query(None),
+    branch_id: Optional[UUID] = Query(None),
+    limit: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> ConsoleCompliancePolicyRegistryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=scope,
+        domain_key=domain_key,
+        branch_id=branch_id,
+    )
+    normalized_data_class = str(data_class or "").strip().lower()
+    try:
+        active_record = get_latest_compliance_policy_version(
+            db,
+            scope=normalized_scope,
+            data_class=normalized_data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            status="published",
+        )
+        history_records = list_compliance_policy_history(
+            db,
+            scope=normalized_scope,
+            data_class=normalized_data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+
+    return ConsoleCompliancePolicyRegistryResponse(
+        scope=normalized_scope,
+        data_class=normalized_data_class,
+        company_id=resolved_company_id,
+        domain_key=resolved_domain_key,
+        client_id=resolved_client_id,
+        branch_id=resolved_branch_id,
+        active=_serialize_compliance_policy_version_record(active_record) if active_record else None,
+        history=[_serialize_compliance_policy_version_record(item) for item in history_records],
+    )
+
+
+@router.post(
+    "/admin/compliance-policy-registry/publish",
+    response_model=ConsoleCompliancePolicyRegistryMutationResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def publish_compliance_policy_registry(
+    request: Request,
+    body: ConsoleCompliancePolicyRegistryPublishRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleCompliancePolicyRegistryMutationResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage compliance policy registry",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        domain_key=body.domain_key,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+    schema_version = body.schema_version or COMPLIANCE_POLICY_SCHEMA_VERSION
+
+    try:
+        record = publish_compliance_policy_version(
+            db,
+            scope=normalized_scope,
+            data_class=body.data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            payload=body.payload,
+            actor_id=context.agent.id,
+            reason=reason,
+            schema_version=schema_version,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="compliance_policy_registry_published",
+        entity_type="compliance_policy_version",
+        entity_id=record.id,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": normalized_scope,
+            "data_class": record.data_class,
+            "company_id": str(record.company_id) if record.company_id else None,
+            "domain_key": record.domain_key,
+            "client_id": str(record.client_id) if record.client_id else None,
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "version_number": record.version_number,
+            "reason": reason,
+        },
+    )
+    db.commit()
+    return ConsoleCompliancePolicyRegistryMutationResponse(
+        success=True,
+        record=_serialize_compliance_policy_version_record(record),
+    )
+
+
+@router.post(
+    "/admin/compliance-policy-registry/rollback",
+    response_model=ConsoleCompliancePolicyRegistryMutationResponse,
+    responses={
+        400: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def rollback_compliance_policy_registry(
+    request: Request,
+    body: ConsoleCompliancePolicyRegistryRollbackRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleCompliancePolicyRegistryMutationResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage compliance policy registry",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        domain_key=body.domain_key,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+
+    try:
+        record, source_record = rollback_compliance_policy_version(
+            db,
+            scope=normalized_scope,
+            data_class=body.data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            target_version_id=body.target_version_id,
+            actor_id=context.agent.id,
+            reason=reason,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message == "Compliance policy version not found":
+            raise ConsoleAPIError(404, "NOT_FOUND", message) from exc
+        raise ConsoleAPIError(400, "INVALID_PARAM", message) from exc
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="compliance_policy_registry_rollback",
+        entity_type="compliance_policy_version",
+        entity_id=record.id,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": normalized_scope,
+            "data_class": record.data_class,
+            "company_id": str(record.company_id) if record.company_id else None,
+            "domain_key": record.domain_key,
+            "client_id": str(record.client_id) if record.client_id else None,
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "version_number": record.version_number,
+            "reason": reason,
+            "from_version_id": str(source_record.id),
+        },
+    )
+    db.commit()
+    return ConsoleCompliancePolicyRegistryMutationResponse(
+        success=True,
+        record=_serialize_compliance_policy_version_record(record),
+        from_version_id=source_record.id,
+    )
+
+
+@router.post(
+    "/admin/compliance-lifecycle/runs",
+    response_model=ConsoleComplianceLifecycleRunResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def run_compliance_lifecycle(
+    request: Request,
+    body: ConsoleComplianceLifecycleRunRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleRunResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage compliance lifecycle",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+    run, records = _execute_compliance_lifecycle_preview_run(
+        db,
+        context=context,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+        data_class=body.data_class,
+        operation=body.operation,
+        max_items=body.max_items,
+        run_mode=body.run_mode or "preview",
+    )
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="compliance_lifecycle_run_requested",
+        entity_type="compliance_lifecycle_run",
+        entity_id=run.id,
+        client_id=context.client.id,
+        branch_id=resolved_branch_id,
+        payload={
+            "scope": run.scope,
+            "data_class": run.data_class,
+            "operation": run.operation,
+            "run_mode": run.run_mode,
+            "reason": reason,
+            "summary": run.summary_json or {},
+            "policy_version_id": str(run.policy_version_id) if run.policy_version_id else None,
+        },
+    )
+    db.commit()
+    return ConsoleComplianceLifecycleRunResponse(
+        success=True,
+        run=_serialize_compliance_lifecycle_run_record(run),
+        records=[_serialize_compliance_lifecycle_record(item) for item in records],
+    )
+
+
+@router.get(
+    "/admin/compliance-lifecycle/runs",
+    response_model=ConsoleComplianceLifecycleRunsResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def list_compliance_lifecycle_runs(
+    request: Request,
+    scope: Literal["client", "branch"] = Query("client"),
+    branch_id: Optional[UUID] = Query(None),
+    data_class: Optional[str] = Query(None),
+    operation: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleRunsResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=scope,
+        branch_id=branch_id,
+    )
+    try:
+        runs = list_lifecycle_runs(
+            db,
+            client_id=context.client.id,
+            scope=normalized_scope,
+            branch_id=resolved_branch_id,
+            data_class=data_class,
+            operation=operation,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+
+    return ConsoleComplianceLifecycleRunsResponse(
+        items=[_serialize_compliance_lifecycle_run_record(item) for item in runs]
+    )
+
+
+@router.get(
+    "/admin/compliance-lifecycle/runs/{run_id}",
+    response_model=ConsoleComplianceLifecycleRunResponse,
+    responses={
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def get_compliance_lifecycle_run(
+    run_id: UUID,
+    request: Request,
+    scope: Literal["client", "branch"] = Query("client"),
+    branch_id: Optional[UUID] = Query(None),
+    records_limit: int = Query(200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleRunResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=scope,
+        branch_id=branch_id,
+    )
+    run = get_lifecycle_run(
+        db,
+        run_id=run_id,
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+    )
+    if run is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Compliance lifecycle run not found")
+    records = list_lifecycle_records(db, run_id=run.id, limit=records_limit)
+    return ConsoleComplianceLifecycleRunResponse(
+        success=True,
+        run=_serialize_compliance_lifecycle_run_record(run),
+        records=[_serialize_compliance_lifecycle_record(item) for item in records],
+    )
+
+
+@router.get(
+    "/admin/compliance-lifecycle/runs/{run_id}/artifact",
+    response_model=ConsoleComplianceLifecycleArtifactResponse,
+    responses={
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def get_compliance_lifecycle_artifact(
+    run_id: UUID,
+    request: Request,
+    scope: Literal["client", "branch"] = Query("client"),
+    branch_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleArtifactResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=scope,
+        branch_id=branch_id,
+    )
+    run = get_lifecycle_run(
+        db,
+        run_id=run_id,
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+    )
+    if run is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Compliance lifecycle run not found")
+
+    artifact = get_lifecycle_artifact(
+        db,
+        run_id=run.id,
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+    )
+    if artifact is None:
+        records = list_lifecycle_records(db, run_id=run.id, limit=1000)
+        artifact = publish_lifecycle_artifact(
+            db,
+            run=run,
+            records=records,
+            actor_id=context.agent.id,
+        )
+        run_summary = run.summary_json if isinstance(run.summary_json, dict) else {}
+        run_summary["artifact_id"] = str(artifact.id)
+        run_summary["artifact_digest"] = artifact.artifact_digest
+        run.summary_json = run_summary
+        run.updated_at = datetime.now(timezone.utc)
+        db.commit()
+
+    return ConsoleComplianceLifecycleArtifactResponse(
+        success=True,
+        artifact=_serialize_compliance_lifecycle_artifact_record(artifact),
     )
 
 

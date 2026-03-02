@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from app.schemas.capabilities import CapabilitiesPayload, CapabilityPolicyOverrides
+from app.schemas.compliance_policy import CompliancePolicyPayload
 from app.schemas.onboarding_contract import (
     OnboardingContractPayload,
     OnboardingProviderBindingPayload,
@@ -1163,7 +1164,14 @@ class ConsoleIncidentAction(BaseModel):
     description: str
     href: Optional[str] = None
     job_type: Optional[
-        Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot", "incident_state"]
+        Literal[
+            "outbox_process",
+            "integration_reconcile",
+            "heal",
+            "metrics_snapshot",
+            "incident_state",
+            "compliance_lifecycle",
+        ]
     ] = None
     mode: Optional[Literal["dry_run", "execute"]] = None
     params: Optional[dict] = None
@@ -1538,7 +1546,14 @@ class ConsoleReminderRetryResponse(BaseModel):
     matched: int
 
 
-ConsoleOpsJobType = Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot", "incident_state"]
+ConsoleOpsJobType = Literal[
+    "outbox_process",
+    "integration_reconcile",
+    "heal",
+    "metrics_snapshot",
+    "incident_state",
+    "compliance_lifecycle",
+]
 ConsoleOpsJobMode = Literal["dry_run", "execute"]
 ConsoleOpsJobStatus = Literal["success", "failed"]
 
@@ -1776,6 +1791,140 @@ class ConsolePolicyRegistryMutationResponse(BaseModel):
     success: bool
     record: ConsolePolicyVersionRecord
     from_version_id: Optional[UUID] = None
+
+
+class ConsoleCompliancePolicyVersionRecord(BaseModel):
+    id: UUID
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    company_id: Optional[UUID] = None
+    domain_key: Optional[str] = None
+    client_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    status: Literal["published", "archived"]
+    schema_version: str
+    version_number: int
+    payload: CompliancePolicyPayload
+    reason: Optional[str] = None
+    source_version_id: Optional[UUID] = None
+    created_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    published_by: Optional[UUID] = None
+    published_at: Optional[str] = None
+
+
+class ConsoleCompliancePolicyRegistryResponse(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    company_id: Optional[UUID] = None
+    domain_key: Optional[str] = None
+    client_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    active: Optional[ConsoleCompliancePolicyVersionRecord] = None
+    history: list[ConsoleCompliancePolicyVersionRecord] = []
+
+
+class ConsoleCompliancePolicyRegistryPublishRequest(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    domain_key: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    schema_version: Optional[str] = None
+    reason: str
+    payload: CompliancePolicyPayload
+
+
+class ConsoleCompliancePolicyRegistryRollbackRequest(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    domain_key: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    target_version_id: UUID
+    reason: str
+
+
+class ConsoleCompliancePolicyRegistryMutationResponse(BaseModel):
+    success: bool
+    record: ConsoleCompliancePolicyVersionRecord
+    from_version_id: Optional[UUID] = None
+
+
+class ConsoleComplianceLifecycleRunRecord(BaseModel):
+    id: UUID
+    scope: Literal["client", "branch"]
+    data_class: str
+    operation: Literal["retention_scan", "export_preview", "destruction_preview"]
+    run_mode: Literal["preview", "manual"]
+    status: Literal["running", "completed", "failed"]
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    policy_version_id: Optional[UUID] = None
+    policy_scope: Optional[str] = None
+    summary: dict = {}
+    error_message: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    triggered_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleComplianceLifecycleRecord(BaseModel):
+    id: UUID
+    run_id: UUID
+    entity_type: str
+    entity_id: Optional[str] = None
+    action: str
+    result: Literal["candidate", "skipped", "error"]
+    payload: dict = {}
+    occurred_at: Optional[str] = None
+
+
+class ConsoleComplianceLifecycleArtifactRecord(BaseModel):
+    id: UUID
+    run_id: UUID
+    scope: Literal["client", "branch"]
+    data_class: str
+    operation: Literal["retention_scan", "export_preview", "destruction_preview"]
+    run_mode: Literal["preview", "manual"]
+    status: Literal["running", "completed", "failed"]
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    artifact_type: Literal["compliance_lifecycle_evidence"]
+    artifact_digest: str
+    payload: dict = {}
+    records_count: int = 0
+    evidence_record_count: int = 0
+    published_by: Optional[UUID] = None
+    published_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleComplianceLifecycleRunRequest(BaseModel):
+    scope: Literal["client", "branch"]
+    branch_id: Optional[UUID] = None
+    data_class: Literal["learned_responses"] = "learned_responses"
+    operation: Literal["retention_scan", "export_preview", "destruction_preview"]
+    run_mode: Optional[Literal["preview", "manual"]] = None
+    max_items: int = Field(default=200, ge=1, le=500)
+    reason: str
+
+
+class ConsoleComplianceLifecycleRunResponse(BaseModel):
+    success: bool
+    run: ConsoleComplianceLifecycleRunRecord
+    records: list[ConsoleComplianceLifecycleRecord] = []
+
+
+class ConsoleComplianceLifecycleRunsResponse(BaseModel):
+    items: list[ConsoleComplianceLifecycleRunRecord]
+
+
+class ConsoleComplianceLifecycleArtifactResponse(BaseModel):
+    success: bool
+    artifact: ConsoleComplianceLifecycleArtifactRecord
 
 
 class ConsoleSlaProfileVersionRecord(BaseModel):
