@@ -1,5 +1,9 @@
 # TP-2026-03-02-p4-expected-reply-routing-decouple-a1
 
+## Status
+- `SUPERSEDED_BY`: `docs/TASK_PACKAGES/TP-2026-03-02-p4-expected-reply-full-closure-a1.md`
+- `REASON`: this file captured the first continuation slice only; full closure now uses a single end-to-end TP.
+
 ## Block identity
 - `BLOCK_ID`: SIG-P4-EXPECTED-REPLY-DECOUPLE-A1
 - `PARENT_BLOCK_ID`: TP-2026-02-21-consultant-contract-first-remediation-a1

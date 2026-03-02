@@ -54,7 +54,14 @@ from app.services.booking_signal_service import (
 )
 from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.expected_reply_contract import (
+    expected_reply_slot_key,
+    should_allow_layout_swap_for_expected_reply,
+    should_keep_booking_prompt_for_info_clarify_time_followup,
+    should_mark_booking_time_service_candidate,
+    should_prefer_info_class_for_booking_interrupt,
+    should_repeat_booking_prompt,
     should_skip_booking_interrupt_for_expected_reply,
+    should_use_expected_service_off_topic_prompt,
 )
 from app.services.pack_runtime_service import get_system_lexicon_list, phrase_match_intent
 
@@ -112,10 +119,7 @@ def _build_slot_candidates(
         seen.add(cleaned)
         candidates.append(SlotCandidate(cleaned, flags))
 
-    allow_layout_swap = expected_reply_type in {
-        legacy.EXPECTED_REPLY_SERVICE,
-        legacy.EXPECTED_REPLY_TIME,
-    }
+    allow_layout_swap = should_allow_layout_swap_for_expected_reply(expected_reply_type)
     if allow_layout_swap and _looks_like_layout_swap(raw):
         swapped = _swap_keyboard_layout(raw)
         swapped_normalized = legacy._normalize_text(swapped)
@@ -602,29 +606,30 @@ def _match_expected_reply(
     message_text: str,
     client_slug: str | None,
 ) -> tuple[bool, str | None, list[str]]:
+    slot_key = expected_reply_slot_key(expected_reply_type)
+    validator_by_slot = {
+        "service": _validate_service_slot,
+        "datetime": _validate_datetime_slot,
+        "name": _validate_name_slot,
+    }
     if not expected_reply_type or not message_text:
+        return False, None, []
+    if not slot_key:
         return False, None, []
     if _is_blocked_slot_message(message_text):
         return False, None, []
-    from . import _legacy as legacy
+    validator = validator_by_slot.get(slot_key)
+    if validator is None:
+        return False, None, []
 
     for candidate in _build_slot_candidates(
         message_text, expected_reply_type=expected_reply_type
     ):
-        if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
-            value = _validate_service_slot(
-                candidate.text, allow_freeform=True, client_slug=client_slug
-            )
-        elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:
-            value = _validate_datetime_slot(
-                candidate.text, allow_freeform=True, client_slug=client_slug
-            )
-        elif expected_reply_type == legacy.EXPECTED_REPLY_NAME:
-            value = _validate_name_slot(
-                candidate.text, allow_freeform=True, client_slug=client_slug
-            )
-        else:
-            return False, None, []
+        value = validator(
+            candidate.text,
+            allow_freeform=True,
+            client_slug=client_slug,
+        )
         if value:
             return True, value, list(candidate.flags)
     return False, None, []
@@ -632,6 +637,9 @@ def _match_expected_reply(
 
 def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None, value: str) -> dict:
     if not expected_reply_type or not value:
+        return context
+    slot_key = expected_reply_slot_key(expected_reply_type)
+    if not slot_key:
         return context
     from . import _legacy as legacy
 
@@ -660,14 +668,6 @@ def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None
             return existing
         return f"{existing} {incoming}".strip()
 
-    if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
-        slot_key = "service"
-    elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:
-        slot_key = "datetime"
-    elif expected_reply_type == legacy.EXPECTED_REPLY_NAME:
-        slot_key = "name"
-    else:
-        return context
     booking_state = _get_booking_context(context)
     if not isinstance(booking_state, dict) or not booking_state:
         return context
@@ -780,17 +780,10 @@ def _resolve_booking_info_intents(
     from . import _legacy as legacy
 
     booking_info_intents: list[str] = []
-    should_prefer_info_class = bool(
-        info_class_intents
-        and (
-            booking_time_service_candidate
-            or expected_reply_type
-            in {
-                legacy.EXPECTED_REPLY_SERVICE,
-                legacy.EXPECTED_REPLY_TIME,
-                legacy.EXPECTED_REPLY_NAME,
-            }
-        )
+    should_prefer_info_class = should_prefer_info_class_for_booking_interrupt(
+        info_class_intents_present=bool(info_class_intents),
+        booking_time_service_candidate=booking_time_service_candidate,
+        expected_reply_type=expected_reply_type,
     )
     if should_prefer_info_class:
         booking_info_intents = sorted(info_class_intents)
@@ -1687,10 +1680,10 @@ def _handle_booking_interrupt(
             conversation_id=conversation.id,
             bot_response=bot_response,
         )
-    booking_time_service_candidate = (
-        expected_reply_type == legacy.EXPECTED_REPLY_TIME
-        and expected_reply_matched is False
-        and message_text
+    booking_time_service_candidate = should_mark_booking_time_service_candidate(
+        expected_reply_type=expected_reply_type,
+        expected_reply_matched=expected_reply_matched,
+        message_text=message_text,
     )
 
     def _merge_info_sections(info_meta: dict[str, Any], intents: list[str]) -> list[str]:
@@ -2232,10 +2225,10 @@ def _handle_booking_interrupt(
                 booking_expected = legacy._expected_reply_for_booking_question(
                     booking_state.get("last_question")
                 )
-                booking_prompt_repeat = bool(
-                    booking_expected
-                    and expected_reply_type == booking_expected
-                    and expected_reply_matched is False
+                booking_prompt_repeat = should_repeat_booking_prompt(
+                    expected_reply_type=expected_reply_type,
+                    expected_reply_matched=expected_reply_matched,
+                    booking_expected_reply_type=booking_expected,
                 )
                 if prompt and booking_expected:
                     context = legacy._set_expected_reply_context(
@@ -2423,12 +2416,12 @@ def _handle_booking_interrupt(
                             and not booking_active
                             and primary_intent_token == "booking"
                         )
-                        or (
-                            info_decision.intent == "info_clarify"
-                            and booking_active
-                            and expected_reply_type == legacy.EXPECTED_REPLY_TIME
-                            and booking_expected == legacy.EXPECTED_REPLY_TIME
-                            and domain_out_of_domain
+                        or should_keep_booking_prompt_for_info_clarify_time_followup(
+                            info_intent=info_decision.intent,
+                            booking_active=booking_active,
+                            expected_reply_type=expected_reply_type,
+                            booking_expected_reply_type=booking_expected,
+                            domain_out_of_domain=domain_out_of_domain,
                         )
                         or (
                             info_decision.intent == "info_clarify"
@@ -3275,17 +3268,17 @@ def _handle_booking_flow(
                         )
             slot_lock_reprompt = bool(slot_lock_active and not booking_related and not booking_signal)
             if slot_lock_reprompt and prompt:
-                if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
+                if should_use_expected_service_off_topic_prompt(expected_reply_type):
                     prompt = legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC
                 else:
                     prompt = legacy._combine_sidecar(prompt, legacy.MSG_BOOKING_SLOT_LOCK_STUB)
             context = legacy._set_booking_context(context, booking_state)
             legacy._set_conversation_context(conversation, context)
             booking_expected = legacy._expected_reply_for_booking_question(booking_state.get("last_question"))
-            booking_prompt_repeat = bool(
-                booking_expected
-                and expected_reply_type == booking_expected
-                and expected_reply_matched is False
+            booking_prompt_repeat = should_repeat_booking_prompt(
+                expected_reply_type=expected_reply_type,
+                expected_reply_matched=expected_reply_matched,
+                booking_expected_reply_type=booking_expected,
             )
             booking_slot_signal = _is_booking_slot_signal(
                 message_text,

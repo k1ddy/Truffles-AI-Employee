@@ -425,4 +425,58 @@
     - `pytest -q truffles-api/tests/test_message_endpoint.py -k "booking_info_interrupt or expected_reply"` (`22 passed, 248 deselected`)
     - `ruff check truffles-api/app/services/expected_reply_contract.py truffles-api/app/routers/webhook/booking.py truffles-api/tests/test_expected_reply_contract.py truffles-api/tests/test_message_endpoint.py` (`All checks passed`)
     - `SESSION_AGENT=a1 scripts/session_check.sh`
-- last_updated: 2026-03-02T15:02:00+05:00
+  - Process remediation after owner feedback (no ad-hoc wave slicing for open blocks):
+    - normalized open parent-TP blocks into one-file-per-block full-closure TPs:
+      - `docs/TASK_PACKAGES/TP-2026-03-02-p4-expected-reply-full-closure-a1.md`
+      - `docs/TASK_PACKAGES/TP-2026-03-02-p5b-distributed-retrieval-backend-a1.md` (rewritten as full closure)
+      - `docs/TASK_PACKAGES/TP-2026-03-02-p9-contract-oracle-full-closure-a1.md`
+      - `docs/TASK_PACKAGES/TP-2026-03-02-p12-cross-domain-hardening-full-closure-a1.md`
+      - `docs/TASK_PACKAGES/TP-2026-03-02-p13-canary-rollback-full-closure-a1.md`
+      - `docs/TASK_PACKAGES/TP-2026-03-02-p14-evidence-state-handoff-full-closure-a1.md`
+    - marked slice-only TPs as superseded:
+      - `docs/TASK_PACKAGES/TP-2026-03-02-p4-expected-reply-routing-decouple-a1.md`
+      - `docs/TASK_PACKAGES/TP-2026-03-02-p9-contract-oracle-migration-wave1-a1.md`
+    - synchronized parent TP execution status and added strict open-block closure contract section:
+      - `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`
+    - synchronized canon docs with new full-closure TP set:
+      - `STRUCTURE.md`
+      - `STATE.md`
+  - Implemented `P4` full closure (contract-boundary routing):
+    - moved expected-reply routing/guard decisions into `truffles-api/app/services/expected_reply_contract.py`:
+      - `expected_reply_slot_key`
+      - `should_prefer_info_class_for_booking_interrupt`
+      - `should_override_truth_gate_off_topic_contract`
+      - `truth_gate_expected_reply_prompt_contract`
+      - `should_repeat_booking_prompt`
+      - `should_mark_booking_time_service_candidate`
+      - `should_keep_booking_prompt_for_info_clarify_time_followup`
+      - `should_use_expected_service_off_topic_prompt`
+    - removed direct `expected_reply_type == ...` / membership routing branches from:
+      - `truffles-api/app/routers/webhook/booking.py`
+      - `truffles-api/app/routers/webhook/info.py`
+    - extended deterministic coverage in:
+      - `truffles-api/tests/test_expected_reply_contract.py`
+  - Validation (green, P4 full closure):
+    - `ruff check truffles-api/app/services/expected_reply_contract.py truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/info.py truffles-api/tests/test_expected_reply_contract.py` (`All checks passed`)
+    - `pytest -q truffles-api/tests/test_expected_reply_contract.py` (`20 passed`)
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k "expected_reply or booking_info_interrupt"` (`22 passed, 248 deselected`)
+    - `pytest -q truffles-api/tests/test_master_info_flow.py` (`29 passed`)
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k "truth_gate or off_topic"` (`6 passed, 264 deselected`)
+  - Canon sync for P4 closure:
+    - parent execution status updated in `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md` (`P4 -> done`)
+    - full-closure evidence recorded in `docs/TASK_PACKAGES/TP-2026-03-02-p4-expected-reply-full-closure-a1.md`
+    - `STATE.md` NOW updated with P4 closure evidence.
+  - Opened PR for P4 closure + full-closure TP normalization packet:
+    - `https://github.com/k1ddy/Truffles-AI-Employee/pull/870`
+    - branch: `fix/llm-first-firebreak-2026-02-19`, commit: `54ab8609`.
+  - Started `P9` full-closure implementation (contract-oracle migration pass 1):
+    - reduced phrase-level business assertions in `truffles-api/tests/test_message_endpoint.py` for consult recommendation, booking-info-interrupt, intent-queue, mixed info/booking scenarios (replaced with contract/state/meta checks),
+    - converted `truffles-api/tests/test_knowledge_service.py` to structural line-based assertions.
+  - Validation (green, P9 pass 1):
+    - `ruff check truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_knowledge_service.py` (`All checks passed`)
+    - `pytest -q truffles-api/tests/test_knowledge_service.py` (`10 passed`)
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k "consult_recommendation_prefers_pack_service_decision_over_service_matcher or consult_recommendation_forces_consult_intent_for_pack_service_decision or booking_info_interrupt_keeps_info_reply_without_prompt_leak or booking_info_interrupt_with_expected_reply_type_keeps_info_reply or booking_time_service_question_keeps_time_contract or booking_info_interrupt_without_policy_handler_uses_service_hint_for_pricing or intent_queue_sets_context_and_prompt or intent_queue_info_limit_skips_booking or intent_queue_choice_pricing_replies_and_updates_queue or intent_queue_choice_hours_matches_time_phrase or llm_policy_core_service_query_non_service_refs_routes_to_info or multi_truth_reply_handles_hours_and_service_without_booking or llm_policy_core_catalog_tool_decision_mismatch_contract_error_escalates_handoff or llm_policy_core_consult_duration_signal_sets_info_meta"` (`12 passed, 258 deselected`)
+  - Canon sync for P9 in-progress:
+    - updated `docs/TASK_PACKAGES/TP-2026-03-02-p9-contract-oracle-full-closure-a1.md` execution status (`in_progress` + evidence + remaining scope),
+    - updated `STATE.md` NOW with P9 in-progress evidence.
+- last_updated: 2026-03-02T16:07:00+05:00

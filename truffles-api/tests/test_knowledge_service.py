@@ -23,9 +23,10 @@ class TestFormatKnowledgeContext:
     def test_formats_single_result(self):
         results = [{"text": "Some knowledge", "score": 0.9}]
         result = format_knowledge_context(results)
-
-        assert "Релевантная информация" in result
-        assert "1. Some knowledge" in result
+        lines = result.splitlines()
+        assert len(lines) == 2
+        assert lines[0].endswith(":")
+        assert lines[1] == "1. Some knowledge"
 
     def test_formats_multiple_results(self):
         results = [
@@ -33,9 +34,10 @@ class TestFormatKnowledgeContext:
             {"text": "Second info", "score": 0.8},
         ]
         result = format_knowledge_context(results)
-
-        assert "1. First info" in result
-        assert "2. Second info" in result
+        lines = result.splitlines()
+        assert len(lines) == 3
+        assert lines[1] == "1. First info"
+        assert lines[2] == "2. Second info"
 
     def test_skips_empty_text(self):
         results = [
@@ -44,9 +46,9 @@ class TestFormatKnowledgeContext:
             {"text": None, "score": 0.7},
         ]
         result = format_knowledge_context(results)
-
-        assert "1. Valid info" in result
-        assert "2." not in result
+        lines = result.splitlines()
+        assert len(lines) == 2
+        assert lines[1] == "1. Valid info"
 
 
 class TestGetEmbedding:

@@ -8,6 +8,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable
 
 from app.schemas.webhook import WebhookResponse
+from app.services.expected_reply_contract import (
+    should_override_truth_gate_off_topic_contract,
+    truth_gate_expected_reply_prompt_contract,
+)
 from app.services.info_signal_service import (
     anchor_group_hit as _anchor_group_hit,
 )
@@ -328,13 +332,15 @@ def _looks_like_info_query(message_text: str | None, *, client_slug: str | None 
 def _truth_gate_expected_reply_prompt(expected_reply_type: str | None) -> tuple[str | None, str | None]:
     from . import _legacy as legacy
 
-    if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
-        return legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC, "service_clarify"
-    if expected_reply_type == legacy.EXPECTED_REPLY_TIME:
-        return legacy.MSG_BOOKING_ASK_DATETIME, "booking_followup"
-    if expected_reply_type == legacy.EXPECTED_REPLY_NAME:
-        return legacy.MSG_BOOKING_ASK_NAME, "booking_followup"
-    return None, None
+    prompt_key, intent = truth_gate_expected_reply_prompt_contract(expected_reply_type)
+    prompt_map = {
+        "service_clarify": legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC,
+        "booking_ask_datetime": legacy.MSG_BOOKING_ASK_DATETIME,
+        "booking_ask_name": legacy.MSG_BOOKING_ASK_NAME,
+    }
+    if not prompt_key or not intent:
+        return None, None
+    return prompt_map.get(prompt_key), intent
 
 
 def _should_override_truth_gate_off_topic(
@@ -347,39 +353,33 @@ def _should_override_truth_gate_off_topic(
 ) -> bool:
     from . import _legacy as legacy
 
-    if expected_reply_type not in {
-        legacy.EXPECTED_REPLY_SERVICE,
-        legacy.EXPECTED_REPLY_TIME,
-        legacy.EXPECTED_REPLY_NAME,
-    }:
-        return False
-    if current_goal == "booking":
-        return True
-    if expected_reply_matched is False:
-        return True
-    if not message_text:
-        return False
-    if legacy._is_short_reply(message_text):
-        return True
-    if legacy._is_booking_slot_signal(message_text, client_slug=client_slug):
-        return True
-    if get_pack_service_hint(message_text, client_slug=client_slug):
-        return True
-    if (
-        expected_reply_type == legacy.EXPECTED_REPLY_TIME
-        and legacy._extract_datetime(message_text)
-    ):
-        return True
-    if (
-        expected_reply_type == legacy.EXPECTED_REPLY_NAME
-        and legacy._validate_name_slot(
+    has_message_text = bool(message_text)
+    is_short_reply = legacy._is_short_reply(message_text) if has_message_text else False
+    has_booking_slot_signal = (
+        legacy._is_booking_slot_signal(message_text, client_slug=client_slug)
+        if has_message_text
+        else False
+    )
+    has_service_hint = bool(get_pack_service_hint(message_text, client_slug=client_slug)) if has_message_text else False
+    has_datetime_slot = bool(legacy._extract_datetime(message_text)) if has_message_text else False
+    has_name_slot = bool(
+        legacy._validate_name_slot(
             message_text,
             allow_freeform=True,
             client_slug=client_slug,
         )
-    ):
-        return True
-    return False
+    ) if has_message_text else False
+    return should_override_truth_gate_off_topic_contract(
+        expected_reply_type=expected_reply_type,
+        expected_reply_matched=expected_reply_matched,
+        has_message_text=has_message_text,
+        current_goal=current_goal,
+        is_short_reply=is_short_reply,
+        has_booking_slot_signal=has_booking_slot_signal,
+        has_service_hint=has_service_hint,
+        has_datetime_slot=has_datetime_slot,
+        has_name_slot=has_name_slot,
+    )
 
 
 def _build_info_intent_reply(
