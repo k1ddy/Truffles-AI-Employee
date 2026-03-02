@@ -19,9 +19,12 @@
   - Canon synced: `docs/BLOCK_GRAPH.yaml` and master report moved phase11 from `planned` to `in_progress`.
   - Slice 1 implemented: compliance policy registry schema/migration/service/console API + deterministic tests.
   - OpenAPI contract synced with new `/admin/compliance-policy-registry*` endpoints.
+  - PR branch synced with fresh `origin/main` via merge commit (`out-of-date` resolved).
+  - Slice 2 implemented: compliance lifecycle run ledger + execution records + preview endpoints (`/admin/compliance-lifecycle/runs*`).
+  - Added deterministic lifecycle tests and synced OpenAPI contract.
 - next:
-  - Build Slice 2: lifecycle run ledger + compliance export/destruction execution records.
-  - Add deterministic ops-job coverage for retention -> export -> destruction flow.
+  - Build Slice 3: connect lifecycle ledger to scheduled `console_ops_jobs` orchestration.
+  - Add deterministic coverage for ops-job trigger path and failure/audit behavior.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md
   - docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md
@@ -34,4 +37,8 @@
   - truffles-api/tests/test_compliance_policy_registry_service.py
   - truffles-api/tests/test_console_compliance_policy_registry.py
   - contracts/console_api/openapi.v1.yaml
+  - truffles-api/migrations/048_add_compliance_lifecycle_runs.sql
+  - truffles-api/app/services/compliance_lifecycle_service.py
+  - truffles-api/tests/test_compliance_lifecycle_service.py
+  - truffles-api/tests/test_console_compliance_lifecycle.py
 - last_updated: 2026-03-02

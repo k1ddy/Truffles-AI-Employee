@@ -1836,6 +1836,57 @@ class ConsoleCompliancePolicyRegistryMutationResponse(BaseModel):
     from_version_id: Optional[UUID] = None
 
 
+class ConsoleComplianceLifecycleRunRecord(BaseModel):
+    id: UUID
+    scope: Literal["client", "branch"]
+    data_class: str
+    operation: Literal["retention_scan", "export_preview", "destruction_preview"]
+    run_mode: Literal["preview", "manual"]
+    status: Literal["running", "completed", "failed"]
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    policy_version_id: Optional[UUID] = None
+    policy_scope: Optional[str] = None
+    summary: dict = {}
+    error_message: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    triggered_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleComplianceLifecycleRecord(BaseModel):
+    id: UUID
+    run_id: UUID
+    entity_type: str
+    entity_id: Optional[str] = None
+    action: str
+    result: Literal["candidate", "skipped", "error"]
+    payload: dict = {}
+    occurred_at: Optional[str] = None
+
+
+class ConsoleComplianceLifecycleRunRequest(BaseModel):
+    scope: Literal["client", "branch"]
+    branch_id: Optional[UUID] = None
+    data_class: Literal["learned_responses"] = "learned_responses"
+    operation: Literal["retention_scan", "export_preview", "destruction_preview"]
+    run_mode: Optional[Literal["preview", "manual"]] = None
+    max_items: int = Field(default=200, ge=1, le=500)
+    reason: str
+
+
+class ConsoleComplianceLifecycleRunResponse(BaseModel):
+    success: bool
+    run: ConsoleComplianceLifecycleRunRecord
+    records: list[ConsoleComplianceLifecycleRecord] = []
+
+
+class ConsoleComplianceLifecycleRunsResponse(BaseModel):
+    items: list[ConsoleComplianceLifecycleRunRecord]
+
+
 class ConsoleSlaProfileVersionRecord(BaseModel):
     id: UUID
     scope: Literal["global", "domain", "client", "branch"]

@@ -76,12 +76,32 @@ Date
     - `truffles-api/tests/test_console_compliance_policy_registry.py`
   - OpenAPI canon sync:
     - `contracts/console_api/openapi.v1.yaml`
+- Slice 2 delivery (`compliance lifecycle ledger + preview records`):
+  - migration:
+    - `truffles-api/migrations/048_add_compliance_lifecycle_runs.sql`
+  - models:
+    - `truffles-api/app/models/compliance_lifecycle_run.py`
+    - `truffles-api/app/models/compliance_lifecycle_record.py`
+  - service:
+    - `truffles-api/app/services/compliance_lifecycle_service.py`
+  - console API:
+    - `POST /console/v1/admin/compliance-lifecycle/runs`
+    - `GET /console/v1/admin/compliance-lifecycle/runs`
+    - `GET /console/v1/admin/compliance-lifecycle/runs/{run_id}`
+  - deterministic behavior:
+    - tenant-scoped preview for `learned_responses` due by `retention_expires_at`,
+    - lifecycle run summary + per-entity candidate records,
+    - fail-closed on unsupported `data_class`/invalid params.
+  - tests:
+    - `truffles-api/tests/test_compliance_lifecycle_service.py`
+    - `truffles-api/tests/test_console_compliance_lifecycle.py`
 
 ## Checks + outcomes
 - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
 - `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md --report docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md --graph docs/BLOCK_GRAPH.yaml` -> `zero_context_gate: OK`.
 - `cd truffles-api && ruff check app/models/__init__.py app/models/compliance_policy_version.py app/schemas/__init__.py app/schemas/compliance_policy.py app/schemas/console.py app/services/compliance_policy_registry_service.py app/routers/console.py tests/test_compliance_policy_registry_service.py tests/test_console_compliance_policy_registry.py` -> `All checks passed`.
 - `cd truffles-api && pytest -q tests/test_compliance_policy_registry_service.py tests/test_console_compliance_policy_registry.py tests/test_policy_registry_service.py tests/test_console_policy_registry.py tests/test_sla_profile_registry_service.py tests/test_console_sla_profile_registry.py` -> `25 passed`.
+- `cd truffles-api && pytest -q tests/test_compliance_lifecycle_service.py tests/test_console_compliance_lifecycle.py tests/test_compliance_policy_registry_service.py tests/test_console_compliance_policy_registry.py tests/test_policy_registry_service.py tests/test_console_policy_registry.py tests/test_sla_profile_registry_service.py tests/test_console_sla_profile_registry.py` -> `34 passed`.
 - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass after contract sync (`openapi.v1.yaml` updated).
 
 ## Iteration budget outcomes
@@ -102,12 +122,16 @@ Date
 - `truffles-api/app/routers/console.py`
 - `truffles-api/tests/test_compliance_policy_registry_service.py`
 - `truffles-api/tests/test_console_compliance_policy_registry.py`
+- `truffles-api/migrations/048_add_compliance_lifecycle_runs.sql`
+- `truffles-api/app/services/compliance_lifecycle_service.py`
+- `truffles-api/tests/test_compliance_lifecycle_service.py`
+- `truffles-api/tests/test_console_compliance_lifecycle.py`
 - `contracts/console_api/openapi.v1.yaml`
 
 ## Release safety decision
-- `Strategy used` -> registry-only canary slice (policy registry surface only, without destructive lifecycle jobs).
+- `Strategy used` -> registry + preview-only lifecycle slice (no destructive mutation path in runtime).
 - `Go/no-go signals observed` -> deterministic tests green + API contract synced + no runtime semantic path changes.
-- `Rollback readiness` -> revert Slice 1 commit + keep B11 status `in_progress` until lifecycle jobs are delivered.
+- `Rollback readiness` -> revert Slice 1/2 commits + keep B11 status `in_progress` until scheduled orchestration is delivered.
 
 ## Canon/doc sync updates
 - `Updated docs`:

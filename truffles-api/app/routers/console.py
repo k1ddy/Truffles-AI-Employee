@@ -43,6 +43,8 @@ from app.models import (
     ClientPolicyVersion,
     ClientSettings,
     Company,
+    ComplianceLifecycleRecord,
+    ComplianceLifecycleRun,
     CompliancePolicyVersion,
     ConsoleBranchChange,
     ConsoleOpsJob,
@@ -127,6 +129,11 @@ from app.schemas.console import (
     ConsoleCompanyCreateResponse,
     ConsoleCompanyListResponse,
     ConsoleCompanyUpdateRequest,
+    ConsoleComplianceLifecycleRecord,
+    ConsoleComplianceLifecycleRunRecord,
+    ConsoleComplianceLifecycleRunRequest,
+    ConsoleComplianceLifecycleRunResponse,
+    ConsoleComplianceLifecycleRunsResponse,
     ConsoleCompliancePolicyRegistryMutationResponse,
     ConsoleCompliancePolicyRegistryPublishRequest,
     ConsoleCompliancePolicyRegistryResponse,
@@ -323,11 +330,21 @@ from app.services.capabilities_service import (
     payload_to_dict,
 )
 from app.services.chatflow_service import get_instance_id, send_bot_response
+from app.services.compliance_lifecycle_service import (
+    create_lifecycle_run,
+    execute_lifecycle_preview,
+    finalize_lifecycle_run,
+    get_lifecycle_run,
+    list_lifecycle_records,
+    list_lifecycle_runs,
+)
 from app.services.compliance_policy_registry_service import (
     COMPLIANCE_POLICY_SCHEMA_VERSION,
     get_latest_compliance_policy_version,
     list_compliance_policy_history,
     publish_compliance_policy_version,
+    resolve_effective_compliance_policy_payload,
+    resolve_effective_compliance_policy_version,
     rollback_compliance_policy_version,
 )
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
@@ -20682,6 +20699,45 @@ def _serialize_compliance_policy_version_record(
     )
 
 
+def _serialize_compliance_lifecycle_run_record(
+    record: ComplianceLifecycleRun,
+) -> ConsoleComplianceLifecycleRunRecord:
+    return ConsoleComplianceLifecycleRunRecord(
+        id=record.id,
+        scope=record.scope,
+        data_class=record.data_class,
+        operation=record.operation,
+        run_mode=record.run_mode,
+        status=record.status,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        policy_version_id=record.policy_version_id,
+        policy_scope=record.policy_scope,
+        summary=record.summary_json or {},
+        error_message=record.error_message,
+        started_at=record.started_at.isoformat() if record.started_at else None,
+        finished_at=record.finished_at.isoformat() if record.finished_at else None,
+        triggered_by=record.triggered_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
+def _serialize_compliance_lifecycle_record(
+    record: ComplianceLifecycleRecord,
+) -> ConsoleComplianceLifecycleRecord:
+    return ConsoleComplianceLifecycleRecord(
+        id=record.id,
+        run_id=record.run_id,
+        entity_type=record.entity_type,
+        entity_id=record.entity_id,
+        action=record.action,
+        result=record.result,
+        payload=record.payload_json or {},
+        occurred_at=record.occurred_at.isoformat() if record.occurred_at else None,
+    )
+
+
 def _serialize_sla_profile_version_record(record: SlaProfileVersion) -> ConsoleSlaProfileVersionRecord:
     try:
         payload = SlaProfilePayload.model_validate(record.payload_json or {})
@@ -21524,6 +21580,214 @@ async def rollback_compliance_policy_registry(
         success=True,
         record=_serialize_compliance_policy_version_record(record),
         from_version_id=source_record.id,
+    )
+
+
+@router.post(
+    "/admin/compliance-lifecycle/runs",
+    response_model=ConsoleComplianceLifecycleRunResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def run_compliance_lifecycle(
+    request: Request,
+    body: ConsoleComplianceLifecycleRunRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleRunResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage compliance lifecycle",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+
+    try:
+        policy_version = resolve_effective_compliance_policy_version(
+            db,
+            data_class=body.data_class,
+            company_id=context.client.company_id,
+            domain_key=None,
+            client_id=context.client.id,
+            branch_id=resolved_branch_id,
+        )
+        policy_payload = resolve_effective_compliance_policy_payload(
+            db,
+            data_class=body.data_class,
+            company_id=context.client.company_id,
+            domain_key=None,
+            client_id=context.client.id,
+            branch_id=resolved_branch_id,
+        )
+        run = create_lifecycle_run(
+            db,
+            scope=normalized_scope,
+            data_class=body.data_class,
+            operation=body.operation,
+            client_id=context.client.id,
+            branch_id=resolved_branch_id,
+            company_id=context.client.company_id,
+            domain_key=None,
+            policy_version_id=policy_version.id if policy_version else None,
+            policy_scope=policy_version.scope if policy_version else None,
+            policy_schema_version=policy_version.schema_version if policy_version else None,
+            policy_snapshot=policy_payload.model_dump(exclude_none=True) if policy_payload else {},
+            actor_id=context.agent.id,
+            run_mode=body.run_mode,
+        )
+        summary = execute_lifecycle_preview(
+            db,
+            run=run,
+            max_items=body.max_items,
+        )
+        run = finalize_lifecycle_run(
+            db,
+            run=run,
+            status="completed",
+            summary=summary,
+            error_message=None,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive safety branch
+        if "run" in locals():
+            finalize_lifecycle_run(
+                db,
+                run=run,
+                status="failed",
+                summary={"error": "runtime_failure"},
+                error_message=str(exc),
+            )
+            db.commit()
+        raise ConsoleAPIError(500, "COMPLIANCE_LIFECYCLE_FAILED", "Compliance lifecycle run failed") from exc
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="compliance_lifecycle_run_requested",
+        entity_type="compliance_lifecycle_run",
+        entity_id=run.id,
+        client_id=context.client.id,
+        branch_id=resolved_branch_id,
+        payload={
+            "scope": run.scope,
+            "data_class": run.data_class,
+            "operation": run.operation,
+            "run_mode": run.run_mode,
+            "reason": reason,
+            "summary": run.summary_json or {},
+            "policy_version_id": str(run.policy_version_id) if run.policy_version_id else None,
+        },
+    )
+    db.commit()
+    records = list_lifecycle_records(db, run_id=run.id, limit=body.max_items)
+    return ConsoleComplianceLifecycleRunResponse(
+        success=True,
+        run=_serialize_compliance_lifecycle_run_record(run),
+        records=[_serialize_compliance_lifecycle_record(item) for item in records],
+    )
+
+
+@router.get(
+    "/admin/compliance-lifecycle/runs",
+    response_model=ConsoleComplianceLifecycleRunsResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def list_compliance_lifecycle_runs(
+    request: Request,
+    scope: Literal["client", "branch"] = Query("client"),
+    branch_id: Optional[UUID] = Query(None),
+    data_class: Optional[str] = Query(None),
+    operation: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleRunsResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=scope,
+        branch_id=branch_id,
+    )
+    try:
+        runs = list_lifecycle_runs(
+            db,
+            client_id=context.client.id,
+            scope=normalized_scope,
+            branch_id=resolved_branch_id,
+            data_class=data_class,
+            operation=operation,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+
+    return ConsoleComplianceLifecycleRunsResponse(
+        items=[_serialize_compliance_lifecycle_run_record(item) for item in runs]
+    )
+
+
+@router.get(
+    "/admin/compliance-lifecycle/runs/{run_id}",
+    response_model=ConsoleComplianceLifecycleRunResponse,
+    responses={
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def get_compliance_lifecycle_run(
+    run_id: UUID,
+    request: Request,
+    scope: Literal["client", "branch"] = Query("client"),
+    branch_id: Optional[UUID] = Query(None),
+    records_limit: int = Query(200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleRunResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=scope,
+        branch_id=branch_id,
+    )
+    run = get_lifecycle_run(
+        db,
+        run_id=run_id,
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+    )
+    if run is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Compliance lifecycle run not found")
+    records = list_lifecycle_records(db, run_id=run.id, limit=records_limit)
+    return ConsoleComplianceLifecycleRunResponse(
+        success=True,
+        run=_serialize_compliance_lifecycle_run_record(run),
+        records=[_serialize_compliance_lifecycle_record(item) for item in records],
     )
 
 
