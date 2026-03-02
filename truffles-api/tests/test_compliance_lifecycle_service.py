@@ -102,6 +102,7 @@ def test_execute_lifecycle_preview_creates_candidate_records(monkeypatch):
     assert summary["skipped_count"] == 0
     assert summary["error_count"] == 0
     assert summary["apply_actions"] is False
+    assert summary["approval_token"] is None
     assert summary["evidence_record_count"] == 2
     assert len(summary["evidence_digest"]) == 64
     assert summary["execution_action"] == "destruction_preview"
@@ -160,6 +161,7 @@ def test_execute_lifecycle_preview_manual_mode_sets_execution_action(monkeypatch
         run=run,
         max_items=10,
         apply_actions=True,
+        approval_token="CAB-9000",
     )
 
     assert summary["candidate_count"] == 1
@@ -167,10 +169,12 @@ def test_execute_lifecycle_preview_manual_mode_sets_execution_action(monkeypatch
     assert summary["skipped_count"] == 0
     assert summary["error_count"] == 0
     assert summary["apply_actions"] is True
+    assert summary["approval_token"] == "CAB-9000"
     assert summary["evidence_record_count"] == 1
     assert len(summary["evidence_digest"]) == 64
     assert summary["execution_action"] == "anonymize_record"
     assert captured[0]["payload"]["execution_action"] == "anonymize_record"
+    assert captured[0]["payload"]["approval_token"] == "CAB-9000"
     assert captured[0]["payload"]["applied"] is True
     assert captured[0]["payload"]["action_status"] == "anonymized"
     assert due_items[0].question_text == "[anonymized]"

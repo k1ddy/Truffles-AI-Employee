@@ -8152,6 +8152,7 @@ _COMPLIANCE_LIFECYCLE_PROFILE_DEFAULTS = {
         "max_items": 200,
     },
 }
+_COMPLIANCE_LIFECYCLE_APPLY_MAX_ITEMS = 50
 
 
 def _require_ops_access(context: ConsoleAuthContext, *, action: str = "read") -> None:
@@ -9134,6 +9135,7 @@ def _execute_compliance_lifecycle_preview_run(
     max_items: int,
     run_mode: str,
     apply_actions: bool = False,
+    approval_token: str | None = None,
 ) -> tuple[ComplianceLifecycleRun, list[ComplianceLifecycleRecord]]:
     run: ComplianceLifecycleRun | None = None
     try:
@@ -9174,6 +9176,7 @@ def _execute_compliance_lifecycle_preview_run(
             run=run,
             max_items=max_items,
             apply_actions=apply_actions,
+            approval_token=approval_token,
         )
         run = finalize_lifecycle_run(
             db,
@@ -9281,6 +9284,12 @@ async def _run_compliance_lifecycle_job(
         name="apply_actions",
         default=False,
     )
+    approval_token = _parse_ops_job_text_param(
+        params,
+        name="approval_token",
+        required=False,
+        max_length=64,
+    )
     reason = _parse_ops_job_text_param(params, name="reason", required=False, max_length=500)
     if apply_actions and mode != "execute":
         raise ConsoleAPIError(400, "INVALID_PARAM", "apply_actions requires execute mode")
@@ -9288,6 +9297,14 @@ async def _run_compliance_lifecycle_job(
         raise ConsoleAPIError(400, "INVALID_PARAM", "apply_actions requires lane=manual")
     if apply_actions and not reason:
         raise ConsoleAPIError(400, "INVALID_PARAM", "reason is required when apply_actions=true")
+    if apply_actions and not approval_token:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "approval_token is required when apply_actions=true")
+    if apply_actions and max_items > _COMPLIANCE_LIFECYCLE_APPLY_MAX_ITEMS:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"max_items must be <= {_COMPLIANCE_LIFECYCLE_APPLY_MAX_ITEMS} when apply_actions=true",
+        )
 
     resolved_scope, resolved_branch_id = _resolve_policy_registry_scope(
         db,
@@ -9327,6 +9344,7 @@ async def _run_compliance_lifecycle_job(
                     "profile": profile.strip().lower() if isinstance(profile, str) else None,
                     "cadence_minutes": cadence_minutes,
                     "apply_actions": apply_actions,
+                    "approval_token": approval_token,
                     "skipped": True,
                     "skip_reason": "cadence_not_due",
                     "last_run_job_id": str(recent_job.id),
@@ -9345,6 +9363,7 @@ async def _run_compliance_lifecycle_job(
         max_items=max_items,
         run_mode=lifecycle_run_mode,
         apply_actions=apply_actions,
+        approval_token=approval_token,
     )
     return {
         "mode": mode,
@@ -9359,6 +9378,7 @@ async def _run_compliance_lifecycle_job(
         "profile": profile.strip().lower() if isinstance(profile, str) else None,
         "cadence_minutes": cadence_minutes,
         "apply_actions": apply_actions,
+        "approval_token": approval_token,
         "run_mode": run.run_mode,
         "reason": reason,
         "run_id": str(run.id),

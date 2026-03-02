@@ -320,6 +320,7 @@ def execute_lifecycle_preview(
     run: ComplianceLifecycleRun,
     max_items: int,
     apply_actions: bool = False,
+    approval_token: str | None = None,
 ) -> dict[str, Any]:
     if run.data_class != "learned_responses":
         raise ValueError("unsupported data_class")
@@ -350,6 +351,11 @@ def execute_lifecycle_preview(
         destruction_mode=str(policy_mode) if policy_mode is not None else None,
     )
     should_apply_actions = bool(apply_actions and run_mode == "manual")
+    normalized_approval_token = (
+        str(approval_token).strip()
+        if isinstance(approval_token, str) and str(approval_token).strip()
+        else None
+    )
     created = 0
     applied_count = 0
     skipped_count = 0
@@ -366,6 +372,7 @@ def execute_lifecycle_preview(
             "anonymization_mode": item.anonymization_mode,
             "execution_action": execution_action,
             "apply_actions": should_apply_actions,
+            "approval_token": normalized_approval_token,
         }
         if run.operation == "destruction_preview":
             payload["planned_destruction_mode"] = policy_mode or "delete"
@@ -426,6 +433,7 @@ def execute_lifecycle_preview(
         "run_mode": run_mode,
         "execution_action": execution_action,
         "apply_actions": should_apply_actions,
+        "approval_token": normalized_approval_token,
         "data_class": run.data_class,
         "scope": run.scope,
     }

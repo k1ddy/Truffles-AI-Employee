@@ -126,6 +126,9 @@ Date
     - allowed only for `mode=execute`,
     - allowed only for `lane=manual`,
     - requires explicit `reason`.
+  - Added rollout controls for mutation lane:
+    - `approval_token` is mandatory when `apply_actions=true`,
+    - canary cap enforced: `max_items <= 50` for apply-actions.
   - Added apply-action execution outcomes in lifecycle service:
     - summary fields: `apply_actions`, `applied_count`, `skipped_count`, `error_count`,
     - per-record payload fields: `apply_actions`, `applied`, `action_status`, `apply_error` (on failure).
@@ -155,7 +158,7 @@ Date
 - `cd truffles-api && ruff check app/services/compliance_lifecycle_service.py tests/test_compliance_lifecycle_service.py app/routers/console.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `All checks passed`.
 - `cd truffles-api && pytest -q tests/test_compliance_lifecycle_service.py tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `33 passed`.
 - `cd truffles-api && ruff check app/services/compliance_lifecycle_service.py app/routers/console.py tests/test_compliance_lifecycle_service.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `All checks passed` (after apply-actions slice).
-- `cd truffles-api && pytest -q tests/test_compliance_lifecycle_service.py tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `37 passed`.
+- `cd truffles-api && pytest -q tests/test_compliance_lifecycle_service.py tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `39 passed`.
 
 ## Iteration budget outcomes
 - `Planned max runs` -> 0 expensive realism runs (analysis/doc sync only).

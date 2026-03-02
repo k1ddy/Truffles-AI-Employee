@@ -303,6 +303,48 @@ async def test_run_compliance_lifecycle_job_rejects_apply_actions_for_auto_lane(
 
 
 @pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_rejects_apply_actions_without_approval_token():
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router._run_compliance_lifecycle_job(
+            db,
+            context=context,
+            mode="execute",
+            params={
+                "apply_actions": True,
+                "reason": "approved compliance action",
+            },
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "approval_token is required when apply_actions=true" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_rejects_apply_actions_over_max_items():
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router._run_compliance_lifecycle_job(
+            db,
+            context=context,
+            mode="execute",
+            params={
+                "apply_actions": True,
+                "approval_token": "CAB-42",
+                "reason": "approved compliance action",
+                "max_items": 200,
+            },
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "max_items must be <=" in exc_info.value.message
+
+
+@pytest.mark.asyncio
 async def test_run_compliance_lifecycle_job_auto_lane_skips_when_not_due(monkeypatch):
     db = Mock()
     context = _mock_context(role="platform_admin")
@@ -436,6 +478,7 @@ async def test_run_compliance_lifecycle_job_execute_apply_actions_passed_to_exec
     def _fake_execute(*args, **kwargs):
         captured["run_mode"] = kwargs["run_mode"]
         captured["apply_actions"] = kwargs["apply_actions"]
+        captured["approval_token"] = kwargs["approval_token"]
         return run, records
 
     monkeypatch.setattr(console_router, "_execute_compliance_lifecycle_preview_run", _fake_execute)
@@ -447,14 +490,18 @@ async def test_run_compliance_lifecycle_job_execute_apply_actions_passed_to_exec
         params={
             "operation": "destruction_preview",
             "apply_actions": True,
+            "approval_token": "CAB-4242",
             "reason": "approved compliance action",
+            "max_items": 10,
         },
     )
 
     assert result["apply_actions"] is True
+    assert result["approval_token"] == "CAB-4242"
     assert result["skipped"] is False
     assert captured["run_mode"] == "manual"
     assert captured["apply_actions"] is True
+    assert captured["approval_token"] == "CAB-4242"
 
 
 @pytest.mark.asyncio
