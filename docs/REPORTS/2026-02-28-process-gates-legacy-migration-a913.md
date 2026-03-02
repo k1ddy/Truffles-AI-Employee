@@ -51,6 +51,11 @@
 - `delta_missing=20`
 - `delta_optional=20`
 
+## Owner closure decision
+- `PROCESS-GATES` phase is marked closed by owner decision for current program lane.
+- Remaining adoption/hygiene deltas (`legacy_missing/stale_active/done_cleanup_candidates`) are tracked as non-blocking backlog.
+- No cross-phase dependency lock is allowed from this block.
+
 ## Checks
 - `bash -n scripts/session_audit.sh scripts/session_check.sh scripts/session_gate.sh`
 - `SESSION_AGENT=a913 scripts/session_check.sh`
@@ -59,11 +64,10 @@
 - `jq` delta compare of before/after counts
 
 ## Risks / notes
-- Wave-1 intentionally keeps legacy in `optional`; strict mode migration stays for next blocks.
-- `stale_active` and `done_cleanup_candidates` remain high; requires separate hygiene waves.
+- Wave-1 intentionally keeps legacy in `optional`; strict mode promotion can be executed later as dedicated governance backlog.
+- `stale_active` and `done_cleanup_candidates` remain high and are treated as non-blocking hygiene backlog.
 
 ## Next block handoff
-- `UNLOCK`: `PROCESS-GATES-LEGACY-MIGRATION-WAVE2-2026Q2`
-- Suggested next cohort: next 20 stale `legacy_missing` sessions.
-- First command:
-  - `scripts/session_audit.sh --adoption-report-json /tmp/session_adoption_wave2_before.json`
+- `UNLOCK`: none (phase closed by owner decision)
+- Optional follow-up backlog command:
+  - `scripts/session_audit.sh --adoption-report-json /tmp/session_adoption_hygiene_followup.json`

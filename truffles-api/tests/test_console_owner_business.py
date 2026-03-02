@@ -420,6 +420,48 @@ def test_build_scope_incident_items_empty_for_healthy_signals() -> None:
     assert items == []
 
 
+def test_build_scope_incident_items_applies_sla_escalation_mapping(monkeypatch) -> None:
+    profile_id = uuid4()
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_sla_action_for_scope",
+        lambda *_args, **_kwargs: console_router._SlaActionResolution(
+            action="escalate",
+            profile_id=profile_id,
+            profile_version=4,
+            profile_scope="client",
+        ),
+    )
+
+    items = console_router._build_scope_incident_items(
+        scope="client",
+        signals=console_router._IncidentSignals(
+            outbox_backlog=600,
+            outbox_failed_24h=35,
+            pending_handovers=0,
+            integration_degraded_branches=0,
+            last_error="temporary provider timeout",
+        ),
+        detected_at=datetime.now(timezone.utc),
+        client_id=uuid4(),
+        company_id=uuid4(),
+        domain_key="beauty",
+        client_slug="demo",
+        branch_id=None,
+        branch_ids=None,
+        platform_scope=False,
+        db=SimpleNamespace(),
+    )
+
+    assert len(items) == 1
+    item = items[0]
+    assert item.metrics.get("sla_violation_action") == "escalate"
+    assert item.metrics.get("sla_profile_id") == str(profile_id)
+    assert item.metrics.get("sla_profile_version") == 4
+    assert item.metrics.get("sla_profile_scope") == "client"
+    assert "integration_reconcile_dry_run" in {action.id for action in item.actions}
+
+
 def test_build_scope_incident_items_includes_delivery_and_handover_risks() -> None:
     items = console_router._build_scope_incident_items(
         scope="client",

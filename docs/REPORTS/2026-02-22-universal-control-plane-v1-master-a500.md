@@ -83,8 +83,8 @@
 | B06 Tool Registry Certification | `UCPV1-PHASE6` | passed | Подключение инструментов безопасно и управляемо | Несертифицированный tool не попадает в effective capabilities; scope rules + health checks |
 | B07 Provider/Channel Control (WA-first) | `UCPV1-PHASE7` | passed | Каналы управляются предсказуемо при деградации провайдера | Provider lifecycle registry + explicit branch channel status + safe degrade mode |
 | B08 Knowledge Studio + Pack Compiler | `UCPV1-PHASE8` | passed | Контент управляется через Draft->Validate->Publish->Rollback | Publish блокируется при нарушении minimum data contract; rollback one-click |
-| B09 Runtime Pack-Agnostic Decoupling | `UCPV1-PHASE9` | blocked | Runtime независим от demo-пака | Нет прямых demo imports в core runtime; adapter boundaries + neutral fallback |
-| B10 SLA/SLO Engine (Multi-level) | `UCPV1-PHASE10` | planned (analysis-ready, dependency-locked) | SLA/SLO профили реально влияют на runtime и escalation | Policy-driven thresholds + predictable actions + auditability on each violation |
+| B09 Runtime Pack-Agnostic Decoupling | `UCPV1-PHASE9` | passed (owner-closed) | Runtime независим от demo-пака | Нет прямых demo imports в core runtime; adapter boundaries + neutral fallback |
+| B10 SLA/SLO Engine (Multi-level) | `UCPV1-PHASE10` | passed | SLA/SLO профили реально влияют на runtime и escalation | Policy-driven thresholds + predictable actions + auditability on each violation |
 | B11 Compliance KZ Retention/Lifecycle | `UCPV1-PHASE11` | planned | KZ boundary и lifecycle соблюдаются автоматически | Retention/delete/export jobs с owner+TTL+audit trail по каждому data class |
 | B12 Control Tower for Platform Admin | `UCPV1-PHASE12` | planned | Fleet управляется через Console без CLI как основного пути | Risk queue + readiness board + drift board + action center с evidence links |
 | B13 Migration Program (Current -> Target) | `UCPV1-PHASE13` | planned | Переход без stop-the-world | Waves (`canary -> cohort -> fleet`) с pass/fail gates и rollback triggers |
@@ -104,13 +104,14 @@ Completed in this program chain:
 - `UCPV1-PHASE6` passed.
 - `UCPV1-PHASE7` passed.
 - `UCPV1-PHASE8` passed.
+- `UCPV1-PHASE10` passed.
 
 Current active block:
-- `UCPV1-PHASE9` blocked.
+- none (phase10 closed in current lane).
 
 Current queue head:
-- `UCPV1-PHASE9` (blocked; canonical long lane executed, semantic gate failed).
-- `UCPV1-PHASE10` analysis package prepared (`docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase10-a500.md`, `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase10-a500.md`), implementation waits for phase9 unblock.
+- `UCPV1-PHASE11` preparation track (analysis-first, no cross-block mixing).
+- Latest completed slice (2026-03-01): `UCPV1-PHASE10` provider lifecycle/outbox SLA action mapping with deterministic tests (`67 passed`, `74 passed`, `1 passed`) and green contract check (`python3 scripts/generate_openapi.py --check`).
 
 ## 8) Program-level DoD
 

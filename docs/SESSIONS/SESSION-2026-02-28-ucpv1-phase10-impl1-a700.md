@@ -8,7 +8,7 @@
 - root_cause_gate: required
 - reuse_gate: required
 - release_safety_gate: required
-- branch: feat/2026-02-28-ucpv1-phase10-impl1-a700
+- branch: feat/2026-03-01-ucpv1-phase10-sla-actions-a700
 - worktree: /home/zhan/worktrees/2026-02-28-ucpv1-phase10-impl1-a700
 - base_ref: origin/main
 - scope: UCPV1 Phase10 slice1+slice2: SLA profile registry model/migration/service + console API (get/publish/rollback) + deterministic tests.
@@ -23,9 +23,11 @@
   - Wired collect-only runtime guard into webhook routing (`app/routers/webhook/guards.py`, `app/routers/webhook/decision.py`).
   - Wired SLA-aware threshold for no-response alerts and collect-only context handoff in reminders (`app/services/reminder_service.py`).
   - Added deterministic tests for runtime resolver + pending/reminder integration.
+  - Extended provider lifecycle/outbox incident mapping to apply effective SLA violation actions with profile/version evidence.
+  - Synced branch to `origin/main` by cherry-picking phase10 delta into `feat/2026-03-01-ucpv1-phase10-sla-actions-a700`.
 - next:
-  - Extend SLA violation action mapping from pending/reminder path to provider/outbox incident paths.
-  - Add console-facing evidence endpoint/view for recent applied SLA actions (profile/version/action).
+  - Update phase10 report with new evidence and residual-gap status.
+  - Prepare closure proposal (`in_progress -> passed`) once owner acceptance confirms final DoD.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase10-a500.md
   - truffles-api/migrations/046_add_sla_profile_versions.sql
@@ -42,4 +44,4 @@
   - truffles-api/tests/test_sla_runtime_service.py
   - truffles-api/tests/test_pending_pack_lexicons.py
   - truffles-api/tests/test_reminders.py
-- last_updated: 2026-02-28
+- last_updated: 2026-03-01
