@@ -23,7 +23,7 @@ import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
 type SessionData = ReturnType<typeof useSession>["data"];
 type ProvisioningBranch = components["schemas"]["ConsoleBranch"];
 type ProvisioningAgent = components["schemas"]["ConsoleAgent"];
-type RawCapabilitiesPayload = components["schemas"]["CapabilitiesPayload"];
+type RawCapabilitiesPayload = components["schemas"]["CapabilitiesPayload-Output"];
 type CapabilitiesPayload = RawCapabilitiesPayload & {
     channels: NonNullable<RawCapabilitiesPayload["channels"]>;
     providers: NonNullable<RawCapabilitiesPayload["providers"]>;

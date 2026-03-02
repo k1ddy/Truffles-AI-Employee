@@ -204,6 +204,34 @@ export function useTenantsDataQueries<TSnapshot>({
         enabled: tenantsEnabled && tenantLifecycle === "active" && tenantsPortfolioQuery.isError,
     });
 
+    const controlTowerActionCenterQuery = useQuery({
+        queryKey: ["tenants-control-tower-action-center", tenantLifecycle],
+        queryFn: async () => {
+            const response = await adminApi.getControlTowerActionCenter({
+                limit: 24,
+                stale_after_minutes: 60,
+                include_p2: "true",
+            });
+            return response.data;
+        },
+        enabled: tenantsEnabled && tenantLifecycle === "active",
+        staleTime: 30000,
+    });
+
+    const controlTowerMigrationProgramQuery = useQuery({
+        queryKey: ["tenants-control-tower-migration-program", tenantLifecycle],
+        queryFn: async () => {
+            const response = await adminApi.getControlTowerMigrationProgram({
+                limit: 24,
+                stale_after_minutes: 60,
+                include_p2: "true",
+            });
+            return response.data;
+        },
+        enabled: tenantsEnabled && tenantLifecycle === "active",
+        staleTime: 30000,
+    });
+
     const branchChangesQuery = useQuery({
         queryKey: ["tenants-branch-changes", branchEditorId],
         queryFn: async () => {
@@ -272,6 +300,8 @@ export function useTenantsDataQueries<TSnapshot>({
         clientsQuery,
         branchesQuery,
         fleetAttentionQuery,
+        controlTowerActionCenterQuery,
+        controlTowerMigrationProgramQuery,
         branchChangesQuery,
         recentBranchChangesKpiQuery,
         selectedClientAuditQuery,

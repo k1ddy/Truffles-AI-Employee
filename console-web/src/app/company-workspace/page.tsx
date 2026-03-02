@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import toast from "react-hot-toast";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import AccessDenied from "@/components/AccessDenied";
 import {
     adminApi,
@@ -41,7 +41,7 @@ type WorkspaceRecommendedActionContext = {
     branch_id: string;
     action: ProviderOpsAction;
     reasons: string[];
-    source: "queue" | "matrix";
+    source: string;
     captured_at: string;
 };
 
@@ -83,6 +83,47 @@ function readWorkspaceRecommendedActionContext(): WorkspaceRecommendedActionCont
     } catch {
         return null;
     }
+}
+
+function parseWorkspaceProviderAction(value?: string | null): ProviderOpsAction | null {
+    if (!value) {
+        return null;
+    }
+    const normalized = value.trim();
+    if (
+        normalized === "integration_reconcile"
+        || normalized === "provider_start_rebind"
+        || normalized === "provider_complete_rebind"
+        || normalized === "provider_renewal_confirmed"
+        || normalized === "provider_webhook_updated"
+        || normalized === "provider_send_reminder"
+    ) {
+        return normalized;
+    }
+    return null;
+}
+
+function readWorkspaceRecommendedActionFromQuery(
+    searchParams: ReturnType<typeof useSearchParams>,
+): WorkspaceRecommendedActionContext | null {
+    const branchId = (searchParams?.get("branch_id") ?? "").trim();
+    const recommendedAction = parseWorkspaceProviderAction(searchParams?.get("recommended_action"));
+    if (!branchId || !recommendedAction) {
+        return null;
+    }
+    const rawReasons = (searchParams?.get("action_reasons") ?? "").trim();
+    const reasons = rawReasons
+        .split(",")
+        .map((reason) => reason.trim())
+        .filter((reason) => reason.length > 0)
+        .slice(0, 8);
+    return {
+        branch_id: branchId,
+        action: recommendedAction,
+        reasons,
+        source: (searchParams?.get("action_source") ?? "query").trim() || "query",
+        captured_at: new Date().toISOString(),
+    };
 }
 
 function formatDateLabel(value?: string | null): string {
@@ -312,6 +353,8 @@ function workspaceIncidentStatePillClass(state: IncidentItem["incident_state"]):
 export default function CompanyWorkspacePage() {
     const { data: session } = useSession();
     const searchParams = useSearchParams();
+    const router = useRouter();
+    const pathname = usePathname();
     const { errors: inlineErrors, reportError, reportInlineError, clearErrors } = useInlineErrorSummary();
     const reportValidationError = (message: string, code = "VALIDATION_ERROR") => {
         reportInlineError({ code, message });
@@ -340,6 +383,26 @@ export default function CompanyWorkspacePage() {
     const focusedIncidentId = (searchParams?.get("incident_id") ?? "").trim();
     const focusedIncidentReason = (searchParams?.get("reason") ?? "").trim();
     const focusedIncidentBranchId = (searchParams?.get("branch_id") ?? "").trim();
+
+    const clearRecommendedActionQuery = () => {
+        if (!searchParams) {
+            return;
+        }
+        const nextParams = new URLSearchParams(searchParams.toString());
+        const keys = ["recommended_action", "action_source", "action_reasons", "action_mode", "origin_href"];
+        let changed = false;
+        for (const key of keys) {
+            if (nextParams.has(key)) {
+                nextParams.delete(key);
+                changed = true;
+            }
+        }
+        if (!changed) {
+            return;
+        }
+        const query = nextParams.toString();
+        router.replace(query ? `${pathname}?${query}` : pathname);
+    };
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -618,7 +681,9 @@ export default function CompanyWorkspacePage() {
     }, [selectedIntegration?.branch_id, selectedIntegration?.webhook_url]);
 
     useEffect(() => {
-        const recommendation = readWorkspaceRecommendedActionContext();
+        const recommendation =
+            readWorkspaceRecommendedActionFromQuery(searchParams)
+            ?? readWorkspaceRecommendedActionContext();
         if (!recommendation) {
             setRecommendedActionContext(null);
             return;
@@ -632,7 +697,7 @@ export default function CompanyWorkspacePage() {
             return;
         }
         setRecommendedActionContext(recommendation);
-    }, [scopeBranchId, selectedIntegration?.branch_id]);
+    }, [scopeBranchId, searchParams, selectedIntegration?.branch_id]);
 
     const createBranchConfirmation = async (
         branchId: string,
@@ -689,6 +754,7 @@ export default function CompanyWorkspacePage() {
             if (mode === "execute") {
                 writeBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
                 setRecommendedActionContext(null);
+                clearRecommendedActionQuery();
             }
             await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard(), refetchIncidents()]);
         } catch (error) {
@@ -1113,7 +1179,7 @@ export default function CompanyWorkspacePage() {
                     <div>
                         <h2 className="text-lg font-semibold">Следующее рекомендуемое действие</h2>
                         <p className="mt-1 text-xs text-muted-foreground">
-                            Авто-подсказка из Integrations Queue/Matrix. Ничего не выполняется автоматически.
+                            Подсказка из единой операционной очереди. Ничего не выполняется автоматически.
                         </p>
                     </div>
                     <span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
@@ -1176,6 +1242,7 @@ export default function CompanyWorkspacePage() {
                                 onClick={() => {
                                     writeBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
                                     setRecommendedActionContext(null);
+                                    clearRecommendedActionQuery();
                                 }}
                                 disabled={!!runningAction}
                                 data-testid="workspace-recommended-clear"
@@ -1186,7 +1253,7 @@ export default function CompanyWorkspacePage() {
                     </div>
                 ) : (
                     <div className="mt-3 rounded-lg border border-emerald-300/60 bg-emerald-50 p-3 text-xs text-emerald-800">
-                        Для текущего контекста нет активной подсказки. Используйте Integrations Queue/Matrix для выбора филиала с проблемой.
+                        Для текущего контекста нет активной подсказки. Используйте Tenants очередь задач или матрицу Integrations, чтобы выбрать филиал с проблемой.
                     </div>
                 )}
             </section>

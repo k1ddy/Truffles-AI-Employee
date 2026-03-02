@@ -53,7 +53,7 @@ export default function TenantsActionQueuePanel<T extends TenantsActionQueueItem
                 <div>
                     <h2 className="text-sm font-semibold">Приоритетные задачи</h2>
                     <p className="text-xs text-muted-foreground">
-                        Что важно сделать в первую очередь по текущему портфелю.
+                        Единая очередь действий: что делать в первую очередь по текущему портфелю.
                     </p>
                 </div>
                 <button className="btn-ghost" onClick={onRefresh} disabled={refreshing}>

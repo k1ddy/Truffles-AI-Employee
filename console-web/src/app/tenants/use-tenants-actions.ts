@@ -3,7 +3,7 @@
 import { type Dispatch, type SetStateAction, useCallback } from "react";
 import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
-import { adminApi, confirmationsApi } from "@/lib/api-client";
+import { adminApi, confirmationsApi, type ProviderOpsAction } from "@/lib/api-client";
 import {
     readConsoleContextScopeFromStorage,
     setConsoleContextScope,
@@ -22,6 +22,9 @@ type ActionQueueIntent =
     | "set_context"
     | "open_cases"
     | "open_integrations"
+    | "open_ops"
+    | "open_workspace"
+    | "open_workspace_execute"
     | "workspace_portfolio"
     | "workspace_onboarding"
     | "workspace_changes"
@@ -31,8 +34,15 @@ type ActionQueueItemForIntent = {
     intent: ActionQueueIntent;
     clientId?: string | null;
     companyId?: string | null;
+    branchId?: string | null;
+    actionHref?: string | null;
+    incidentId?: string | null;
+    source?: "incident" | "provider_ops" | "readiness";
+    providerAction?: ProviderOpsAction | null;
+    mode?: "dry_run" | "execute" | null;
+    reasons?: string[];
 };
-type ClientTargetPath = "/" | "/integrations" | "/ops";
+type ClientTargetPath = string;
 type ClientLifecycleMode = "archive" | "restore";
 type ClientLifecycleAuditSource = "session" | "api";
 
@@ -438,6 +448,57 @@ export function useTenantsActions({
         }, 120);
     }, [setTenantLifecycle, setWorkspaceMode]);
 
+    const openWorkspaceTarget = useCallback((item: ActionQueueItemForIntent) => {
+        const storedScope = readConsoleContextScopeFromStorage();
+        const nextScopeCandidate = validateScopeForBranchActions(
+            {
+                companyId: item.companyId ?? pageFilterCompanyId ?? storedScope.companyId,
+                clientId: item.clientId ?? pageFilterClientId ?? storedScope.clientId,
+                branchId: item.branchId ?? null,
+            },
+            "Открыть действие в Workspace",
+        );
+        if (!nextScopeCandidate) {
+            return;
+        }
+        const nextScope = writeContextScope({
+            companyId: nextScopeCandidate.companyId,
+            clientId: nextScopeCandidate.clientId,
+            branchId: nextScopeCandidate.branchId,
+        });
+
+        const params = new URLSearchParams();
+        if (nextScope.branchId) {
+            params.set("branch_id", nextScope.branchId);
+        }
+        if (item.providerAction) {
+            params.set("recommended_action", item.providerAction);
+        }
+        if (item.mode) {
+            params.set("action_mode", item.mode);
+        }
+        if (item.source) {
+            params.set("action_source", item.source);
+        }
+        if (item.incidentId) {
+            params.set("incident_id", item.incidentId);
+        }
+        if (item.reasons?.length) {
+            params.set("action_reasons", item.reasons.slice(0, 6).join(","));
+        }
+        if (item.actionHref) {
+            params.set("origin_href", item.actionHref);
+        }
+        const query = params.toString();
+        navigateTo(query ? `/company-workspace?${query}` : "/company-workspace");
+    }, [
+        navigateTo,
+        pageFilterClientId,
+        pageFilterCompanyId,
+        validateScopeForBranchActions,
+        writeContextScope,
+    ]);
+
     const runActionQueueIntent = useCallback((item: ActionQueueItemForIntent) => {
         if (item.intent === "set_context") {
             setClientContextAndPageFilters(item.clientId, item.companyId);
@@ -449,6 +510,14 @@ export function useTenantsActions({
         }
         if (item.intent === "open_integrations") {
             openClientContextTarget("/integrations", item.clientId, item.companyId);
+            return;
+        }
+        if (item.intent === "open_ops") {
+            openClientContextTarget("/ops", item.clientId, item.companyId);
+            return;
+        }
+        if (item.intent === "open_workspace" || item.intent === "open_workspace_execute") {
+            openWorkspaceTarget(item);
             return;
         }
         if (item.intent === "workspace_portfolio") {
@@ -482,7 +551,7 @@ export function useTenantsActions({
                 sectionTestId: "tenants-decommission-center",
             });
         }
-    }, [focusWorkspaceSection, openClientContextTarget, setClientContextAndPageFilters]);
+    }, [focusWorkspaceSection, openClientContextTarget, openWorkspaceTarget, setClientContextAndPageFilters]);
 
     const runKpiAction = useCallback((action: OperationalKpiAction) => {
         if (action === "onboarding") {

@@ -1053,6 +1053,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/admin/marketing/segments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Marketing Segments Catalog */
+        get: operations["get_marketing_segments_catalog_console_v1_admin_marketing_segments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/admin/marketing/campaigns": {
         parameters: {
             query?: never;
@@ -1335,6 +1352,108 @@ export interface paths {
         };
         /** List Admin Incidents */
         get: operations["list_admin_incidents_console_v1_admin_incidents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/control-tower/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Admin Control Tower Overview */
+        get: operations["get_admin_control_tower_overview_console_v1_admin_control_tower_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/control-tower/readiness-board": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Admin Control Tower Readiness Board */
+        get: operations["get_admin_control_tower_readiness_board_console_v1_admin_control_tower_readiness_board_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/control-tower/drift-board": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Admin Control Tower Drift Board */
+        get: operations["get_admin_control_tower_drift_board_console_v1_admin_control_tower_drift_board_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/control-tower/action-center": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Admin Control Tower Action Center */
+        get: operations["get_admin_control_tower_action_center_console_v1_admin_control_tower_action_center_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/control-tower/migration-program": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Admin Control Tower Migration Program */
+        get: operations["get_admin_control_tower_migration_program_console_v1_admin_control_tower_migration_program_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/control-tower/migration-program/{wave}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Admin Control Tower Migration Wave Detail */
+        get: operations["get_admin_control_tower_migration_wave_detail_console_v1_admin_control_tower_migration_program__wave__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1702,6 +1821,245 @@ export interface paths {
         patch: operations["patch_capabilities_console_v1_admin_capabilities_patch"];
         trace?: never;
     };
+    "/console/v1/admin/policy-registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Policy Registry */
+        get: operations["get_policy_registry_console_v1_admin_policy_registry_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/policy-registry/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Policy Registry */
+        post: operations["publish_policy_registry_console_v1_admin_policy_registry_publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/policy-registry/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Policy Registry */
+        post: operations["rollback_policy_registry_console_v1_admin_policy_registry_rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/compliance-policy-registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Compliance Policy Registry */
+        get: operations["get_compliance_policy_registry_console_v1_admin_compliance_policy_registry_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/compliance-policy-registry/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Compliance Policy Registry */
+        post: operations["publish_compliance_policy_registry_console_v1_admin_compliance_policy_registry_publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/compliance-policy-registry/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Compliance Policy Registry */
+        post: operations["rollback_compliance_policy_registry_console_v1_admin_compliance_policy_registry_rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/compliance-lifecycle/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Compliance Lifecycle Runs */
+        get: operations["list_compliance_lifecycle_runs_console_v1_admin_compliance_lifecycle_runs_get"];
+        put?: never;
+        /** Run Compliance Lifecycle */
+        post: operations["run_compliance_lifecycle_console_v1_admin_compliance_lifecycle_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/compliance-lifecycle/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Compliance Lifecycle Run */
+        get: operations["get_compliance_lifecycle_run_console_v1_admin_compliance_lifecycle_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/compliance-lifecycle/runs/{run_id}/artifact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Compliance Lifecycle Artifact */
+        get: operations["get_compliance_lifecycle_artifact_console_v1_admin_compliance_lifecycle_runs__run_id__artifact_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/sla-profile-registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Sla Profile Registry */
+        get: operations["get_sla_profile_registry_console_v1_admin_sla_profile_registry_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/sla-profile-registry/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Sla Profile Registry */
+        post: operations["publish_sla_profile_registry_console_v1_admin_sla_profile_registry_publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/sla-profile-registry/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Sla Profile Registry */
+        post: operations["rollback_sla_profile_registry_console_v1_admin_sla_profile_registry_rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/tool-registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tool Registry */
+        get: operations["list_tool_registry_console_v1_admin_tool_registry_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/tool-registry/{tool_action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upsert Tool Registry */
+        put: operations["upsert_tool_registry_console_v1_admin_tool_registry__tool_action__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/admin/onboarding-contract": {
         parameters: {
             query?: never;
@@ -1749,6 +2107,41 @@ export interface paths {
         /** Run Onboarding Autopilot */
         post: operations["run_onboarding_autopilot_console_v1_admin_onboarding_autopilot_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/domain-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Domain Catalog */
+        get: operations["list_domain_catalog_console_v1_admin_domain_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/domain-catalog/{domain_slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upsert Domain Catalog */
+        put: operations["upsert_domain_catalog_console_v1_admin_domain_catalog__domain_slug__put"];
+        post?: never;
+        /** Disable Domain Catalog */
+        delete: operations["disable_domain_catalog_console_v1_admin_domain_catalog__domain_slug__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2167,13 +2560,32 @@ export interface components {
             items: components["schemas"]["BookingResponse"][];
         };
         /** CapabilitiesPayload */
-        CapabilitiesPayload: {
+        "CapabilitiesPayload-Input": {
             /** Domain Slug */
             domain_slug?: string | null;
             channels?: components["schemas"]["CapabilityChannels"];
             providers?: components["schemas"]["CapabilityProviders"];
             features?: components["schemas"]["CapabilityFeatures"];
             tools?: components["schemas"]["CapabilityTools"];
+            policy_overrides?: components["schemas"]["CapabilityPolicyOverrides"];
+            /** Allowed Fact Scopes */
+            allowed_fact_scopes?: string[] | null;
+            /** Handoff Policy */
+            handoff_policy?: ("allow" | "manager_request_only" | "deny") | null;
+        };
+        /** CapabilitiesPayload */
+        "CapabilitiesPayload-Output": {
+            /** Domain Slug */
+            domain_slug?: string | null;
+            channels?: components["schemas"]["CapabilityChannels"];
+            providers?: components["schemas"]["CapabilityProviders"];
+            features?: components["schemas"]["CapabilityFeatures"];
+            tools?: components["schemas"]["CapabilityTools"];
+            policy_overrides?: components["schemas"]["CapabilityPolicyOverrides"];
+            /** Allowed Fact Scopes */
+            allowed_fact_scopes?: string[] | null;
+            /** Handoff Policy */
+            handoff_policy?: ("allow" | "manager_request_only" | "deny") | null;
         };
         /** CapabilityChannels */
         CapabilityChannels: {
@@ -2195,6 +2607,16 @@ export interface components {
             /** Auto Learn */
             auto_learn?: boolean | null;
         };
+        /** CapabilityPolicyOverrides */
+        CapabilityPolicyOverrides: {
+            payment_info?: components["schemas"]["CapabilityPolicySectionOverride"] | null;
+            discounts?: components["schemas"]["CapabilityPolicySectionOverride"] | null;
+        };
+        /** CapabilityPolicySectionOverride */
+        CapabilityPolicySectionOverride: {
+            /** Response */
+            response?: string | null;
+        };
         /** CapabilityProviders */
         CapabilityProviders: {
             /** Availability Provider */
@@ -2210,6 +2632,527 @@ export interface components {
             allow?: string[] | null;
             /** Deny */
             deny?: string[] | null;
+        };
+        /** CompliancePolicyPayload */
+        CompliancePolicyPayload: {
+            /**
+             * Policy Name
+             * @default default
+             */
+            policy_name: string;
+            /**
+             * Legal Basis
+             * @default legal_obligation
+             * @enum {string}
+             */
+            legal_basis: "consent" | "contract" | "legal_obligation" | "legitimate_interest" | "vital_interest" | "other";
+            /**
+             * Retention Days
+             * @default 365
+             */
+            retention_days: number;
+            /**
+             * Export Mode
+             * @default on_demand
+             * @enum {string}
+             */
+            export_mode: "on_demand" | "scheduled" | "disabled";
+            /**
+             * Destruction Mode
+             * @default delete
+             * @enum {string}
+             */
+            destruction_mode: "delete" | "anonymize" | "archive";
+            /**
+             * Kz Storage Required
+             * @default true
+             */
+            kz_storage_required: boolean;
+            /** Notes */
+            notes?: string | null;
+        };
+        /** ConsoleAdminControlTowerActionCenterResponse */
+        ConsoleAdminControlTowerActionCenterResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Stale After Minutes */
+            stale_after_minutes: number;
+            /** Limit */
+            limit: number;
+            /**
+             * Include P2
+             * @default true
+             */
+            include_p2: boolean;
+            summary: components["schemas"]["ConsoleAdminControlTowerActionCenterSummary"];
+            /**
+             * Top Reasons
+             * @default []
+             */
+            top_reasons: components["schemas"]["ConsoleAdminControlTowerIssueCount"][];
+            /** Items */
+            items: components["schemas"]["ConsoleAdminControlTowerActionItem"][];
+        };
+        /** ConsoleAdminControlTowerActionCenterSummary */
+        ConsoleAdminControlTowerActionCenterSummary: {
+            /** Total Actions */
+            total_actions: number;
+            /** P0 Actions */
+            p0_actions: number;
+            /** P1 Actions */
+            p1_actions: number;
+            /** P2 Actions */
+            p2_actions: number;
+            /** Incident Actions */
+            incident_actions: number;
+            /** Provider Ops Actions */
+            provider_ops_actions: number;
+            /** Readiness Actions */
+            readiness_actions: number;
+        };
+        /** ConsoleAdminControlTowerActionItem */
+        ConsoleAdminControlTowerActionItem: {
+            /** Id */
+            id: string;
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "p0" | "p1" | "p2";
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "incident" | "provider_ops" | "readiness";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "navigate" | "ops_job" | "provider_action";
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /**
+             * Reasons
+             * @default []
+             */
+            reasons: string[];
+            /** Href */
+            href?: string | null;
+            /** Incident Id */
+            incident_id?: string | null;
+            /** Client Id */
+            client_id?: string | null;
+            /** Client Slug */
+            client_slug?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Branch Slug */
+            branch_slug?: string | null;
+            /** Branch Name */
+            branch_name?: string | null;
+            /** Job Type */
+            job_type?: ("outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state" | "compliance_lifecycle") | null;
+            /** Mode */
+            mode?: ("dry_run" | "execute") | null;
+            /** Params */
+            params?: Record<string, never> | null;
+            /** Provider Action */
+            provider_action?: string | null;
+            /**
+             * Requires Confirmation
+             * @default false
+             */
+            requires_confirmation: boolean;
+            /**
+             * Evidence Links
+             * @default []
+             */
+            evidence_links: string[];
+        };
+        /** ConsoleAdminControlTowerDriftBoardResponse */
+        ConsoleAdminControlTowerDriftBoardResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Stale After Minutes */
+            stale_after_minutes: number;
+            /** Limit */
+            limit: number;
+            /**
+             * Only Problematic
+             * @default true
+             */
+            only_problematic: boolean;
+            summary: components["schemas"]["ConsoleAdminControlTowerDriftSummary"];
+            /**
+             * Top Issues
+             * @default []
+             */
+            top_issues: components["schemas"]["ConsoleAdminControlTowerIssueCount"][];
+            /** Items */
+            items: components["schemas"]["ConsoleProviderLifecycleItem"][];
+            /**
+             * Provider Ops Queue
+             * @default []
+             */
+            provider_ops_queue: components["schemas"]["ConsoleProviderOpsQueueItem"][];
+        };
+        /** ConsoleAdminControlTowerDriftSummary */
+        ConsoleAdminControlTowerDriftSummary: {
+            /** Total Branches */
+            total_branches: number;
+            /** Ok Branches */
+            ok_branches: number;
+            /** Warn Branches */
+            warn_branches: number;
+            /** Error Branches */
+            error_branches: number;
+            /** Degraded Branches */
+            degraded_branches: number;
+            /** Queue P0 */
+            queue_p0: number;
+            /** Queue P1 */
+            queue_p1: number;
+            /** Queue P2 */
+            queue_p2: number;
+        };
+        /** ConsoleAdminControlTowerIssueCount */
+        ConsoleAdminControlTowerIssueCount: {
+            /** Code */
+            code: string;
+            /** Count */
+            count: number;
+        };
+        /** ConsoleAdminControlTowerMigrationProgramResponse */
+        ConsoleAdminControlTowerMigrationProgramResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Stale After Minutes */
+            stale_after_minutes: number;
+            /** Limit */
+            limit: number;
+            /**
+             * Include P2
+             * @default true
+             */
+            include_p2: boolean;
+            summary: components["schemas"]["ConsoleAdminControlTowerMigrationProgramSummary"];
+            /** Waves */
+            waves: components["schemas"]["ConsoleAdminControlTowerMigrationWave"][];
+            /**
+             * Signals
+             * @default []
+             */
+            signals: components["schemas"]["ConsoleAdminControlTowerMigrationSignal"][];
+            /**
+             * Promotion Actions
+             * @default []
+             */
+            promotion_actions: components["schemas"]["ConsoleAdminControlTowerPromotionAction"][];
+        };
+        /** ConsoleAdminControlTowerMigrationProgramSummary */
+        ConsoleAdminControlTowerMigrationProgramSummary: {
+            /** Active Clients Total */
+            active_clients_total: number;
+            /** Total Branches */
+            total_branches: number;
+            /** Ready Branches */
+            ready_branches: number;
+            /** Blocked Branches */
+            blocked_branches: number;
+            /** P0 Actions */
+            p0_actions: number;
+            /** P1 Actions */
+            p1_actions: number;
+            /** P2 Actions */
+            p2_actions: number;
+            /** Waves Go */
+            waves_go: number;
+            /** Waves Hold */
+            waves_hold: number;
+        };
+        /** ConsoleAdminControlTowerMigrationSignal */
+        ConsoleAdminControlTowerMigrationSignal: {
+            /** Code */
+            code: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "warn" | "fail";
+            /** Value */
+            value: number;
+            /** Threshold */
+            threshold: number;
+            /** Note */
+            note?: string | null;
+        };
+        /** ConsoleAdminControlTowerMigrationWave */
+        ConsoleAdminControlTowerMigrationWave: {
+            /**
+             * Wave
+             * @enum {string}
+             */
+            wave: "canary" | "cohort" | "fleet";
+            /**
+             * Gate
+             * @enum {string}
+             */
+            gate: "go" | "hold";
+            /** Reason */
+            reason: string;
+            /** Candidate Clients Total */
+            candidate_clients_total: number;
+            /** Candidate Branches Total */
+            candidate_branches_total: number;
+            /** Blockers Total */
+            blockers_total: number;
+            /**
+             * Rollback Triggers
+             * @default []
+             */
+            rollback_triggers: string[];
+            /**
+             * Top Blockers
+             * @default []
+             */
+            top_blockers: components["schemas"]["ConsoleAdminControlTowerIssueCount"][];
+        };
+        /** ConsoleAdminControlTowerMigrationWaveDetailResponse */
+        ConsoleAdminControlTowerMigrationWaveDetailResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Stale After Minutes */
+            stale_after_minutes: number;
+            /** Limit */
+            limit: number;
+            /**
+             * Include P2
+             * @default true
+             */
+            include_p2: boolean;
+            /**
+             * Wave
+             * @enum {string}
+             */
+            wave: "canary" | "cohort" | "fleet";
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "promote" | "hold";
+            /** Reason */
+            reason: string;
+            summary: components["schemas"]["ConsoleAdminControlTowerMigrationProgramSummary"];
+            wave_state: components["schemas"]["ConsoleAdminControlTowerMigrationWave"];
+            /**
+             * Signals
+             * @default []
+             */
+            signals: components["schemas"]["ConsoleAdminControlTowerMigrationSignal"][];
+            /** Promotion Actions Total */
+            promotion_actions_total: number;
+            /**
+             * Promotion Actions
+             * @default []
+             */
+            promotion_actions: components["schemas"]["ConsoleAdminControlTowerPromotionAction"][];
+        };
+        /** ConsoleAdminControlTowerOverviewResponse */
+        ConsoleAdminControlTowerOverviewResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Stale After Minutes */
+            stale_after_minutes: number;
+            /** Attention Limit */
+            attention_limit: number;
+            /** Incident Limit */
+            incident_limit: number;
+            /** Ops Jobs Limit */
+            ops_jobs_limit: number;
+            summary: components["schemas"]["ConsoleAdminControlTowerOverviewSummary"];
+            fleet_attention: components["schemas"]["ConsoleFleetAttentionResponse"];
+            incidents: components["schemas"]["ConsoleIncidentListResponse"];
+            /** Recent Ops Jobs */
+            recent_ops_jobs: components["schemas"]["ConsoleOpsJobRecord"][];
+            /** Ops Job Catalog */
+            ops_job_catalog: components["schemas"]["ConsoleOpsJobDefinition"][];
+        };
+        /** ConsoleAdminControlTowerOverviewSummary */
+        ConsoleAdminControlTowerOverviewSummary: {
+            /** Active Clients Total */
+            active_clients_total: number;
+            /** Clients With Attention */
+            clients_with_attention: number;
+            /** High Risk Clients */
+            high_risk_clients: number;
+            /** Incidents Total */
+            incidents_total: number;
+            /** Incidents Critical */
+            incidents_critical: number;
+            /** Incidents Warn */
+            incidents_warn: number;
+            /** Incidents Info */
+            incidents_info: number;
+            /** Ops Jobs Total 24H */
+            ops_jobs_total_24h: number;
+            /** Ops Jobs Failed 24H */
+            ops_jobs_failed_24h: number;
+        };
+        /** ConsoleAdminControlTowerPromotionAction */
+        ConsoleAdminControlTowerPromotionAction: {
+            /** Id */
+            id: string;
+            /**
+             * Wave
+             * @enum {string}
+             */
+            wave: "canary" | "cohort" | "fleet";
+            /**
+             * Gate
+             * @enum {string}
+             */
+            gate: "go" | "hold";
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "p0" | "p1" | "p2";
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "incident" | "provider_ops" | "readiness";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "navigate" | "ops_job" | "provider_action";
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /**
+             * Reasons
+             * @default []
+             */
+            reasons: string[];
+            /** Href */
+            href?: string | null;
+            /** Job Type */
+            job_type?: ("outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state" | "compliance_lifecycle") | null;
+            /** Mode */
+            mode?: ("dry_run" | "execute") | null;
+            /** Params */
+            params?: Record<string, never> | null;
+            /**
+             * Evidence Links
+             * @default []
+             */
+            evidence_links: string[];
+        };
+        /** ConsoleAdminControlTowerReadinessBoardResponse */
+        ConsoleAdminControlTowerReadinessBoardResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Limit */
+            limit: number;
+            /**
+             * Include Ready
+             * @default false
+             */
+            include_ready: boolean;
+            summary: components["schemas"]["ConsoleAdminControlTowerReadinessSummary"];
+            /**
+             * Top Blockers
+             * @default []
+             */
+            top_blockers: components["schemas"]["ConsoleAdminControlTowerIssueCount"][];
+            /** Items */
+            items: components["schemas"]["ConsoleAdminControlTowerReadinessItem"][];
+        };
+        /** ConsoleAdminControlTowerReadinessItem */
+        ConsoleAdminControlTowerReadinessItem: {
+            /** Company Id */
+            company_id?: string | null;
+            /** Company Name */
+            company_name?: string | null;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Client Slug */
+            client_slug: string;
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /** Branch Slug */
+            branch_slug: string;
+            /** Branch Name */
+            branch_name: string;
+            /**
+             * Current Step
+             * @enum {string}
+             */
+            current_step: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
+            /**
+             * Scorecard Status
+             * @enum {string}
+             */
+            scorecard_status: "pass" | "fail";
+            /**
+             * Readiness Status
+             * @enum {string}
+             */
+            readiness_status: "pass" | "warn" | "fail";
+            /**
+             * Hard Gate Status
+             * @enum {string}
+             */
+            hard_gate_status: "pass" | "fail";
+            /** Ready */
+            ready: boolean;
+            /** Go Live State */
+            go_live_state: string;
+            /**
+             * Integration State
+             * @default ok
+             * @enum {string}
+             */
+            integration_state: "ok" | "degraded";
+            /**
+             * Missing
+             * @default []
+             */
+            missing: string[];
+            /**
+             * Hard Gate Blockers
+             * @default []
+             */
+            hard_gate_blockers: string[];
+        };
+        /** ConsoleAdminControlTowerReadinessSummary */
+        ConsoleAdminControlTowerReadinessSummary: {
+            /** Total Branches */
+            total_branches: number;
+            /** Ready Branches */
+            ready_branches: number;
+            /** Blocked Branches */
+            blocked_branches: number;
+            /** Hard Gate Failed Branches */
+            hard_gate_failed_branches: number;
+            /** Go Live Draft Branches */
+            go_live_draft_branches: number;
+            /** Go Live Approved Branches */
+            go_live_approved_branches: number;
+            /** Go Live Rejected Branches */
+            go_live_rejected_branches: number;
+            /** Degraded Branches */
+            degraded_branches: number;
         };
         /** ConsoleAgent */
         ConsoleAgent: {
@@ -2974,7 +3917,7 @@ export interface components {
             status?: ("active" | "disabled") | null;
             /** Schema Version */
             schema_version?: string | null;
-            payload: components["schemas"]["CapabilitiesPayload"];
+            payload: components["schemas"]["CapabilitiesPayload-Input"];
         };
         /** ConsoleCapabilitiesRecord */
         ConsoleCapabilitiesRecord: {
@@ -3002,7 +3945,7 @@ export interface components {
             status: "active" | "disabled";
             /** Schema Version */
             schema_version: string;
-            payload: components["schemas"]["CapabilitiesPayload"];
+            payload: components["schemas"]["CapabilitiesPayload-Output"];
             /** Created By */
             created_by?: string | null;
             /** Created At */
@@ -3019,7 +3962,7 @@ export interface components {
             client_id: string;
             /** Branch Id */
             branch_id?: string | null;
-            effective: components["schemas"]["CapabilitiesPayload"];
+            effective: components["schemas"]["CapabilitiesPayload-Output"];
             client_capabilities?: components["schemas"]["ConsoleCapabilitiesRecord"] | null;
             branch_capabilities?: components["schemas"]["ConsoleCapabilitiesRecord"] | null;
         };
@@ -3255,6 +4198,338 @@ export interface components {
             /** Billing Info */
             billing_info?: Record<string, never> | null;
         };
+        /** ConsoleComplianceLifecycleArtifactRecord */
+        ConsoleComplianceLifecycleArtifactRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Data Class */
+            data_class: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "retention_scan" | "export_preview" | "destruction_preview";
+            /**
+             * Run Mode
+             * @enum {string}
+             */
+            run_mode: "preview" | "manual";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "completed" | "failed";
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Artifact Type
+             * @constant
+             */
+            artifact_type: "compliance_lifecycle_evidence";
+            /** Artifact Digest */
+            artifact_digest: string;
+            /**
+             * Payload
+             * @default {}
+             */
+            payload: Record<string, never>;
+            /**
+             * Records Count
+             * @default 0
+             */
+            records_count: number;
+            /**
+             * Evidence Record Count
+             * @default 0
+             */
+            evidence_record_count: number;
+            /** Published By */
+            published_by?: string | null;
+            /** Published At */
+            published_at?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleComplianceLifecycleArtifactResponse */
+        ConsoleComplianceLifecycleArtifactResponse: {
+            /** Success */
+            success: boolean;
+            artifact: components["schemas"]["ConsoleComplianceLifecycleArtifactRecord"];
+        };
+        /** ConsoleComplianceLifecycleRecord */
+        ConsoleComplianceLifecycleRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Entity Type */
+            entity_type: string;
+            /** Entity Id */
+            entity_id?: string | null;
+            /** Action */
+            action: string;
+            /**
+             * Result
+             * @enum {string}
+             */
+            result: "candidate" | "skipped" | "error";
+            /**
+             * Payload
+             * @default {}
+             */
+            payload: Record<string, never>;
+            /** Occurred At */
+            occurred_at?: string | null;
+        };
+        /** ConsoleComplianceLifecycleRunRecord */
+        ConsoleComplianceLifecycleRunRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Data Class */
+            data_class: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "retention_scan" | "export_preview" | "destruction_preview";
+            /**
+             * Run Mode
+             * @enum {string}
+             */
+            run_mode: "preview" | "manual";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "completed" | "failed";
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Policy Version Id */
+            policy_version_id?: string | null;
+            /** Policy Scope */
+            policy_scope?: string | null;
+            /**
+             * Summary
+             * @default {}
+             */
+            summary: Record<string, never>;
+            /** Error Message */
+            error_message?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Triggered By */
+            triggered_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleComplianceLifecycleRunRequest */
+        ConsoleComplianceLifecycleRunRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Data Class
+             * @default learned_responses
+             * @constant
+             */
+            data_class: "learned_responses";
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "retention_scan" | "export_preview" | "destruction_preview";
+            /** Run Mode */
+            run_mode?: ("preview" | "manual") | null;
+            /**
+             * Max Items
+             * @default 200
+             */
+            max_items: number;
+            /** Reason */
+            reason: string;
+        };
+        /** ConsoleComplianceLifecycleRunResponse */
+        ConsoleComplianceLifecycleRunResponse: {
+            /** Success */
+            success: boolean;
+            run: components["schemas"]["ConsoleComplianceLifecycleRunRecord"];
+            /**
+             * Records
+             * @default []
+             */
+            records: components["schemas"]["ConsoleComplianceLifecycleRecord"][];
+        };
+        /** ConsoleComplianceLifecycleRunsResponse */
+        ConsoleComplianceLifecycleRunsResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleComplianceLifecycleRunRecord"][];
+        };
+        /** ConsoleCompliancePolicyRegistryMutationResponse */
+        ConsoleCompliancePolicyRegistryMutationResponse: {
+            /** Success */
+            success: boolean;
+            record: components["schemas"]["ConsoleCompliancePolicyVersionRecord"];
+            /** From Version Id */
+            from_version_id?: string | null;
+        };
+        /** ConsoleCompliancePolicyRegistryPublishRequest */
+        ConsoleCompliancePolicyRegistryPublishRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "global" | "domain" | "client" | "branch";
+            /** Data Class */
+            data_class: string;
+            /** Domain Key */
+            domain_key?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Schema Version */
+            schema_version?: string | null;
+            /** Reason */
+            reason: string;
+            payload: components["schemas"]["CompliancePolicyPayload"];
+        };
+        /** ConsoleCompliancePolicyRegistryResponse */
+        ConsoleCompliancePolicyRegistryResponse: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "global" | "domain" | "client" | "branch";
+            /** Data Class */
+            data_class: string;
+            /** Company Id */
+            company_id?: string | null;
+            /** Domain Key */
+            domain_key?: string | null;
+            /** Client Id */
+            client_id?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            active?: components["schemas"]["ConsoleCompliancePolicyVersionRecord"] | null;
+            /**
+             * History
+             * @default []
+             */
+            history: components["schemas"]["ConsoleCompliancePolicyVersionRecord"][];
+        };
+        /** ConsoleCompliancePolicyRegistryRollbackRequest */
+        ConsoleCompliancePolicyRegistryRollbackRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "global" | "domain" | "client" | "branch";
+            /** Data Class */
+            data_class: string;
+            /** Domain Key */
+            domain_key?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Target Version Id
+             * Format: uuid
+             */
+            target_version_id: string;
+            /** Reason */
+            reason: string;
+        };
+        /** ConsoleCompliancePolicyVersionRecord */
+        ConsoleCompliancePolicyVersionRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "global" | "domain" | "client" | "branch";
+            /** Data Class */
+            data_class: string;
+            /** Company Id */
+            company_id?: string | null;
+            /** Domain Key */
+            domain_key?: string | null;
+            /** Client Id */
+            client_id?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "published" | "archived";
+            /** Schema Version */
+            schema_version: string;
+            /** Version Number */
+            version_number: number;
+            payload: components["schemas"]["CompliancePolicyPayload"];
+            /** Reason */
+            reason?: string | null;
+            /** Source Version Id */
+            source_version_id?: string | null;
+            /** Created By */
+            created_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Published By */
+            published_by?: string | null;
+            /** Published At */
+            published_at?: string | null;
+        };
         /** ConsoleConfirmationCreateRequest */
         ConsoleConfirmationCreateRequest: {
             /**
@@ -3344,6 +4619,55 @@ export interface components {
             metric_meta: {
                 [key: string]: components["schemas"]["ConsoleMetricFactMeta"];
             };
+        };
+        /** ConsoleDomainCatalogItem */
+        ConsoleDomainCatalogItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Domain Slug */
+            domain_slug: string;
+            /** Title */
+            title: string;
+            /** Summary */
+            summary?: string | null;
+            /** Schema Version */
+            schema_version: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "disabled";
+            capability_template: components["schemas"]["CapabilitiesPayload-Output"];
+            /** Metadata */
+            metadata: Record<string, never>;
+            /** Created By */
+            created_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleDomainCatalogListResponse */
+        ConsoleDomainCatalogListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleDomainCatalogItem"][];
+        };
+        /** ConsoleDomainCatalogUpsertRequest */
+        ConsoleDomainCatalogUpsertRequest: {
+            /** Title */
+            title: string;
+            /** Summary */
+            summary?: string | null;
+            /** Schema Version */
+            schema_version?: string | null;
+            /** Status */
+            status?: ("active" | "disabled") | null;
+            capability_template?: components["schemas"]["CapabilitiesPayload-Input"] | null;
+            /** Metadata */
+            metadata?: Record<string, never> | null;
         };
         /** ConsoleError */
         ConsoleError: {
@@ -3597,7 +4921,7 @@ export interface components {
             /** Href */
             href?: string | null;
             /** Job Type */
-            job_type?: ("outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state") | null;
+            job_type?: ("outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state" | "compliance_lifecycle") | null;
             /** Mode */
             mode?: ("dry_run" | "execute") | null;
             /** Params */
@@ -4074,6 +5398,13 @@ export interface components {
              */
             segment_code: "reactivation_30_120" | "no_show_recovery_14d" | "engaged_no_booking_7d";
             /**
+             * Segment Params
+             * @default {}
+             */
+            segment_params: Record<string, never>;
+            /** Segment Summary */
+            segment_summary?: string | null;
+            /**
              * Audience Mode
              * @constant
              */
@@ -4142,6 +5473,8 @@ export interface components {
              * @enum {string}
              */
             segment_code: "reactivation_30_120" | "no_show_recovery_14d" | "engaged_no_booking_7d";
+            /** Segment Params */
+            segment_params?: Record<string, never> | null;
             /**
              * Audience Mode
              * @default branch_active_conversations
@@ -4277,6 +5610,13 @@ export interface components {
              * @default 0
              */
             suppressed_count: number;
+            /**
+             * Segment Params
+             * @default {}
+             */
+            segment_params: Record<string, never>;
+            /** Segment Summary */
+            segment_summary?: string | null;
             preview_stats?: components["schemas"]["ConsoleMarketingAudienceFunnel"] | null;
             /**
              * Template Gate Enabled
@@ -4328,6 +5668,13 @@ export interface components {
              * @default 0
              */
             suppressed_count: number;
+            /**
+             * Segment Params
+             * @default {}
+             */
+            segment_params: Record<string, never>;
+            /** Segment Summary */
+            segment_summary?: string | null;
             /** Sample Conversation Ids */
             sample_conversation_ids: string[];
             /** Sample Recipient Jids */
@@ -4363,6 +5710,11 @@ export interface components {
              */
             reason_codes: string[];
             /**
+             * Reason Hints
+             * @default []
+             */
+            reason_hints: string[];
+            /**
              * Suppressed
              * @default false
              */
@@ -4372,6 +5724,11 @@ export interface components {
              * @default []
              */
             suppression_reasons: string[];
+            /**
+             * Suppression Hints
+             * @default []
+             */
+            suppression_hints: string[];
             /** Updated At */
             updated_at?: string | null;
         };
@@ -4410,6 +5767,8 @@ export interface components {
             message_text?: string | null;
             /** Segment Code */
             segment_code?: ("reactivation_30_120" | "no_show_recovery_14d" | "engaged_no_booking_7d") | null;
+            /** Segment Params */
+            segment_params?: Record<string, never> | null;
             /** Reason */
             reason?: string | null;
         };
@@ -4435,6 +5794,55 @@ export interface components {
             last_error?: string | null;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /** ConsoleMarketingSegmentCatalogResponse */
+        ConsoleMarketingSegmentCatalogResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleMarketingSegmentDefinition"][];
+        };
+        /** ConsoleMarketingSegmentDefinition */
+        ConsoleMarketingSegmentDefinition: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "reactivation_30_120" | "no_show_recovery_14d" | "engaged_no_booking_7d";
+            /** Label */
+            label: string;
+            /** Short Label */
+            short_label: string;
+            /** Description */
+            description: string;
+            /**
+             * Defaults
+             * @default {}
+             */
+            defaults: Record<string, never>;
+            /** Summary */
+            summary: string;
+            /**
+             * Editable Fields
+             * @default []
+             */
+            editable_fields: components["schemas"]["ConsoleMarketingSegmentEditableField"][];
+        };
+        /** ConsoleMarketingSegmentEditableField */
+        ConsoleMarketingSegmentEditableField: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "int" | "bool";
+            /** Min */
+            min?: number | null;
+            /** Max */
+            max?: number | null;
+            /** Step */
+            step?: number | null;
         };
         /** ConsoleMeResponse */
         ConsoleMeResponse: {
@@ -4740,7 +6148,7 @@ export interface components {
             payment_status: ("pending" | "confirmed" | "rejected") | null;
             /** Domain Slug */
             domain_slug?: string | null;
-            purchased?: components["schemas"]["CapabilitiesPayload"] | null;
+            purchased?: components["schemas"]["CapabilitiesPayload-Input"] | null;
             /** Purchased Services */
             purchased_services?: ("whatsapp" | "telegram" | "instagram" | "booking_collect" | "booking_confirm" | "knowledge_upload" | "analytics" | "auto_learn" | "provider_google_calendar" | "provider_local_calendar" | "provider_manual" | "provider_amocrm" | "provider_bitrix")[] | null;
             provider_binding?: components["schemas"]["OnboardingProviderBindingPayload"] | null;
@@ -4804,7 +6212,7 @@ export interface components {
             label: string;
             /** Summary */
             summary: string;
-            payload: components["schemas"]["CapabilitiesPayload"];
+            payload: components["schemas"]["CapabilitiesPayload-Output"];
             /**
              * Go Live Blockers Profile
              * @default []
@@ -5387,7 +6795,7 @@ export interface components {
              * Job Type
              * @enum {string}
              */
-            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state" | "compliance_lifecycle";
             /** Label */
             label: string;
             /** Description */
@@ -5415,7 +6823,7 @@ export interface components {
              * Job Type
              * @enum {string}
              */
-            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state" | "compliance_lifecycle";
             /**
              * Mode
              * @enum {string}
@@ -5443,7 +6851,7 @@ export interface components {
              * Job Type
              * @enum {string}
              */
-            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state" | "compliance_lifecycle";
             /**
              * Mode
              * @default dry_run
@@ -5562,6 +6970,12 @@ export interface components {
             delivery_status: "queued" | "delivered" | "failed";
             /** Remote Jid */
             remote_jid?: string | null;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Case Id */
+            case_id?: string | null;
+            /** Case Created */
+            case_created?: boolean | null;
             /** Outbox Enqueued */
             outbox_enqueued?: boolean | null;
             /** Lock Until */
@@ -5727,6 +7141,111 @@ export interface components {
             /** Escalation Timeout Minutes */
             escalation_timeout_minutes: number;
         };
+        /** ConsolePolicyRegistryMutationResponse */
+        ConsolePolicyRegistryMutationResponse: {
+            /** Success */
+            success: boolean;
+            record: components["schemas"]["ConsolePolicyVersionRecord"];
+            /** From Version Id */
+            from_version_id?: string | null;
+        };
+        /** ConsolePolicyRegistryPublishRequest */
+        ConsolePolicyRegistryPublishRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Schema Version */
+            schema_version?: string | null;
+            /** Reason */
+            reason: string;
+            payload: components["schemas"]["CapabilityPolicyOverrides"];
+        };
+        /** ConsolePolicyRegistryResponse */
+        ConsolePolicyRegistryResponse: {
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Branch Id */
+            branch_id?: string | null;
+            active?: components["schemas"]["ConsolePolicyVersionRecord"] | null;
+            /**
+             * History
+             * @default []
+             */
+            history: components["schemas"]["ConsolePolicyVersionRecord"][];
+        };
+        /** ConsolePolicyRegistryRollbackRequest */
+        ConsolePolicyRegistryRollbackRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Target Version Id
+             * Format: uuid
+             */
+            target_version_id: string;
+            /** Reason */
+            reason: string;
+        };
+        /** ConsolePolicyVersionRecord */
+        ConsolePolicyVersionRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "published" | "archived";
+            /** Schema Version */
+            schema_version: string;
+            /** Version Number */
+            version_number: number;
+            payload: components["schemas"]["CapabilityPolicyOverrides"];
+            /** Reason */
+            reason?: string | null;
+            /** Source Version Id */
+            source_version_id?: string | null;
+            /** Created By */
+            created_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Published By */
+            published_by?: string | null;
+            /** Published At */
+            published_at?: string | null;
+        };
         /** ConsoleProviderLifecycleItem */
         ConsoleProviderLifecycleItem: {
             /**
@@ -5818,6 +7337,14 @@ export interface components {
              * @enum {string}
              */
             sla_state: "none" | "on_track" | "due_soon" | "overdue";
+            /** Sla Violation Action */
+            sla_violation_action?: ("none" | "notify_manager" | "escalate" | "collect_only") | null;
+            /** Sla Profile Id */
+            sla_profile_id?: string | null;
+            /** Sla Profile Version */
+            sla_profile_version?: number | null;
+            /** Sla Profile Scope */
+            sla_profile_scope?: ("global" | "domain" | "client" | "branch") | null;
             /** Generated At */
             generated_at?: string | null;
         };
@@ -6090,6 +7617,117 @@ export interface components {
             success: boolean;
             /** Message */
             message: string;
+        };
+        /** ConsoleSlaProfileRegistryMutationResponse */
+        ConsoleSlaProfileRegistryMutationResponse: {
+            /** Success */
+            success: boolean;
+            record: components["schemas"]["ConsoleSlaProfileVersionRecord"];
+            /** From Version Id */
+            from_version_id?: string | null;
+        };
+        /** ConsoleSlaProfileRegistryPublishRequest */
+        ConsoleSlaProfileRegistryPublishRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "global" | "domain" | "client" | "branch";
+            /** Domain Key */
+            domain_key?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Schema Version */
+            schema_version?: string | null;
+            /** Reason */
+            reason: string;
+            payload: components["schemas"]["SlaProfilePayload"];
+        };
+        /** ConsoleSlaProfileRegistryResponse */
+        ConsoleSlaProfileRegistryResponse: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "global" | "domain" | "client" | "branch";
+            /** Company Id */
+            company_id?: string | null;
+            /** Domain Key */
+            domain_key?: string | null;
+            /** Client Id */
+            client_id?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            active?: components["schemas"]["ConsoleSlaProfileVersionRecord"] | null;
+            /**
+             * History
+             * @default []
+             */
+            history: components["schemas"]["ConsoleSlaProfileVersionRecord"][];
+        };
+        /** ConsoleSlaProfileRegistryRollbackRequest */
+        ConsoleSlaProfileRegistryRollbackRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "global" | "domain" | "client" | "branch";
+            /** Domain Key */
+            domain_key?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Target Version Id
+             * Format: uuid
+             */
+            target_version_id: string;
+            /** Reason */
+            reason: string;
+        };
+        /** ConsoleSlaProfileVersionRecord */
+        ConsoleSlaProfileVersionRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "global" | "domain" | "client" | "branch";
+            /** Company Id */
+            company_id?: string | null;
+            /** Domain Key */
+            domain_key?: string | null;
+            /** Client Id */
+            client_id?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "published" | "archived";
+            /** Schema Version */
+            schema_version: string;
+            /** Version Number */
+            version_number: number;
+            payload: components["schemas"]["SlaProfilePayload"];
+            /** Reason */
+            reason?: string | null;
+            /** Source Version Id */
+            source_version_id?: string | null;
+            /** Created By */
+            created_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Published By */
+            published_by?: string | null;
+            /** Published At */
+            published_at?: string | null;
         };
         /** ConsoleSubscriptionContractGap */
         ConsoleSubscriptionContractGap: {
@@ -6656,6 +8294,79 @@ export interface components {
             /** Actor Name */
             actor_name?: string | null;
         };
+        /** ConsoleToolRegistryItem */
+        ConsoleToolRegistryItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Tool Action */
+            tool_action: string;
+            /** Tool Group */
+            tool_group: string;
+            /** Title */
+            title?: string | null;
+            /** Summary */
+            summary?: string | null;
+            /** Schema Version */
+            schema_version: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "disabled";
+            /**
+             * Certification Status
+             * @enum {string}
+             */
+            certification_status: "certified" | "uncertified";
+            /**
+             * Health Status
+             * @enum {string}
+             */
+            health_status: "healthy" | "degraded" | "down";
+            /**
+             * Allowed Scopes
+             * @default []
+             */
+            allowed_scopes: ("client" | "branch")[];
+            /**
+             * Metadata
+             * @default {}
+             */
+            metadata: Record<string, never>;
+            /** Created By */
+            created_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleToolRegistryListResponse */
+        ConsoleToolRegistryListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleToolRegistryItem"][];
+        };
+        /** ConsoleToolRegistryUpsertRequest */
+        ConsoleToolRegistryUpsertRequest: {
+            /** Title */
+            title?: string | null;
+            /** Summary */
+            summary?: string | null;
+            /** Schema Version */
+            schema_version?: string | null;
+            /** Status */
+            status?: ("active" | "disabled") | null;
+            /** Certification Status */
+            certification_status?: ("certified" | "uncertified") | null;
+            /** Health Status */
+            health_status?: ("healthy" | "degraded" | "down") | null;
+            /** Allowed Scopes */
+            allowed_scopes?: ("client" | "branch")[] | null;
+            /** Metadata */
+            metadata?: Record<string, never> | null;
+        };
         /** ConsoleWebhookSecretResponse */
         ConsoleWebhookSecretResponse: {
             /**
@@ -6684,14 +8395,14 @@ export interface components {
         "OnboardingContractPayload-Input": {
             /** Domain Slug */
             domain_slug?: string | null;
-            purchased?: components["schemas"]["CapabilitiesPayload"];
+            purchased?: components["schemas"]["CapabilitiesPayload-Input"];
             provider_binding?: components["schemas"]["OnboardingProviderBindingPayload"];
         };
         /** OnboardingContractPayload */
         "OnboardingContractPayload-Output": {
             /** Domain Slug */
             domain_slug?: string | null;
-            purchased?: components["schemas"]["CapabilitiesPayload"];
+            purchased?: components["schemas"]["CapabilitiesPayload-Output"];
             provider_binding?: components["schemas"]["OnboardingProviderBindingPayload"];
         };
         /** OnboardingProviderBindingPayload */
@@ -6720,6 +8431,57 @@ export interface components {
             alert_state?: ("ok" | "warn" | "critical") | null;
             /** Notes */
             notes?: string | null;
+        };
+        /** SlaProfilePayload */
+        SlaProfilePayload: {
+            /**
+             * Profile Name
+             * @default default
+             */
+            profile_name: string;
+            thresholds?: components["schemas"]["SlaThresholds"];
+            actions?: components["schemas"]["SlaViolationActions"];
+        };
+        /** SlaThresholds */
+        SlaThresholds: {
+            /**
+             * First Response Minutes
+             * @default 5
+             */
+            first_response_minutes: number;
+            /**
+             * Handoff Ack Minutes
+             * @default 15
+             */
+            handoff_ack_minutes: number;
+            /**
+             * Resolution Minutes
+             * @default 120
+             */
+            resolution_minutes: number;
+            /**
+             * Fallback Rate Max
+             * @default 0.2
+             */
+            fallback_rate_max: number;
+        };
+        /** SlaViolationActions */
+        SlaViolationActions: {
+            /**
+             * Warning
+             * @default notify_manager
+             */
+            warning: string;
+            /**
+             * Breach
+             * @default escalate
+             */
+            breach: string;
+            /**
+             * Severe Breach
+             * @default collect_only
+             */
+            severe_breach: string;
         };
         /** SlotResponse */
         SlotResponse: {
@@ -9537,6 +11299,7 @@ export interface operations {
                 q?: string | null;
                 company_id?: string | null;
                 client_id?: string | null;
+                branch_id?: string | null;
                 lifecycle?: string | null;
             };
             header?: never;
@@ -9695,6 +11458,7 @@ export interface operations {
             query: {
                 company_id: string;
                 client_id?: string | null;
+                include_branches?: string | null;
                 lifecycle?: string | null;
                 client_limit?: number;
                 branch_limit?: number;
@@ -9897,6 +11661,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_marketing_segments_catalog_console_v1_admin_marketing_segments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingSegmentCatalogResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
                 };
             };
         };
@@ -10827,6 +12629,315 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleIncidentListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_admin_control_tower_overview_console_v1_admin_control_tower_overview_get: {
+        parameters: {
+            query?: {
+                attention_limit?: number;
+                incident_limit?: number;
+                ops_jobs_limit?: number;
+                stale_after_minutes?: number;
+                include_low?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAdminControlTowerOverviewResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_admin_control_tower_readiness_board_console_v1_admin_control_tower_readiness_board_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                include_ready?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAdminControlTowerReadinessBoardResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_admin_control_tower_drift_board_console_v1_admin_control_tower_drift_board_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                stale_after_minutes?: number;
+                only_problematic?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAdminControlTowerDriftBoardResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_admin_control_tower_action_center_console_v1_admin_control_tower_action_center_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                stale_after_minutes?: number;
+                include_p2?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAdminControlTowerActionCenterResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_admin_control_tower_migration_program_console_v1_admin_control_tower_migration_program_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                stale_after_minutes?: number;
+                include_p2?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAdminControlTowerMigrationProgramResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_admin_control_tower_migration_wave_detail_console_v1_admin_control_tower_migration_program__wave__get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                stale_after_minutes?: number;
+                include_p2?: string | null;
+            };
+            header?: never;
+            path: {
+                wave: "canary" | "cohort" | "fleet";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAdminControlTowerMigrationWaveDetailResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -12129,6 +14240,717 @@ export interface operations {
             };
         };
     };
+    get_policy_registry_console_v1_admin_policy_registry_get: {
+        parameters: {
+            query?: {
+                scope?: "client" | "branch";
+                branch_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsolePolicyRegistryResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_policy_registry_console_v1_admin_policy_registry_publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsolePolicyRegistryPublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsolePolicyRegistryMutationResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_policy_registry_console_v1_admin_policy_registry_rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsolePolicyRegistryRollbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsolePolicyRegistryMutationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_compliance_policy_registry_console_v1_admin_compliance_policy_registry_get: {
+        parameters: {
+            query: {
+                data_class: string;
+                scope?: "global" | "domain" | "client" | "branch";
+                domain_key?: string | null;
+                branch_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCompliancePolicyRegistryResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_compliance_policy_registry_console_v1_admin_compliance_policy_registry_publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCompliancePolicyRegistryPublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCompliancePolicyRegistryMutationResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_compliance_policy_registry_console_v1_admin_compliance_policy_registry_rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCompliancePolicyRegistryRollbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCompliancePolicyRegistryMutationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_compliance_lifecycle_runs_console_v1_admin_compliance_lifecycle_runs_get: {
+        parameters: {
+            query?: {
+                scope?: "client" | "branch";
+                branch_id?: string | null;
+                data_class?: string | null;
+                operation?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleComplianceLifecycleRunsResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_compliance_lifecycle_console_v1_admin_compliance_lifecycle_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleComplianceLifecycleRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleComplianceLifecycleRunResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_compliance_lifecycle_run_console_v1_admin_compliance_lifecycle_runs__run_id__get: {
+        parameters: {
+            query?: {
+                scope?: "client" | "branch";
+                branch_id?: string | null;
+                records_limit?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleComplianceLifecycleRunResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_compliance_lifecycle_artifact_console_v1_admin_compliance_lifecycle_runs__run_id__artifact_get: {
+        parameters: {
+            query?: {
+                scope?: "client" | "branch";
+                branch_id?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleComplianceLifecycleArtifactResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sla_profile_registry_console_v1_admin_sla_profile_registry_get: {
+        parameters: {
+            query?: {
+                scope?: "global" | "domain" | "client" | "branch";
+                domain_key?: string | null;
+                branch_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSlaProfileRegistryResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_sla_profile_registry_console_v1_admin_sla_profile_registry_publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleSlaProfileRegistryPublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSlaProfileRegistryMutationResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_sla_profile_registry_console_v1_admin_sla_profile_registry_rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleSlaProfileRegistryRollbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSlaProfileRegistryMutationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tool_registry_console_v1_admin_tool_registry_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                certification_status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleToolRegistryListResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_tool_registry_console_v1_admin_tool_registry__tool_action__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tool_action: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleToolRegistryUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleToolRegistryItem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_onboarding_contract_console_v1_admin_onboarding_contract_get: {
         parameters: {
             query?: {
@@ -12271,6 +15093,130 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleOnboardingAutopilotResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_domain_catalog_console_v1_admin_domain_catalog_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleDomainCatalogListResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_domain_catalog_console_v1_admin_domain_catalog__domain_slug__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                domain_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleDomainCatalogUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleDomainCatalogItem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_domain_catalog_console_v1_admin_domain_catalog__domain_slug__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                domain_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleDomainCatalogItem"];
                 };
             };
             /** @description Forbidden */
