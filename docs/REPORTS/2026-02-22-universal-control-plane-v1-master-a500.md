@@ -87,7 +87,7 @@
 | B10 SLA/SLO Engine (Multi-level) | `UCPV1-PHASE10` | passed | SLA/SLO профили реально влияют на runtime и escalation | Policy-driven thresholds + predictable actions + auditability on each violation |
 | B11 Compliance KZ Retention/Lifecycle | `UCPV1-PHASE11` | passed | KZ boundary и lifecycle соблюдаются автоматически | Retention/delete/export jobs с owner+TTL+audit trail по каждому data class |
 | B12 Control Tower for Platform Admin | `UCPV1-PHASE12` | passed | Fleet управляется через Console без CLI как основного пути | Risk queue + readiness board + drift board + action center с evidence links |
-| B13 Migration Program (Current -> Target) | `UCPV1-PHASE13` | in_progress | Переход без stop-the-world | Waves (`canary -> cohort -> fleet`) с pass/fail gates и rollback triggers |
+| B13 Migration Program (Current -> Target) | `UCPV1-PHASE13` | passed | Переход без stop-the-world | Waves (`canary -> cohort -> fleet`) с pass/fail gates и rollback triggers |
 
 ## 7) Execution status (FACT)
 
@@ -107,13 +107,14 @@ Completed in this program chain:
 - `UCPV1-PHASE10` passed.
 - `UCPV1-PHASE11` passed.
 - `UCPV1-PHASE12` passed.
+- `UCPV1-PHASE13` passed.
 
 Current active block:
-- `UCPV1-PHASE13` (`in_progress`, migration program slices `1-3` delivered; closure pending).
+- `none` (UCP v1 phase chain closure complete).
 
 Current queue head:
-- `UCPV1-PHASE13` delivery track (`docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md`, `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md`).
-- Latest completed block (2026-03-02): `UCPV1-PHASE12` closure with deterministic pass-gate evidence (`101 passed`) plus governance/contract checks (`SESSION_AGENT=a700 scripts/session_check.sh`, `scripts/zero_context_gate.sh`, `python3 scripts/generate_openapi.py --check`).
+- `none` (awaiting next program block definition).
+- Latest completed block (2026-03-02): `UCPV1-PHASE13` closure pass-gate on fresh `origin/main` with deterministic checks (`108 passed`), governance checks (`SESSION_AGENT=a704 scripts/session_check.sh`, `scripts/zero_context_gate.sh`), and contract check (`python3 scripts/generate_openapi.py --check`).
 - Latest closed slice update (2026-03-02): `UCPV1-PHASE13` slice3 added `GET /console/v1/admin/control-tower/migration-program/{wave}` with per-wave deterministic decision (`promote|hold`) and wave-filtered promotion action queue.
 
 ## 8) Program-level DoD

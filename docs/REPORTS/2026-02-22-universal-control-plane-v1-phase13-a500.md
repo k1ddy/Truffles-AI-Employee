@@ -137,6 +137,19 @@ Date
 - `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md --report docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md --graph docs/BLOCK_GRAPH.yaml` -> `zero_context_gate: OK`.
 - `SESSION_AGENT=a703 scripts/session_check.sh` -> `Session OK`.
 
+## Phase 13 closure pass-gate (post-merge)
+- Closure executed on fresh `origin/main` baseline after slice3 merge (`main @ bdda26cb`) in dedicated session/worktree `2026-03-02-ucpv1-phase13-pass-a704`.
+- Canon status sync:
+  - `docs/BLOCK_GRAPH.yaml`: `UCPV1-PHASE13` switched `in_progress -> passed`.
+  - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`: execution status and queue head updated to reflect phase-chain closure.
+- Deterministic closure checks:
+  - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_owner_business.py` -> `All checks passed`.
+  - `cd truffles-api && pytest -q tests/test_console_owner_business.py -k "migration_program or migration_wave_detail or control_tower"` -> `18 passed, 41 deselected`.
+  - `cd truffles-api && pytest -q tests/test_console_owner_business.py tests/test_console_fleet_attention.py tests/test_console_ops_jobs.py tests/test_console_onboarding_state.py` -> `108 passed`.
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> passed on closure baseline.
+  - `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md --report docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md --graph docs/BLOCK_GRAPH.yaml` -> `zero_context_gate: OK`.
+  - `SESSION_AGENT=a704 scripts/session_check.sh` -> `Session OK`.
+
 ## Checks + outcomes
 - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_owner_business.py` -> `All checks passed`.
 - `cd truffles-api && pytest -q tests/test_console_owner_business.py -k \"migration_program or control_tower\"` -> `14 passed, 41 deselected`.
@@ -163,6 +176,7 @@ Date
 - `contracts/console_api/openapi.v1.yaml`
 - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase13-slice2-a702.md`
 - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase13-slice3-a703.md`
+- `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase13-pass-a704.md`
 
 ## Release safety decision
 - `Strategy used` -> read-only platform-admin API contract expansion.
@@ -176,6 +190,9 @@ Date
   - `docs/BLOCK_GRAPH.yaml`
   - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
   - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase13-a701.md`
+  - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase13-slice2-a702.md`
+  - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase13-slice3-a703.md`
+  - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase13-pass-a704.md`
   - `docs/SESSION_INDEX.md`
 
 ## Residual GAP / Risks
@@ -183,11 +200,11 @@ Date
 - Control-tower logic concentration in `console.py` remains technical debt for later decomposition.
 
 ## Handoff (for zero-context next agent)
-- `Ready for next agent`: after current slice checks pass.
-- `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md`.
-- `Do not touch`: unrelated tracks outside phase13 migration contract.
-- `Open risks`: threshold calibration and router blast radius.
-- `First command to verify`: `rg -n "UCPV1-PHASE13|migration-program|migration-program/\\{wave\\}|in_progress" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md truffles-api/app/routers/console.py`.
+- `Ready for next agent`: phase13 is closed (`passed`); start from next program block definition.
+- `Start from`: `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`.
+- `Do not touch`: historical phase13 slice artifacts unless regression requires reopen.
+- `Open risks`: threshold calibration and router blast radius stay as non-blocking backlog.
+- `First command to verify`: `rg -n "UCPV1-PHASE13|passed|migration-program/\\{wave\\}" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md`.
 
 ## Verdict
-- `In progress`
+- `Passed`
