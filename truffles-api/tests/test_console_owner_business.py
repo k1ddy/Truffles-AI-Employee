@@ -978,6 +978,159 @@ async def test_admin_incidents_returns_empty_summary_without_active_clients(monk
 
 
 @pytest.mark.asyncio
+async def test_admin_control_tower_overview_requires_platform_admin(monkeypatch):
+    context = _build_context(role="owner")
+    context.accessible_clients = []
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: context,
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_admin_control_tower_overview(
+            request=SimpleNamespace(query_params={}),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_control_tower_overview_returns_empty_without_active_clients(monkeypatch):
+    context = _build_context(role="platform_admin")
+    context.accessible_clients = []
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: context,
+    )
+    monkeypatch.setattr(console_router, "_build_ops_job_catalog_items", lambda: [])
+
+    response = await console_router.get_admin_control_tower_overview(
+        request=SimpleNamespace(query_params={}),
+        db=SimpleNamespace(),
+    )
+
+    assert response.summary.active_clients_total == 0
+    assert response.summary.incidents_total == 0
+    assert response.summary.ops_jobs_total_24h == 0
+    assert response.fleet_attention.items == []
+    assert response.incidents.items == []
+    assert response.recent_ops_jobs == []
+
+
+@pytest.mark.asyncio
+async def test_admin_control_tower_overview_aggregates_fleet_incidents_and_ops(monkeypatch):
+    client_id = uuid4()
+    company_id = uuid4()
+    context = _build_context(role="platform_admin")
+    context.companies = [SimpleNamespace(id=company_id, name="Acme")]
+    context.accessible_clients = [
+        SimpleNamespace(id=client_id, name="alpha", status="active", company_id=company_id, config={})
+    ]
+
+    captured: dict[str, object] = {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    fleet_attention = console_router.ConsoleFleetAttentionResponse(
+        generated_at=now_iso,
+        stale_after_minutes=120,
+        summary=console_router.ConsoleFleetAttentionSummary(
+            active_clients_total=3,
+            clients_with_attention=2,
+            high_risk_clients=1,
+            medium_risk_clients=1,
+            low_risk_clients=0,
+            stale_branches_total=4,
+            integration_error_branches_total=2,
+            integration_warn_branches_total=1,
+            outbox_failed_24h_total=7,
+            pending_handovers_total=3,
+        ),
+        items=[],
+    )
+    incidents = console_router.ConsoleIncidentListResponse(
+        generated_at=now_iso,
+        scope="fleet",
+        summary=console_router.ConsoleIncidentSummary(total=5, critical=1, warn=3, info=1),
+        items=[],
+    )
+    job_record = console_router.ConsoleOpsJobRecord(
+        id=uuid4(),
+        job_type="outbox_process",
+        mode="dry_run",
+        status="success",
+        created_at=now_iso,
+        finished_at=now_iso,
+        error_message=None,
+        request_payload={"limit": 10},
+        result_payload={"ok": True},
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: context,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_platform_admin_fleet_attention_response",
+        lambda _db, *, active_clients, companies_by_id, stale_after_minutes, include_low_mode, limit, now: (
+            captured.update(
+                {
+                    "attention_limit": limit,
+                    "stale_after_minutes": stale_after_minutes,
+                    "include_low_mode": include_low_mode,
+                    "companies": companies_by_id,
+                    "active_clients": active_clients,
+                }
+            )
+            or fleet_attention
+        ),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_incidents_response",
+        lambda _db, *, active_clients, limit, now: (
+            captured.update({"incident_limit": limit, "incident_clients": active_clients}) or incidents
+        ),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_recent_ops_jobs",
+        lambda _db, *, client_ids, limit, now: (
+            captured.update({"ops_jobs_limit": limit, "ops_client_ids": client_ids}) or ([job_record], 14, 2)
+        ),
+    )
+    monkeypatch.setattr(console_router, "_build_ops_job_catalog_items", lambda: [])
+
+    response = await console_router.get_admin_control_tower_overview(
+        request=SimpleNamespace(query_params={}),
+        attention_limit=12,
+        incident_limit=15,
+        ops_jobs_limit=8,
+        db=SimpleNamespace(),
+    )
+
+    assert captured["attention_limit"] == 12
+    assert captured["incident_limit"] == 15
+    assert captured["ops_jobs_limit"] == 8
+    assert captured["ops_client_ids"] == [client_id]
+    assert response.summary.active_clients_total == 3
+    assert response.summary.clients_with_attention == 2
+    assert response.summary.high_risk_clients == 1
+    assert response.summary.incidents_total == 5
+    assert response.summary.incidents_critical == 1
+    assert response.summary.incidents_warn == 3
+    assert response.summary.incidents_info == 1
+    assert response.summary.ops_jobs_total_24h == 14
+    assert response.summary.ops_jobs_failed_24h == 2
+    assert response.recent_ops_jobs == [job_record]
+
+
+@pytest.mark.asyncio
 async def test_subscription_summary_requires_subscription_permission(monkeypatch):
     context = _build_context(role="support")
     monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)

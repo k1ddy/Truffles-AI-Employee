@@ -82,6 +82,8 @@ from app.schemas.capabilities import (
 )
 from app.schemas.compliance_policy import CompliancePolicyPayload
 from app.schemas.console import (
+    ConsoleAdminControlTowerOverviewResponse,
+    ConsoleAdminControlTowerOverviewSummary,
     ConsoleAgent,
     ConsoleAgentCreateRequest,
     ConsoleAgentCreateResponse,
@@ -7919,6 +7921,168 @@ def _build_incident_summary(items: list[ConsoleIncidentItem]) -> ConsoleIncident
     )
 
 
+def _build_empty_fleet_attention_response(
+    *,
+    generated_at: datetime,
+    stale_after_minutes: int,
+) -> ConsoleFleetAttentionResponse:
+    return ConsoleFleetAttentionResponse(
+        generated_at=generated_at.isoformat(),
+        stale_after_minutes=stale_after_minutes,
+        summary=ConsoleFleetAttentionSummary(
+            active_clients_total=0,
+            clients_with_attention=0,
+            high_risk_clients=0,
+            medium_risk_clients=0,
+            low_risk_clients=0,
+            stale_branches_total=0,
+            integration_error_branches_total=0,
+            integration_warn_branches_total=0,
+            outbox_failed_24h_total=0,
+            pending_handovers_total=0,
+        ),
+        items=[],
+    )
+
+
+def _build_empty_incident_list_response(*, generated_at: datetime) -> ConsoleIncidentListResponse:
+    return ConsoleIncidentListResponse(
+        generated_at=generated_at.isoformat(),
+        scope="fleet",
+        summary=ConsoleIncidentSummary(total=0, critical=0, warn=0, info=0),
+        items=[],
+    )
+
+
+def _build_platform_admin_fleet_attention_response(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    stale_after_minutes: int,
+    include_low_mode: bool,
+    limit: int,
+    now: datetime,
+) -> ConsoleFleetAttentionResponse:
+    active_client_ids = {client.id for client in active_clients}
+    attention_scope_key = _build_fleet_attention_cache_scope_key(
+        active_client_ids=active_client_ids,
+        stale_after_minutes=stale_after_minutes,
+        include_low_mode=include_low_mode,
+        limit=limit,
+    )
+    cached_response = _load_cached_fleet_attention(
+        db,
+        scope_key=attention_scope_key,
+        now=now,
+    )
+    if cached_response is not None:
+        _schedule_fleet_attention_async_refresh(
+            db,
+            scope_key=attention_scope_key,
+            active_client_ids=active_client_ids,
+            stale_after_minutes=stale_after_minutes,
+            include_low_mode=include_low_mode,
+            limit=limit,
+            now=now,
+        )
+        return cached_response
+
+    response = _build_fleet_attention_response_for_clients(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_low_mode=include_low_mode,
+        limit=limit,
+        now=now,
+    )
+    _store_cached_fleet_attention(
+        db,
+        scope_key=attention_scope_key,
+        now=now,
+        response=response,
+    )
+    return response
+
+
+def _build_admin_incidents_response(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    limit: int,
+    now: datetime,
+) -> ConsoleIncidentListResponse:
+    client_ids = [client.id for client in active_clients]
+    outbox_backlog_map = _query_outbox_backlog_map(db, client_ids=client_ids)
+    outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
+    pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
+    degraded_map = _query_integration_degraded_branch_count_map(db, client_ids=client_ids)
+    latest_error_map = _query_latest_failed_error_map(db, client_ids=client_ids, now=now)
+
+    items: list[ConsoleIncidentItem] = []
+    for client in active_clients:
+        signals = _IncidentSignals(
+            outbox_backlog=outbox_backlog_map.get(client.id, 0),
+            outbox_failed_24h=outbox_failed_map.get(client.id, 0),
+            pending_handovers=pending_handovers_map.get(client.id, 0),
+            integration_degraded_branches=degraded_map.get(client.id, 0),
+            last_error=latest_error_map.get(client.id),
+        )
+        items.extend(
+            _build_scope_incident_items(
+                scope="fleet",
+                signals=signals,
+                detected_at=now,
+                client_id=client.id,
+                company_id=getattr(client, "company_id", None),
+                domain_key=_normalize_optional_domain_slug_token(
+                    client.config.get("domain_slug")
+                    if isinstance(getattr(client, "config", None), dict)
+                    else None
+                ),
+                client_slug=client.name,
+                branch_id=None,
+                branch_ids=None,
+                platform_scope=True,
+                db=db,
+            )
+        )
+
+    items_by_client: dict[UUID, list[ConsoleIncidentItem]] = {}
+    for item in items:
+        if item.client_id is None:
+            continue
+        items_by_client.setdefault(item.client_id, []).append(item)
+    for client_id, scoped_items in items_by_client.items():
+        state_map = _load_incident_state_map(
+            db,
+            client_id=client_id,
+            incident_ids=[item.id for item in scoped_items],
+            allowed_branch_ids=None,
+        )
+        _apply_incident_state_map(scoped_items, state_map=state_map)
+
+    severity_rank = {"critical": 2, "warn": 1, "info": 0}
+    items.sort(
+        key=lambda item: (
+            severity_rank.get(item.severity, 0),
+            int(item.metrics.get("outbox_backlog") or 0),
+            int(item.metrics.get("outbox_failed_24h") or 0),
+            int(item.metrics.get("integration_degraded_branches") or 0),
+            int(item.metrics.get("pending_handovers") or 0),
+        ),
+        reverse=True,
+    )
+    limited_items = items[:limit]
+    return ConsoleIncidentListResponse(
+        generated_at=now.isoformat(),
+        scope="fleet",
+        summary=_build_incident_summary(limited_items),
+        items=limited_items,
+    )
+
+
 def _coerce_incident_state(value: object) -> Optional[str]:
     if not isinstance(value, str):
         return None
@@ -8357,6 +8521,53 @@ def _build_ops_job_record(job: ConsoleOpsJob) -> ConsoleOpsJobRecord:
         request_payload=job.request_payload if isinstance(job.request_payload, dict) else None,
         result_payload=job.result_payload if isinstance(job.result_payload, dict) else None,
     )
+
+
+def _build_ops_job_catalog_items() -> list[ConsoleOpsJobDefinition]:
+    return [
+        ConsoleOpsJobDefinition(
+            job_type=job_type,
+            label=meta["label"],
+            description=meta["description"],
+            supports_dry_run=bool(meta["supports_dry_run"]),
+        )
+        for job_type, meta in _OPS_JOB_DEFINITIONS.items()
+    ]
+
+
+def _build_admin_recent_ops_jobs(
+    db: Session,
+    *,
+    client_ids: list[UUID],
+    limit: int,
+    now: datetime,
+) -> tuple[list[ConsoleOpsJobRecord], int, int]:
+    if not client_ids:
+        return [], 0, 0
+
+    window_start = now - timedelta(hours=24)
+    aggregate_row = (
+        db.query(
+            func.count(ConsoleOpsJob.id),
+            func.sum(case((ConsoleOpsJob.status == "failed", 1), else_=0)),
+        )
+        .filter(
+            ConsoleOpsJob.client_id.in_(client_ids),
+            ConsoleOpsJob.created_at >= window_start,
+        )
+        .first()
+    )
+    total_24h = int((aggregate_row[0] if aggregate_row else 0) or 0)
+    failed_24h = int((aggregate_row[1] if aggregate_row else 0) or 0)
+
+    rows = (
+        db.query(ConsoleOpsJob)
+        .filter(ConsoleOpsJob.client_id.in_(client_ids))
+        .order_by(ConsoleOpsJob.created_at.desc(), ConsoleOpsJob.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [_build_ops_job_record(row) for row in rows], total_24h, failed_24h
 
 
 def _parse_ops_job_params(params: Optional[dict]) -> dict:
@@ -14606,16 +14817,7 @@ async def get_ops_jobs_catalog(
     context = get_console_context(request, db)
     _require_ops_access(context, action="read")
 
-    items = [
-        ConsoleOpsJobDefinition(
-            job_type=job_type,
-            label=meta["label"],
-            description=meta["description"],
-            supports_dry_run=bool(meta["supports_dry_run"]),
-        )
-        for job_type, meta in _OPS_JOB_DEFINITIONS.items()
-    ]
-    return ConsoleOpsJobCatalogResponse(items=items)
+    return ConsoleOpsJobCatalogResponse(items=_build_ops_job_catalog_items())
 
 
 @router.get(
@@ -18715,52 +18917,15 @@ async def list_fleet_attention(
     active_clients = [
         client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
     ]
-    if not active_clients:
-        return ConsoleFleetAttentionResponse(
-            generated_at=datetime.now(timezone.utc).isoformat(),
-            stale_after_minutes=stale_after_minutes,
-            summary=ConsoleFleetAttentionSummary(
-                active_clients_total=0,
-                clients_with_attention=0,
-                high_risk_clients=0,
-                medium_risk_clients=0,
-                low_risk_clients=0,
-                stale_branches_total=0,
-                integration_error_branches_total=0,
-                integration_warn_branches_total=0,
-                outbox_failed_24h_total=0,
-                pending_handovers_total=0,
-            ),
-            items=[],
-        )
-
-    active_client_ids = {client.id for client in active_clients}
     now = datetime.now(timezone.utc)
-    attention_scope_key = _build_fleet_attention_cache_scope_key(
-        active_client_ids=active_client_ids,
-        stale_after_minutes=stale_after_minutes,
-        include_low_mode=include_low_mode,
-        limit=limit,
-    )
-    cached_response = _load_cached_fleet_attention(
-        db,
-        scope_key=attention_scope_key,
-        now=now,
-    )
-    if cached_response is not None:
-        _schedule_fleet_attention_async_refresh(
-            db,
-            scope_key=attention_scope_key,
-            active_client_ids=active_client_ids,
+    if not active_clients:
+        return _build_empty_fleet_attention_response(
+            generated_at=now,
             stale_after_minutes=stale_after_minutes,
-            include_low_mode=include_low_mode,
-            limit=limit,
-            now=now,
         )
-        return cached_response
 
     companies_by_id = {company.id: company for company in (context.companies or [])}
-    response = _build_fleet_attention_response_for_clients(
+    return _build_platform_admin_fleet_attention_response(
         db,
         active_clients=active_clients,
         companies_by_id=companies_by_id,
@@ -18769,13 +18934,6 @@ async def list_fleet_attention(
         limit=limit,
         now=now,
     )
-    _store_cached_fleet_attention(
-        db,
-        scope_key=attention_scope_key,
-        now=now,
-        response=response,
-    )
-    return response
 
 
 @router.get(
@@ -18802,82 +18960,142 @@ async def list_admin_incidents(
     active_clients = [
         client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
     ]
+    now = datetime.now(timezone.utc)
     if not active_clients:
-        return ConsoleIncidentListResponse(
-            generated_at=datetime.now(timezone.utc).isoformat(),
-            scope="fleet",
-            summary=ConsoleIncidentSummary(total=0, critical=0, warn=0, info=0),
-            items=[],
-        )
+        return _build_empty_incident_list_response(generated_at=now)
+
+    return _build_admin_incidents_response(
+        db,
+        active_clients=active_clients,
+        limit=limit,
+        now=now,
+    )
+
+
+@router.get(
+    "/admin/control-tower/overview",
+    response_model=ConsoleAdminControlTowerOverviewResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_admin_control_tower_overview(
+    request: Request,
+    attention_limit: int = 20,
+    incident_limit: int = 20,
+    ops_jobs_limit: int = 20,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    include_low: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleAdminControlTowerOverviewResponse:
+    _reject_unknown_query_params(
+        request,
+        {
+            "attention_limit",
+            "incident_limit",
+            "ops_jobs_limit",
+            "stale_after_minutes",
+            "include_low",
+        },
+    )
+    _validate_limit(attention_limit)
+    _validate_limit(incident_limit)
+    _validate_limit(ops_jobs_limit)
+
+    if not isinstance(stale_after_minutes, int):
+        stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
+    normalized_include_low = include_low
+    if normalized_include_low is not None and normalized_include_low.lower() == "null":
+        normalized_include_low = None
+    include_low_mode = _parse_bool_param("include_low", normalized_include_low, default=False)
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
 
     now = datetime.now(timezone.utc)
-    client_ids = [client.id for client in active_clients]
-    outbox_backlog_map = _query_outbox_backlog_map(db, client_ids=client_ids)
-    outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
-    pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
-    degraded_map = _query_integration_degraded_branch_count_map(db, client_ids=client_ids)
-    latest_error_map = _query_latest_failed_error_map(db, client_ids=client_ids, now=now)
-
-    items: list[ConsoleIncidentItem] = []
-    for client in active_clients:
-        signals = _IncidentSignals(
-            outbox_backlog=outbox_backlog_map.get(client.id, 0),
-            outbox_failed_24h=outbox_failed_map.get(client.id, 0),
-            pending_handovers=pending_handovers_map.get(client.id, 0),
-            integration_degraded_branches=degraded_map.get(client.id, 0),
-            last_error=latest_error_map.get(client.id),
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    if not active_clients:
+        empty_fleet_attention = _build_empty_fleet_attention_response(
+            generated_at=now,
+            stale_after_minutes=stale_after_minutes,
         )
-        items.extend(
-            _build_scope_incident_items(
-                scope="fleet",
-                signals=signals,
-                detected_at=now,
-                client_id=client.id,
-                company_id=getattr(client, "company_id", None),
-                domain_key=_normalize_optional_domain_slug_token(
-                    client.config.get("domain_slug")
-                    if isinstance(getattr(client, "config", None), dict)
-                    else None
-                ),
-                client_slug=client.name,
-                branch_id=None,
-                branch_ids=None,
-                platform_scope=True,
-                db=db,
-            )
+        empty_incidents = _build_empty_incident_list_response(generated_at=now)
+        return ConsoleAdminControlTowerOverviewResponse(
+            generated_at=now.isoformat(),
+            stale_after_minutes=stale_after_minutes,
+            attention_limit=attention_limit,
+            incident_limit=incident_limit,
+            ops_jobs_limit=ops_jobs_limit,
+            summary=ConsoleAdminControlTowerOverviewSummary(
+                active_clients_total=0,
+                clients_with_attention=0,
+                high_risk_clients=0,
+                incidents_total=0,
+                incidents_critical=0,
+                incidents_warn=0,
+                incidents_info=0,
+                ops_jobs_total_24h=0,
+                ops_jobs_failed_24h=0,
+            ),
+            fleet_attention=empty_fleet_attention,
+            incidents=empty_incidents,
+            recent_ops_jobs=[],
+            ops_job_catalog=_build_ops_job_catalog_items(),
         )
 
-    items_by_client: dict[UUID, list[ConsoleIncidentItem]] = {}
-    for item in items:
-        if item.client_id is None:
-            continue
-        items_by_client.setdefault(item.client_id, []).append(item)
-    for client_id, scoped_items in items_by_client.items():
-        state_map = _load_incident_state_map(
-            db,
-            client_id=client_id,
-            incident_ids=[item.id for item in scoped_items],
-            allowed_branch_ids=None,
-        )
-        _apply_incident_state_map(scoped_items, state_map=state_map)
-
-    severity_rank = {"critical": 2, "warn": 1, "info": 0}
-    items.sort(
-        key=lambda item: (
-            severity_rank.get(item.severity, 0),
-            int(item.metrics.get("outbox_backlog") or 0),
-            int(item.metrics.get("outbox_failed_24h") or 0),
-            int(item.metrics.get("integration_degraded_branches") or 0),
-            int(item.metrics.get("pending_handovers") or 0),
-        ),
-        reverse=True,
+    companies_by_id = {company.id: company for company in (context.companies or [])}
+    fleet_attention = _build_platform_admin_fleet_attention_response(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_low_mode=include_low_mode,
+        limit=attention_limit,
+        now=now,
     )
-    limited_items = items[:limit]
-    return ConsoleIncidentListResponse(
+    incidents = _build_admin_incidents_response(
+        db,
+        active_clients=active_clients,
+        limit=incident_limit,
+        now=now,
+    )
+    recent_ops_jobs, ops_jobs_total_24h, ops_jobs_failed_24h = _build_admin_recent_ops_jobs(
+        db,
+        client_ids=[client.id for client in active_clients],
+        limit=ops_jobs_limit,
+        now=now,
+    )
+
+    return ConsoleAdminControlTowerOverviewResponse(
         generated_at=now.isoformat(),
-        scope="fleet",
-        summary=_build_incident_summary(limited_items),
-        items=limited_items,
+        stale_after_minutes=stale_after_minutes,
+        attention_limit=attention_limit,
+        incident_limit=incident_limit,
+        ops_jobs_limit=ops_jobs_limit,
+        summary=ConsoleAdminControlTowerOverviewSummary(
+            active_clients_total=fleet_attention.summary.active_clients_total,
+            clients_with_attention=fleet_attention.summary.clients_with_attention,
+            high_risk_clients=fleet_attention.summary.high_risk_clients,
+            incidents_total=incidents.summary.total,
+            incidents_critical=incidents.summary.critical,
+            incidents_warn=incidents.summary.warn,
+            incidents_info=incidents.summary.info,
+            ops_jobs_total_24h=ops_jobs_total_24h,
+            ops_jobs_failed_24h=ops_jobs_failed_24h,
+        ),
+        fleet_attention=fleet_attention,
+        incidents=incidents,
+        recent_ops_jobs=recent_ops_jobs,
+        ops_job_catalog=_build_ops_job_catalog_items(),
     )
 
 

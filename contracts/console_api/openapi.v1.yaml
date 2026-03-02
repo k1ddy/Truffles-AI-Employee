@@ -3712,6 +3712,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/control-tower/overview:
+    get:
+      tags:
+      - console
+      summary: Get Admin Control Tower Overview
+      operationId: get_admin_control_tower_overview_console_v1_admin_control_tower_overview_get
+      parameters:
+      - name: attention_limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          title: Attention Limit
+      - name: incident_limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          title: Incident Limit
+      - name: ops_jobs_limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          title: Ops Jobs Limit
+      - name: stale_after_minutes
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1440
+          minimum: 5
+          default: 60
+          title: Stale After Minutes
+      - name: include_low
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Include Low
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleAdminControlTowerOverviewResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/companies/{company_id}:
     patch:
       tags:
@@ -6765,6 +6835,93 @@ components:
       additionalProperties: false
       type: object
       title: CompliancePolicyPayload
+    ConsoleAdminControlTowerOverviewResponse:
+      properties:
+        generated_at:
+          type: string
+          title: Generated At
+        stale_after_minutes:
+          type: integer
+          title: Stale After Minutes
+        attention_limit:
+          type: integer
+          title: Attention Limit
+        incident_limit:
+          type: integer
+          title: Incident Limit
+        ops_jobs_limit:
+          type: integer
+          title: Ops Jobs Limit
+        summary:
+          $ref: '#/components/schemas/ConsoleAdminControlTowerOverviewSummary'
+        fleet_attention:
+          $ref: '#/components/schemas/ConsoleFleetAttentionResponse'
+        incidents:
+          $ref: '#/components/schemas/ConsoleIncidentListResponse'
+        recent_ops_jobs:
+          items:
+            $ref: '#/components/schemas/ConsoleOpsJobRecord'
+          type: array
+          title: Recent Ops Jobs
+        ops_job_catalog:
+          items:
+            $ref: '#/components/schemas/ConsoleOpsJobDefinition'
+          type: array
+          title: Ops Job Catalog
+      type: object
+      required:
+      - generated_at
+      - stale_after_minutes
+      - attention_limit
+      - incident_limit
+      - ops_jobs_limit
+      - summary
+      - fleet_attention
+      - incidents
+      - recent_ops_jobs
+      - ops_job_catalog
+      title: ConsoleAdminControlTowerOverviewResponse
+    ConsoleAdminControlTowerOverviewSummary:
+      properties:
+        active_clients_total:
+          type: integer
+          title: Active Clients Total
+        clients_with_attention:
+          type: integer
+          title: Clients With Attention
+        high_risk_clients:
+          type: integer
+          title: High Risk Clients
+        incidents_total:
+          type: integer
+          title: Incidents Total
+        incidents_critical:
+          type: integer
+          title: Incidents Critical
+        incidents_warn:
+          type: integer
+          title: Incidents Warn
+        incidents_info:
+          type: integer
+          title: Incidents Info
+        ops_jobs_total_24h:
+          type: integer
+          title: Ops Jobs Total 24H
+        ops_jobs_failed_24h:
+          type: integer
+          title: Ops Jobs Failed 24H
+      type: object
+      required:
+      - active_clients_total
+      - clients_with_attention
+      - high_risk_clients
+      - incidents_total
+      - incidents_critical
+      - incidents_warn
+      - incidents_info
+      - ops_jobs_total_24h
+      - ops_jobs_failed_24h
+      title: ConsoleAdminControlTowerOverviewSummary
     ConsoleAgent:
       properties:
         id:
