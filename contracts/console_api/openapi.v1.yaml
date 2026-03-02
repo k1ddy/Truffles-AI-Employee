@@ -9928,6 +9928,7 @@ components:
             - heal
             - metrics_snapshot
             - incident_state
+            - compliance_lifecycle
           - type: 'null'
           title: Job Type
         mode:
@@ -13222,6 +13223,7 @@ components:
           - heal
           - metrics_snapshot
           - incident_state
+          - compliance_lifecycle
           title: Job Type
         label:
           type: string
@@ -13273,6 +13275,7 @@ components:
           - heal
           - metrics_snapshot
           - incident_state
+          - compliance_lifecycle
           title: Job Type
         mode:
           type: string
@@ -13327,6 +13330,7 @@ components:
           - heal
           - metrics_snapshot
           - incident_state
+          - compliance_lifecycle
           title: Job Type
         mode:
           type: string

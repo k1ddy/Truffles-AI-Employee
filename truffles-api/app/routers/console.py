@@ -8125,6 +8125,11 @@ _OPS_JOB_DEFINITIONS = {
         "description": "Set incident workflow state (open/in_progress/resolved) with audit metadata.",
         "supports_dry_run": True,
     },
+    "compliance_lifecycle": {
+        "label": "Compliance Lifecycle",
+        "description": "Run tenant-scoped compliance lifecycle preview (retention/export/destruction) with ledger evidence.",
+        "supports_dry_run": True,
+    },
 }
 
 _INCIDENT_STATE_ALERT_TYPE = "console_incident_state"
@@ -9015,6 +9020,156 @@ async def _run_integration_reconcile_job(
         "branch_ids": [str(branch_id) for branch_id in selected_branch_ids or []],
     }
     return result
+
+
+def _execute_compliance_lifecycle_preview_run(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    scope: str,
+    branch_id: UUID | None,
+    data_class: str,
+    operation: str,
+    max_items: int,
+    run_mode: str,
+) -> tuple[ComplianceLifecycleRun, list[ComplianceLifecycleRecord]]:
+    run: ComplianceLifecycleRun | None = None
+    try:
+        policy_version = resolve_effective_compliance_policy_version(
+            db,
+            data_class=data_class,
+            company_id=context.client.company_id,
+            domain_key=None,
+            client_id=context.client.id,
+            branch_id=branch_id,
+        )
+        policy_payload = resolve_effective_compliance_policy_payload(
+            db,
+            data_class=data_class,
+            company_id=context.client.company_id,
+            domain_key=None,
+            client_id=context.client.id,
+            branch_id=branch_id,
+        )
+        run = create_lifecycle_run(
+            db,
+            scope=scope,
+            data_class=data_class,
+            operation=operation,
+            client_id=context.client.id,
+            branch_id=branch_id,
+            company_id=context.client.company_id,
+            domain_key=None,
+            policy_version_id=policy_version.id if policy_version else None,
+            policy_scope=policy_version.scope if policy_version else None,
+            policy_schema_version=policy_version.schema_version if policy_version else None,
+            policy_snapshot=policy_payload.model_dump(exclude_none=True) if policy_payload else {},
+            actor_id=context.agent.id,
+            run_mode=run_mode,
+        )
+        summary = execute_lifecycle_preview(
+            db,
+            run=run,
+            max_items=max_items,
+        )
+        run = finalize_lifecycle_run(
+            db,
+            run=run,
+            status="completed",
+            summary=summary,
+            error_message=None,
+        )
+        records = list_lifecycle_records(db, run_id=run.id, limit=max_items)
+        return run, records
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+    except ConsoleAPIError:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive safety branch
+        if run is not None:
+            finalize_lifecycle_run(
+                db,
+                run=run,
+                status="failed",
+                summary={"error": "runtime_failure"},
+                error_message=str(exc),
+            )
+            db.commit()
+        raise ConsoleAPIError(500, "COMPLIANCE_LIFECYCLE_FAILED", "Compliance lifecycle run failed") from exc
+
+
+async def _run_compliance_lifecycle_job(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    mode: str,
+    params: dict,
+) -> dict:
+    scope_raw = _parse_ops_job_text_param(params, name="scope", required=False, max_length=16)
+    default_scope = "branch" if context.effective_branch_id else "client"
+    normalized_scope = (scope_raw or default_scope).strip().lower()
+    if normalized_scope not in {"client", "branch"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "scope must be client|branch")
+
+    branch_id_raw = _parse_ops_job_text_param(params, name="branch_id", required=False, max_length=64)
+    if branch_id_raw:
+        requested_branch_id = _parse_uuid_param("branch_id", branch_id_raw)
+    elif normalized_scope == "branch":
+        requested_branch_id = context.effective_branch_id
+    else:
+        requested_branch_id = None
+
+    data_class = (
+        _parse_ops_job_text_param(params, name="data_class", required=False, max_length=64)
+        or "learned_responses"
+    )
+    operation = (
+        _parse_ops_job_text_param(params, name="operation", required=False, max_length=64)
+        or "retention_scan"
+    )
+    max_items = _parse_ops_job_int_param(
+        params,
+        name="max_items",
+        default=200,
+        min_value=1,
+        max_value=500,
+    )
+    reason = _parse_ops_job_text_param(params, name="reason", required=False, max_length=500)
+
+    resolved_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=normalized_scope,
+        branch_id=requested_branch_id,
+    )
+    lifecycle_run_mode = "preview" if mode == "dry_run" else "manual"
+    run, records = _execute_compliance_lifecycle_preview_run(
+        db,
+        context=context,
+        scope=resolved_scope,
+        branch_id=resolved_branch_id,
+        data_class=data_class,
+        operation=operation,
+        max_items=max_items,
+        run_mode=lifecycle_run_mode,
+    )
+    return {
+        "mode": mode,
+        "scope": {
+            "client_id": str(context.client.id),
+            "scope": resolved_scope,
+            "branch_id": str(resolved_branch_id) if resolved_branch_id else None,
+        },
+        "data_class": run.data_class,
+        "operation": run.operation,
+        "run_mode": run.run_mode,
+        "reason": reason,
+        "run_id": str(run.id),
+        "status": run.status,
+        "summary": run.summary_json or {},
+        "records_count": len(records),
+        "policy_version_id": str(run.policy_version_id) if run.policy_version_id else None,
+    }
 
 
 def _build_ops_job_artifact(
@@ -14349,6 +14504,13 @@ async def run_ops_job(
             )
         elif body.job_type == "incident_state":
             result_payload = await _run_incident_state_job(
+                db,
+                context=context,
+                mode=body.mode,
+                params=params,
+            )
+        elif body.job_type == "compliance_lifecycle":
+            result_payload = await _run_compliance_lifecycle_job(
                 db,
                 context=context,
                 mode=body.mode,
@@ -21609,65 +21771,16 @@ async def run_compliance_lifecycle(
         branch_id=body.branch_id,
     )
     reason = _normalize_access_reason(body.reason, required=True)
-
-    try:
-        policy_version = resolve_effective_compliance_policy_version(
-            db,
-            data_class=body.data_class,
-            company_id=context.client.company_id,
-            domain_key=None,
-            client_id=context.client.id,
-            branch_id=resolved_branch_id,
-        )
-        policy_payload = resolve_effective_compliance_policy_payload(
-            db,
-            data_class=body.data_class,
-            company_id=context.client.company_id,
-            domain_key=None,
-            client_id=context.client.id,
-            branch_id=resolved_branch_id,
-        )
-        run = create_lifecycle_run(
-            db,
-            scope=normalized_scope,
-            data_class=body.data_class,
-            operation=body.operation,
-            client_id=context.client.id,
-            branch_id=resolved_branch_id,
-            company_id=context.client.company_id,
-            domain_key=None,
-            policy_version_id=policy_version.id if policy_version else None,
-            policy_scope=policy_version.scope if policy_version else None,
-            policy_schema_version=policy_version.schema_version if policy_version else None,
-            policy_snapshot=policy_payload.model_dump(exclude_none=True) if policy_payload else {},
-            actor_id=context.agent.id,
-            run_mode=body.run_mode,
-        )
-        summary = execute_lifecycle_preview(
-            db,
-            run=run,
-            max_items=body.max_items,
-        )
-        run = finalize_lifecycle_run(
-            db,
-            run=run,
-            status="completed",
-            summary=summary,
-            error_message=None,
-        )
-    except ValueError as exc:
-        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - defensive safety branch
-        if "run" in locals():
-            finalize_lifecycle_run(
-                db,
-                run=run,
-                status="failed",
-                summary={"error": "runtime_failure"},
-                error_message=str(exc),
-            )
-            db.commit()
-        raise ConsoleAPIError(500, "COMPLIANCE_LIFECYCLE_FAILED", "Compliance lifecycle run failed") from exc
+    run, records = _execute_compliance_lifecycle_preview_run(
+        db,
+        context=context,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+        data_class=body.data_class,
+        operation=body.operation,
+        max_items=body.max_items,
+        run_mode=body.run_mode or "preview",
+    )
 
     record_audit_event(
         db,
@@ -21688,7 +21801,6 @@ async def run_compliance_lifecycle(
         },
     )
     db.commit()
-    records = list_lifecycle_records(db, run_id=run.id, limit=body.max_items)
     return ConsoleComplianceLifecycleRunResponse(
         success=True,
         run=_serialize_compliance_lifecycle_run_record(run),

@@ -22,9 +22,10 @@
   - PR branch synced with fresh `origin/main` via merge commit (`out-of-date` resolved).
   - Slice 2 implemented: compliance lifecycle run ledger + execution records + preview endpoints (`/admin/compliance-lifecycle/runs*`).
   - Added deterministic lifecycle tests and synced OpenAPI contract.
+  - Slice 3 implemented: `console_ops_jobs` orchestration for `compliance_lifecycle` with trigger/failure/audit coverage.
 - next:
-  - Build Slice 3: connect lifecycle ledger to scheduled `console_ops_jobs` orchestration.
-  - Add deterministic coverage for ops-job trigger path and failure/audit behavior.
+  - Build Slice 4: scheduled automation contract (`console_ops_jobs` cadence/profile + guardrails for manual/auto lanes).
+  - Add deterministic checks for scheduled path and no-cross-tenant safety signals.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md
   - docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md
@@ -41,4 +42,6 @@
   - truffles-api/app/services/compliance_lifecycle_service.py
   - truffles-api/tests/test_compliance_lifecycle_service.py
   - truffles-api/tests/test_console_compliance_lifecycle.py
+  - truffles-api/tests/test_console_ops_jobs.py
+  - truffles-api/app/schemas/console.py (`ConsoleOpsJobType += compliance_lifecycle`)
 - last_updated: 2026-03-02

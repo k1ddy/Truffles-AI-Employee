@@ -18,6 +18,9 @@ def _mock_context(*, role: str = "platform_admin", client_id=None, company_id=No
             id=client_id or uuid4(),
             company_id=company_id or uuid4(),
         ),
+        effective_branch_id=None,
+        branch_restricted=False,
+        branches=[],
     )
 
 
@@ -122,12 +125,11 @@ async def test_run_compliance_lifecycle_success(monkeypatch):
     monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
     monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "_resolve_policy_registry_scope", lambda *args, **kwargs: ("client", None))
-    monkeypatch.setattr(console_router, "resolve_effective_compliance_policy_version", lambda *args, **kwargs: None)
-    monkeypatch.setattr(console_router, "resolve_effective_compliance_policy_payload", lambda *args, **kwargs: None)
-    monkeypatch.setattr(console_router, "create_lifecycle_run", lambda *args, **kwargs: run)
-    monkeypatch.setattr(console_router, "execute_lifecycle_preview", lambda *args, **kwargs: {"candidate_count": 1})
-    monkeypatch.setattr(console_router, "finalize_lifecycle_run", lambda *args, **kwargs: run)
-    monkeypatch.setattr(console_router, "list_lifecycle_records", lambda *args, **kwargs: records)
+    monkeypatch.setattr(
+        console_router,
+        "_execute_compliance_lifecycle_preview_run",
+        lambda *args, **kwargs: (run, records),
+    )
     monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
 
     response = await console_router.run_compliance_lifecycle(
@@ -189,3 +191,53 @@ async def test_list_compliance_lifecycle_runs_returns_items(monkeypatch):
 
     assert len(response.items) == 1
     assert response.items[0].id == run.id
+
+
+@pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_returns_preview_summary(monkeypatch):
+    client_id = uuid4()
+    context = _mock_context(role="platform_admin", client_id=client_id)
+    db = Mock()
+    run = _run_record(client_id=client_id)
+    records = [_record_item(run_id=run.id), _record_item(run_id=run.id)]
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(console_router, "_resolve_policy_registry_scope", lambda *args, **kwargs: ("client", None))
+
+    def _fake_execute(*args, **kwargs):
+        captured["run_mode"] = kwargs["run_mode"]
+        captured["operation"] = kwargs["operation"]
+        captured["max_items"] = kwargs["max_items"]
+        return run, records
+
+    monkeypatch.setattr(console_router, "_execute_compliance_lifecycle_preview_run", _fake_execute)
+
+    result = await console_router._run_compliance_lifecycle_job(
+        db,
+        context=context,
+        mode="execute",
+        params={"operation": "destruction_preview", "max_items": 12},
+    )
+
+    assert result["mode"] == "execute"
+    assert result["status"] == "completed"
+    assert result["records_count"] == 2
+    assert captured["run_mode"] == "manual"
+    assert captured["operation"] == "destruction_preview"
+    assert captured["max_items"] == 12
+
+
+@pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_rejects_invalid_scope():
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router._run_compliance_lifecycle_job(
+            db,
+            context=context,
+            mode="dry_run",
+            params={"scope": "fleet"},
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"

@@ -1164,7 +1164,14 @@ class ConsoleIncidentAction(BaseModel):
     description: str
     href: Optional[str] = None
     job_type: Optional[
-        Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot", "incident_state"]
+        Literal[
+            "outbox_process",
+            "integration_reconcile",
+            "heal",
+            "metrics_snapshot",
+            "incident_state",
+            "compliance_lifecycle",
+        ]
     ] = None
     mode: Optional[Literal["dry_run", "execute"]] = None
     params: Optional[dict] = None
@@ -1539,7 +1546,14 @@ class ConsoleReminderRetryResponse(BaseModel):
     matched: int
 
 
-ConsoleOpsJobType = Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot", "incident_state"]
+ConsoleOpsJobType = Literal[
+    "outbox_process",
+    "integration_reconcile",
+    "heal",
+    "metrics_snapshot",
+    "incident_state",
+    "compliance_lifecycle",
+]
 ConsoleOpsJobMode = Literal["dry_run", "execute"]
 ConsoleOpsJobStatus = Literal["success", "failed"]
 
