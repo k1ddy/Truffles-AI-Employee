@@ -488,6 +488,8 @@ from app.services.sla_profile_registry_service import (
     get_latest_profile_version,
     list_profile_history,
     publish_profile_version,
+    resolve_effective_profile_payload,
+    resolve_effective_profile_version,
     rollback_profile_version,
 )
 from app.services.state_service import manager_resolve as state_manager_resolve
@@ -2174,6 +2176,20 @@ _PROVIDER_OPS_ACTIONS = {
     "provider_renewal_confirmed",
     "provider_webhook_updated",
     "provider_send_reminder",
+}
+# Escalate provider actions only when SLA mapping suggests a higher-priority remedy.
+_SLA_PROVIDER_ACTION_PRIORITY = {
+    "provider_send_reminder": 1,
+    "provider_renewal_confirmed": 2,
+    "provider_webhook_updated": 2,
+    "integration_reconcile": 3,
+    "provider_start_rebind": 4,
+    "provider_complete_rebind": 5,
+}
+_SLA_PROVIDER_ACTION_BY_VIOLATION = {
+    "notify_manager": "provider_send_reminder",
+    "escalate": "integration_reconcile",
+    "collect_only": "provider_complete_rebind",
 }
 _INTEGRATION_ALERT_ISSUES = {
     "instance_id_mismatch",
@@ -6881,6 +6897,102 @@ def _build_branch_integration_status(
     )
 
 
+@dataclass(frozen=True)
+class _SlaActionResolution:
+    action: str
+    profile_id: Optional[UUID]
+    profile_version: Optional[int]
+    profile_scope: Optional[str]
+
+
+def _resolve_sla_action_for_scope(
+    db: Session,
+    *,
+    severity: str | None,
+    company_id: Optional[UUID],
+    client_id: Optional[UUID],
+    branch_id: Optional[UUID],
+    domain_key: Optional[str],
+) -> Optional[_SlaActionResolution]:
+    if severity not in {"warning", "breach", "severe_breach"}:
+        return None
+
+    payload = resolve_effective_profile_payload(
+        db,
+        company_id=company_id,
+        domain_key=domain_key,
+        client_id=client_id,
+        branch_id=branch_id,
+    )
+    version = resolve_effective_profile_version(
+        db,
+        company_id=company_id,
+        domain_key=domain_key,
+        client_id=client_id,
+        branch_id=branch_id,
+    )
+
+    effective_payload = payload or SlaProfilePayload()
+    if severity == "warning":
+        action = effective_payload.actions.warning
+    elif severity == "breach":
+        action = effective_payload.actions.breach
+    else:
+        action = effective_payload.actions.severe_breach
+
+    return _SlaActionResolution(
+        action=action,
+        profile_id=version.id if version else None,
+        profile_version=version.version_number if version else None,
+        profile_scope=version.scope if version else None,
+    )
+
+
+def _provider_sla_violation_severity(
+    *,
+    priority: Optional[str],
+    sla_state: str,
+) -> str | None:
+    if priority == "p0":
+        return "severe_breach"
+    if priority == "p1":
+        return "breach"
+    if priority == "p2":
+        return "warning"
+    if sla_state == "due_soon":
+        return "breach"
+    if sla_state == "overdue":
+        return "severe_breach"
+    return None
+
+
+def _incident_sla_violation_severity(severity: str) -> str | None:
+    if severity == "warn":
+        return "breach"
+    if severity == "critical":
+        return "severe_breach"
+    return None
+
+
+def _resolve_provider_action_by_sla(
+    *,
+    current_action: Optional[str],
+    sla_violation_action: Optional[str],
+) -> Optional[str]:
+    if not sla_violation_action:
+        return current_action
+    mapped_action = _SLA_PROVIDER_ACTION_BY_VIOLATION.get(sla_violation_action)
+    if not mapped_action:
+        return current_action
+    if not current_action:
+        return mapped_action
+    current_rank = _SLA_PROVIDER_ACTION_PRIORITY.get(current_action, 0)
+    mapped_rank = _SLA_PROVIDER_ACTION_PRIORITY.get(mapped_action, 0)
+    if mapped_rank > current_rank:
+        return mapped_action
+    return current_action
+
+
 def _resolve_provider_ops_decision(
     item: ConsoleBranchIntegrationStatus,
 ) -> Optional[tuple[str, str, list[str]]]:
@@ -7009,10 +7121,12 @@ def _build_provider_ops_queue(
 
 def _build_provider_lifecycle_item(
     *,
+    db: Session,
     status: ConsoleBranchIntegrationStatus,
     branch: Branch,
     company_id: Optional[UUID],
     company_name: Optional[str],
+    domain_key: Optional[str],
     generated_at: datetime,
     now: datetime,
 ) -> ConsoleProviderLifecycleItem:
@@ -7027,6 +7141,25 @@ def _build_provider_lifecycle_item(
         generated_at=generated_at,
         now=now,
     )
+    sla_resolution: Optional[_SlaActionResolution] = None
+    violation_severity = _provider_sla_violation_severity(
+        priority=priority,
+        sla_state=sla_state,
+    )
+    if violation_severity:
+        sla_resolution = _resolve_sla_action_for_scope(
+            db,
+            severity=violation_severity,
+            company_id=company_id,
+            client_id=status.client_id,
+            branch_id=status.branch_id,
+            domain_key=domain_key,
+        )
+        if sla_resolution and sla_resolution.profile_id:
+            next_action = _resolve_provider_action_by_sla(
+                current_action=next_action,
+                sla_violation_action=sla_resolution.action,
+            )
     return ConsoleProviderLifecycleItem(
         client_id=status.client_id,
         client_slug=status.client_slug,
@@ -7057,6 +7190,26 @@ def _build_provider_lifecycle_item(
         blockers=blockers,
         sla_deadline_at=sla_deadline_at,
         sla_state=sla_state,
+        sla_violation_action=(
+            sla_resolution.action
+            if sla_resolution and sla_resolution.profile_id
+            else None
+        ),
+        sla_profile_id=(
+            sla_resolution.profile_id
+            if sla_resolution and sla_resolution.profile_id
+            else None
+        ),
+        sla_profile_version=(
+            sla_resolution.profile_version
+            if sla_resolution and sla_resolution.profile_id
+            else None
+        ),
+        sla_profile_scope=(
+            sla_resolution.profile_scope
+            if sla_resolution and sla_resolution.profile_id
+            else None
+        ),
         generated_at=generated_at.isoformat(),
     )
 
@@ -7432,8 +7585,13 @@ def _build_incident_actions(
     integration_degraded_branches: int,
     branch_ids: Optional[list[UUID]],
     platform_scope: bool,
+    sla_violation_action: Optional[str] = None,
 ) -> list[ConsoleIncidentAction]:
     actions: list[ConsoleIncidentAction] = []
+
+    def _has_action(action_id: str) -> bool:
+        return any(item.id == action_id for item in actions)
+
     outbox_limit = max(10, min(200, outbox_backlog if outbox_backlog > 0 else 25))
     outbox_params: dict[str, object] = {"limit": outbox_limit}
     if branch_ids:
@@ -7507,6 +7665,24 @@ def _build_incident_actions(
             )
         )
 
+    if sla_violation_action == "escalate" and not _has_action("integration_reconcile_dry_run"):
+        reconcile_params: dict[str, object] = {
+            "limit": max(1, min(200, integration_degraded_branches or 25))
+        }
+        if branch_ids:
+            reconcile_params["branch_ids"] = [str(branch_id) for branch_id in branch_ids]
+        actions.append(
+            ConsoleIncidentAction(
+                id="integration_reconcile_dry_run",
+                title="Запустить dry-run integration_reconcile",
+                description="SLA-профиль рекомендует эскалацию: проверьте remediation-контур до execute.",
+                job_type="integration_reconcile",
+                mode="dry_run",
+                params=reconcile_params,
+                dry_run_first=True,
+            )
+        )
+
     if platform_scope:
         actions.append(
             ConsoleIncidentAction(
@@ -7541,12 +7717,25 @@ def _build_outbox_incident_item(
     branch_id: Optional[UUID],
     branch_ids: Optional[list[UUID]],
     platform_scope: bool,
+    sla_resolution: Optional[_SlaActionResolution] = None,
 ) -> ConsoleIncidentItem:
     reason_code, reason_label = _classify_outbox_incident_reason(
         last_error=signals.last_error,
         integration_degraded=signals.integration_degraded_branches > 0,
     )
     severity = _incident_severity_from_signals(signals)
+    metrics: dict[str, str | int | float | bool | None] = {
+        "outbox_backlog": signals.outbox_backlog,
+        "outbox_failed_24h": signals.outbox_failed_24h,
+        "integration_degraded_branches": signals.integration_degraded_branches,
+        "pending_handovers": signals.pending_handovers,
+        "last_error": _truncate_preview(signals.last_error, limit=160),
+    }
+    if sla_resolution and sla_resolution.profile_id:
+        metrics["sla_violation_action"] = sla_resolution.action
+        metrics["sla_profile_id"] = str(sla_resolution.profile_id)
+        metrics["sla_profile_version"] = sla_resolution.profile_version
+        metrics["sla_profile_scope"] = sla_resolution.profile_scope
     return ConsoleIncidentItem(
         id=f"outbox-{client_id or 'scope'}",
         scope=scope,
@@ -7563,19 +7752,18 @@ def _build_outbox_incident_item(
         client_id=client_id,
         client_slug=client_slug,
         branch_id=branch_id,
-        metrics={
-            "outbox_backlog": signals.outbox_backlog,
-            "outbox_failed_24h": signals.outbox_failed_24h,
-            "integration_degraded_branches": signals.integration_degraded_branches,
-            "pending_handovers": signals.pending_handovers,
-            "last_error": _truncate_preview(signals.last_error, limit=160),
-        },
+        metrics=metrics,
         actions=_build_incident_actions(
             reason_code=reason_code,
             outbox_backlog=signals.outbox_backlog,
             integration_degraded_branches=signals.integration_degraded_branches,
             branch_ids=branch_ids,
             platform_scope=platform_scope,
+            sla_violation_action=(
+                sla_resolution.action
+                if sla_resolution and sla_resolution.profile_id
+                else None
+            ),
         ),
     )
 
@@ -7629,10 +7817,13 @@ def _build_scope_incident_items(
     signals: _IncidentSignals,
     detected_at: datetime,
     client_id: Optional[UUID],
-    client_slug: Optional[str],
-    branch_id: Optional[UUID],
-    branch_ids: Optional[list[UUID]],
-    platform_scope: bool,
+    company_id: Optional[UUID] = None,
+    domain_key: Optional[str] = None,
+    client_slug: Optional[str] = None,
+    branch_id: Optional[UUID] = None,
+    branch_ids: Optional[list[UUID]] = None,
+    platform_scope: bool = False,
+    db: Optional[Session] = None,
 ) -> list[ConsoleIncidentItem]:
     items: list[ConsoleIncidentItem] = []
     has_delivery_risk = (
@@ -7641,6 +7832,19 @@ def _build_scope_incident_items(
         or signals.integration_degraded_branches > 0
     )
     if has_delivery_risk:
+        sla_resolution: Optional[_SlaActionResolution] = None
+        if db and client_id:
+            incident_severity = _incident_severity_from_signals(signals)
+            violation_severity = _incident_sla_violation_severity(incident_severity)
+            if violation_severity:
+                sla_resolution = _resolve_sla_action_for_scope(
+                    db,
+                    severity=violation_severity,
+                    company_id=company_id,
+                    client_id=client_id,
+                    branch_id=branch_id,
+                    domain_key=domain_key,
+                )
         items.append(
             _build_outbox_incident_item(
                 scope=scope,
@@ -7651,6 +7855,7 @@ def _build_scope_incident_items(
                 branch_id=branch_id,
                 branch_ids=branch_ids,
                 platform_scope=platform_scope,
+                sla_resolution=sla_resolution,
             )
         )
     if signals.pending_handovers >= 10:
@@ -11877,10 +12082,17 @@ async def list_business_incidents(
         signals=signals,
         detected_at=now,
         client_id=context.client.id,
+        company_id=context.client.company_id,
+        domain_key=_normalize_optional_domain_slug_token(
+            context.client.config.get("domain_slug")
+            if isinstance(context.client.config, dict)
+            else None
+        ),
         client_slug=context.client.name,
         branch_id=context.effective_branch_id,
         branch_ids=allowed_branch_ids,
         platform_scope=False,
+        db=db,
     )
     state_map = _load_incident_state_map(
         db,
@@ -17408,6 +17620,16 @@ async def list_provider_lifecycle(
         for client in active_clients
         if getattr(client, "company_id", None)
     }
+    client_domain_map: dict[UUID, str] = {}
+    for client in active_clients:
+        config = getattr(client, "config", None)
+        if not isinstance(config, dict):
+            continue
+        domain_key = _normalize_optional_domain_slug_token(
+            config.get("domain_slug") or config.get("domain")
+        )
+        if domain_key:
+            client_domain_map[client.id] = domain_key
 
     company_ids = sorted({company_id for company_id in client_company_map.values() if company_id})
     companies_by_id: dict[UUID, Company] = {}
@@ -17490,10 +17712,12 @@ async def list_provider_lifecycle(
             else None
         )
         lifecycle_item = _build_provider_lifecycle_item(
+            db=db,
             status=status,
             branch=branch,
             company_id=company_uuid_for_client,
             company_name=company_name,
+            domain_key=client_domain_map.get(branch.client_id),
             generated_at=generated_at,
             now=generated_at,
         )
@@ -18161,10 +18385,17 @@ async def list_admin_incidents(
                 signals=signals,
                 detected_at=now,
                 client_id=client.id,
+                company_id=getattr(client, "company_id", None),
+                domain_key=_normalize_optional_domain_slug_token(
+                    client.config.get("domain_slug")
+                    if isinstance(getattr(client, "config", None), dict)
+                    else None
+                ),
                 client_slug=client.name,
                 branch_id=None,
                 branch_ids=None,
                 platform_scope=True,
+                db=db,
             )
         )
 

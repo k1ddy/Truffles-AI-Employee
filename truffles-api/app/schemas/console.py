@@ -2165,6 +2165,8 @@ ConsoleProviderOpsAction = Literal[
 ]
 ConsoleProviderOpsQueuePriority = Literal["p0", "p1", "p2"]
 ConsoleProviderLifecycleSlaState = Literal["none", "on_track", "due_soon", "overdue"]
+ConsoleSlaViolationAction = Literal["none", "notify_manager", "escalate", "collect_only"]
+ConsoleSlaProfileScope = Literal["global", "domain", "client", "branch"]
 
 
 class ConsoleProviderOpsQueueItem(BaseModel):
@@ -2224,6 +2226,10 @@ class ConsoleProviderLifecycleItem(BaseModel):
     blockers: list[str] = []
     sla_deadline_at: Optional[str] = None
     sla_state: ConsoleProviderLifecycleSlaState = "none"
+    sla_violation_action: Optional[ConsoleSlaViolationAction] = None
+    sla_profile_id: Optional[UUID] = None
+    sla_profile_version: Optional[int] = None
+    sla_profile_scope: Optional[ConsoleSlaProfileScope] = None
     generated_at: Optional[str] = None
 
 
