@@ -197,6 +197,12 @@
 - `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-semantic-service-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-core-dehardcoding-sweep-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-p4-expected-reply-full-closure-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-p5b-distributed-retrieval-backend-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-p9-contract-oracle-full-closure-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-p12-cross-domain-hardening-full-closure-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-p13-canary-rollback-full-closure-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-p14-evidence-state-handoff-full-closure-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-02-27-research-gates-rollout-a900.md`
 - `docs/TASK_PACKAGES/TP-2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md`
 - `docs/TASK_PACKAGES/TP-2026-02-22-outreach-auto-case-a200.md`

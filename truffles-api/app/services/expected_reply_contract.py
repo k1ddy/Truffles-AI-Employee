@@ -14,6 +14,18 @@ EXPECTED_REPLY_ALLOWED_TYPES = {
     EXPECTED_REPLY_INTENT_CHOICE,
 }
 
+EXPECTED_REPLY_SLOT_KEYS = {
+    EXPECTED_REPLY_SERVICE: "service",
+    EXPECTED_REPLY_TIME: "datetime",
+    EXPECTED_REPLY_NAME: "name",
+}
+
+EXPECTED_REPLY_OFF_TOPIC_PROMPT_MAP = {
+    EXPECTED_REPLY_SERVICE: ("service_clarify", "service_clarify"),
+    EXPECTED_REPLY_TIME: ("booking_ask_datetime", "booking_followup"),
+    EXPECTED_REPLY_NAME: ("booking_ask_name", "booking_followup"),
+}
+
 
 @dataclass(frozen=True)
 class ExpectedReplyContractUpdate:
@@ -43,6 +55,126 @@ def normalize_expected_reply_type(value: str | None) -> str | None:
     if cleaned not in EXPECTED_REPLY_ALLOWED_TYPES:
         return None
     return cleaned
+
+
+def expected_reply_slot_key(expected_reply_type: str | None) -> str | None:
+    expected_type = normalize_expected_reply_type(expected_reply_type)
+    if not expected_type:
+        return None
+    return EXPECTED_REPLY_SLOT_KEYS.get(expected_type)
+
+
+def is_expected_reply_type(expected_reply_type: str | None, target_type: str) -> bool:
+    expected_type = normalize_expected_reply_type(expected_reply_type)
+    target = normalize_expected_reply_type(target_type)
+    if not expected_type or not target:
+        return False
+    return expected_type == target
+
+
+def should_allow_layout_swap_for_expected_reply(expected_reply_type: str | None) -> bool:
+    expected_type = normalize_expected_reply_type(expected_reply_type)
+    return expected_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME}
+
+
+def should_mark_booking_time_service_candidate(
+    *,
+    expected_reply_type: str | None,
+    expected_reply_matched: bool | None,
+    message_text: str | None,
+) -> bool:
+    return bool(
+        is_expected_reply_type(expected_reply_type, EXPECTED_REPLY_TIME)
+        and expected_reply_matched is False
+        and message_text
+    )
+
+
+def should_repeat_booking_prompt(
+    *,
+    expected_reply_type: str | None,
+    expected_reply_matched: bool | None,
+    booking_expected_reply_type: str | None,
+) -> bool:
+    expected_type = normalize_expected_reply_type(expected_reply_type)
+    booking_expected = normalize_expected_reply_type(booking_expected_reply_type)
+    return bool(booking_expected and expected_type == booking_expected and expected_reply_matched is False)
+
+
+def should_use_expected_service_off_topic_prompt(expected_reply_type: str | None) -> bool:
+    return is_expected_reply_type(expected_reply_type, EXPECTED_REPLY_SERVICE)
+
+
+def should_prefer_info_class_for_booking_interrupt(
+    *,
+    info_class_intents_present: bool,
+    booking_time_service_candidate: bool,
+    expected_reply_type: str | None,
+) -> bool:
+    if not info_class_intents_present:
+        return False
+    return bool(
+        booking_time_service_candidate
+        or normalize_expected_reply_type(expected_reply_type)
+        in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+    )
+
+
+def truth_gate_expected_reply_prompt_contract(
+    expected_reply_type: str | None,
+) -> tuple[str | None, str | None]:
+    expected_type = normalize_expected_reply_type(expected_reply_type)
+    if not expected_type:
+        return None, None
+    return EXPECTED_REPLY_OFF_TOPIC_PROMPT_MAP.get(expected_type, (None, None))
+
+
+def should_override_truth_gate_off_topic_contract(
+    *,
+    expected_reply_type: str | None,
+    expected_reply_matched: bool | None,
+    has_message_text: bool,
+    current_goal: str | None,
+    is_short_reply: bool,
+    has_booking_slot_signal: bool,
+    has_service_hint: bool,
+    has_datetime_slot: bool,
+    has_name_slot: bool,
+) -> bool:
+    expected_type = normalize_expected_reply_type(expected_reply_type)
+    if expected_type not in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
+        return False
+    if current_goal == "booking":
+        return True
+    if expected_reply_matched is False:
+        return True
+    if not has_message_text:
+        return False
+    if is_short_reply or has_booking_slot_signal or has_service_hint:
+        return True
+    if expected_type == EXPECTED_REPLY_TIME and has_datetime_slot:
+        return True
+    if expected_type == EXPECTED_REPLY_NAME and has_name_slot:
+        return True
+    return False
+
+
+def should_keep_booking_prompt_for_info_clarify_time_followup(
+    *,
+    info_intent: str | None,
+    booking_active: bool,
+    expected_reply_type: str | None,
+    booking_expected_reply_type: str | None,
+    domain_out_of_domain: bool,
+) -> bool:
+    if info_intent != "info_clarify":
+        return False
+    if not booking_active or not domain_out_of_domain:
+        return False
+    return bool(
+        is_expected_reply_type(expected_reply_type, EXPECTED_REPLY_TIME)
+        and is_expected_reply_type(booking_expected_reply_type, EXPECTED_REPLY_TIME)
+    )
 
 
 def should_skip_booking_interrupt_for_expected_reply(

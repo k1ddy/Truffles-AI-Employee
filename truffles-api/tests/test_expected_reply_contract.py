@@ -2,10 +2,19 @@ from app.services.expected_reply_contract import (
     EXPECTED_REPLY_NAME,
     EXPECTED_REPLY_SERVICE,
     EXPECTED_REPLY_TIME,
+    expected_reply_slot_key,
     normalize_expected_reply_type,
     resolve_services_overview_contract_update,
     resolve_tool_expected_reply_contract,
+    should_allow_layout_swap_for_expected_reply,
+    should_keep_booking_prompt_for_info_clarify_time_followup,
+    should_mark_booking_time_service_candidate,
+    should_override_truth_gate_off_topic_contract,
+    should_prefer_info_class_for_booking_interrupt,
+    should_repeat_booking_prompt,
     should_skip_booking_interrupt_for_expected_reply,
+    should_use_expected_service_off_topic_prompt,
+    truth_gate_expected_reply_prompt_contract,
 )
 
 
@@ -157,3 +166,158 @@ def test_tool_contract_get_booking_verifier_blocked_collects_name_when_name_miss
     assert decision is not None
     assert decision.expected_reply_type == EXPECTED_REPLY_NAME
     assert decision.reason == "calendar_get_booking_collect_reference"
+
+
+def test_expected_reply_slot_key_maps_supported_types():
+    assert expected_reply_slot_key(EXPECTED_REPLY_SERVICE) == "service"
+    assert expected_reply_slot_key(EXPECTED_REPLY_TIME) == "datetime"
+    assert expected_reply_slot_key(EXPECTED_REPLY_NAME) == "name"
+    assert expected_reply_slot_key("unknown") is None
+
+
+def test_should_allow_layout_swap_for_expected_reply():
+    assert should_allow_layout_swap_for_expected_reply(EXPECTED_REPLY_SERVICE) is True
+    assert should_allow_layout_swap_for_expected_reply(EXPECTED_REPLY_TIME) is True
+    assert should_allow_layout_swap_for_expected_reply(EXPECTED_REPLY_NAME) is False
+
+
+def test_should_mark_booking_time_service_candidate_requires_unmatched_time():
+    assert (
+        should_mark_booking_time_service_candidate(
+            expected_reply_type=EXPECTED_REPLY_TIME,
+            expected_reply_matched=False,
+            message_text="на завтра",
+        )
+        is True
+    )
+    assert (
+        should_mark_booking_time_service_candidate(
+            expected_reply_type=EXPECTED_REPLY_TIME,
+            expected_reply_matched=True,
+            message_text="на завтра",
+        )
+        is False
+    )
+
+
+def test_should_repeat_booking_prompt_requires_same_expected_and_unmatched():
+    assert (
+        should_repeat_booking_prompt(
+            expected_reply_type=EXPECTED_REPLY_TIME,
+            expected_reply_matched=False,
+            booking_expected_reply_type=EXPECTED_REPLY_TIME,
+        )
+        is True
+    )
+    assert (
+        should_repeat_booking_prompt(
+            expected_reply_type=EXPECTED_REPLY_TIME,
+            expected_reply_matched=False,
+            booking_expected_reply_type=EXPECTED_REPLY_SERVICE,
+        )
+        is False
+    )
+
+
+def test_truth_gate_expected_reply_prompt_contract_maps_prompt_keys():
+    assert truth_gate_expected_reply_prompt_contract(EXPECTED_REPLY_SERVICE) == (
+        "service_clarify",
+        "service_clarify",
+    )
+    assert truth_gate_expected_reply_prompt_contract(EXPECTED_REPLY_TIME) == (
+        "booking_ask_datetime",
+        "booking_followup",
+    )
+    assert truth_gate_expected_reply_prompt_contract("unknown") == (None, None)
+
+
+def test_should_override_truth_gate_off_topic_contract():
+    assert (
+        should_override_truth_gate_off_topic_contract(
+            expected_reply_type=EXPECTED_REPLY_SERVICE,
+            expected_reply_matched=None,
+            has_message_text=True,
+            current_goal="booking",
+            is_short_reply=False,
+            has_booking_slot_signal=False,
+            has_service_hint=False,
+            has_datetime_slot=False,
+            has_name_slot=False,
+        )
+        is True
+    )
+    assert (
+        should_override_truth_gate_off_topic_contract(
+            expected_reply_type=EXPECTED_REPLY_TIME,
+            expected_reply_matched=None,
+            has_message_text=True,
+            current_goal="info",
+            is_short_reply=False,
+            has_booking_slot_signal=False,
+            has_service_hint=False,
+            has_datetime_slot=True,
+            has_name_slot=False,
+        )
+        is True
+    )
+    assert (
+        should_override_truth_gate_off_topic_contract(
+            expected_reply_type="unknown",
+            expected_reply_matched=None,
+            has_message_text=True,
+            current_goal="info",
+            is_short_reply=False,
+            has_booking_slot_signal=False,
+            has_service_hint=False,
+            has_datetime_slot=False,
+            has_name_slot=False,
+        )
+        is False
+    )
+
+
+def test_should_prefer_info_class_for_booking_interrupt():
+    assert (
+        should_prefer_info_class_for_booking_interrupt(
+            info_class_intents_present=True,
+            booking_time_service_candidate=False,
+            expected_reply_type=EXPECTED_REPLY_SERVICE,
+        )
+        is True
+    )
+    assert (
+        should_prefer_info_class_for_booking_interrupt(
+            info_class_intents_present=False,
+            booking_time_service_candidate=True,
+            expected_reply_type=EXPECTED_REPLY_SERVICE,
+        )
+        is False
+    )
+
+
+def test_should_use_expected_service_off_topic_prompt():
+    assert should_use_expected_service_off_topic_prompt(EXPECTED_REPLY_SERVICE) is True
+    assert should_use_expected_service_off_topic_prompt(EXPECTED_REPLY_TIME) is False
+
+
+def test_should_keep_booking_prompt_for_info_clarify_time_followup():
+    assert (
+        should_keep_booking_prompt_for_info_clarify_time_followup(
+            info_intent="info_clarify",
+            booking_active=True,
+            expected_reply_type=EXPECTED_REPLY_TIME,
+            booking_expected_reply_type=EXPECTED_REPLY_TIME,
+            domain_out_of_domain=True,
+        )
+        is True
+    )
+    assert (
+        should_keep_booking_prompt_for_info_clarify_time_followup(
+            info_intent="info_clarify",
+            booking_active=True,
+            expected_reply_type=EXPECTED_REPLY_SERVICE,
+            booking_expected_reply_type=EXPECTED_REPLY_TIME,
+            domain_out_of_domain=True,
+        )
+        is False
+    )
