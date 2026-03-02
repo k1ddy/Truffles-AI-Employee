@@ -8134,6 +8134,24 @@ _OPS_JOB_DEFINITIONS = {
 
 _INCIDENT_STATE_ALERT_TYPE = "console_incident_state"
 _INCIDENT_STATES = {"open", "in_progress", "resolved"}
+_COMPLIANCE_LIFECYCLE_LANES = {"manual", "auto"}
+_COMPLIANCE_LIFECYCLE_PROFILE_DEFAULTS = {
+    "retention_hourly": {
+        "operation": "retention_scan",
+        "cadence_minutes": 60,
+        "max_items": 200,
+    },
+    "export_daily": {
+        "operation": "export_preview",
+        "cadence_minutes": 1440,
+        "max_items": 200,
+    },
+    "destruction_daily": {
+        "operation": "destruction_preview",
+        "cadence_minutes": 1440,
+        "max_items": 200,
+    },
+}
 
 
 def _require_ops_access(context: ConsoleAuthContext, *, action: str = "read") -> None:
@@ -9022,6 +9040,88 @@ async def _run_integration_reconcile_job(
     return result
 
 
+def _normalize_compliance_lifecycle_lane(value: str | None) -> str:
+    lane = str(value or "manual").strip().lower()
+    if lane not in _COMPLIANCE_LIFECYCLE_LANES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "lane must be manual|auto")
+    return lane
+
+
+def _resolve_compliance_lifecycle_profile_defaults(
+    profile: str | None,
+) -> dict[str, int | str] | None:
+    if profile is None:
+        return None
+    token = profile.strip().lower()
+    defaults = _COMPLIANCE_LIFECYCLE_PROFILE_DEFAULTS.get(token)
+    if defaults is None:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "profile must be retention_hourly|export_daily|destruction_daily",
+        )
+    return defaults
+
+
+def _find_recent_compliance_lifecycle_ops_job(
+    db: Session,
+    *,
+    client_id: UUID,
+    scope: str,
+    branch_id: UUID | None,
+    data_class: str,
+    operation: str,
+    lane: str,
+) -> ConsoleOpsJob | None:
+    rows = (
+        db.query(ConsoleOpsJob)
+        .filter(
+            ConsoleOpsJob.client_id == client_id,
+            ConsoleOpsJob.job_type == "compliance_lifecycle",
+            ConsoleOpsJob.status == "success",
+        )
+        .order_by(ConsoleOpsJob.created_at.desc(), ConsoleOpsJob.id.desc())
+        .limit(200)
+        .all()
+    )
+    expected_branch_text = str(branch_id) if branch_id else None
+    expected_scope = scope.strip().lower()
+    expected_data_class = data_class.strip().lower()
+    expected_operation = operation.strip().lower()
+    expected_lane = lane.strip().lower()
+
+    for row in rows:
+        request_payload = row.request_payload if isinstance(row.request_payload, dict) else {}
+        params = request_payload.get("params")
+        if not isinstance(params, dict):
+            continue
+        row_scope = str(params.get("scope") or "").strip().lower() or (
+            "branch" if params.get("branch_id") else "client"
+        )
+        row_branch_raw = params.get("branch_id")
+        row_branch_text = str(row_branch_raw).strip() if row_branch_raw else None
+        row_data_class = str(params.get("data_class") or "learned_responses").strip().lower()
+        row_operation = str(params.get("operation") or "retention_scan").strip().lower()
+        try:
+            row_lane = _normalize_compliance_lifecycle_lane(
+                str(params.get("lane") or "manual").strip().lower()
+            )
+        except ConsoleAPIError:
+            continue
+        if row_scope != expected_scope:
+            continue
+        if row_branch_text != expected_branch_text:
+            continue
+        if row_data_class != expected_data_class:
+            continue
+        if row_operation != expected_operation:
+            continue
+        if row_lane != expected_lane:
+            continue
+        return row
+    return None
+
+
 def _execute_compliance_lifecycle_preview_run(
     db: Session,
     *,
@@ -9119,20 +9219,59 @@ async def _run_compliance_lifecycle_job(
     else:
         requested_branch_id = None
 
+    profile = _parse_ops_job_text_param(
+        params,
+        name="profile",
+        required=False,
+        max_length=64,
+    )
+    profile_defaults = _resolve_compliance_lifecycle_profile_defaults(profile)
+
     data_class = (
         _parse_ops_job_text_param(params, name="data_class", required=False, max_length=64)
         or "learned_responses"
     )
+    default_operation = (
+        str(profile_defaults["operation"])
+        if profile_defaults and isinstance(profile_defaults.get("operation"), str)
+        else "retention_scan"
+    )
     operation = (
         _parse_ops_job_text_param(params, name="operation", required=False, max_length=64)
-        or "retention_scan"
+        or default_operation
+    )
+    if profile_defaults and operation != default_operation:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "operation must match selected profile",
+        )
+    default_max_items = (
+        int(profile_defaults["max_items"])
+        if profile_defaults and isinstance(profile_defaults.get("max_items"), int)
+        else 200
     )
     max_items = _parse_ops_job_int_param(
         params,
         name="max_items",
-        default=200,
+        default=default_max_items,
         min_value=1,
         max_value=500,
+    )
+    lane = _normalize_compliance_lifecycle_lane(
+        _parse_ops_job_text_param(params, name="lane", required=False, max_length=16)
+    )
+    default_cadence = (
+        int(profile_defaults["cadence_minutes"])
+        if profile_defaults and isinstance(profile_defaults.get("cadence_minutes"), int)
+        else 60
+    )
+    cadence_minutes = _parse_ops_job_int_param(
+        params,
+        name="cadence_minutes",
+        default=default_cadence,
+        min_value=15,
+        max_value=10080,
     )
     reason = _parse_ops_job_text_param(params, name="reason", required=False, max_length=500)
 
@@ -9142,6 +9281,44 @@ async def _run_compliance_lifecycle_job(
         scope=normalized_scope,
         branch_id=requested_branch_id,
     )
+    now = datetime.now(timezone.utc)
+    if lane == "auto":
+        recent_job = _find_recent_compliance_lifecycle_ops_job(
+            db,
+            client_id=context.client.id,
+            scope=resolved_scope,
+            branch_id=resolved_branch_id,
+            data_class=data_class,
+            operation=operation,
+            lane=lane,
+        )
+        if recent_job and recent_job.created_at:
+            recent_created_at = (
+                recent_job.created_at
+                if recent_job.created_at.tzinfo
+                else recent_job.created_at.replace(tzinfo=timezone.utc)
+            )
+            next_due_at = recent_created_at + timedelta(minutes=cadence_minutes)
+            if next_due_at > now:
+                return {
+                    "mode": mode,
+                    "scope": {
+                        "client_id": str(context.client.id),
+                        "scope": resolved_scope,
+                        "branch_id": str(resolved_branch_id) if resolved_branch_id else None,
+                    },
+                    "data_class": data_class,
+                    "operation": operation,
+                    "lane": lane,
+                    "profile": profile.strip().lower() if isinstance(profile, str) else None,
+                    "cadence_minutes": cadence_minutes,
+                    "skipped": True,
+                    "skip_reason": "cadence_not_due",
+                    "last_run_job_id": str(recent_job.id),
+                    "last_run_at": recent_created_at.isoformat(),
+                    "next_due_at": next_due_at.isoformat(),
+                }
+
     lifecycle_run_mode = "preview" if mode == "dry_run" else "manual"
     run, records = _execute_compliance_lifecycle_preview_run(
         db,
@@ -9162,10 +9339,14 @@ async def _run_compliance_lifecycle_job(
         },
         "data_class": run.data_class,
         "operation": run.operation,
+        "lane": lane,
+        "profile": profile.strip().lower() if isinstance(profile, str) else None,
+        "cadence_minutes": cadence_minutes,
         "run_mode": run.run_mode,
         "reason": reason,
         "run_id": str(run.id),
         "status": run.status,
+        "skipped": False,
         "summary": run.summary_json or {},
         "records_count": len(records),
         "policy_version_id": str(run.policy_version_id) if run.policy_version_id else None,

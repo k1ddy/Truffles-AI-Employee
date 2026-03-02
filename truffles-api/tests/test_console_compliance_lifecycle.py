@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import uuid4
@@ -222,6 +222,8 @@ async def test_run_compliance_lifecycle_job_returns_preview_summary(monkeypatch)
     assert result["mode"] == "execute"
     assert result["status"] == "completed"
     assert result["records_count"] == 2
+    assert result["lane"] == "manual"
+    assert result["skipped"] is False
     assert captured["run_mode"] == "manual"
     assert captured["operation"] == "destruction_preview"
     assert captured["max_items"] == 12
@@ -241,3 +243,121 @@ async def test_run_compliance_lifecycle_job_rejects_invalid_scope():
         )
 
     assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_auto_lane_skips_when_not_due(monkeypatch):
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+    recent_job = SimpleNamespace(
+        id=uuid4(),
+        created_at=datetime.now(timezone.utc),
+    )
+
+    monkeypatch.setattr(console_router, "_resolve_policy_registry_scope", lambda *args, **kwargs: ("client", None))
+    monkeypatch.setattr(
+        console_router,
+        "_find_recent_compliance_lifecycle_ops_job",
+        lambda *args, **kwargs: recent_job,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_execute_compliance_lifecycle_preview_run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not execute")),
+    )
+
+    result = await console_router._run_compliance_lifecycle_job(
+        db,
+        context=context,
+        mode="execute",
+        params={
+            "lane": "auto",
+            "operation": "retention_scan",
+            "cadence_minutes": 60,
+        },
+    )
+
+    assert result["skipped"] is True
+    assert result["skip_reason"] == "cadence_not_due"
+    assert result["last_run_job_id"] == str(recent_job.id)
+
+
+@pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_auto_lane_runs_when_due(monkeypatch):
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+    run = _run_record(client_id=context.client.id, agent_id=context.agent.id)
+    records = [_record_item(run_id=run.id)]
+    old_job = SimpleNamespace(
+        id=uuid4(),
+        created_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(console_router, "_resolve_policy_registry_scope", lambda *args, **kwargs: ("client", None))
+    monkeypatch.setattr(
+        console_router,
+        "_find_recent_compliance_lifecycle_ops_job",
+        lambda *args, **kwargs: old_job,
+    )
+
+    def _fake_execute(*args, **kwargs):
+        captured["operation"] = kwargs["operation"]
+        captured["run_mode"] = kwargs["run_mode"]
+        return run, records
+
+    monkeypatch.setattr(console_router, "_execute_compliance_lifecycle_preview_run", _fake_execute)
+
+    result = await console_router._run_compliance_lifecycle_job(
+        db,
+        context=context,
+        mode="execute",
+        params={
+            "lane": "auto",
+            "profile": "destruction_daily",
+            "cadence_minutes": 60,
+        },
+    )
+
+    assert result["skipped"] is False
+    assert result["lane"] == "auto"
+    assert result["profile"] == "destruction_daily"
+    assert captured["operation"] == "destruction_preview"
+    assert captured["run_mode"] == "manual"
+
+
+@pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_rejects_invalid_profile():
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router._run_compliance_lifecycle_job(
+            db,
+            context=context,
+            mode="dry_run",
+            params={"profile": "weekly_cleanup"},
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "profile must be" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_rejects_profile_operation_mismatch():
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router._run_compliance_lifecycle_job(
+            db,
+            context=context,
+            mode="execute",
+            params={
+                "profile": "destruction_daily",
+                "operation": "retention_scan",
+            },
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "operation must match selected profile" in exc_info.value.message

@@ -102,6 +102,15 @@ Date
   - deterministic tests:
     - `truffles-api/tests/test_console_ops_jobs.py` (success/failure/audit payload for compliance job type)
     - `truffles-api/tests/test_console_compliance_lifecycle.py` (`_run_compliance_lifecycle_job` scope validation + run-mode mapping)
+- Slice 4 delivery (`automation cadence/profile guardrails`):
+  - Added lifecycle lane contract (`manual|auto`) with deterministic validation.
+  - Added profile presets (`retention_hourly|export_daily|destruction_daily`) for operation/max-items/cadence defaults.
+  - Added auto-lane cadence gate: if matching successful run is not due, job returns explicit `skipped=true` payload with `last_run_at` and `next_due_at`.
+  - Added fail-closed checks:
+    - invalid profile rejected,
+    - profile/operation mismatch rejected.
+  - deterministic tests:
+    - `truffles-api/tests/test_console_compliance_lifecycle.py` (auto skip path, due path, invalid profile, mismatch rejection)
 
 ## Checks + outcomes
 - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
@@ -111,6 +120,10 @@ Date
 - `cd truffles-api && pytest -q tests/test_compliance_lifecycle_service.py tests/test_console_compliance_lifecycle.py tests/test_compliance_policy_registry_service.py tests/test_console_compliance_policy_registry.py tests/test_policy_registry_service.py tests/test_console_policy_registry.py tests/test_sla_profile_registry_service.py tests/test_console_sla_profile_registry.py` -> `34 passed`.
 - `cd truffles-api && pytest -q tests/test_console_ops_jobs.py tests/test_console_compliance_lifecycle.py tests/test_compliance_lifecycle_service.py tests/test_compliance_policy_registry_service.py tests/test_console_compliance_policy_registry.py` -> `32 passed`.
 - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass after contract sync (`openapi.v1.yaml` updated).
+- `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK` (after Slice 4).
+- `cd truffles-api && ruff check app/routers/console.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `All checks passed`.
+- `cd truffles-api && pytest -q tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `27 passed`.
+- `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass (no OpenAPI drift after Slice 4).
 
 ## Iteration budget outcomes
 - `Planned max runs` -> 0 expensive realism runs (analysis/doc sync only).
