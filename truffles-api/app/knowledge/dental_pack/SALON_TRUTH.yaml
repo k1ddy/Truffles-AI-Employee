@@ -1,0 +1,31 @@
+salon:
+  name: "Dental Pack"
+  instagram: "https://instagram.com/dental_pack"
+  services_summary: "Стоматология: лечение, гигиена, профилактика."
+
+services_catalog:
+  - name: "Профессиональная чистка зубов"
+    aliases:
+      - "чистка зубов"
+      - "гигиена полости рта"
+      - "профчистка"
+    price: "22000 тг"
+    duration: "45 мин"
+  - name: "Лечение кариеса"
+    aliases:
+      - "лечение зуба"
+      - "кариес лечение"
+    price: "28000 тг"
+    duration: "60 мин"
+
+client_pack:
+  signals:
+    services_overview_phrases:
+      - "какие процедуры для зубов"
+      - "что по лечению зубов"
+    service_question_keywords:
+      - "какие услуги"
+      - "что по стоматологии"
+    portfolio_question_keywords:
+      - "есть фото результатов"
+      - "покажите примеры работ"

@@ -12,6 +12,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.services.knowledge_runtime import get_runtime_truth
+from app.services.pack_query_backend_service import (
+    PackQueryBackendCandidate,
+    PackQueryBackendLookup,
+    get_pack_query_retrieval_mode,
+    resolve_backend_candidates,
+)
 from app.services.pack_runtime_default import (
     _build_fact_meta,
     _detect_promotion_intent,
@@ -367,27 +373,27 @@ def _pack_query_catalog_templates(truth: dict[str, Any]) -> tuple[str, str]:
     )
 
 
-def _build_pack_query_candidates(
+def _runtime_dense_signal(
     text: str,
     *,
     client_slug: str | None,
-    branch_id: str | None = None,
-) -> tuple[list[PackQueryCandidate], dict[str, Any]]:
-    truth = load_yaml_truth(client_slug)
-    if not isinstance(truth, dict):
-        return [], {}
-    effective_slug, runtime_branch = _resolve_runtime_scope(client_slug)
-    effective_branch = _normalize_scope_token(branch_id) or runtime_branch
+) -> tuple[str | None, float, str | None]:
     runtime_semantic = _runtime_semantic_service_match(text, client_slug or "generic")
-    dense_name = None
-    dense_score = 0.0
-    dense_action = None
-    if runtime_semantic:
-        dense_action = _coerce_text_token(getattr(runtime_semantic, "action", None))
-        dense_name = _normalize_text(str(getattr(runtime_semantic, "canonical_name", "") or ""))
-        dense_score = _coerce_confidence(getattr(runtime_semantic, "score", None)) or 0.0
+    if not runtime_semantic:
+        return None, 0.0, None
+    dense_action = _coerce_text_token(getattr(runtime_semantic, "action", None))
+    dense_name = _normalize_text(str(getattr(runtime_semantic, "canonical_name", "") or ""))
+    dense_score = _coerce_confidence(getattr(runtime_semantic, "score", None)) or 0.0
+    return dense_action, dense_score, dense_name
 
-    candidates: list[PackQueryCandidate] = []
+
+def _service_entries_in_scope(
+    truth: dict[str, Any],
+    *,
+    effective_slug: str | None,
+    effective_branch: str | None,
+) -> tuple[list[dict[str, Any]], dict[str, bool]]:
+    scoped_items: list[dict[str, Any]] = []
     branch_scoped_items_seen = False
     filtered_out_by_branch = False
     filtered_out_by_tenant = False
@@ -404,6 +410,136 @@ def _build_pack_query_candidates(
             branch_scoped_items_seen = True
         if effective_branch and branch_scope and effective_branch not in branch_scope:
             filtered_out_by_branch = True
+            continue
+        scoped_items.append(service_item)
+    return scoped_items, {
+        "branch_filter_active": bool(effective_branch),
+        "branch_scoped_items_seen": branch_scoped_items_seen,
+        "filtered_out_by_branch": filtered_out_by_branch,
+        "filtered_out_by_tenant": filtered_out_by_tenant,
+    }
+
+
+def _match_backend_candidate_to_scope(
+    candidate: PackQueryBackendCandidate,
+    *,
+    scoped_items: list[dict[str, Any]],
+) -> tuple[dict[str, Any], str, str | None] | None:
+    candidate_norm = _normalize_text(candidate.canonical_name)
+    if not candidate_norm:
+        return None
+    alias_match: tuple[dict[str, Any], str, str | None] | None = None
+    for service_item in scoped_items:
+        canonical_name = _coerce_text_token(service_item.get("name"))
+        if not canonical_name:
+            continue
+        canonical_norm = _normalize_text(canonical_name)
+        if candidate_norm == canonical_norm:
+            return service_item, canonical_name, None
+        if alias_match is not None:
+            continue
+        for alias in _service_aliases(service_item):
+            if _normalize_text(alias) == candidate_norm:
+                alias_match = (service_item, canonical_name, alias)
+                break
+    return alias_match
+
+
+def _to_pack_query_candidate_from_backend(
+    backend_candidate: PackQueryBackendCandidate,
+    *,
+    text: str,
+    scoped_items: list[dict[str, Any]],
+) -> PackQueryCandidate | None:
+    matched = _match_backend_candidate_to_scope(backend_candidate, scoped_items=scoped_items)
+    if matched is None:
+        return None
+    service_item, canonical_name, alias_hit = matched
+    sparse_score = backend_candidate.sparse_score
+    if sparse_score <= 0.0:
+        sparse_score = _sparse_alias_score(text, alias_hit or canonical_name)
+    dense_score = backend_candidate.dense_score
+    if dense_score <= 0.0:
+        dense_score = max(backend_candidate.score, sparse_score)
+    rerank_bonus = backend_candidate.rerank_bonus
+    final_score = backend_candidate.score
+    if final_score <= 0.0:
+        final_score = min(1.0, 0.58 * dense_score + 0.42 * sparse_score + rerank_bonus)
+    if final_score <= 0.0:
+        return None
+    return PackQueryCandidate(
+        canonical_name=canonical_name,
+        sparse_score=max(0.0, min(sparse_score, 1.0)),
+        dense_score=max(0.0, min(dense_score, 1.0)),
+        rerank_bonus=max(0.0, min(rerank_bonus, 1.0)),
+        final_score=max(0.0, min(final_score, 1.0)),
+        matched_alias=alias_hit or backend_candidate.matched_alias,
+        service_item=service_item,
+    )
+
+
+def _backend_candidates_in_scope(
+    backend_lookup: PackQueryBackendLookup,
+    *,
+    text: str,
+    scoped_items: list[dict[str, Any]],
+) -> list[PackQueryCandidate]:
+    selected: dict[str, PackQueryCandidate] = {}
+    for backend_candidate in backend_lookup.candidates:
+        candidate = _to_pack_query_candidate_from_backend(
+            backend_candidate,
+            text=text,
+            scoped_items=scoped_items,
+        )
+        if candidate is None:
+            continue
+        key = _normalize_text(candidate.canonical_name)
+        previous = selected.get(key)
+        if previous and previous.final_score >= candidate.final_score:
+            continue
+        selected[key] = candidate
+    return sorted(selected.values(), key=lambda row: row.final_score, reverse=True)
+
+
+def _pack_query_backend_status(lookup: PackQueryBackendLookup) -> dict[str, Any]:
+    meta = lookup.meta if isinstance(lookup.meta, dict) else {}
+    payload = {
+        "mode": _coerce_text_token(meta.get("mode")),
+        "driver": _coerce_text_token(meta.get("driver")),
+        "engine": _coerce_text_token(meta.get("engine")),
+        "engine_version": _coerce_text_token(meta.get("engine_version")),
+        "method": _coerce_text_token(meta.get("method")),
+        "available": bool(lookup.available),
+        "unavailable_reason": _coerce_text_token(lookup.unavailable_reason),
+    }
+    return payload
+
+
+def _build_pack_query_candidates_local(
+    text: str,
+    *,
+    client_slug: str | None,
+    branch_id: str | None = None,
+) -> tuple[list[PackQueryCandidate], dict[str, Any]]:
+    truth = load_yaml_truth(client_slug)
+    if not isinstance(truth, dict):
+        return [], {}
+    effective_slug, runtime_branch = _resolve_runtime_scope(client_slug)
+    effective_branch = _normalize_scope_token(branch_id) or runtime_branch
+    dense_action, dense_score, dense_name = _runtime_dense_signal(
+        text,
+        client_slug=client_slug,
+    )
+
+    candidates: list[PackQueryCandidate] = []
+    scoped_items, scope_meta = _service_entries_in_scope(
+        truth,
+        effective_slug=effective_slug,
+        effective_branch=effective_branch,
+    )
+    for service_item in scoped_items:
+        canonical_name = _coerce_text_token(service_item.get("name"))
+        if not canonical_name:
             continue
         aliases = _service_aliases(service_item)
         if not aliases:
@@ -459,12 +595,7 @@ def _build_pack_query_candidates(
             "tenant_slug": effective_slug,
             "branch_id": effective_branch,
         },
-        "scope": {
-            "branch_filter_active": bool(effective_branch),
-            "branch_scoped_items_seen": branch_scoped_items_seen,
-            "filtered_out_by_branch": filtered_out_by_branch,
-            "filtered_out_by_tenant": filtered_out_by_tenant,
-        },
+        "scope": scope_meta,
         "dense_signal": {
             "action": dense_action,
             "canonical_name": dense_name,
@@ -477,6 +608,84 @@ def _build_pack_query_candidates(
         },
     }
     return candidates, meta
+
+
+def _build_pack_query_candidates(
+    text: str,
+    *,
+    client_slug: str | None,
+    branch_id: str | None = None,
+) -> tuple[list[PackQueryCandidate], dict[str, Any]]:
+    local_candidates, local_meta = _build_pack_query_candidates_local(
+        text,
+        client_slug=client_slug,
+        branch_id=branch_id,
+    )
+    retrieval_mode = get_pack_query_retrieval_mode()
+    if retrieval_mode == "runtime_local":
+        runtime_meta = dict(local_meta)
+        runtime_meta["retrieval_mode"] = "runtime_local"
+        runtime_meta["selected_source"] = "runtime_local"
+        return local_candidates, runtime_meta
+
+    filters = local_meta.get("filters") if isinstance(local_meta.get("filters"), dict) else {}
+    effective_branch = _coerce_text_token(filters.get("branch_id"))
+    backend_lookup = resolve_backend_candidates(
+        query_text=text,
+        client_slug=client_slug,
+        branch_id=effective_branch,
+    )
+    backend_status = _pack_query_backend_status(backend_lookup)
+
+    if retrieval_mode == "backend_shadow":
+        shadow_meta = dict(local_meta)
+        shadow_meta["retrieval_mode"] = "backend_shadow"
+        shadow_meta["selected_source"] = "runtime_local"
+        shadow_meta["backend"] = backend_status
+        shadow_meta["backend_candidate_count"] = len(backend_lookup.candidates)
+        return local_candidates, shadow_meta
+
+    truth = load_yaml_truth(client_slug)
+    if not isinstance(truth, dict):
+        truth = {}
+    effective_slug, runtime_branch = _resolve_runtime_scope(client_slug)
+    scoped_branch = _normalize_scope_token(branch_id) or runtime_branch
+    scoped_items, _ = _service_entries_in_scope(
+        truth,
+        effective_slug=effective_slug,
+        effective_branch=scoped_branch,
+    )
+    backend_candidates = _backend_candidates_in_scope(
+        backend_lookup,
+        text=text,
+        scoped_items=scoped_items,
+    )
+
+    if backend_candidates:
+        backend_meta = dict(local_meta)
+        driver_meta = backend_lookup.meta if isinstance(backend_lookup.meta, dict) else {}
+        backend_meta["engine"] = _coerce_text_token(driver_meta.get("engine")) or backend_meta.get("engine")
+        backend_meta["engine_version"] = _coerce_text_token(driver_meta.get("engine_version")) or backend_meta.get(
+            "engine_version"
+        )
+        backend_meta["method"] = _coerce_text_token(driver_meta.get("method")) or backend_meta.get("method")
+        backend_meta["candidate_count"] = len(backend_candidates)
+        backend_meta["retrieval_mode"] = "backend_primary"
+        backend_meta["selected_source"] = "backend_primary"
+        backend_meta["backend"] = backend_status
+        return backend_candidates, backend_meta
+
+    fallback_reason = "backend_scope_filtered"
+    if not backend_lookup.available:
+        fallback_reason = "backend_unavailable"
+    elif backend_lookup.unavailable_reason == "no_candidates":
+        fallback_reason = "backend_empty"
+    fallback_meta = dict(local_meta)
+    fallback_meta["retrieval_mode"] = "backend_primary"
+    fallback_meta["selected_source"] = "runtime_local_fallback"
+    fallback_meta["backend"] = backend_status
+    fallback_meta["fallback_reason"] = fallback_reason
+    return local_candidates, fallback_meta
 
 
 def _build_pack_query_retrieval_meta(
@@ -500,6 +709,29 @@ def _build_pack_query_retrieval_meta(
         "best_rerank_bonus": round(float(best.rerank_bonus), 4) if best else 0.0,
         "suggestions": suggestions,
     }
+    retrieval_mode = _coerce_text_token(engine_meta.get("retrieval_mode"))
+    if retrieval_mode:
+        payload["retrieval_mode"] = retrieval_mode
+    selected_source = _coerce_text_token(engine_meta.get("selected_source"))
+    if selected_source:
+        payload["selected_source"] = selected_source
+    fallback_reason = _coerce_text_token(engine_meta.get("fallback_reason"))
+    if fallback_reason:
+        payload["fallback_reason"] = fallback_reason
+    backend_candidate_count = engine_meta.get("backend_candidate_count")
+    if isinstance(backend_candidate_count, int) and backend_candidate_count >= 0:
+        payload["backend_candidate_count"] = backend_candidate_count
+    backend = engine_meta.get("backend")
+    if isinstance(backend, dict):
+        payload["backend"] = {
+            "mode": _coerce_text_token(backend.get("mode")),
+            "driver": _coerce_text_token(backend.get("driver")),
+            "engine": _coerce_text_token(backend.get("engine")),
+            "engine_version": _coerce_text_token(backend.get("engine_version")),
+            "method": _coerce_text_token(backend.get("method")),
+            "available": bool(backend.get("available")),
+            "unavailable_reason": _coerce_text_token(backend.get("unavailable_reason")),
+        }
     return payload
 
 
@@ -1055,12 +1287,18 @@ def _normalize_retrieval_meta(meta: Any) -> dict[str, Any] | None:
         return None
     filters = meta.get("filters") if isinstance(meta.get("filters"), dict) else {}
     scope = meta.get("scope") if isinstance(meta.get("scope"), dict) else {}
+    backend = meta.get("backend") if isinstance(meta.get("backend"), dict) else {}
     suggestions = _coerce_text_list(meta.get("suggestions"))
     raw_candidate_count = meta.get("candidate_count")
     try:
         candidate_count = int(raw_candidate_count or 0)
     except (TypeError, ValueError):
         candidate_count = 0
+    raw_backend_candidate_count = meta.get("backend_candidate_count")
+    try:
+        backend_candidate_count = int(raw_backend_candidate_count or 0)
+    except (TypeError, ValueError):
+        backend_candidate_count = 0
     return {
         "engine": _coerce_text_token(meta.get("engine")),
         "engine_version": _coerce_text_token(meta.get("engine_version")),
@@ -1071,6 +1309,10 @@ def _normalize_retrieval_meta(meta: Any) -> dict[str, Any] | None:
         "best_sparse_score": _coerce_confidence(meta.get("best_sparse_score")) or 0.0,
         "best_dense_score": _coerce_confidence(meta.get("best_dense_score")) or 0.0,
         "best_rerank_bonus": _coerce_confidence(meta.get("best_rerank_bonus")) or 0.0,
+        "retrieval_mode": _coerce_text_token(meta.get("retrieval_mode")),
+        "selected_source": _coerce_text_token(meta.get("selected_source")),
+        "fallback_reason": _coerce_text_token(meta.get("fallback_reason")),
+        "backend_candidate_count": max(backend_candidate_count, 0),
         "suggestions": suggestions,
         "filters": {
             "tenant_slug": _coerce_text_token(filters.get("tenant_slug")),
@@ -1081,6 +1323,15 @@ def _normalize_retrieval_meta(meta: Any) -> dict[str, Any] | None:
             "branch_scoped_items_seen": bool(scope.get("branch_scoped_items_seen")),
             "filtered_out_by_branch": bool(scope.get("filtered_out_by_branch")),
             "filtered_out_by_tenant": bool(scope.get("filtered_out_by_tenant")),
+        },
+        "backend": {
+            "mode": _coerce_text_token(backend.get("mode")),
+            "driver": _coerce_text_token(backend.get("driver")),
+            "engine": _coerce_text_token(backend.get("engine")),
+            "engine_version": _coerce_text_token(backend.get("engine_version")),
+            "method": _coerce_text_token(backend.get("method")),
+            "available": bool(backend.get("available")),
+            "unavailable_reason": _coerce_text_token(backend.get("unavailable_reason")),
         },
     }
 

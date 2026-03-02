@@ -496,4 +496,22 @@
     - `test_llm_policy_core_degraded_timeout_services_overview_uses_info_fallback`: migrated strict text/trace asserts to resilient contract-state checks for valid degraded variants.
   - Validation (green, full deterministic):
     - `pytest -q truffles-api/tests/test_message_endpoint.py` (`270 passed, 2 warnings`).
-- last_updated: 2026-03-02T17:03:09+05:00
+  - Implemented `P5b` distributed retrieval closure (runtime adapter + mode switch):
+    - added `truffles-api/app/services/pack_query_backend_service.py` (driver contract + modes `runtime_local|backend_shadow|backend_primary`),
+    - wired `truffles-api/app/services/pack_runtime_service.py` to backend shadow/primary paths with explicit fallback reason and retrieval provenance parity,
+    - extended retrieval contract normalization (`resolver_contract.retrieval`) for mode/source/backend/fallback fields.
+  - Implemented deterministic part of `P12` on real repository packs:
+    - added canonical non-salon packs `truffles-api/app/knowledge/clinic_pack/SALON_TRUTH.yaml` and `truffles-api/app/knowledge/dental_pack/SALON_TRUTH.yaml` (+ README),
+    - updated `truffles-api/tests/test_cross_domain_signal_contract_suite.py` to use real slugs/packs (no inline runtime truth injection).
+  - Validation (green, P5b+P12 deterministic packet):
+    - `ruff check truffles-api/app/services/pack_runtime_service.py truffles-api/app/services/pack_query_backend_service.py truffles-api/tests/test_pack_runtime_service.py truffles-api/tests/test_pack_query_engine_contract.py truffles-api/tests/test_pack_query_backend_service.py truffles-api/tests/test_cross_domain_signal_contract_suite.py` (`All checks passed`)
+    - `pytest -q truffles-api/tests/test_pack_query_backend_service.py truffles-api/tests/test_pack_runtime_service.py truffles-api/tests/test_pack_query_engine_contract.py truffles-api/tests/test_cross_domain_signal_contract_suite.py` (`26 passed`)
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k "semantic_service_matcher or service_not_found"` (`6 passed, 264 deselected`)
+    - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "cross_domain_matrix_contract"` (`3 passed, 74 deselected`)
+    - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+  - Canon sync completed:
+    - updated `docs/TASK_PACKAGES/TP-2026-03-02-p5b-distributed-retrieval-backend-a1.md` (status `done`),
+    - updated `docs/TASK_PACKAGES/TP-2026-03-02-p12-cross-domain-hardening-full-closure-a1.md` (status `in_progress`, deterministic done + acceptance pending),
+    - updated parent execution status in `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`,
+    - updated `STATE.md` NOW block with packet evidence.
+- last_updated: 2026-03-02T17:53:28+05:00

@@ -167,3 +167,22 @@
 - `Do not touch`: policy-core behavior logic.
 - `Open risks`: missing production-like non-salon datasets.
 - `First command to verify`: `pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py`.
+
+## Execution status (2026-03-02)
+- `Status`: `in_progress` (deterministic scope done, acceptance evidence pending)
+- `Implementation facts`:
+  - Added canonical non-salon reference packs:
+    - `truffles-api/app/knowledge/clinic_pack/SALON_TRUTH.yaml`
+    - `truffles-api/app/knowledge/dental_pack/SALON_TRUTH.yaml`
+  - Added pack docs:
+    - `truffles-api/app/knowledge/clinic_pack/README.md`
+    - `truffles-api/app/knowledge/dental_pack/README.md`
+  - Updated cross-domain deterministic suite to use real pack slugs/data from repository (removed inline runtime-truth injection):
+    - `truffles-api/tests/test_cross_domain_signal_contract_suite.py`
+- `Deterministic evidence`:
+  - `pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py` (included in packet run; green).
+  - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "cross_domain_matrix_contract"` (`3 passed, 74 deselected`).
+  - `ruff check truffles-api/tests/test_cross_domain_signal_contract_suite.py` (green inside packet lint run).
+- `Remaining to close P12`:
+  - Guarded acceptance artifacts for minimum two non-salon domains (`lock/replay` or matrix equivalent) with valid `infra_valid/semantic_valid/run_integrity_valid/manual_audit`.
+  - Update parent TP + `STATE.md` with concrete artifact paths after acceptance runs.
