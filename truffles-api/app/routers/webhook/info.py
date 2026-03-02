@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
-import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable
 
 from app.schemas.webhook import WebhookResponse
+from app.services.info_signal_service import (
+    anchor_group_hit as _anchor_group_hit,
+    count_anchor_hits as _count_anchor_hits,
+    is_short_reply as _is_short_reply_impl,
+    normalized_contains_any as _normalized_contains_any,
+    signal_any_match as _signal_any_match,
+    signal_pair_match as _signal_pair_match,
+    system_any_match as _system_any_match,
+    system_any_match_multi as _system_any_match_multi,
+    tokens_have_prefixes as _tokens_have_prefixes,
+    tokenize_for_matching as _tokenize_for_matching,
+)
 from app.services.pack_runtime_service import (
     _build_fact_meta,
     _has_contact_signal,
@@ -16,7 +27,6 @@ from app.services.pack_runtime_service import (
     _has_guest_waiting_signal,
     _has_parking_signal,
     _has_price_signal,
-    _normalize_text,
     build_info_combined_reply,
     build_master_reply_from_pack,
     compose_multi_truth_reply,
@@ -24,7 +34,6 @@ from app.services.pack_runtime_service import (
     format_reply_from_truth,
     get_pack_decision,
     get_pack_service_hint,
-    get_signal_lexicon_list,
     load_yaml_truth,
     phrase_match_intent,
     resolve_master_intent,
@@ -36,120 +45,12 @@ if TYPE_CHECKING:
     from app.models import Conversation, Message, User
 
 
-def _tokenize_for_matching(normalized: str) -> list[str]:
-    return re.findall(r"\w+", normalized)
-
-
 def _is_short_reply(message_text: str | None) -> bool:
     if not message_text:
         return False
     from . import _legacy as legacy
 
-    normalized = legacy.normalize_for_matching(message_text)
-    if not normalized:
-        return False
-    tokens = _tokenize_for_matching(normalized)
-    return 0 < len(tokens) <= legacy.SESSION_MEMORY_SHORT_TOKENS
-
-
-def _signal_phrase_list(client_slug: str | None, *keys: str) -> list[str]:
-    phrases: list[str] = []
-    for key in keys:
-        values = get_signal_lexicon_list(client_slug, key)
-        if not values:
-            continue
-        for phrase in values:
-            token = phrase.strip() if isinstance(phrase, str) else ""
-            if token and token not in phrases:
-                phrases.append(token)
-    return phrases
-
-
-def _has_token_prefix(tokens: list[str], prefix: str) -> bool:
-    return any(token.startswith(prefix) for token in tokens)
-
-
-def _has_anchor_prefix(tokens: list[str], prefix: str) -> bool:
-    """Anchor matching must avoid false positives on very short stems like 'до' in 'долгими'."""
-    if len(prefix) <= 2:
-        return any(token == prefix for token in tokens)
-    return any(token.startswith(prefix) for token in tokens)
-
-
-def _anchor_group_hit(tokens: list[str], group: tuple[str, ...]) -> bool:
-    return all(_has_anchor_prefix(tokens, prefix) for prefix in group)
-
-
-def _lexicon_anchor_groups(client_slug: str | None, key: str) -> list[tuple[str, ...]]:
-    from . import _legacy as legacy
-
-    groups: list[tuple[str, ...]] = []
-    for phrase in _signal_phrase_list(client_slug, key):
-        normalized_phrase = legacy.normalize_for_matching(phrase)
-        if not normalized_phrase:
-            continue
-        group = tuple(_tokenize_for_matching(normalized_phrase))
-        if len(group) < 2 or group in groups:
-            continue
-        groups.append(group)
-    return groups
-
-
-def _resolve_team_focus_key(
-    *,
-    client_slug: str | None,
-    message_text: str | None,
-    service_query: str | None,
-) -> str | None:
-    candidate = (
-        str(service_query).strip()
-        if isinstance(service_query, str) and str(service_query).strip()
-        else None
-    )
-    if not candidate and message_text:
-        candidate = get_pack_service_hint(message_text, client_slug=client_slug)
-    normalized = _normalize_text(candidate or "")
-    if not normalized:
-        return None
-    focus_tokens = {
-        "nails": (
-            "маникюр",
-            "педикюр",
-            "ногт",
-            "покрытие",
-            "наращивание",
-            "гель лак",
-        ),
-        "hair": (
-            "стрижка",
-            "окрашивание",
-            "укладка",
-            "волос",
-        ),
-        "brows_lashes": (
-            "бров",
-            "ресниц",
-            "ламинирование",
-        ),
-        "facial": (
-            "уход за лицом",
-            "чистка лица",
-            "пилинг",
-            "депиляция",
-        ),
-    }
-    for team_key, tokens in focus_tokens.items():
-        if any(token in normalized for token in tokens):
-            return team_key
-    return None
-
-
-def _count_anchor_hits(tokens: list[str], groups: list[tuple[str, ...]]) -> int:
-    hits = 0
-    for group in groups:
-        if _anchor_group_hit(tokens, group):
-            hits += 1
-    return hits
+    return _is_short_reply_impl(message_text, max_tokens=legacy.SESSION_MEMORY_SHORT_TOKENS)
 
 
 def _detect_info_anchor_hits(tokens: list[str]) -> dict[str, int]:
@@ -185,7 +86,7 @@ def _detect_info_class_intents(
     anchor_intents = {intent for intent, count in anchor_hits.items() if count > 0}
     question_like = "?" in (message_text or "")
     if not question_like and tokens:
-        question_like = any(_has_token_prefix(tokens, prefix) for prefix in legacy.QUESTION_WORD_PREFIXES)
+        question_like = _tokens_have_prefixes(tokens, legacy.QUESTION_WORD_PREFIXES)
     short_query = 0 < len(tokens) <= 4
 
     parking_signal = _has_parking_signal(normalized, client_slug=client_slug)
@@ -205,7 +106,8 @@ def _detect_info_class_intents(
         message_text,
         client_slug=client_slug,
     )
-    location_phrases = _signal_phrase_list(
+    location_signal = parking_signal or _signal_any_match(
+        normalized,
         client_slug,
         "location_keywords",
         "location_phrases",
@@ -222,53 +124,44 @@ def _detect_info_class_intents(
                 if len(token) >= 4 and not token.isdigit()
             ]
             if address_tokens:
-                address_hint_signal = any(token in normalized for token in address_tokens)
-    location_signal = parking_signal or (
-        bool(location_phrases) and any(phrase in normalized for phrase in location_phrases)
+                address_hint_signal = _normalized_contains_any(normalized, address_tokens)
+    location_scope_signal = _signal_any_match(
+        normalized,
+        client_slug,
+        "location_question_scope_terms",
     )
-    location_scope_terms = _signal_phrase_list(client_slug, "location_question_scope_terms")
     location_question_signal = bool(
         question_like
-        and any(token.startswith("где") for token in tokens)
-        and bool(location_scope_terms)
-        and any(stem in normalized for stem in location_scope_terms)
+        and _tokens_have_prefixes(tokens, ("где",))
+        and location_scope_signal
     )
     if location_question_signal:
         location_signal = True
     if address_hint_signal:
         location_signal = True
-    hours_phrases = _signal_phrase_list(client_slug, "hours_keywords")
-    hours_signal = bool(hours_phrases) and any(phrase in normalized for phrase in hours_phrases)
-    hours_stems = _signal_phrase_list(client_slug, "info_hours_stems")
-    time_markers = _signal_phrase_list(client_slug, "info_time_markers")
+    hours_signal = _signal_any_match(normalized, client_slug, "hours_keywords")
+    hours_stem_signal = _signal_any_match(normalized, client_slug, "info_hours_stems")
+    time_marker_signal = _signal_any_match(normalized, client_slug, "info_time_markers")
     if not hours_signal and question_like:
-        has_work_schedule_signal = bool(
-            hours_stems
-            and time_markers
-            and any(stem in normalized for stem in hours_stems)
-            and any(marker in normalized for marker in time_markers)
-        )
+        has_work_schedule_signal = hours_stem_signal and time_marker_signal
         if has_work_schedule_signal:
             hours_signal = True
     pricing_signal = _has_price_signal(normalized, message_text, client_slug=client_slug)
     duration_signal = _has_duration_signal(normalized, message_text, client_slug=client_slug)
-    duration_fallback_verbs = _signal_phrase_list(client_slug, "info_duration_fallback_verbs")
-    duration_fallback_questions = _signal_phrase_list(
-        client_slug, "info_duration_fallback_question_markers"
+    duration_fallback_signal = _signal_pair_match(
+        normalized,
+        client_slug,
+        "info_duration_fallback_verbs",
+        "info_duration_fallback_question_markers",
     )
     if not duration_signal:
-        duration_signal = bool(
-            duration_fallback_verbs
-            and duration_fallback_questions
-            and any(marker in normalized for marker in duration_fallback_verbs)
-            and any(marker in normalized for marker in duration_fallback_questions)
-        )
-    service_duration_markers = _signal_phrase_list(client_slug, "info_duration_service_context_markers")
-    service_duration_context = bool(
-        service_duration_markers
-        and any(marker in normalized for marker in service_duration_markers)
+        duration_signal = duration_fallback_signal
+    service_duration_context = _signal_any_match(
+        normalized,
+        client_slug,
+        "info_duration_service_context_markers",
     )
-    if duration_signal and any(stem in normalized for stem in hours_stems) and not service_duration_context:
+    if duration_signal and hours_stem_signal and not service_duration_context:
         duration_signal = False
         hours_signal = True
     master_resolution = resolve_master_intent(
@@ -314,11 +207,7 @@ def _detect_info_class_intents(
         intents.add(question_type.kind)
         meta["question_type"] = question_type.kind
         meta["question_type_score"] = question_type.score
-    work_schedule_phrase = bool(
-        hours_stems
-        and any(stem in normalized for stem in hours_stems)
-        and not service_duration_context
-    )
+    work_schedule_phrase = bool(hours_stem_signal and not service_duration_context)
     if work_schedule_phrase and "duration" in intents:
         intents.discard("duration")
         intents.add("hours")
@@ -399,18 +288,21 @@ def _looks_like_info_query(message_text: str | None, *, client_slug: str | None 
                     for token in legacy.normalize_for_matching(address_full).split()
                     if len(token) >= 4 and not token.isdigit()
                 ]
-                has_address_hint = any(token in normalized for token in address_tokens)
-                has_hours_hint = any(
-                    marker in normalized
-                    for marker in ("откры", "закры", "работ", "до ", "после ")
+                has_address_hint = _normalized_contains_any(normalized, address_tokens)
+                has_hours_hint = _system_any_match_multi(
+                    normalized,
+                    "hours_question_work_verbs",
+                    "hours_question_work_singular",
+                    "hours_question_time_phrases",
                 )
                 if has_address_hint and ("?" in message_text or has_hours_hint):
                     return True
-        if normalized and "запис" in normalized:
-            if any(
-                token in normalized
-                for token in ("какие дан", "дан", "что нужно", "нужно для", "какие нужны", "нужн")
-            ):
+        if normalized and _system_any_match_multi(
+            normalized,
+            "booking_request",
+            "booking_keywords",
+        ):
+            if _system_any_match(normalized, "booking_required_details_keywords"):
                 return True
     return False
 
@@ -487,13 +379,11 @@ def _build_info_intent_reply(
     guest_signal = _has_guest_waiting_signal(normalized, client_slug=client_slug) if normalized else False
     location_signal = False
     if normalized:
-        location_phrases = _signal_phrase_list(
+        location_signal = _signal_any_match(
+            normalized,
             client_slug,
             "location_keywords",
             "location_phrases",
-        )
-        location_signal = bool(location_phrases) and any(
-            phrase in normalized for phrase in location_phrases
         )
     include_info_bundle = include_info_bundle and (
         intent in {"location", "hours"} or location_signal or parking_signal or guest_signal
@@ -959,12 +849,11 @@ def _handle_info_flow(
             ):
                 service_hint = None
             else:
-                presence_keywords = get_signal_lexicon_list(client_slug, "service_question_keywords")
-                presence_hint = (
-                    bool(presence_keywords) and legacy._contains_any(normalized, presence_keywords)
-                ) or (
-                    "?" in message_text and len(normalized.split()) <= 4
-                )
+                presence_hint = _signal_any_match(
+                    normalized,
+                    client_slug,
+                    "service_question_keywords",
+                ) or ("?" in message_text and len(normalized.split()) <= 4)
                 if presence_hint and not (
                     legacy._has_price_signal(normalized, message_text)
                     or legacy._has_duration_signal(normalized, message_text)
@@ -1084,7 +973,9 @@ def _handle_info_flow(
         and not explicit_service_signal
     )
     force_parking_followup = bool(
-        carryover_has_parking and normalized_followup and "мест" in normalized_followup
+        carryover_has_parking
+        and normalized_followup
+        and _signal_any_match(normalized_followup, client_slug, "parking_keywords")
     )
     base_info_override = False
     if isinstance(info_signals, dict):
@@ -2249,7 +2140,6 @@ __all__ = [
     "_handle_info_flow",
     "_handle_offline_info_class",
     "_handle_truth_gate_fallback",
-    "_has_token_prefix",
     "_is_short_reply",
     "_looks_like_info_query",
     "_tokenize_for_matching",

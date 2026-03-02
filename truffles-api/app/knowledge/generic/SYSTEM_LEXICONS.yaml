@@ -98,6 +98,14 @@ booking_collect_detail_markers:
   ru:
     - без запис
     - сроч
+booking_required_details_keywords:
+  ru:
+    - какие дан
+    - дан
+    - что нужно
+    - нужно для
+    - какие нужны
+    - нужн
 booking_collect_detail_relative_markers:
   ru:
     - через
@@ -309,9 +317,13 @@ style_reference_media_terms:
 style_reference_send_terms:
   ru:
     - отправ
+    - присл
     - пришл
     - скин
+    - могу
+    - можно
     - покаж
+    - прикреп
   en:
     - send
     - share

@@ -91,6 +91,8 @@
 | `truffles-api/app/services/learned_response_service.py` | Auto-ingest + approval wiring for learned responses | Backend |
 | `truffles-api/app/services/calendar_sync_service.py` | Calendar provider sync via outbox + cursors + busy blocks | Backend |
 | `truffles-api/app/services/tool_registry_service.py` | Tool registry executor (calendar/catalog) for LLM plan | Backend |
+| `truffles-api/app/services/info_signal_service.py` | Info/lexicon signal helpers (routing-neutral) | Backend |
+| `truffles-api/app/services/booking_signal_service.py` | Booking/date/time signal helpers (regex + lexicon) | Backend |
 | `truffles-api/app/services/appointment_reminder_service.py` | Appointment reminder/follow-up jobs + outbox enqueue | Backend |
 | `truffles-api/app/services/metrics_daily_service.py` | Daily metrics snapshot (metrics_daily) | Backend |
 | `truffles-api/app/services/marketing/service.py` | Marketing Pro lifecycle/audience/preflight/execute/retry logic | Backend |
@@ -184,6 +186,11 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-03-02-multi-seed-drift-gate-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-chain-controller-bootstrap-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-master-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-semantic-service-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-core-dehardcoding-sweep-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-02-27-research-gates-rollout-a900.md`
 - `docs/TASK_PACKAGES/TP-2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md`
 - `docs/TASK_PACKAGES/TP-2026-02-22-outreach-auto-case-a200.md`

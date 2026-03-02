@@ -32,20 +32,38 @@ _TARGET_TEST_REF = (
 )
 
 
-def _write_l2_summary(path: Path, *, run_id: str, semantic_valid: bool = True) -> None:
+def _chain_controller_script() -> Path:
+    base = Path(__file__).resolve()
+    script_path = base.parents[2] / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("scripts/quality_chain_controller.sh not present", allow_module_level=True)
+    return script_path
+
+
+def _write_l2_summary(
+    path: Path,
+    *,
+    run_id: str,
+    semantic_valid: bool = True,
+    seed: int = 7,
+    lane: str = "dev",
+) -> None:
+    now_iso = datetime.now(timezone.utc).isoformat()
     payload = {
         "run_id": run_id,
+        "finished_at": now_iso,
         "quality_status": {
             "infra_valid": True,
             "semantic_valid": semantic_valid,
             "run_integrity_valid": True,
             "manual_audit_status": "done",
-            "quality_lane_effective": "dev",
+            "quality_lane_effective": lane,
         },
         "infra_valid": True,
         "semantic_valid": semantic_valid,
         "run_integrity_valid": True,
-        "config": {"quality_lane_effective": "dev"},
+        "config": {"quality_lane_effective": lane, "seed": seed},
+        "seed": seed,
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -100,6 +118,8 @@ def _write_pg_checklist(
     l2_summary_path: Path | None = None,
     l2_run_id: str | None = None,
     freshness_hours: float | None = None,
+    multi_seed_summaries: list[dict] | None = None,
+    multi_seed_required: list[int] | None = None,
 ) -> None:
     payload = {
         "go_to_full": {
@@ -134,7 +154,38 @@ def _write_pg_checklist(
         }
     if freshness_hours is not None:
         payload["go_to_full"]["evidence_freshness_hours"] = float(freshness_hours)
+    if multi_seed_summaries is not None:
+        payload["go_to_full"]["multi_seed_evidence"] = {
+            "summaries": multi_seed_summaries,
+        }
+        if multi_seed_required is not None:
+            payload["go_to_full"]["multi_seed_evidence"]["required_seeds"] = list(
+                multi_seed_required
+            )
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_multi_seed_summaries(
+    base_dir: Path,
+    *,
+    seeds: list[int],
+    run_id_prefix: str,
+) -> list[dict]:
+    summaries: list[dict] = []
+    for seed in seeds:
+        summary_path = base_dir / f"l2_summary_seed_{seed}.json"
+        _write_l2_summary(
+            summary_path,
+            run_id=f"{run_id_prefix}-{seed}",
+            seed=seed,
+        )
+        summaries.append(
+            {
+                "seed": seed,
+                "summary_path": str(summary_path),
+            }
+        )
+    return summaries
 
 
 def test_chain_gate_requires_token_for_acceptance(tmp_path):
@@ -204,6 +255,50 @@ def test_chain_gate_rejects_run_id_mode_mismatch(tmp_path):
     assert "chain_step_mode_mismatch:lock:replay" in status["reasons"]
 
 
+def test_chain_controller_bootstrap_imports_existing_lock(tmp_path):
+    chain_root = tmp_path / "chain"
+    chain_root.mkdir(parents=True, exist_ok=True)
+    output_dir = tmp_path / "run"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    chain_id = "bootstrap-a1"
+    run_id = f"booking-lock-{chain_id}"
+    summary_path = output_dir / "summary.json"
+    _write_l2_summary(summary_path, run_id=run_id, semantic_valid=True)
+
+    script_path = _chain_controller_script()
+    env = os.environ.copy()
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(chain_root)
+    result = subprocess.run(
+        [
+            str(script_path),
+            "bootstrap",
+            "--mode",
+            "lock",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            str(output_dir),
+            "--summary-path",
+            str(summary_path),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+    state_path = chain_root / f"{chain_id}.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["steps"]["lock"]["status"] == "canonical"
+    assert state["steps"]["lock"]["output_dir"] == str(output_dir)
+    assert state["active"]["step"] == "replay"
+    assert "--mode replay" in (state.get("next_command") or "")
+    assert f"{output_dir}/summary.json" in (state.get("next_command") or "")
+    assert (output_dir / "brief_for_next_agent.md").exists()
+
+
 def test_chain_gate_requires_resume_when_chain_marks_resume_required(tmp_path):
     chain_root = tmp_path / "chain"
     chain_root.mkdir(parents=True, exist_ok=True)
@@ -261,12 +356,18 @@ def test_chain_controller_prepare_and_finalize_advances_to_replay(tmp_path):
     l2_summary_path = tmp_path / "l2_summary.json"
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_l1_junit(l1_junit_path, target_refs=[_TARGET_TEST_REF])
-    _write_l2_summary(l2_summary_path, run_id="booking-l2-chain-e2e")
+    _write_l2_summary(l2_summary_path, run_id="booking-l2-chain-e2e", seed=7)
+    multi_seed = _write_multi_seed_summaries(
+        tmp_path,
+        seeds=[7, 19, 42],
+        run_id_prefix="booking-l2-chain-e2e-seed",
+    )
     _write_pg_checklist(
         pg_checklist,
         l1_junit_path=l1_junit_path,
         l2_summary_path=l2_summary_path,
         l2_run_id="booking-l2-chain-e2e",
+        multi_seed_summaries=multi_seed,
     )
     env = dict(os.environ)
     env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
@@ -373,12 +474,18 @@ def test_chain_controller_accepts_repo_target_with_nested_junit_paths(tmp_path):
         target_refs=[_TARGET_TEST_REF],
         path_attr_overrides={_TARGET_TEST_REF: "tests/test_message_endpoint.py"},
     )
-    _write_l2_summary(l2_summary_path, run_id="booking-l2-junit-path-normalized")
+    _write_l2_summary(l2_summary_path, run_id="booking-l2-junit-path-normalized", seed=7)
+    multi_seed = _write_multi_seed_summaries(
+        tmp_path,
+        seeds=[7, 19, 42],
+        run_id_prefix="booking-l2-junit-path-normalized-seed",
+    )
     _write_pg_checklist(
         pg_checklist,
         l1_junit_path=l1_junit_path,
         l2_summary_path=l2_summary_path,
         l2_run_id="booking-l2-junit-path-normalized",
+        multi_seed_summaries=multi_seed,
     )
     env = dict(os.environ)
     env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
@@ -588,6 +695,53 @@ def test_chain_controller_blocks_lock_with_pg_checklist_missing_l2_evidence(tmp_
 
     assert prepare.returncode != 0
     assert "go_to_full_l2_evidence_missing" in prepare.stderr
+
+
+def test_chain_controller_blocks_lock_with_pg_checklist_missing_multi_seed(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    run_id = "booking-lock-chain-missing-multi-seed"
+    output_dir = tmp_path / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    l1_junit_path = tmp_path / "l1_junit_missing_multi_seed.xml"
+    l2_summary_path = tmp_path / "l2_summary_missing_multi_seed.json"
+    _write_l1_junit(l1_junit_path, target_refs=[_TARGET_TEST_REF])
+    _write_l2_summary(l2_summary_path, run_id="booking-l2-missing-multi-seed", seed=7)
+    pg_checklist = tmp_path / "pg_checklist_missing_multi_seed.json"
+    _write_pg_checklist(
+        pg_checklist,
+        l1_junit_path=l1_junit_path,
+        l2_summary_path=l2_summary_path,
+        l2_run_id="booking-l2-missing-multi-seed",
+    )
+
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
+
+    prepare = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "lock",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            str(output_dir),
+            "--pg-checklist",
+            str(pg_checklist),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+
+    assert prepare.returncode != 0
+    assert "go_to_full_multi_seed_missing" in prepare.stderr
 
 
 def test_chain_controller_blocks_lock_with_pg_checklist_non_green_l2(tmp_path):

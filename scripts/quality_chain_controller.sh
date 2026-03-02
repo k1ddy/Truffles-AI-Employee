@@ -6,6 +6,7 @@ usage() {
 Usage:
   scripts/quality_chain_controller.sh prepare --mode <lock|replay|full> --run-id <id> [--output-dir <dir>] [--chain-id <id>] [--resume] [--pg-checklist <path>]
   scripts/quality_chain_controller.sh finalize --mode <lock|replay|full> --run-id <id> [--output-dir <dir>] [--summary-path <path>] [--exit-code <n>] [--chain-id <id>]
+  scripts/quality_chain_controller.sh bootstrap --mode <lock|replay|full> --run-id <id> [--output-dir <dir>] [--summary-path <path>] [--exit-code <n>] [--chain-id <id>]
   scripts/quality_chain_controller.sh status --chain-id <id>
   scripts/quality_chain_controller.sh close --chain-id <id>
   scripts/quality_chain_controller.sh abort --chain-id <id> [--reason <text>]
@@ -48,7 +49,7 @@ case "$COMMAND" in
   advance)
     COMMAND="prepare"
     ;;
-  prepare|finalize|status|close|abort)
+  prepare|finalize|bootstrap|status|close|abort)
     ;;
   --help|-h|help)
     usage
@@ -119,7 +120,7 @@ done
 
 CHAIN_ROOT="${LLM_QUALITY_CHAIN_ROOT:-/tmp/booking_quality/_chain}"
 
-if [[ "$COMMAND" == "prepare" || "$COMMAND" == "finalize" ]]; then
+if [[ "$COMMAND" == "prepare" || "$COMMAND" == "finalize" || "$COMMAND" == "bootstrap" ]]; then
   [[ -n "$MODE" ]] || die "--mode is required for $COMMAND"
   [[ "$MODE" =~ ^(lock|replay|full)$ ]] || die "--mode must be one of: lock|replay|full"
   [[ -n "$RUN_ID" ]] || die "--run-id is required for $COMMAND"
@@ -127,12 +128,12 @@ fi
 if [[ "$COMMAND" == "status" || "$COMMAND" == "close" || "$COMMAND" == "abort" ]]; then
   [[ -n "$CHAIN_ID" ]] || die "--chain-id is required for $COMMAND"
 fi
-if [[ "$COMMAND" == "prepare" || "$COMMAND" == "finalize" ]]; then
+if [[ "$COMMAND" == "prepare" || "$COMMAND" == "finalize" || "$COMMAND" == "bootstrap" ]]; then
   if [[ -z "$OUTPUT_DIR" ]]; then
     OUTPUT_DIR="/tmp/booking_quality/${RUN_ID}"
   fi
 fi
-if [[ "$COMMAND" == "finalize" && -z "$SUMMARY_PATH" ]]; then
+if [[ ( "$COMMAND" == "finalize" || "$COMMAND" == "bootstrap" ) && -z "$SUMMARY_PATH" ]]; then
   SUMMARY_PATH="${OUTPUT_DIR%/}/summary.json"
 fi
 
@@ -170,6 +171,7 @@ GO_TO_FULL_KEYS = ("PG0", "PG1", "PG2", "PG3", "PG4", "PG5", "PG6")
 DEFECT_MAPPING_KEYS = ("defect_class", "target_test", "gate", "owner")
 VALID_DONE_AUDIT_STATES = {"done", "completed", "pass", "passed"}
 DEFAULT_EVIDENCE_FRESHNESS_HOURS = 24.0
+DEFAULT_MULTI_SEED_REQUIRED = (7, 19, 42)
 REPO_ROOT = os.path.abspath(
     os.path.expanduser(str(os.environ.get("LLM_QUALITY_REPO_ROOT") or os.getcwd()))
 )
@@ -240,6 +242,46 @@ def parse_status_bool(value):
             return True
         if token in {"false", "0", "no", "fail", "failed", "red"}:
             return False
+    return None
+
+
+def normalize_required_seeds(value) -> list[int]:
+    candidates = []
+    if isinstance(value, (list, tuple, set)):
+        candidates = list(value)
+    elif value is not None:
+        candidates = [value]
+    seeds: list[int] = []
+    seen = set()
+    for item in candidates:
+        if isinstance(item, bool):
+            continue
+        try:
+            seed = int(str(item).strip())
+        except Exception:
+            continue
+        if seed in seen:
+            continue
+        seen.add(seed)
+        seeds.append(seed)
+    if not seeds:
+        seeds = list(DEFAULT_MULTI_SEED_REQUIRED)
+    return seeds
+
+
+def parse_seed_value(value) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        token = value.strip()
+        if not token:
+            return None
+        try:
+            return int(token)
+        except Exception:
+            return None
     return None
 
 
@@ -472,6 +514,14 @@ def load_pg_checklist(path: str):
     if l2_error:
         return None, l2_error
 
+    multi_seed_evidence, multi_seed_error = validate_multi_seed_evidence(
+        payload,
+        source,
+        freshness_hours=freshness_hours,
+    )
+    if multi_seed_error:
+        return None, multi_seed_error
+
     result = {
         "path": normalized,
         "keys": list(GO_TO_FULL_KEYS),
@@ -481,6 +531,7 @@ def load_pg_checklist(path: str):
         "evidence_freshness_hours": freshness_hours,
         "l1_evidence": l1_evidence,
         "l2_evidence": l2_evidence,
+        "multi_seed_evidence": multi_seed_evidence,
     }
     return result, None
 
@@ -660,6 +711,147 @@ def validate_l2_evidence(payload: dict, source: dict, *, freshness_hours):
         "manual_audit_status": manual_audit_status or None,
         "lane_effective": lane_token or None,
         "recorded_at": freshness_timestamp,
+    }, None
+
+
+def _summary_lane_token(summary: dict) -> str:
+    quality_status = (
+        summary.get("quality_status") if isinstance(summary.get("quality_status"), dict) else {}
+    )
+    config = summary.get("config") if isinstance(summary.get("config"), dict) else {}
+    return str(
+        quality_status.get("quality_lane_effective")
+        or config.get("quality_lane_effective")
+        or config.get("quality_lane")
+        or summary.get("quality_lane_effective")
+        or summary.get("quality_lane")
+        or ""
+    ).strip().casefold()
+
+
+def _summary_seed_value(summary: dict) -> int | None:
+    config = summary.get("config") if isinstance(summary.get("config"), dict) else {}
+    seed_value = config.get("seed")
+    if seed_value is None:
+        seed_value = summary.get("seed")
+    return parse_seed_value(seed_value)
+
+
+def _summary_is_canonical(summary: dict) -> bool:
+    quality_status = (
+        summary.get("quality_status") if isinstance(summary.get("quality_status"), dict) else {}
+    )
+    infra_valid = parse_status_bool(quality_status.get("infra_valid"))
+    if infra_valid is None:
+        infra_valid = parse_status_bool(summary.get("infra_valid"))
+    semantic_valid = parse_status_bool(quality_status.get("semantic_valid"))
+    if semantic_valid is None:
+        semantic_valid = parse_status_bool(summary.get("semantic_valid"))
+    run_integrity_valid = parse_status_bool(quality_status.get("run_integrity_valid"))
+    if run_integrity_valid is None:
+        run_integrity_valid = parse_status_bool(summary.get("run_integrity_valid"))
+    return infra_valid is True and semantic_valid is True and run_integrity_valid is True
+
+
+def _summary_manual_audit_status(summary: dict) -> str:
+    quality_status = (
+        summary.get("quality_status") if isinstance(summary.get("quality_status"), dict) else {}
+    )
+    return str(
+        quality_status.get("manual_audit_status")
+        or summary.get("manual_audit_status")
+        or ""
+    ).strip().casefold()
+
+
+def validate_multi_seed_evidence(payload: dict, source: dict, *, freshness_hours):
+    evidence = source.get("multi_seed_evidence")
+    if not isinstance(evidence, dict):
+        evidence = payload.get("multi_seed_evidence")
+    if not isinstance(evidence, dict):
+        return None, "go_to_full_multi_seed_missing"
+
+    required_seeds = normalize_required_seeds(evidence.get("required_seeds"))
+    summaries = evidence.get("summaries")
+    if not isinstance(summaries, list) or not summaries:
+        return None, "go_to_full_multi_seed_entries_missing"
+
+    by_seed = {}
+    invalid_entries = []
+    for index, entry in enumerate(summaries):
+        if not isinstance(entry, dict):
+            invalid_entries.append(f"{index}:not_object")
+            continue
+        seed_value = parse_seed_value(entry.get("seed"))
+        if seed_value is None:
+            invalid_entries.append(f"{index}:seed_missing")
+            continue
+        if seed_value in by_seed:
+            invalid_entries.append(f"{index}:seed_duplicate:{seed_value}")
+            continue
+        summary_path_token = str(entry.get("summary_path") or "").strip()
+        if not summary_path_token:
+            invalid_entries.append(f"{index}:summary_path_missing")
+            continue
+        summary_path = os.path.abspath(os.path.expanduser(summary_path_token))
+        if not os.path.exists(summary_path) or not os.path.isfile(summary_path):
+            invalid_entries.append(f"{index}:summary_missing:{summary_path}")
+            continue
+        summary_payload = load_json(summary_path)
+        if not isinstance(summary_payload, dict):
+            invalid_entries.append(f"{index}:summary_unreadable:{summary_path}")
+            continue
+        if not _summary_is_canonical(summary_payload):
+            invalid_entries.append(f"{index}:summary_not_green:{seed_value}")
+            continue
+        lane_token = _summary_lane_token(summary_payload)
+        if lane_token == "acceptance":
+            invalid_entries.append(f"{index}:summary_lane_invalid:{seed_value}")
+            continue
+        manual_status = _summary_manual_audit_status(summary_payload)
+        if manual_status and manual_status not in VALID_DONE_AUDIT_STATES:
+            invalid_entries.append(
+                f"{index}:summary_manual_audit_incomplete:{seed_value}:{manual_status}"
+            )
+            continue
+        observed_seed = _summary_seed_value(summary_payload)
+        if observed_seed is None:
+            invalid_entries.append(f"{index}:summary_seed_missing:{seed_value}")
+            continue
+        if observed_seed != seed_value:
+            invalid_entries.append(f"{index}:summary_seed_mismatch:{seed_value}:{observed_seed}")
+            continue
+        summary_mtime_iso = datetime.fromtimestamp(
+            os.path.getmtime(summary_path),
+            tz=timezone.utc,
+        ).isoformat()
+        freshness_timestamp, freshness_error = validate_evidence_freshness(
+            token="go_to_full_multi_seed_evidence",
+            freshness_hours=freshness_hours,
+            primary_ts=entry.get("recorded_at") or summary_payload.get("finished_at"),
+            fallback_ts=summary_mtime_iso,
+        )
+        if freshness_error:
+            invalid_entries.append(f"{index}:{freshness_error}:{seed_value}")
+            continue
+        by_seed[seed_value] = {
+            "summary_path": summary_path,
+            "seed": seed_value,
+            "recorded_at": freshness_timestamp,
+            "run_id": str(summary_payload.get("run_id") or "").strip() or None,
+        }
+
+    if invalid_entries:
+        return None, "go_to_full_multi_seed_invalid:" + ";".join(invalid_entries)
+
+    missing_required = [str(seed) for seed in required_seeds if seed not in by_seed]
+    if missing_required:
+        return None, "go_to_full_multi_seed_missing_required:" + ",".join(missing_required)
+
+    ordered = [by_seed[seed] for seed in sorted(by_seed.keys())]
+    return {
+        "required_seeds": list(required_seeds),
+        "summaries": ordered,
     }, None
 
 
@@ -1163,6 +1355,176 @@ def cmd_finalize():
         _lock.close()
 
 
+def cmd_bootstrap():
+    chain_id = derive_chain_id(RUN_ID, CHAIN_ID_ARG)
+    if not chain_id:
+        eprint("chain_id_invalid")
+        raise SystemExit(2)
+
+    mode_ok, mode_reason = run_id_mode_ok(RUN_ID, MODE)
+    if not mode_ok:
+        eprint(mode_reason or "run_id_mode_mismatch")
+        raise SystemExit(2)
+
+    if not OUTPUT_DIR or not os.path.isdir(OUTPUT_DIR):
+        eprint("bootstrap_output_dir_missing")
+        raise SystemExit(2)
+    if not SUMMARY_PATH or not os.path.exists(SUMMARY_PATH):
+        eprint("bootstrap_summary_missing")
+        raise SystemExit(2)
+
+    summary = load_json(SUMMARY_PATH) if SUMMARY_PATH else {}
+    if not isinstance(summary, dict):
+        eprint("bootstrap_summary_invalid")
+        raise SystemExit(2)
+    manifest_path = os.path.join(OUTPUT_DIR, "run_manifest.json")
+    manifest = load_json(manifest_path) if os.path.exists(manifest_path) else {}
+    step_status = infer_step_status(summary, manifest, EXIT_CODE)
+    stop_reason = ""
+    if isinstance(summary, dict):
+        stop_reason = str(summary.get("stop_reason") or "").strip()
+    if not stop_reason and isinstance(manifest, dict):
+        stop_reason = str(manifest.get("stop_reason") or "").strip()
+
+    path = state_path(chain_id)
+    _lock = with_lock(path)
+    try:
+        existing = load_json(path)
+        if isinstance(existing, dict) and existing:
+            eprint("chain_state_exists")
+            raise SystemExit(2)
+
+        base_state = {
+            "chain_id": chain_id,
+            "lane": "acceptance",
+            "status": "active",
+            "current_step": MODE,
+        }
+        state = ensure_state_defaults(base_state, chain_id)
+
+        step_entry = state["steps"].get(MODE, {})
+        step_entry.update(
+            {
+                "status": step_status,
+                "run_id": RUN_ID,
+                "output_dir": OUTPUT_DIR,
+                "summary_path": SUMMARY_PATH,
+                "stop_reason": stop_reason or None,
+                "updated_at": now_iso(),
+            }
+        )
+        state["steps"][MODE] = step_entry
+        state["current_step"] = MODE
+
+        target_total, judged = derive_target_blocker_total(summary)
+        roi = state.get("roi") if isinstance(state.get("roi"), dict) else {}
+        last_total = roi.get("last_target_total")
+        no_improve = int(roi.get("consecutive_no_improve") or 0)
+        expensive_limit = int(roi.get("expensive_no_improve_limit") or 3)
+        judge_threshold = int(roi.get("judge_threshold") or 20)
+        expensive = judged >= judge_threshold
+
+        if step_status == "canonical":
+            no_improve = 0
+            roi["last_target_total"] = target_total
+        elif expensive:
+            if last_total is not None and target_total >= int(last_total):
+                no_improve += 1
+            else:
+                no_improve = 0
+            roi["last_target_total"] = target_total
+
+        roi["consecutive_no_improve"] = no_improve
+        roi["expensive_no_improve_limit"] = expensive_limit
+        roi["judge_threshold"] = judge_threshold
+        if not isinstance(roi.get("target_blockers"), list) or not roi.get("target_blockers"):
+            roi["target_blockers"] = list(BLOCKERS)
+        state["roi"] = roi
+
+        next_step = None
+        resume_required = False
+        if step_status == "incomplete":
+            next_step = MODE
+            resume_required = True
+        elif step_status == "canonical":
+            next_step = step_next(MODE)
+        else:
+            next_step = MODE
+
+        if no_improve >= expensive_limit:
+            state["status"] = "blocked"
+            state["blocked_reason"] = "root_cause_required"
+            next_step = None
+            resume_required = False
+        elif step_status == "canonical" and MODE == "full":
+            state["status"] = "canonical_closed"
+            state["blocked_reason"] = None
+            next_step = None
+        else:
+            state["status"] = "active"
+            state["blocked_reason"] = None
+
+        if step_status == "incomplete":
+            state["active"] = {
+                "step": MODE,
+                "run_id": RUN_ID,
+                "token": "",
+                "resume_required": True,
+                "output_dir": OUTPUT_DIR,
+                "updated_at": now_iso(),
+            }
+        else:
+            state["active"] = {
+                "step": next_step or "",
+                "run_id": "",
+                "token": "",
+                "resume_required": False,
+                "output_dir": "",
+                "updated_at": now_iso(),
+            }
+
+        history = state.get("history") if isinstance(state.get("history"), list) else []
+        history.append(
+            {
+                "finished_at": now_iso(),
+                "mode": MODE,
+                "run_id": RUN_ID,
+                "step_status": step_status,
+                "stop_reason": stop_reason or None,
+                "target_blockers_total": target_total,
+                "judge_judged": judged,
+                "exit_code": EXIT_CODE,
+                "source": "bootstrap",
+            }
+        )
+        state["history"] = history[-50:]
+
+        next_command = build_next_command(
+            state,
+            mode=MODE,
+            run_id=RUN_ID,
+            output_dir=OUTPUT_DIR,
+            step_status=step_status,
+        )
+        state["next_command"] = next_command
+        state["updated_at"] = now_iso()
+
+        write_brief(
+            state,
+            chain_id=chain_id,
+            output_dir=OUTPUT_DIR,
+            mode=MODE,
+            run_id=RUN_ID,
+            step_status=step_status,
+            next_command=next_command,
+        )
+        write_json_atomic(path, state)
+    finally:
+        if fcntl is not None:
+            fcntl.flock(_lock.fileno(), fcntl.LOCK_UN)
+        _lock.close()
+
+
 def cmd_status(chain_id: str):
     path = state_path(chain_id)
     payload = load_json(path)
@@ -1215,6 +1577,8 @@ if COMMAND == "prepare":
     cmd_prepare()
 elif COMMAND == "finalize":
     cmd_finalize()
+elif COMMAND == "bootstrap":
+    cmd_bootstrap()
 elif COMMAND == "status":
     chain_id = derive_chain_id("", CHAIN_ID_ARG)
     if not chain_id:

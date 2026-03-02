@@ -73,6 +73,17 @@
   - Executed fresh dev-lane replay `booking-human-critical-hq1-20260227-promofix-a1-r5a` on runtime `:32768`: canonical (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`, `manual_audit=done`, `artifact_integrity=true`).
   - Executed judge-enabled dev-lane replay `booking-human-critical-hq1-20260227-promofix-a1-r5b-dev1`: run completed with full integrity (`infra_valid=true`, `run_integrity_valid=true`, `manual_audit=done`) but semantic remained `invalid` by threshold (`degraded_fallback_rate=0.0909 > 0.05`).
   - Captured degraded fallback cluster (timeout-degrade guard path) at turn-level evidence: `...-002-10-3fe325`, `...-002-11-2e8a9a`, `...-003-06-631f4b`; root class tracked as `runtime_pipeline_latency_budget_exceeded`.
+  - Contract-test migration (master long hair): removed text-based asserts and switched to contract meta checks (`intent_class`, `action_class`, `fact_intents`, `info_sections`, `master_reply_mode`).
+  - Created TP for this packet: `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-master-a1.md`.
+  - Chain controller bootstrap/import command added to support legacy run artifacts; deterministic test added and green.
+  - Created TP for chain controller bootstrap packet: `docs/TASK_PACKAGES/TP-2026-03-02-chain-controller-bootstrap-a1.md`.
+  - Refreshed TP execution status with code-fact audit: P15 implemented (timeout-degrade retry + escalation tests), P12 partial (capability isolation only), P9 still has text-based oracles in `test_message_endpoint.py`/`test_knowledge_service.py`, open items now `P4/P5/P7/P9/P10/P12/P13/P14`.
+  - Implemented multi-seed drift enforcement for acceptance PG checklist in `scripts/quality_chain_controller.sh` and added unit coverage in `truffles-api/tests/test_booking_quality_chain_controller.py`.
+  - Created TP for multi-seed gate: `docs/TASK_PACKAGES/TP-2026-03-02-multi-seed-drift-gate-a1.md`.
+  - Validation: `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py` (`15 passed`).
+  - Verified master long-hair contract test migration: `pytest -q truffles-api/tests/test_info_master_long_hair.py` (`2 passed`) and `pytest -q truffles-api/tests/test_master_info_flow.py` (`29 passed`); updated TP evidence.
+  - Migrated demo_salon semantic service tests to contract meta asserts (removed text oracles) and added TP: `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-semantic-service-a1.md`.
+  - Completed P7 Core De-hardcoding Sweep: moved phrase/regex matchers into `truffles-api/app/services/info_signal_service.py` and `truffles-api/app/services/booking_signal_service.py`, removed core patterns from `info/booking/tool_registry`, and passed targeted tests (`test_booking_appointments.py`, `test_master_info_flow.py`, `test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply"`).
 - next:
   - Re-canonicalize `/tmp/booking_quality/blocking_scenarios_human.json` (remove `weak_oracle_turn`) so HQ1 full scenario set can pass scenario-contract preflight without waivers.
   - Re-run HQ1 full chain (`L1` no-judge + `L2` critical) on re-canonicalized human scenarios with same runtime parity and replay isolation flags.
@@ -80,6 +91,10 @@
   - Continue TP Track B runtime refactor for remaining post-tool semantic rewrites outside policy-core guard scope and remove lexical degrade paths where reason-coded clarify/handoff is required.
   - Keep structured scenario-generation progress in llm-quality summaries for faster infra triage.
 - evidence:
+- pytest -q truffles-api/tests/test_booking_quality_chain_controller.py (`14 passed`)
+- pytest -q truffles-api/tests/test_info_master_long_hair.py (`2 passed`)
+- pytest -q truffles-api/tests/test_master_info_flow.py (`29 passed`)
+- pytest -q truffles-api/tests/test_message_endpoint.py -k "semantic_service_matcher or semantic_question_type" (`7 passed, 263 deselected`)
   - pytest -q truffles-api/tests/test_demo_salon_eval.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_chaos_dialogs.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_message_endpoint.py
   - 289 passed, 2 warnings
   - ruff check truffles-api/app/services/ai_service.py truffles-api/tests/test_ai_service.py
@@ -352,4 +367,4 @@
     - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`69 passed`)
     - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
     - `scripts/session_check.sh`
-- last_updated: 2026-03-02T06:11:08+05:00
+- last_updated: 2026-03-02T07:10:00+05:00

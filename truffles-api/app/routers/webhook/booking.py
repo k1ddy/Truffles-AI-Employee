@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -20,6 +19,19 @@ from sqlalchemy.exc import IntegrityError
 
 from app.schemas.webhook import WebhookResponse
 from app.services.appointment_service import SchedulingService
+from app.services.booking_signal_service import (
+    clean_name_candidate as _clean_name_candidate_impl,
+    collapse_repeats as _collapse_repeats,
+    has_daypart_stem as _has_daypart_stem,
+    has_duration_context_marker as _has_duration_context_marker,
+    looks_like_layout_swap as _looks_like_layout_swap,
+    looks_like_phone as _looks_like_phone,
+    match_booking_hour_fallback as _match_booking_hour_fallback,
+    normalize_phone_digits as _normalize_phone_digits_impl,
+    parse_iso_datetime as _parse_iso_datetime,
+    normalize_resolved_datetime_value as _normalize_resolved_datetime_value,
+    swap_keyboard_layout as _swap_keyboard_layout,
+)
 from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.pack_runtime_service import get_system_lexicon_list, phrase_match_intent
 
@@ -30,90 +42,6 @@ if TYPE_CHECKING:
     from app.services.pack_runtime_service import PackDecision
 
 BOOKING_SLOT_ORDER = ("service", "datetime", "name")
-PHONE_PATTERN = re.compile(r"\+?\d[\d\s\-\(\)]{8,}\d")
-BOOKING_HOUR_FALLBACK_PATTERN = re.compile(
-    r"\b(?P<prep>в|к|на)\s*(?P<hour>[01]?\d|2[0-3])(?:[:.](?P<minute>[0-5]\d))?\s*(?:час(?:а|ов)?)?\b",
-    re.IGNORECASE,
-)
-DATETIME_DURATION_CONTEXT_MARKERS = (
-    "сколько",
-    "длит",
-    "длител",
-    "занима",
-    "долго",
-    "по времени",
-    "duration",
-)
-DATETIME_DAYPART_STEMS = ("утр", "дн", "веч", "ноч", "обед")
-RELATIVE_DAY_TOKEN_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bпослезавтраш\w*|\bпослезавтра\b", re.IGNORECASE), "послезавтра"),
-    (re.compile(r"\bзавтраш\w*|\bзавтра\b", re.IGNORECASE), "завтра"),
-    (re.compile(r"\bсегодняш\w*|\bсегодня\b", re.IGNORECASE), "сегодня"),
-    (re.compile(r"\bпонедель\w*", re.IGNORECASE), "в понедельник"),
-    (re.compile(r"\bвторник\w*", re.IGNORECASE), "во вторник"),
-    (re.compile(r"\bсред\w*", re.IGNORECASE), "в среду"),
-    (re.compile(r"\bчетверг\w*", re.IGNORECASE), "в четверг"),
-    (re.compile(r"\bпятниц\w*", re.IGNORECASE), "в пятницу"),
-    (re.compile(r"\bсуббот\w*", re.IGNORECASE), "в субботу"),
-    (re.compile(r"\bвоскрес\w*", re.IGNORECASE), "в воскресенье"),
-    (re.compile(r"\bвыходн\w*", re.IGNORECASE), "в субботу"),
-)
-DAYPART_TOKEN_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (
-        re.compile(
-            r"\b(вечер\w*|вечером|к вечеру|на вечер|после работы|ближе к вечеру)\b",
-            re.IGNORECASE,
-        ),
-        "вечером",
-    ),
-    (
-        re.compile(r"\b(утро\w*|утром|с утра|на утро)\b", re.IGNORECASE),
-        "утром",
-    ),
-    (
-        re.compile(
-            r"\b(днем|днём|день|дневное|дневной|после обеда|ближе к обеду)\b",
-            re.IGNORECASE,
-        ),
-        "днем",
-    ),
-)
-_LAYOUT_SWAP_MAP = str.maketrans(
-    {
-        "q": "й",
-        "w": "ц",
-        "e": "у",
-        "r": "к",
-        "t": "е",
-        "y": "н",
-        "u": "г",
-        "i": "ш",
-        "o": "щ",
-        "p": "з",
-        "[": "х",
-        "]": "ъ",
-        "a": "ф",
-        "s": "ы",
-        "d": "в",
-        "f": "а",
-        "g": "п",
-        "h": "р",
-        "j": "о",
-        "k": "л",
-        "l": "д",
-        ";": "ж",
-        "'": "э",
-        "z": "я",
-        "x": "ч",
-        "c": "с",
-        "v": "м",
-        "b": "и",
-        "n": "т",
-        "m": "ь",
-        ",": "б",
-        ".": "ю",
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -141,31 +69,6 @@ def _is_booking_confirm_enabled() -> bool:
     return _is_env_enabled(os.environ.get("BOOKING_CONFIRM_ENABLED"), default=False)
 
 
-def _looks_like_layout_swap(text: str) -> bool:
-    if not text or not text.strip():
-        return False
-    has_cyrillic = bool(re.search(r"[а-яё]", text, flags=re.IGNORECASE))
-    has_latin = bool(re.search(r"[a-z]", text, flags=re.IGNORECASE))
-    if not has_latin or has_cyrillic:
-        return False
-    return len(re.findall(r"[a-z]", text, flags=re.IGNORECASE)) >= 3
-
-
-def _swap_keyboard_layout(text: str) -> str:
-    return (text or "").translate(_LAYOUT_SWAP_MAP)
-
-
-def _collapse_repeats(text: str, *, max_repeats: int = 2) -> str:
-    if not text:
-        return ""
-    if max_repeats < 1:
-        return text
-    pattern = re.compile(rf"(.)\1{{{max_repeats},}}")
-
-    def _replace(match: re.Match[str]) -> str:
-        return match.group(1) * max_repeats
-
-    return pattern.sub(_replace, text)
 
 
 def _build_slot_candidates(
@@ -342,9 +245,7 @@ def _is_noise_slot_message(message_text: str) -> bool:
 
 
 def _clean_name_candidate(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-zА-Яа-яЁё\s-]", " ", value or "")
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return cleaned
+    return _clean_name_candidate_impl(value)
 
 
 @lru_cache(maxsize=16)
@@ -540,43 +441,6 @@ def _resolve_datetime_offline(
     return result
 
 
-def _pick_relative_day_token(text: str) -> str | None:
-    if not text:
-        return None
-    for pattern, replacement in RELATIVE_DAY_TOKEN_PATTERNS:
-        if pattern.search(text):
-            return replacement
-    return None
-
-
-def _pick_daypart_token(text: str) -> str | None:
-    if not text:
-        return None
-    for pattern, replacement in DAYPART_TOKEN_PATTERNS:
-        if pattern.search(text):
-            return replacement
-    return None
-
-
-def _normalize_resolved_datetime_value(
-    message_text: str,
-    *,
-    normalized_text: str | None = None,
-) -> str | None:
-    raw = message_text.strip() if isinstance(message_text, str) else ""
-    normalized = normalized_text.strip() if isinstance(normalized_text, str) else ""
-    source = " ".join(part for part in (raw, normalized) if part).strip()
-    if not source:
-        return None
-    day_token = _pick_relative_day_token(source)
-    daypart_token = _pick_daypart_token(source)
-    if day_token and daypart_token:
-        return f"{day_token} {daypart_token}"
-    if day_token:
-        return day_token
-    if daypart_token:
-        return daypart_token
-    return None
 
 
 def _validate_service_slot(
@@ -614,13 +478,13 @@ def _validate_datetime_slot(
     extracted = legacy._extract_datetime(message_text, client_slug=client_slug)
     if extracted:
         return extracted
-    match = BOOKING_HOUR_FALLBACK_PATTERN.search(message_text)
+    match = _match_booking_hour_fallback(message_text)
     if not match:
         return None
     normalized = legacy._normalize_text(message_text)
-    has_duration_context = any(marker in normalized for marker in DATETIME_DURATION_CONTEXT_MARKERS)
+    has_duration_context = _has_duration_context_marker(normalized)
     booking_signal = bool(legacy._is_booking_request(message_text, client_slug=client_slug))
-    prep = (match.group("prep") or "").casefold()
+    prep = (match.get("prep") or "").casefold()
     if has_duration_context and not booking_signal:
         return None
     if prep == "на" and not booking_signal:
@@ -628,8 +492,8 @@ def _validate_datetime_slot(
             return None
         if len(normalized.split()) > 4:
             return None
-    hour = int(match.group("hour"))
-    minute = match.group("minute") or "00"
+    hour = int(match.get("hour") or 0)
+    minute = match.get("minute") or "00"
     return f"{hour:02d}:{minute}"
 
 
@@ -823,16 +687,6 @@ def _is_booking_related_message(
     if allow_name and _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
         return True
     return False
-
-
-def _looks_like_phone(message_text: str | None) -> bool:
-    if not message_text:
-        return False
-    match = PHONE_PATTERN.search(message_text)
-    if not match:
-        return False
-    digits = re.sub(r"\D", "", match.group(0))
-    return len(digits) >= 10
 
 
 def _is_booking_slot_signal(message_text: str | None, *, client_slug: str | None) -> bool:
@@ -1080,7 +934,7 @@ def _is_datetime_grounded_for_prompt(
     if legacy.TIME_PATTERN.search(value) or legacy.TIME_HOUR_PATTERN.search(value):
         return True
     normalized_value = legacy.normalize_for_matching(value)
-    if normalized_value and any(stem in normalized_value for stem in DATETIME_DAYPART_STEMS):
+    if normalized_value and _has_daypart_stem(normalized_value):
         return True
 
     parsed = _resolve_datetime_offline(value, client_slug=client_slug)
@@ -1104,7 +958,7 @@ def _is_datetime_grounded_for_prompt(
     if len(canonical_tokens) < 2:
         return False
     return any(
-        any(stem in token for stem in DATETIME_DAYPART_STEMS)
+        _has_daypart_stem(token)
         for token in canonical_tokens
     )
 
@@ -1216,32 +1070,14 @@ def _build_booking_summary(booking: dict, *, refusal_flags: dict | None = None) 
 
 
 def _normalize_phone_digits(value: str | None) -> str | None:
-    if not value:
-        return None
-    digits = re.sub(r"\D", "", value)
-    return digits or None
+    return _normalize_phone_digits_impl(value)
 
 
 def _parse_booking_datetime(value: str | None, *, tz_name: str | None, now: datetime) -> datetime | None:
     if not value or not value.strip():
         return None
     raw = value.strip()
-    iso_match = re.match(
-        r"^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?:[ T](?P<hour>\d{1,2}):(?P<minute>\d{2}))?$",
-        raw,
-    )
-    parsed = None
-    if iso_match:
-        try:
-            parsed = datetime(
-                int(iso_match.group("year")),
-                int(iso_match.group("month")),
-                int(iso_match.group("day")),
-                int(iso_match.group("hour") or 0),
-                int(iso_match.group("minute") or 0),
-            )
-        except ValueError:
-            parsed = None
+    parsed = _parse_iso_datetime(raw)
     if parsed is None:
         timezone_name = tz_name or "UTC"
         settings = {
