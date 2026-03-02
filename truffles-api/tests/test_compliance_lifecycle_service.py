@@ -98,6 +98,10 @@ def test_execute_lifecycle_preview_creates_candidate_records(monkeypatch):
     )
 
     assert summary["candidate_count"] == 2
+    assert summary["applied_count"] == 0
+    assert summary["skipped_count"] == 0
+    assert summary["error_count"] == 0
+    assert summary["apply_actions"] is False
     assert summary["execution_action"] == "destruction_preview"
     assert summary["run_mode"] == "preview"
     assert len(captured) == 2
@@ -115,6 +119,14 @@ def test_execute_lifecycle_preview_manual_mode_sets_execution_action(monkeypatch
             consent_status="granted",
             anonymization_mode="redact",
             created_at=now,
+            question_text="Q",
+            response_text="A",
+            source_name="Manager",
+            source_channel="wa",
+            redaction_summary=None,
+            is_active=True,
+            status="approved",
+            updated_at=now,
         ),
     ]
     captured = []
@@ -145,11 +157,21 @@ def test_execute_lifecycle_preview_manual_mode_sets_execution_action(monkeypatch
         Mock(),
         run=run,
         max_items=10,
+        apply_actions=True,
     )
 
     assert summary["candidate_count"] == 1
+    assert summary["applied_count"] == 1
+    assert summary["skipped_count"] == 0
+    assert summary["error_count"] == 0
+    assert summary["apply_actions"] is True
     assert summary["execution_action"] == "anonymize_record"
     assert captured[0]["payload"]["execution_action"] == "anonymize_record"
+    assert captured[0]["payload"]["applied"] is True
+    assert captured[0]["payload"]["action_status"] == "anonymized"
+    assert due_items[0].question_text == "[anonymized]"
+    assert due_items[0].response_text == "[anonymized]"
+    assert due_items[0].is_active is False
 
 
 def test_execute_lifecycle_preview_rejects_unsupported_data_class():

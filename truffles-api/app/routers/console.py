@@ -9133,6 +9133,7 @@ def _execute_compliance_lifecycle_preview_run(
     operation: str,
     max_items: int,
     run_mode: str,
+    apply_actions: bool = False,
 ) -> tuple[ComplianceLifecycleRun, list[ComplianceLifecycleRecord]]:
     run: ComplianceLifecycleRun | None = None
     try:
@@ -9172,6 +9173,7 @@ def _execute_compliance_lifecycle_preview_run(
             db,
             run=run,
             max_items=max_items,
+            apply_actions=apply_actions,
         )
         run = finalize_lifecycle_run(
             db,
@@ -9274,7 +9276,18 @@ async def _run_compliance_lifecycle_job(
         min_value=15,
         max_value=10080,
     )
+    apply_actions = _parse_ops_job_bool_param(
+        params,
+        name="apply_actions",
+        default=False,
+    )
     reason = _parse_ops_job_text_param(params, name="reason", required=False, max_length=500)
+    if apply_actions and mode != "execute":
+        raise ConsoleAPIError(400, "INVALID_PARAM", "apply_actions requires execute mode")
+    if apply_actions and lane != "manual":
+        raise ConsoleAPIError(400, "INVALID_PARAM", "apply_actions requires lane=manual")
+    if apply_actions and not reason:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "reason is required when apply_actions=true")
 
     resolved_scope, resolved_branch_id = _resolve_policy_registry_scope(
         db,
@@ -9313,6 +9326,7 @@ async def _run_compliance_lifecycle_job(
                     "lane": lane,
                     "profile": profile.strip().lower() if isinstance(profile, str) else None,
                     "cadence_minutes": cadence_minutes,
+                    "apply_actions": apply_actions,
                     "skipped": True,
                     "skip_reason": "cadence_not_due",
                     "last_run_job_id": str(recent_job.id),
@@ -9330,6 +9344,7 @@ async def _run_compliance_lifecycle_job(
         operation=operation,
         max_items=max_items,
         run_mode=lifecycle_run_mode,
+        apply_actions=apply_actions,
     )
     return {
         "mode": mode,
@@ -9343,6 +9358,7 @@ async def _run_compliance_lifecycle_job(
         "lane": lane,
         "profile": profile.strip().lower() if isinstance(profile, str) else None,
         "cadence_minutes": cadence_minutes,
+        "apply_actions": apply_actions,
         "run_mode": run.run_mode,
         "reason": reason,
         "run_id": str(run.id),

@@ -276,11 +276,49 @@ def _resolve_execution_action(
     return operation
 
 
+def _apply_learned_response_action(
+    *,
+    item: LearnedResponse,
+    operation: str,
+    destruction_mode: str | None,
+    now: datetime,
+) -> dict[str, Any]:
+    if operation == "retention_scan":
+        return {"applied": False, "action_status": "scan_only"}
+    if operation == "export_preview":
+        export_ref = f"learned_response:{item.id}:{int(now.timestamp())}"
+        return {"applied": True, "action_status": "exported", "export_ref": export_ref}
+
+    normalized_mode = str(destruction_mode or "delete").strip().lower()
+    if normalized_mode == "anonymize":
+        item.question_text = "[anonymized]"
+        item.response_text = "[anonymized]"
+        item.source_name = None
+        item.source_channel = None
+        item.redaction_summary = {
+            "mode": "anonymize",
+            "applied_at": now.isoformat(),
+        }
+        item.is_active = False
+        item.updated_at = now
+        return {"applied": True, "action_status": "anonymized"}
+    if normalized_mode == "archive":
+        item.is_active = False
+        item.status = "rejected"
+        item.updated_at = now
+        return {"applied": True, "action_status": "archived"}
+
+    item.is_active = False
+    item.updated_at = now
+    return {"applied": True, "action_status": "deactivated"}
+
+
 def execute_lifecycle_preview(
     db: Session,
     *,
     run: ComplianceLifecycleRun,
     max_items: int,
+    apply_actions: bool = False,
 ) -> dict[str, Any]:
     if run.data_class != "learned_responses":
         raise ValueError("unsupported data_class")
@@ -310,7 +348,11 @@ def execute_lifecycle_preview(
         run_mode=run_mode,
         destruction_mode=str(policy_mode) if policy_mode is not None else None,
     )
+    should_apply_actions = bool(apply_actions and run_mode == "manual")
     created = 0
+    applied_count = 0
+    skipped_count = 0
+    error_count = 0
     for item in due_items:
         payload = {
             "retention_expires_at": (
@@ -321,27 +363,54 @@ def execute_lifecycle_preview(
             "consent_status": item.consent_status,
             "anonymization_mode": item.anonymization_mode,
             "execution_action": execution_action,
+            "apply_actions": should_apply_actions,
         }
         if run.operation == "destruction_preview":
             payload["planned_destruction_mode"] = policy_mode or "delete"
+        result = "candidate"
+        if should_apply_actions:
+            try:
+                apply_result = _apply_learned_response_action(
+                    item=item,
+                    operation=run.operation,
+                    destruction_mode=str(policy_mode) if policy_mode is not None else None,
+                    now=now,
+                )
+                payload.update(apply_result)
+                if apply_result.get("applied") is True:
+                    applied_count += 1
+                else:
+                    result = "skipped"
+                    skipped_count += 1
+            except Exception as exc:
+                payload["apply_error"] = str(exc)
+                result = "error"
+                error_count += 1
+        else:
+            payload["applied"] = False
         append_lifecycle_record(
             db,
             run_id=run.id,
             entity_type="learned_response",
             entity_id=item.id,
             action=action,
-            result="candidate",
+            result=result,
             payload=payload,
         )
-        created += 1
+        if result == "candidate":
+            created += 1
 
     return {
         "candidate_count": created,
+        "applied_count": applied_count,
+        "skipped_count": skipped_count,
+        "error_count": error_count,
         "max_items": capped_limit,
         "evaluated_at": now.isoformat(),
         "operation": run.operation,
         "run_mode": run_mode,
         "execution_action": execution_action,
+        "apply_actions": should_apply_actions,
         "data_class": run.data_class,
         "scope": run.scope,
     }

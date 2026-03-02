@@ -25,8 +25,9 @@
   - Slice 3 implemented: `console_ops_jobs` orchestration for `compliance_lifecycle` with trigger/failure/audit coverage.
   - Slice 4 implemented: compliance lifecycle automation guardrails (`lane/profile/cadence`) with deterministic auto-lane skip/run behavior, execute-only cadence gate, and fail-closed validation.
   - Slice 5 foundation implemented: deterministic `execution_action` mapping in lifecycle summaries/records (preview vs manual + destruction mode mapping).
+  - Slice 5 safety path implemented: `apply_actions` execution gate (`execute` + `lane=manual` + mandatory reason) and deterministic apply-action outcomes in compliance lifecycle records.
 - next:
-  - Build Slice 5 implementation: apply execution actions with safe mutation strategy and immutable evidence chain.
+  - Extend apply-action path with rollout controls and immutable external evidence artifacts.
   - Add evidence for promotion criteria from `in_progress` to `passed` (policy/run/action chain + rollback signals).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md
@@ -47,7 +48,9 @@
   - truffles-api/tests/test_console_ops_jobs.py
   - truffles-api/app/services/compliance_lifecycle_service.py
   - truffles-api/tests/test_compliance_lifecycle_service.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/tests/test_console_compliance_lifecycle.py
   - truffles-api/app/schemas/console.py (`ConsoleOpsJobType += compliance_lifecycle`)
-  - pytest -q truffles-api/tests/test_compliance_lifecycle_service.py truffles-api/tests/test_console_compliance_policy_registry.py truffles-api/tests/test_console_compliance_lifecycle.py truffles-api/tests/test_console_ops_jobs.py (`33 passed`)
+  - pytest -q truffles-api/tests/test_compliance_lifecycle_service.py truffles-api/tests/test_console_compliance_policy_registry.py truffles-api/tests/test_console_compliance_lifecycle.py truffles-api/tests/test_console_ops_jobs.py (`37 passed`)
   - SESSION_AGENT=a700 scripts/session_check.sh (`Session OK`)
 - last_updated: 2026-03-03

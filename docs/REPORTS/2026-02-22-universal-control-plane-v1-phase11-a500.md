@@ -121,6 +121,21 @@ Date
   - Each lifecycle record payload now includes `execution_action` for audit consistency.
   - deterministic tests:
     - `truffles-api/tests/test_compliance_lifecycle_service.py` (preview + manual action mapping coverage).
+- Slice 5 implementation (`safe apply-actions path`):
+  - Added explicit `apply_actions` gate in ops lifecycle runner:
+    - allowed only for `mode=execute`,
+    - allowed only for `lane=manual`,
+    - requires explicit `reason`.
+  - Added apply-action execution outcomes in lifecycle service:
+    - summary fields: `apply_actions`, `applied_count`, `skipped_count`, `error_count`,
+    - per-record payload fields: `apply_actions`, `applied`, `action_status`, `apply_error` (on failure).
+  - For `learned_responses` manual destruction mode:
+    - `delete` -> deactivate record,
+    - `anonymize` -> redact question/response + deactivate,
+    - `archive` -> mark archived state (`rejected`) + deactivate.
+  - deterministic tests:
+    - `truffles-api/tests/test_console_compliance_lifecycle.py` (apply-actions guardrails + pass-through),
+    - `truffles-api/tests/test_compliance_lifecycle_service.py` (manual apply behavior and counters).
 
 ## Checks + outcomes
 - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
@@ -136,6 +151,8 @@ Date
 - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass (no OpenAPI drift after Slice 4).
 - `cd truffles-api && ruff check app/services/compliance_lifecycle_service.py tests/test_compliance_lifecycle_service.py app/routers/console.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `All checks passed`.
 - `cd truffles-api && pytest -q tests/test_compliance_lifecycle_service.py tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `33 passed`.
+- `cd truffles-api && ruff check app/services/compliance_lifecycle_service.py app/routers/console.py tests/test_compliance_lifecycle_service.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `All checks passed` (after apply-actions slice).
+- `cd truffles-api && pytest -q tests/test_compliance_lifecycle_service.py tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `37 passed`.
 
 ## Iteration budget outcomes
 - `Planned max runs` -> 0 expensive realism runs (analysis/doc sync only).

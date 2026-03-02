@@ -208,6 +208,7 @@ async def test_run_compliance_lifecycle_job_returns_preview_summary(monkeypatch)
         captured["run_mode"] = kwargs["run_mode"]
         captured["operation"] = kwargs["operation"]
         captured["max_items"] = kwargs["max_items"]
+        captured["apply_actions"] = kwargs["apply_actions"]
         return run, records
 
     monkeypatch.setattr(console_router, "_execute_compliance_lifecycle_preview_run", _fake_execute)
@@ -227,6 +228,7 @@ async def test_run_compliance_lifecycle_job_returns_preview_summary(monkeypatch)
     assert captured["run_mode"] == "manual"
     assert captured["operation"] == "destruction_preview"
     assert captured["max_items"] == 12
+    assert captured["apply_actions"] is False
 
 
 @pytest.mark.asyncio
@@ -243,6 +245,61 @@ async def test_run_compliance_lifecycle_job_rejects_invalid_scope():
         )
 
     assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_rejects_apply_actions_for_dry_run():
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router._run_compliance_lifecycle_job(
+            db,
+            context=context,
+            mode="dry_run",
+            params={"apply_actions": True},
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "apply_actions requires execute mode" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_rejects_apply_actions_without_reason():
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router._run_compliance_lifecycle_job(
+            db,
+            context=context,
+            mode="execute",
+            params={"apply_actions": True},
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "reason is required when apply_actions=true" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_rejects_apply_actions_for_auto_lane():
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router._run_compliance_lifecycle_job(
+            db,
+            context=context,
+            mode="execute",
+            params={
+                "lane": "auto",
+                "apply_actions": True,
+                "reason": "approved compliance action",
+            },
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "apply_actions requires lane=manual" in exc_info.value.message
 
 
 @pytest.mark.asyncio
@@ -364,6 +421,40 @@ async def test_run_compliance_lifecycle_job_auto_lane_runs_when_due(monkeypatch)
     assert result["profile"] == "destruction_daily"
     assert captured["operation"] == "destruction_preview"
     assert captured["run_mode"] == "manual"
+
+
+@pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_execute_apply_actions_passed_to_executor(monkeypatch):
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+    run = _run_record(client_id=context.client.id, agent_id=context.agent.id)
+    records = [_record_item(run_id=run.id)]
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(console_router, "_resolve_policy_registry_scope", lambda *args, **kwargs: ("client", None))
+
+    def _fake_execute(*args, **kwargs):
+        captured["run_mode"] = kwargs["run_mode"]
+        captured["apply_actions"] = kwargs["apply_actions"]
+        return run, records
+
+    monkeypatch.setattr(console_router, "_execute_compliance_lifecycle_preview_run", _fake_execute)
+
+    result = await console_router._run_compliance_lifecycle_job(
+        db,
+        context=context,
+        mode="execute",
+        params={
+            "operation": "destruction_preview",
+            "apply_actions": True,
+            "reason": "approved compliance action",
+        },
+    )
+
+    assert result["apply_actions"] is True
+    assert result["skipped"] is False
+    assert captured["run_mode"] == "manual"
+    assert captured["apply_actions"] is True
 
 
 @pytest.mark.asyncio
