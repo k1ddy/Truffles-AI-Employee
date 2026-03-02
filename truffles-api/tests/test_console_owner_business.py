@@ -1130,6 +1130,177 @@ async def test_admin_control_tower_overview_aggregates_fleet_incidents_and_ops(m
     assert response.recent_ops_jobs == [job_record]
 
 
+def test_build_control_tower_issue_counts_sorts_by_count_then_code() -> None:
+    counts = console_router._build_control_tower_issue_counts(
+        {
+            "beta": 2,
+            "alpha": 3,
+            "gamma": 2,
+        },
+        limit=3,
+    )
+
+    assert [item.code for item in counts] == ["alpha", "beta", "gamma"]
+    assert [item.count for item in counts] == [3, 2, 2]
+
+
+@pytest.mark.asyncio
+async def test_admin_control_tower_readiness_board_requires_platform_admin(monkeypatch):
+    context = _build_context(role="owner")
+    context.accessible_clients = []
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_admin_control_tower_readiness_board(
+            request=SimpleNamespace(query_params={}),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_control_tower_readiness_board_passes_scope_and_flags(monkeypatch):
+    client_id = uuid4()
+    company_id = uuid4()
+    context = _build_context(role="platform_admin")
+    context.companies = [SimpleNamespace(id=company_id, name="Acme")]
+    context.accessible_clients = [
+        SimpleNamespace(id=client_id, name="alpha", status="active", company_id=company_id, config={})
+    ]
+    captured: dict[str, object] = {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_control_tower_readiness_board",
+        lambda _db, *, active_clients, companies_by_id, include_ready_mode, limit, now: (
+            captured.update(
+                {
+                    "active_clients": active_clients,
+                    "companies_by_id": companies_by_id,
+                    "include_ready_mode": include_ready_mode,
+                    "limit": limit,
+                }
+            )
+            or console_router.ConsoleAdminControlTowerReadinessBoardResponse(
+                generated_at=now_iso,
+                limit=limit,
+                include_ready=include_ready_mode,
+                summary=console_router.ConsoleAdminControlTowerReadinessSummary(
+                    total_branches=0,
+                    ready_branches=0,
+                    blocked_branches=0,
+                    hard_gate_failed_branches=0,
+                    go_live_draft_branches=0,
+                    go_live_approved_branches=0,
+                    go_live_rejected_branches=0,
+                    degraded_branches=0,
+                ),
+                top_blockers=[],
+                items=[],
+            )
+        ),
+    )
+
+    response = await console_router.get_admin_control_tower_readiness_board(
+        request=SimpleNamespace(query_params={"include_ready": "true", "limit": "7"}),
+        include_ready="true",
+        limit=7,
+        db=SimpleNamespace(),
+    )
+
+    assert captured["limit"] == 7
+    assert captured["include_ready_mode"] is True
+    assert captured["active_clients"][0].id == client_id
+    assert company_id in captured["companies_by_id"]
+    assert response.limit == 7
+    assert response.include_ready is True
+
+
+@pytest.mark.asyncio
+async def test_admin_control_tower_drift_board_requires_platform_admin(monkeypatch):
+    context = _build_context(role="owner")
+    context.accessible_clients = []
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_admin_control_tower_drift_board(
+            request=SimpleNamespace(query_params={}),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_control_tower_drift_board_passes_scope_and_flags(monkeypatch):
+    client_id = uuid4()
+    company_id = uuid4()
+    context = _build_context(role="platform_admin")
+    context.companies = [SimpleNamespace(id=company_id, name="Acme")]
+    context.accessible_clients = [
+        SimpleNamespace(id=client_id, name="alpha", status="active", company_id=company_id, config={})
+    ]
+    captured: dict[str, object] = {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_control_tower_drift_board",
+        lambda _db, *, active_clients, companies_by_id, stale_after_minutes, only_problematic_mode, limit, now: (
+            captured.update(
+                {
+                    "active_clients": active_clients,
+                    "companies_by_id": companies_by_id,
+                    "stale_after_minutes": stale_after_minutes,
+                    "only_problematic_mode": only_problematic_mode,
+                    "limit": limit,
+                }
+            )
+            or console_router.ConsoleAdminControlTowerDriftBoardResponse(
+                generated_at=now_iso,
+                stale_after_minutes=stale_after_minutes,
+                limit=limit,
+                only_problematic=only_problematic_mode,
+                summary=console_router.ConsoleAdminControlTowerDriftSummary(
+                    total_branches=0,
+                    ok_branches=0,
+                    warn_branches=0,
+                    error_branches=0,
+                    degraded_branches=0,
+                    queue_p0=0,
+                    queue_p1=0,
+                    queue_p2=0,
+                ),
+                top_issues=[],
+                items=[],
+                provider_ops_queue=[],
+            )
+        ),
+    )
+
+    response = await console_router.get_admin_control_tower_drift_board(
+        request=SimpleNamespace(query_params={"only_problematic": "false", "stale_after_minutes": "120", "limit": "9"}),
+        only_problematic="false",
+        stale_after_minutes=120,
+        limit=9,
+        db=SimpleNamespace(),
+    )
+
+    assert captured["limit"] == 9
+    assert captured["stale_after_minutes"] == 120
+    assert captured["only_problematic_mode"] is False
+    assert captured["active_clients"][0].id == client_id
+    assert company_id in captured["companies_by_id"]
+    assert response.limit == 9
+    assert response.only_problematic is False
+
+
 @pytest.mark.asyncio
 async def test_subscription_summary_requires_subscription_permission(monkeypatch):
     context = _build_context(role="support")

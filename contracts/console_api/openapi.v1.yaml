@@ -3782,6 +3782,109 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/control-tower/readiness-board:
+    get:
+      tags:
+      - console
+      summary: Get Admin Control Tower Readiness Board
+      operationId: get_admin_control_tower_readiness_board_console_v1_admin_control_tower_readiness_board_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          title: Limit
+      - name: include_ready
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Include Ready
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleAdminControlTowerReadinessBoardResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/control-tower/drift-board:
+    get:
+      tags:
+      - console
+      summary: Get Admin Control Tower Drift Board
+      operationId: get_admin_control_tower_drift_board_console_v1_admin_control_tower_drift_board_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          title: Limit
+      - name: stale_after_minutes
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1440
+          minimum: 5
+          default: 60
+          title: Stale After Minutes
+      - name: only_problematic
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Only Problematic
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleAdminControlTowerDriftBoardResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/companies/{company_id}:
     patch:
       tags:
@@ -6835,6 +6938,98 @@ components:
       additionalProperties: false
       type: object
       title: CompliancePolicyPayload
+    ConsoleAdminControlTowerDriftBoardResponse:
+      properties:
+        generated_at:
+          type: string
+          title: Generated At
+        stale_after_minutes:
+          type: integer
+          title: Stale After Minutes
+        limit:
+          type: integer
+          title: Limit
+        only_problematic:
+          type: boolean
+          title: Only Problematic
+          default: true
+        summary:
+          $ref: '#/components/schemas/ConsoleAdminControlTowerDriftSummary'
+        top_issues:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerIssueCount'
+          type: array
+          title: Top Issues
+          default: []
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleProviderLifecycleItem'
+          type: array
+          title: Items
+        provider_ops_queue:
+          items:
+            $ref: '#/components/schemas/ConsoleProviderOpsQueueItem'
+          type: array
+          title: Provider Ops Queue
+          default: []
+      type: object
+      required:
+      - generated_at
+      - stale_after_minutes
+      - limit
+      - summary
+      - items
+      title: ConsoleAdminControlTowerDriftBoardResponse
+    ConsoleAdminControlTowerDriftSummary:
+      properties:
+        total_branches:
+          type: integer
+          title: Total Branches
+        ok_branches:
+          type: integer
+          title: Ok Branches
+        warn_branches:
+          type: integer
+          title: Warn Branches
+        error_branches:
+          type: integer
+          title: Error Branches
+        degraded_branches:
+          type: integer
+          title: Degraded Branches
+        queue_p0:
+          type: integer
+          title: Queue P0
+        queue_p1:
+          type: integer
+          title: Queue P1
+        queue_p2:
+          type: integer
+          title: Queue P2
+      type: object
+      required:
+      - total_branches
+      - ok_branches
+      - warn_branches
+      - error_branches
+      - degraded_branches
+      - queue_p0
+      - queue_p1
+      - queue_p2
+      title: ConsoleAdminControlTowerDriftSummary
+    ConsoleAdminControlTowerIssueCount:
+      properties:
+        code:
+          type: string
+          title: Code
+        count:
+          type: integer
+          title: Count
+      type: object
+      required:
+      - code
+      - count
+      title: ConsoleAdminControlTowerIssueCount
     ConsoleAdminControlTowerOverviewResponse:
       properties:
         generated_at:
@@ -6922,6 +7117,174 @@ components:
       - ops_jobs_total_24h
       - ops_jobs_failed_24h
       title: ConsoleAdminControlTowerOverviewSummary
+    ConsoleAdminControlTowerReadinessBoardResponse:
+      properties:
+        generated_at:
+          type: string
+          title: Generated At
+        limit:
+          type: integer
+          title: Limit
+        include_ready:
+          type: boolean
+          title: Include Ready
+          default: false
+        summary:
+          $ref: '#/components/schemas/ConsoleAdminControlTowerReadinessSummary'
+        top_blockers:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerIssueCount'
+          type: array
+          title: Top Blockers
+          default: []
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerReadinessItem'
+          type: array
+          title: Items
+      type: object
+      required:
+      - generated_at
+      - limit
+      - summary
+      - items
+      title: ConsoleAdminControlTowerReadinessBoardResponse
+    ConsoleAdminControlTowerReadinessItem:
+      properties:
+        company_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Company Id
+        company_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Company Name
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        client_slug:
+          type: string
+          title: Client Slug
+        branch_id:
+          type: string
+          format: uuid
+          title: Branch Id
+        branch_slug:
+          type: string
+          title: Branch Slug
+        branch_name:
+          type: string
+          title: Branch Name
+        current_step:
+          type: string
+          enum:
+          - branch_draft
+          - integrations
+          - team
+          - telegram
+          - knowledge
+          - booking
+          - go_no_go
+          title: Current Step
+        scorecard_status:
+          type: string
+          enum:
+          - pass
+          - fail
+          title: Scorecard Status
+        readiness_status:
+          type: string
+          enum:
+          - pass
+          - warn
+          - fail
+          title: Readiness Status
+        hard_gate_status:
+          type: string
+          enum:
+          - pass
+          - fail
+          title: Hard Gate Status
+        ready:
+          type: boolean
+          title: Ready
+        go_live_state:
+          type: string
+          title: Go Live State
+        integration_state:
+          type: string
+          enum:
+          - ok
+          - degraded
+          title: Integration State
+          default: ok
+        missing:
+          items:
+            type: string
+          type: array
+          title: Missing
+          default: []
+        hard_gate_blockers:
+          items:
+            type: string
+          type: array
+          title: Hard Gate Blockers
+          default: []
+      type: object
+      required:
+      - client_id
+      - client_slug
+      - branch_id
+      - branch_slug
+      - branch_name
+      - current_step
+      - scorecard_status
+      - readiness_status
+      - hard_gate_status
+      - ready
+      - go_live_state
+      title: ConsoleAdminControlTowerReadinessItem
+    ConsoleAdminControlTowerReadinessSummary:
+      properties:
+        total_branches:
+          type: integer
+          title: Total Branches
+        ready_branches:
+          type: integer
+          title: Ready Branches
+        blocked_branches:
+          type: integer
+          title: Blocked Branches
+        hard_gate_failed_branches:
+          type: integer
+          title: Hard Gate Failed Branches
+        go_live_draft_branches:
+          type: integer
+          title: Go Live Draft Branches
+        go_live_approved_branches:
+          type: integer
+          title: Go Live Approved Branches
+        go_live_rejected_branches:
+          type: integer
+          title: Go Live Rejected Branches
+        degraded_branches:
+          type: integer
+          title: Degraded Branches
+      type: object
+      required:
+      - total_branches
+      - ready_branches
+      - blocked_branches
+      - hard_gate_failed_branches
+      - go_live_draft_branches
+      - go_live_approved_branches
+      - go_live_rejected_branches
+      - degraded_branches
+      title: ConsoleAdminControlTowerReadinessSummary
     ConsoleAgent:
       properties:
         id:

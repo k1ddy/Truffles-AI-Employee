@@ -86,6 +86,22 @@ Date
   - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass after contract sync.
   - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
 
+## Slice 2 update (runtime integration, 2026-03-02)
+- Delivered platform-admin control-tower board endpoints:
+  - `GET /console/v1/admin/control-tower/readiness-board`,
+  - `GET /console/v1/admin/control-tower/drift-board`.
+- Reuse-first implementation:
+  - reused onboarding primitives (`build_onboarding_status`, `build_onboarding_scorecard`) for readiness board.
+  - reused integration/provider primitives (`_build_branch_integration_status`, `_build_provider_lifecycle_item`, `_build_provider_ops_queue`) for drift board.
+- Contract update:
+  - new readiness/drift board schemas in `app/schemas/console.py`.
+  - OpenAPI contract synchronized (`openapi.v1.yaml`) after drift gate.
+- Deterministic checks for slice2:
+  - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_owner_business.py` -> pass.
+  - `cd truffles-api && pytest -q tests/test_console_owner_business.py tests/test_console_fleet_attention.py tests/test_console_ops_jobs.py tests/test_console_onboarding_state.py` -> `98 passed`.
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass after contract sync.
+  - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
+
 ## Iteration budget outcomes
 - `Planned max runs` -> 0 expensive realism runs.
 - `Actual runs` -> 0 expensive realism runs.
@@ -98,6 +114,7 @@ Date
 - `docs/BLOCK_GRAPH.yaml`
 - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
 - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase12-a700.md`
+- `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase12-slice2-a700.md`
 - `STATE.md`
 - `truffles-api/tests/test_console_fleet_attention.py`
 - `truffles-api/tests/test_console_owner_business.py`
@@ -108,9 +125,9 @@ Date
 - `contracts/console_api/openapi.v1.yaml`
 
 ## Release safety decision
-- `Strategy used` -> analysis-only bootstrap (no production behavior change).
-- `Go/no-go signals observed` -> deterministic baseline checks are green; no runtime mutation introduced.
-- `Rollback readiness` -> doc-only revert is sufficient for this slice.
+- `Strategy used` -> runtime read-only contract expansion behind platform-admin authorization.
+- `Go/no-go signals observed` -> deterministic checks are green (`ruff`, `98 passed`, OpenAPI drift gate pass).
+- `Rollback readiness` -> single commit revert restores previous control-tower contract.
 
 ## Canon/doc sync updates
 - `Updated docs`:
@@ -119,6 +136,7 @@ Date
   - `docs/BLOCK_GRAPH.yaml`
   - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
   - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase12-a700.md`
+  - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase12-slice2-a700.md`
   - `STATE.md`
 - `Drift resolved` -> yes (phase12 artifact gap closed).
 
