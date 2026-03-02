@@ -853,7 +853,7 @@ Forensic only (not acceptance):
 
 ### Что не реализовано (ключевые пробелы)
 
-- Нет новых ключевых пробелов в chain controller после bootstrap; открытые пункты остаются в `P4/P5/P7/P9/P12/P13/P14` по Execution Status.
+- Нет новых ключевых пробелов в chain controller после bootstrap; открытые пункты остаются в `P4/P9/P12/P13/P14` по актуальному Execution Status (`P5/P7` закрыты отдельными блоками).
 
 ### Что может сломаться даже после текущих gate (failure map)
 
