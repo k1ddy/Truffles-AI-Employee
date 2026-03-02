@@ -29,7 +29,7 @@ def tokens_have_prefixes(tokens: list[str], prefixes: Iterable[str]) -> bool:
 
 
 def has_anchor_prefix(tokens: list[str], prefix: str) -> bool:
-    """Anchor matching must avoid false positives on very short stems like 'до' in 'долгими'."""
+    # Short stems require exact token match to avoid prefix false positives.
     if len(prefix) <= 2:
         return any(token == prefix for token in tokens)
     return any(token.startswith(prefix) for token in tokens)

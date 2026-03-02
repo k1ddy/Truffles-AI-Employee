@@ -71,7 +71,14 @@ def looks_like_phone(message_text: str | None) -> bool:
 
 
 def clean_name_candidate(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-zА-Яа-яЁё\s-]", " ", value or "")
+    cleaned_chars: list[str] = []
+    allowed_chars = {" ", "-"}
+    for ch in (value or ""):
+        if ch.isalpha() or ch in allowed_chars:
+            cleaned_chars.append(ch)
+        else:
+            cleaned_chars.append(" ")
+    cleaned = "".join(cleaned_chars)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
