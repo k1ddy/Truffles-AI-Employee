@@ -21,15 +21,35 @@ from app.schemas.webhook import WebhookResponse
 from app.services.appointment_service import SchedulingService
 from app.services.booking_signal_service import (
     clean_name_candidate as _clean_name_candidate_impl,
+)
+from app.services.booking_signal_service import (
     collapse_repeats as _collapse_repeats,
+)
+from app.services.booking_signal_service import (
     has_daypart_stem as _has_daypart_stem,
+)
+from app.services.booking_signal_service import (
     has_duration_context_marker as _has_duration_context_marker,
+)
+from app.services.booking_signal_service import (
     looks_like_layout_swap as _looks_like_layout_swap,
+)
+from app.services.booking_signal_service import (
     looks_like_phone as _looks_like_phone,
+)
+from app.services.booking_signal_service import (
     match_booking_hour_fallback as _match_booking_hour_fallback,
+)
+from app.services.booking_signal_service import (
     normalize_phone_digits as _normalize_phone_digits_impl,
-    parse_iso_datetime as _parse_iso_datetime,
+)
+from app.services.booking_signal_service import (
     normalize_resolved_datetime_value as _normalize_resolved_datetime_value,
+)
+from app.services.booking_signal_service import (
+    parse_iso_datetime as _parse_iso_datetime,
+)
+from app.services.booking_signal_service import (
     swap_keyboard_layout as _swap_keyboard_layout,
 )
 from app.services.capabilities_runtime import get_runtime_capabilities

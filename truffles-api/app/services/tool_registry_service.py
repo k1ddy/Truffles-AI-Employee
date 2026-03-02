@@ -24,11 +24,23 @@ from app.services.appointment_reminder_service import (
 from app.services.appointment_service import AppointmentConflictError, SchedulingService
 from app.services.booking_signal_service import (
     clean_specialist_name as _clean_specialist_name_impl,
+)
+from app.services.booking_signal_service import (
     coerce_time_token as _coerce_time_token,
+)
+from app.services.booking_signal_service import (
     extract_daypart_token as _extract_daypart_token,
-    has_explicit_date_signal as _has_explicit_date_signal_impl,
+)
+from app.services.booking_signal_service import (
     extract_relative_date_token as _extract_relative_date_token,
+)
+from app.services.booking_signal_service import (
     extract_time_token as _extract_time_token,
+)
+from app.services.booking_signal_service import (
+    has_explicit_date_signal as _has_explicit_date_signal_impl,
+)
+from app.services.booking_signal_service import (
     strip_daypart_tokens as _strip_daypart_tokens,
 )
 from app.services.calendar_sync_service import enqueue_appointment_sync, get_provider_health
@@ -36,7 +48,11 @@ from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.capability_manifest_service import resolve_tool_protocol_decision
 from app.services.info_signal_service import (
     looks_like_booking_verification_message as _looks_like_booking_verification_message,
+)
+from app.services.info_signal_service import (
     looks_like_services_overview_message as _looks_like_services_overview_message,
+)
+from app.services.info_signal_service import (
     system_any_match as _system_any_match,
 )
 from app.services.pack_runtime_service import (

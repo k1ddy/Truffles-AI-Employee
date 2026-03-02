@@ -10,15 +10,33 @@ from typing import TYPE_CHECKING, Any, Callable
 from app.schemas.webhook import WebhookResponse
 from app.services.info_signal_service import (
     anchor_group_hit as _anchor_group_hit,
+)
+from app.services.info_signal_service import (
     count_anchor_hits as _count_anchor_hits,
+)
+from app.services.info_signal_service import (
     is_short_reply as _is_short_reply_impl,
+)
+from app.services.info_signal_service import (
     normalized_contains_any as _normalized_contains_any,
+)
+from app.services.info_signal_service import (
     signal_any_match as _signal_any_match,
+)
+from app.services.info_signal_service import (
     signal_pair_match as _signal_pair_match,
+)
+from app.services.info_signal_service import (
     system_any_match as _system_any_match,
+)
+from app.services.info_signal_service import (
     system_any_match_multi as _system_any_match_multi,
-    tokens_have_prefixes as _tokens_have_prefixes,
+)
+from app.services.info_signal_service import (
     tokenize_for_matching as _tokenize_for_matching,
+)
+from app.services.info_signal_service import (
+    tokens_have_prefixes as _tokens_have_prefixes,
 )
 from app.services.pack_runtime_service import (
     _build_fact_meta,
