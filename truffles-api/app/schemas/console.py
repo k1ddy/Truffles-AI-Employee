@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from app.schemas.capabilities import CapabilitiesPayload, CapabilityPolicyOverrides
+from app.schemas.compliance_policy import CompliancePolicyPayload
 from app.schemas.onboarding_contract import (
     OnboardingContractPayload,
     OnboardingProviderBindingPayload,
@@ -1163,7 +1164,14 @@ class ConsoleIncidentAction(BaseModel):
     description: str
     href: Optional[str] = None
     job_type: Optional[
-        Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot", "incident_state"]
+        Literal[
+            "outbox_process",
+            "integration_reconcile",
+            "heal",
+            "metrics_snapshot",
+            "incident_state",
+            "compliance_lifecycle",
+        ]
     ] = None
     mode: Optional[Literal["dry_run", "execute"]] = None
     params: Optional[dict] = None
@@ -1538,7 +1546,14 @@ class ConsoleReminderRetryResponse(BaseModel):
     matched: int
 
 
-ConsoleOpsJobType = Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot", "incident_state"]
+ConsoleOpsJobType = Literal[
+    "outbox_process",
+    "integration_reconcile",
+    "heal",
+    "metrics_snapshot",
+    "incident_state",
+    "compliance_lifecycle",
+]
 ConsoleOpsJobMode = Literal["dry_run", "execute"]
 ConsoleOpsJobStatus = Literal["success", "failed"]
 
@@ -1580,6 +1595,159 @@ class ConsoleOpsJobListResponse(BaseModel):
     items: list[ConsoleOpsJobRecord]
     cursor: Optional[str] = None
     has_more: bool
+
+
+class ConsoleAdminControlTowerOverviewSummary(BaseModel):
+    active_clients_total: int
+    clients_with_attention: int
+    high_risk_clients: int
+    incidents_total: int
+    incidents_critical: int
+    incidents_warn: int
+    incidents_info: int
+    ops_jobs_total_24h: int
+    ops_jobs_failed_24h: int
+
+
+class ConsoleAdminControlTowerOverviewResponse(BaseModel):
+    generated_at: str
+    stale_after_minutes: int
+    attention_limit: int
+    incident_limit: int
+    ops_jobs_limit: int
+    summary: ConsoleAdminControlTowerOverviewSummary
+    fleet_attention: ConsoleFleetAttentionResponse
+    incidents: ConsoleIncidentListResponse
+    recent_ops_jobs: list[ConsoleOpsJobRecord]
+    ops_job_catalog: list[ConsoleOpsJobDefinition]
+
+
+class ConsoleAdminControlTowerIssueCount(BaseModel):
+    code: str
+    count: int
+
+
+ConsoleAdminControlTowerActionPriority = Literal["p0", "p1", "p2"]
+ConsoleAdminControlTowerActionSource = Literal["incident", "provider_ops", "readiness"]
+ConsoleAdminControlTowerActionKind = Literal["navigate", "ops_job", "provider_action"]
+
+
+class ConsoleAdminControlTowerActionItem(BaseModel):
+    id: str
+    priority: ConsoleAdminControlTowerActionPriority
+    source: ConsoleAdminControlTowerActionSource
+    kind: ConsoleAdminControlTowerActionKind
+    title: str
+    description: str
+    reasons: list[str] = []
+    href: Optional[str] = None
+    incident_id: Optional[str] = None
+    client_id: Optional[UUID] = None
+    client_slug: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    branch_slug: Optional[str] = None
+    branch_name: Optional[str] = None
+    job_type: Optional[ConsoleOpsJobType] = None
+    mode: Optional[ConsoleOpsJobMode] = None
+    params: Optional[dict] = None
+    provider_action: Optional[str] = None
+    requires_confirmation: bool = False
+    evidence_links: list[str] = []
+
+
+class ConsoleAdminControlTowerActionCenterSummary(BaseModel):
+    total_actions: int
+    p0_actions: int
+    p1_actions: int
+    p2_actions: int
+    incident_actions: int
+    provider_ops_actions: int
+    readiness_actions: int
+
+
+class ConsoleAdminControlTowerActionCenterResponse(BaseModel):
+    generated_at: str
+    stale_after_minutes: int
+    limit: int
+    include_p2: bool = True
+    summary: ConsoleAdminControlTowerActionCenterSummary
+    top_reasons: list[ConsoleAdminControlTowerIssueCount] = []
+    items: list[ConsoleAdminControlTowerActionItem]
+
+
+ConsoleAdminControlTowerMigrationWaveId = Literal["canary", "cohort", "fleet"]
+ConsoleAdminControlTowerMigrationWaveGate = Literal["go", "hold"]
+
+
+class ConsoleAdminControlTowerMigrationWave(BaseModel):
+    wave: ConsoleAdminControlTowerMigrationWaveId
+    gate: ConsoleAdminControlTowerMigrationWaveGate
+    reason: str
+    candidate_clients_total: int
+    candidate_branches_total: int
+    blockers_total: int
+    rollback_triggers: list[str] = []
+    top_blockers: list[ConsoleAdminControlTowerIssueCount] = []
+
+
+class ConsoleAdminControlTowerMigrationProgramSummary(BaseModel):
+    active_clients_total: int
+    total_branches: int
+    ready_branches: int
+    blocked_branches: int
+    p0_actions: int
+    p1_actions: int
+    p2_actions: int
+    waves_go: int
+    waves_hold: int
+
+
+class ConsoleAdminControlTowerMigrationProgramResponse(BaseModel):
+    generated_at: str
+    stale_after_minutes: int
+    limit: int
+    include_p2: bool = True
+    summary: ConsoleAdminControlTowerMigrationProgramSummary
+    waves: list[ConsoleAdminControlTowerMigrationWave]
+
+
+class ConsoleAdminControlTowerReadinessItem(BaseModel):
+    company_id: Optional[UUID] = None
+    company_name: Optional[str] = None
+    client_id: UUID
+    client_slug: str
+    branch_id: UUID
+    branch_slug: str
+    branch_name: str
+    current_step: OnboardingStepId
+    scorecard_status: OnboardingScorecardStatusValue
+    readiness_status: OnboardingReadinessStatusValue
+    hard_gate_status: OnboardingReadinessHardGateStatusValue
+    ready: bool
+    go_live_state: str
+    integration_state: Literal["ok", "degraded"] = "ok"
+    missing: list[str] = []
+    hard_gate_blockers: list[str] = []
+
+
+class ConsoleAdminControlTowerReadinessSummary(BaseModel):
+    total_branches: int
+    ready_branches: int
+    blocked_branches: int
+    hard_gate_failed_branches: int
+    go_live_draft_branches: int
+    go_live_approved_branches: int
+    go_live_rejected_branches: int
+    degraded_branches: int
+
+
+class ConsoleAdminControlTowerReadinessBoardResponse(BaseModel):
+    generated_at: str
+    limit: int
+    include_ready: bool = False
+    summary: ConsoleAdminControlTowerReadinessSummary
+    top_blockers: list[ConsoleAdminControlTowerIssueCount] = []
+    items: list[ConsoleAdminControlTowerReadinessItem]
 
 
 ConsoleBranchChangeStatus = Literal["draft", "validated", "publish_failed", "published", "rolled_back"]
@@ -1776,6 +1944,140 @@ class ConsolePolicyRegistryMutationResponse(BaseModel):
     success: bool
     record: ConsolePolicyVersionRecord
     from_version_id: Optional[UUID] = None
+
+
+class ConsoleCompliancePolicyVersionRecord(BaseModel):
+    id: UUID
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    company_id: Optional[UUID] = None
+    domain_key: Optional[str] = None
+    client_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    status: Literal["published", "archived"]
+    schema_version: str
+    version_number: int
+    payload: CompliancePolicyPayload
+    reason: Optional[str] = None
+    source_version_id: Optional[UUID] = None
+    created_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    published_by: Optional[UUID] = None
+    published_at: Optional[str] = None
+
+
+class ConsoleCompliancePolicyRegistryResponse(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    company_id: Optional[UUID] = None
+    domain_key: Optional[str] = None
+    client_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    active: Optional[ConsoleCompliancePolicyVersionRecord] = None
+    history: list[ConsoleCompliancePolicyVersionRecord] = []
+
+
+class ConsoleCompliancePolicyRegistryPublishRequest(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    domain_key: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    schema_version: Optional[str] = None
+    reason: str
+    payload: CompliancePolicyPayload
+
+
+class ConsoleCompliancePolicyRegistryRollbackRequest(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    domain_key: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    target_version_id: UUID
+    reason: str
+
+
+class ConsoleCompliancePolicyRegistryMutationResponse(BaseModel):
+    success: bool
+    record: ConsoleCompliancePolicyVersionRecord
+    from_version_id: Optional[UUID] = None
+
+
+class ConsoleComplianceLifecycleRunRecord(BaseModel):
+    id: UUID
+    scope: Literal["client", "branch"]
+    data_class: str
+    operation: Literal["retention_scan", "export_preview", "destruction_preview"]
+    run_mode: Literal["preview", "manual"]
+    status: Literal["running", "completed", "failed"]
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    policy_version_id: Optional[UUID] = None
+    policy_scope: Optional[str] = None
+    summary: dict = {}
+    error_message: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    triggered_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleComplianceLifecycleRecord(BaseModel):
+    id: UUID
+    run_id: UUID
+    entity_type: str
+    entity_id: Optional[str] = None
+    action: str
+    result: Literal["candidate", "skipped", "error"]
+    payload: dict = {}
+    occurred_at: Optional[str] = None
+
+
+class ConsoleComplianceLifecycleArtifactRecord(BaseModel):
+    id: UUID
+    run_id: UUID
+    scope: Literal["client", "branch"]
+    data_class: str
+    operation: Literal["retention_scan", "export_preview", "destruction_preview"]
+    run_mode: Literal["preview", "manual"]
+    status: Literal["running", "completed", "failed"]
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    artifact_type: Literal["compliance_lifecycle_evidence"]
+    artifact_digest: str
+    payload: dict = {}
+    records_count: int = 0
+    evidence_record_count: int = 0
+    published_by: Optional[UUID] = None
+    published_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleComplianceLifecycleRunRequest(BaseModel):
+    scope: Literal["client", "branch"]
+    branch_id: Optional[UUID] = None
+    data_class: Literal["learned_responses"] = "learned_responses"
+    operation: Literal["retention_scan", "export_preview", "destruction_preview"]
+    run_mode: Optional[Literal["preview", "manual"]] = None
+    max_items: int = Field(default=200, ge=1, le=500)
+    reason: str
+
+
+class ConsoleComplianceLifecycleRunResponse(BaseModel):
+    success: bool
+    run: ConsoleComplianceLifecycleRunRecord
+    records: list[ConsoleComplianceLifecycleRecord] = []
+
+
+class ConsoleComplianceLifecycleRunsResponse(BaseModel):
+    items: list[ConsoleComplianceLifecycleRunRecord]
+
+
+class ConsoleComplianceLifecycleArtifactResponse(BaseModel):
+    success: bool
+    artifact: ConsoleComplianceLifecycleArtifactRecord
 
 
 class ConsoleSlaProfileVersionRecord(BaseModel):
@@ -2247,6 +2549,28 @@ class ConsoleIntegrationsListResponse(BaseModel):
     has_more: bool = False
     total_in_scope: int = 0
     items: list[ConsoleBranchIntegrationStatus]
+    provider_ops_queue: list[ConsoleProviderOpsQueueItem] = []
+
+
+class ConsoleAdminControlTowerDriftSummary(BaseModel):
+    total_branches: int
+    ok_branches: int
+    warn_branches: int
+    error_branches: int
+    degraded_branches: int
+    queue_p0: int
+    queue_p1: int
+    queue_p2: int
+
+
+class ConsoleAdminControlTowerDriftBoardResponse(BaseModel):
+    generated_at: str
+    stale_after_minutes: int
+    limit: int
+    only_problematic: bool = True
+    summary: ConsoleAdminControlTowerDriftSummary
+    top_issues: list[ConsoleAdminControlTowerIssueCount] = []
+    items: list[ConsoleProviderLifecycleItem]
     provider_ops_queue: list[ConsoleProviderOpsQueueItem] = []
 
 

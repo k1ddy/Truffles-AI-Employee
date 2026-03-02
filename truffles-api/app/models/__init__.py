@@ -11,6 +11,10 @@ from app.models.client_onboarding_contract import ClientOnboardingContract
 from app.models.client_policy_version import ClientPolicyVersion
 from app.models.client_settings import ClientSettings
 from app.models.company import Company
+from app.models.compliance_lifecycle_artifact import ComplianceLifecycleArtifact
+from app.models.compliance_lifecycle_record import ComplianceLifecycleRecord
+from app.models.compliance_lifecycle_run import ComplianceLifecycleRun
+from app.models.compliance_policy_version import CompliancePolicyVersion
 from app.models.console_branch_change import ConsoleBranchChange
 from app.models.console_confirmation import ConsoleConfirmation
 from app.models.console_idempotency import ConsoleIdempotencyKey
@@ -49,6 +53,10 @@ __all__ = [
     "ClientCapability",
     "ClientOnboardingContract",
     "ClientPolicyVersion",
+    "ComplianceLifecycleArtifact",
+    "ComplianceLifecycleRecord",
+    "ComplianceLifecycleRun",
+    "CompliancePolicyVersion",
     "Agent",
     "AgentMembership",
     "AgentIdentity",

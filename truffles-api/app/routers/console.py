@@ -43,6 +43,10 @@ from app.models import (
     ClientPolicyVersion,
     ClientSettings,
     Company,
+    ComplianceLifecycleArtifact,
+    ComplianceLifecycleRecord,
+    ComplianceLifecycleRun,
+    CompliancePolicyVersion,
     ConsoleBranchChange,
     ConsoleOpsJob,
     Conversation,
@@ -76,7 +80,22 @@ from app.schemas.capabilities import (
     CapabilitiesPayload,
     CapabilityPolicyOverrides,
 )
+from app.schemas.compliance_policy import CompliancePolicyPayload
 from app.schemas.console import (
+    ConsoleAdminControlTowerActionCenterResponse,
+    ConsoleAdminControlTowerActionCenterSummary,
+    ConsoleAdminControlTowerActionItem,
+    ConsoleAdminControlTowerDriftBoardResponse,
+    ConsoleAdminControlTowerDriftSummary,
+    ConsoleAdminControlTowerIssueCount,
+    ConsoleAdminControlTowerMigrationProgramResponse,
+    ConsoleAdminControlTowerMigrationProgramSummary,
+    ConsoleAdminControlTowerMigrationWave,
+    ConsoleAdminControlTowerOverviewResponse,
+    ConsoleAdminControlTowerOverviewSummary,
+    ConsoleAdminControlTowerReadinessBoardResponse,
+    ConsoleAdminControlTowerReadinessItem,
+    ConsoleAdminControlTowerReadinessSummary,
     ConsoleAgent,
     ConsoleAgentCreateRequest,
     ConsoleAgentCreateResponse,
@@ -125,6 +144,18 @@ from app.schemas.console import (
     ConsoleCompanyCreateResponse,
     ConsoleCompanyListResponse,
     ConsoleCompanyUpdateRequest,
+    ConsoleComplianceLifecycleArtifactRecord,
+    ConsoleComplianceLifecycleArtifactResponse,
+    ConsoleComplianceLifecycleRecord,
+    ConsoleComplianceLifecycleRunRecord,
+    ConsoleComplianceLifecycleRunRequest,
+    ConsoleComplianceLifecycleRunResponse,
+    ConsoleComplianceLifecycleRunsResponse,
+    ConsoleCompliancePolicyRegistryMutationResponse,
+    ConsoleCompliancePolicyRegistryPublishRequest,
+    ConsoleCompliancePolicyRegistryResponse,
+    ConsoleCompliancePolicyRegistryRollbackRequest,
+    ConsoleCompliancePolicyVersionRecord,
     ConsoleConfirmationCreateRequest,
     ConsoleConfirmationResponse,
     ConsoleDataTrustSummaryResponse,
@@ -316,6 +347,27 @@ from app.services.capabilities_service import (
     payload_to_dict,
 )
 from app.services.chatflow_service import get_instance_id, send_bot_response
+from app.services.compliance_lifecycle_artifact_service import (
+    get_lifecycle_artifact,
+    publish_lifecycle_artifact,
+)
+from app.services.compliance_lifecycle_service import (
+    create_lifecycle_run,
+    execute_lifecycle_preview,
+    finalize_lifecycle_run,
+    get_lifecycle_run,
+    list_lifecycle_records,
+    list_lifecycle_runs,
+)
+from app.services.compliance_policy_registry_service import (
+    COMPLIANCE_POLICY_SCHEMA_VERSION,
+    get_latest_compliance_policy_version,
+    list_compliance_policy_history,
+    publish_compliance_policy_version,
+    resolve_effective_compliance_policy_payload,
+    resolve_effective_compliance_policy_version,
+    rollback_compliance_policy_version,
+)
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
@@ -7881,6 +7933,168 @@ def _build_incident_summary(items: list[ConsoleIncidentItem]) -> ConsoleIncident
     )
 
 
+def _build_empty_fleet_attention_response(
+    *,
+    generated_at: datetime,
+    stale_after_minutes: int,
+) -> ConsoleFleetAttentionResponse:
+    return ConsoleFleetAttentionResponse(
+        generated_at=generated_at.isoformat(),
+        stale_after_minutes=stale_after_minutes,
+        summary=ConsoleFleetAttentionSummary(
+            active_clients_total=0,
+            clients_with_attention=0,
+            high_risk_clients=0,
+            medium_risk_clients=0,
+            low_risk_clients=0,
+            stale_branches_total=0,
+            integration_error_branches_total=0,
+            integration_warn_branches_total=0,
+            outbox_failed_24h_total=0,
+            pending_handovers_total=0,
+        ),
+        items=[],
+    )
+
+
+def _build_empty_incident_list_response(*, generated_at: datetime) -> ConsoleIncidentListResponse:
+    return ConsoleIncidentListResponse(
+        generated_at=generated_at.isoformat(),
+        scope="fleet",
+        summary=ConsoleIncidentSummary(total=0, critical=0, warn=0, info=0),
+        items=[],
+    )
+
+
+def _build_platform_admin_fleet_attention_response(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    stale_after_minutes: int,
+    include_low_mode: bool,
+    limit: int,
+    now: datetime,
+) -> ConsoleFleetAttentionResponse:
+    active_client_ids = {client.id for client in active_clients}
+    attention_scope_key = _build_fleet_attention_cache_scope_key(
+        active_client_ids=active_client_ids,
+        stale_after_minutes=stale_after_minutes,
+        include_low_mode=include_low_mode,
+        limit=limit,
+    )
+    cached_response = _load_cached_fleet_attention(
+        db,
+        scope_key=attention_scope_key,
+        now=now,
+    )
+    if cached_response is not None:
+        _schedule_fleet_attention_async_refresh(
+            db,
+            scope_key=attention_scope_key,
+            active_client_ids=active_client_ids,
+            stale_after_minutes=stale_after_minutes,
+            include_low_mode=include_low_mode,
+            limit=limit,
+            now=now,
+        )
+        return cached_response
+
+    response = _build_fleet_attention_response_for_clients(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_low_mode=include_low_mode,
+        limit=limit,
+        now=now,
+    )
+    _store_cached_fleet_attention(
+        db,
+        scope_key=attention_scope_key,
+        now=now,
+        response=response,
+    )
+    return response
+
+
+def _build_admin_incidents_response(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    limit: int,
+    now: datetime,
+) -> ConsoleIncidentListResponse:
+    client_ids = [client.id for client in active_clients]
+    outbox_backlog_map = _query_outbox_backlog_map(db, client_ids=client_ids)
+    outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
+    pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
+    degraded_map = _query_integration_degraded_branch_count_map(db, client_ids=client_ids)
+    latest_error_map = _query_latest_failed_error_map(db, client_ids=client_ids, now=now)
+
+    items: list[ConsoleIncidentItem] = []
+    for client in active_clients:
+        signals = _IncidentSignals(
+            outbox_backlog=outbox_backlog_map.get(client.id, 0),
+            outbox_failed_24h=outbox_failed_map.get(client.id, 0),
+            pending_handovers=pending_handovers_map.get(client.id, 0),
+            integration_degraded_branches=degraded_map.get(client.id, 0),
+            last_error=latest_error_map.get(client.id),
+        )
+        items.extend(
+            _build_scope_incident_items(
+                scope="fleet",
+                signals=signals,
+                detected_at=now,
+                client_id=client.id,
+                company_id=getattr(client, "company_id", None),
+                domain_key=_normalize_optional_domain_slug_token(
+                    client.config.get("domain_slug")
+                    if isinstance(getattr(client, "config", None), dict)
+                    else None
+                ),
+                client_slug=client.name,
+                branch_id=None,
+                branch_ids=None,
+                platform_scope=True,
+                db=db,
+            )
+        )
+
+    items_by_client: dict[UUID, list[ConsoleIncidentItem]] = {}
+    for item in items:
+        if item.client_id is None:
+            continue
+        items_by_client.setdefault(item.client_id, []).append(item)
+    for client_id, scoped_items in items_by_client.items():
+        state_map = _load_incident_state_map(
+            db,
+            client_id=client_id,
+            incident_ids=[item.id for item in scoped_items],
+            allowed_branch_ids=None,
+        )
+        _apply_incident_state_map(scoped_items, state_map=state_map)
+
+    severity_rank = {"critical": 2, "warn": 1, "info": 0}
+    items.sort(
+        key=lambda item: (
+            severity_rank.get(item.severity, 0),
+            int(item.metrics.get("outbox_backlog") or 0),
+            int(item.metrics.get("outbox_failed_24h") or 0),
+            int(item.metrics.get("integration_degraded_branches") or 0),
+            int(item.metrics.get("pending_handovers") or 0),
+        ),
+        reverse=True,
+    )
+    limited_items = items[:limit]
+    return ConsoleIncidentListResponse(
+        generated_at=now.isoformat(),
+        scope="fleet",
+        summary=_build_incident_summary(limited_items),
+        items=limited_items,
+    )
+
+
 def _coerce_incident_state(value: object) -> Optional[str]:
     if not isinstance(value, str):
         return None
@@ -8094,10 +8308,34 @@ _OPS_JOB_DEFINITIONS = {
         "description": "Set incident workflow state (open/in_progress/resolved) with audit metadata.",
         "supports_dry_run": True,
     },
+    "compliance_lifecycle": {
+        "label": "Compliance Lifecycle",
+        "description": "Run tenant-scoped compliance lifecycle preview (retention/export/destruction) with ledger evidence.",
+        "supports_dry_run": True,
+    },
 }
 
 _INCIDENT_STATE_ALERT_TYPE = "console_incident_state"
 _INCIDENT_STATES = {"open", "in_progress", "resolved"}
+_COMPLIANCE_LIFECYCLE_LANES = {"manual", "auto"}
+_COMPLIANCE_LIFECYCLE_PROFILE_DEFAULTS = {
+    "retention_hourly": {
+        "operation": "retention_scan",
+        "cadence_minutes": 60,
+        "max_items": 200,
+    },
+    "export_daily": {
+        "operation": "export_preview",
+        "cadence_minutes": 1440,
+        "max_items": 200,
+    },
+    "destruction_daily": {
+        "operation": "destruction_preview",
+        "cadence_minutes": 1440,
+        "max_items": 200,
+    },
+}
+_COMPLIANCE_LIFECYCLE_APPLY_MAX_ITEMS = 50
 
 
 def _require_ops_access(context: ConsoleAuthContext, *, action: str = "read") -> None:
@@ -8294,6 +8532,888 @@ def _build_ops_job_record(job: ConsoleOpsJob) -> ConsoleOpsJobRecord:
         error_message=job.error_message,
         request_payload=job.request_payload if isinstance(job.request_payload, dict) else None,
         result_payload=job.result_payload if isinstance(job.result_payload, dict) else None,
+    )
+
+
+def _build_ops_job_catalog_items() -> list[ConsoleOpsJobDefinition]:
+    return [
+        ConsoleOpsJobDefinition(
+            job_type=job_type,
+            label=meta["label"],
+            description=meta["description"],
+            supports_dry_run=bool(meta["supports_dry_run"]),
+        )
+        for job_type, meta in _OPS_JOB_DEFINITIONS.items()
+    ]
+
+
+def _build_admin_recent_ops_jobs(
+    db: Session,
+    *,
+    client_ids: list[UUID],
+    limit: int,
+    now: datetime,
+) -> tuple[list[ConsoleOpsJobRecord], int, int]:
+    if not client_ids:
+        return [], 0, 0
+
+    window_start = now - timedelta(hours=24)
+    aggregate_row = (
+        db.query(
+            func.count(ConsoleOpsJob.id),
+            func.sum(case((ConsoleOpsJob.status == "failed", 1), else_=0)),
+        )
+        .filter(
+            ConsoleOpsJob.client_id.in_(client_ids),
+            ConsoleOpsJob.created_at >= window_start,
+        )
+        .first()
+    )
+    total_24h = int((aggregate_row[0] if aggregate_row else 0) or 0)
+    failed_24h = int((aggregate_row[1] if aggregate_row else 0) or 0)
+
+    rows = (
+        db.query(ConsoleOpsJob)
+        .filter(ConsoleOpsJob.client_id.in_(client_ids))
+        .order_by(ConsoleOpsJob.created_at.desc(), ConsoleOpsJob.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [_build_ops_job_record(row) for row in rows], total_24h, failed_24h
+
+
+def _build_control_tower_issue_counts(
+    counter: dict[str, int],
+    *,
+    limit: int = 10,
+) -> list[ConsoleAdminControlTowerIssueCount]:
+    if not counter:
+        return []
+    ranked = sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+    return [
+        ConsoleAdminControlTowerIssueCount(code=code, count=count)
+        for code, count in ranked[: max(limit, 0)]
+    ]
+
+
+def _control_tower_incident_priority(severity: str) -> Literal["p0", "p1", "p2"]:
+    if severity == "critical":
+        return "p0"
+    if severity == "warn":
+        return "p1"
+    return "p2"
+
+
+def _control_tower_provider_action_label(action: str) -> str:
+    labels = {
+        "integration_reconcile": "Запустить integration reconcile",
+        "provider_start_rebind": "Начать provider rebind",
+        "provider_complete_rebind": "Завершить provider rebind",
+        "provider_renewal_confirmed": "Подтвердить продление провайдера",
+        "provider_webhook_updated": "Обновить webhook/instance",
+        "provider_send_reminder": "Отправить напоминание провайдеру",
+    }
+    return labels.get(action, "Запустить provider action")
+
+
+def _dedupe_non_empty(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = (value or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        deduped.append(normalized)
+        seen.add(normalized)
+    return deduped
+
+
+def _build_admin_control_tower_action_center(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    stale_after_minutes: int,
+    include_p2_mode: bool,
+    limit: int,
+    now: datetime,
+) -> ConsoleAdminControlTowerActionCenterResponse:
+    if not active_clients:
+        return ConsoleAdminControlTowerActionCenterResponse(
+            generated_at=now.isoformat(),
+            stale_after_minutes=stale_after_minutes,
+            limit=limit,
+            include_p2=include_p2_mode,
+            summary=ConsoleAdminControlTowerActionCenterSummary(
+                total_actions=0,
+                p0_actions=0,
+                p1_actions=0,
+                p2_actions=0,
+                incident_actions=0,
+                provider_ops_actions=0,
+                readiness_actions=0,
+            ),
+            top_reasons=[],
+            items=[],
+        )
+
+    incident_limit = max(limit, 50)
+    board_limit = max(limit, 50)
+    client_ids = [client.id for client in active_clients]
+
+    incidents = _build_admin_incidents_response(
+        db,
+        active_clients=active_clients,
+        limit=incident_limit,
+        now=now,
+    )
+    drift_board = _build_admin_control_tower_drift_board(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        only_problematic_mode=True,
+        limit=board_limit,
+        now=now,
+    )
+    readiness_board = _build_admin_control_tower_readiness_board(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        include_ready_mode=False,
+        limit=board_limit,
+        now=now,
+    )
+
+    reason_counter: dict[str, int] = {}
+    collected: list[ConsoleAdminControlTowerActionItem] = []
+
+    for incident in incidents.items:
+        priority = _control_tower_incident_priority(incident.severity)
+        reasons = _dedupe_non_empty([incident.reason_code])
+        for reason in reasons:
+            reason_counter[reason] = reason_counter.get(reason, 0) + 1
+        for action in incident.actions:
+            collected.append(
+                ConsoleAdminControlTowerActionItem(
+                    id=f"incident:{incident.id}:{action.id}",
+                    priority=priority,
+                    source="incident",
+                    kind="ops_job" if action.job_type else "navigate",
+                    title=action.title,
+                    description=action.description,
+                    reasons=reasons,
+                    href=action.href,
+                    incident_id=incident.id,
+                    client_id=incident.client_id,
+                    client_slug=incident.client_slug,
+                    branch_id=incident.branch_id,
+                    job_type=action.job_type,
+                    mode=action.mode,
+                    params=action.params if isinstance(action.params, dict) else None,
+                    requires_confirmation=bool(action.requires_confirmation),
+                    evidence_links=_dedupe_non_empty(
+                        ["/admin/incidents", action.href or "", "/admin/control-tower/overview"]
+                    ),
+                )
+            )
+
+    for queue_item in drift_board.provider_ops_queue:
+        reasons = _dedupe_non_empty(list(queue_item.reasons or []))
+        for reason in reasons:
+            reason_counter[reason] = reason_counter.get(reason, 0) + 1
+        collected.append(
+            ConsoleAdminControlTowerActionItem(
+                id=f"provider:{queue_item.branch_id}:{queue_item.recommended_action}",
+                priority=queue_item.priority,
+                source="provider_ops",
+                kind="provider_action",
+                title=_control_tower_provider_action_label(queue_item.recommended_action),
+                description=(
+                    f"{queue_item.client_slug}/{queue_item.branch_name}: "
+                    f"priority={queue_item.priority}, reasons={', '.join(reasons) or 'n/a'}"
+                ),
+                reasons=reasons,
+                href="/integrations",
+                client_id=queue_item.client_id,
+                client_slug=queue_item.client_slug,
+                branch_id=queue_item.branch_id,
+                branch_slug=queue_item.branch_slug,
+                branch_name=queue_item.branch_name,
+                provider_action=queue_item.recommended_action,
+                params={
+                    "branch_id": str(queue_item.branch_id),
+                    "action": queue_item.recommended_action,
+                    "mode": "execute",
+                    "requires_confirmation": bool(queue_item.requires_confirmation),
+                },
+                requires_confirmation=bool(queue_item.requires_confirmation),
+                evidence_links=[
+                    "/admin/control-tower/drift-board",
+                    f"/admin/integrations/{queue_item.branch_id}/reconcile",
+                ],
+            )
+        )
+
+    for readiness_item in readiness_board.items:
+        reasons = _dedupe_non_empty(
+            list(readiness_item.hard_gate_blockers or []) + list(readiness_item.missing or [])
+        )
+        if not reasons:
+            reasons = ["readiness_blocked"]
+        for reason in reasons:
+            reason_counter[reason] = reason_counter.get(reason, 0) + 1
+        collected.append(
+            ConsoleAdminControlTowerActionItem(
+                id=f"readiness:{readiness_item.branch_id}",
+                priority="p0" if readiness_item.hard_gate_status == "fail" else "p1",
+                source="readiness",
+                kind="navigate",
+                title=f"Закрыть go-live blockers: {readiness_item.client_slug}/{readiness_item.branch_name}",
+                description=(
+                    "Проверьте hard-gate и недостающие onboarding шаги перед продвижением филиала."
+                ),
+                reasons=reasons,
+                href="/tenants",
+                client_id=readiness_item.client_id,
+                client_slug=readiness_item.client_slug,
+                branch_id=readiness_item.branch_id,
+                branch_slug=readiness_item.branch_slug,
+                branch_name=readiness_item.branch_name,
+                evidence_links=["/admin/control-tower/readiness-board", "/tenants"],
+            )
+        )
+
+    scoped_items: list[ConsoleAdminControlTowerActionItem] = []
+    for item in collected:
+        if item.client_id and item.client_id not in client_ids:
+            continue
+        if not include_p2_mode and item.priority == "p2":
+            continue
+        scoped_items.append(item)
+
+    priority_rank = {"p0": 0, "p1": 1, "p2": 2}
+    source_rank = {"incident": 0, "provider_ops": 1, "readiness": 2}
+    scoped_items.sort(
+        key=lambda item: (
+            priority_rank.get(item.priority, 99),
+            source_rank.get(item.source, 99),
+            item.client_slug or "",
+            item.branch_name or "",
+            item.title,
+        )
+    )
+
+    summary = ConsoleAdminControlTowerActionCenterSummary(
+        total_actions=len(scoped_items),
+        p0_actions=sum(1 for item in scoped_items if item.priority == "p0"),
+        p1_actions=sum(1 for item in scoped_items if item.priority == "p1"),
+        p2_actions=sum(1 for item in scoped_items if item.priority == "p2"),
+        incident_actions=sum(1 for item in scoped_items if item.source == "incident"),
+        provider_ops_actions=sum(1 for item in scoped_items if item.source == "provider_ops"),
+        readiness_actions=sum(1 for item in scoped_items if item.source == "readiness"),
+    )
+
+    return ConsoleAdminControlTowerActionCenterResponse(
+        generated_at=now.isoformat(),
+        stale_after_minutes=stale_after_minutes,
+        limit=limit,
+        include_p2=include_p2_mode,
+        summary=summary,
+        top_reasons=_build_control_tower_issue_counts(reason_counter, limit=10),
+        items=scoped_items[:limit],
+    )
+
+
+def _merge_control_tower_issue_counts(
+    *groups: list[ConsoleAdminControlTowerIssueCount],
+) -> dict[str, int]:
+    merged: dict[str, int] = {}
+    for group in groups:
+        for item in group:
+            code = (item.code or "").strip()
+            if not code:
+                continue
+            merged[code] = merged.get(code, 0) + int(item.count or 0)
+    return merged
+
+
+def _build_migration_wave(
+    *,
+    wave: Literal["canary", "cohort", "fleet"],
+    candidate_clients_total: int,
+    candidate_branches_total: int,
+    hard_blockers_total: int,
+    soft_blockers_total: int,
+    blocked_branches_total: int,
+    soft_blocker_budget: int,
+    top_blockers: list[ConsoleAdminControlTowerIssueCount],
+) -> ConsoleAdminControlTowerMigrationWave:
+    gate: Literal["go", "hold"] = "go"
+    reasons: list[str] = []
+    rollback_triggers: list[str] = []
+
+    if candidate_branches_total <= 0:
+        gate = "hold"
+        reasons.append("no_ready_candidates")
+        rollback_triggers.append("no_ready_candidates")
+
+    if hard_blockers_total > 0:
+        gate = "hold"
+        reasons.append("hard_blockers_present")
+        rollback_triggers.extend(
+            [
+                "incident_p0_open",
+                "readiness_hard_gate_failed",
+                "provider_ops_p0_queue",
+            ]
+        )
+
+    if soft_blockers_total > soft_blocker_budget:
+        gate = "hold"
+        reasons.append("soft_blocker_budget_exceeded")
+        rollback_triggers.append("soft_blocker_burn_rate")
+
+    if wave == "fleet" and blocked_branches_total > 0:
+        gate = "hold"
+        reasons.append("blocked_branches_remaining")
+        rollback_triggers.append("blocked_branches_remaining")
+
+    if gate == "go":
+        reason_text = "wave_ready_for_promotion"
+    else:
+        reason_text = "+".join(_dedupe_non_empty(reasons)) or "wave_hold"
+
+    blockers_total = hard_blockers_total + max(0, soft_blockers_total - soft_blocker_budget)
+    return ConsoleAdminControlTowerMigrationWave(
+        wave=wave,
+        gate=gate,
+        reason=reason_text,
+        candidate_clients_total=max(candidate_clients_total, 0),
+        candidate_branches_total=max(candidate_branches_total, 0),
+        blockers_total=max(blockers_total, 0),
+        rollback_triggers=_dedupe_non_empty(rollback_triggers),
+        top_blockers=top_blockers,
+    )
+
+
+def _build_admin_control_tower_migration_program(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    stale_after_minutes: int,
+    include_p2_mode: bool,
+    limit: int,
+    now: datetime,
+) -> ConsoleAdminControlTowerMigrationProgramResponse:
+    if not active_clients:
+        empty_waves = [
+            ConsoleAdminControlTowerMigrationWave(
+                wave=wave,
+                gate="hold",
+                reason="no_active_clients",
+                candidate_clients_total=0,
+                candidate_branches_total=0,
+                blockers_total=0,
+                rollback_triggers=["no_active_clients"],
+                top_blockers=[],
+            )
+            for wave in ("canary", "cohort", "fleet")
+        ]
+        return ConsoleAdminControlTowerMigrationProgramResponse(
+            generated_at=now.isoformat(),
+            stale_after_minutes=stale_after_minutes,
+            limit=limit,
+            include_p2=include_p2_mode,
+            summary=ConsoleAdminControlTowerMigrationProgramSummary(
+                active_clients_total=0,
+                total_branches=0,
+                ready_branches=0,
+                blocked_branches=0,
+                p0_actions=0,
+                p1_actions=0,
+                p2_actions=0,
+                waves_go=0,
+                waves_hold=3,
+            ),
+            waves=empty_waves,
+        )
+
+    board_limit = max(limit, 200)
+    readiness_board = _build_admin_control_tower_readiness_board(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        include_ready_mode=True,
+        limit=board_limit,
+        now=now,
+    )
+    drift_board = _build_admin_control_tower_drift_board(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        only_problematic_mode=False,
+        limit=board_limit,
+        now=now,
+    )
+    action_center = _build_admin_control_tower_action_center(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_p2_mode=include_p2_mode,
+        limit=board_limit,
+        now=now,
+    )
+
+    merged_top_blockers = _build_control_tower_issue_counts(
+        _merge_control_tower_issue_counts(
+            readiness_board.top_blockers,
+            drift_board.top_issues,
+            action_center.top_reasons,
+        ),
+        limit=5,
+    )
+
+    active_clients_total = len(active_clients)
+    total_branches = readiness_board.summary.total_branches
+    ready_branches = readiness_board.summary.ready_branches
+    blocked_branches = readiness_board.summary.blocked_branches
+    p0_actions = action_center.summary.p0_actions
+    p1_actions = action_center.summary.p1_actions
+    p2_actions = action_center.summary.p2_actions
+    hard_blockers_total = (
+        readiness_board.summary.hard_gate_failed_branches
+        + drift_board.summary.queue_p0
+        + p0_actions
+    )
+    soft_blockers_total = drift_board.summary.queue_p1 + p1_actions
+
+    canary_wave = _build_migration_wave(
+        wave="canary",
+        candidate_clients_total=1 if ready_branches > 0 else 0,
+        candidate_branches_total=min(ready_branches, 3),
+        hard_blockers_total=hard_blockers_total,
+        soft_blockers_total=soft_blockers_total,
+        blocked_branches_total=blocked_branches,
+        soft_blocker_budget=2,
+        top_blockers=merged_top_blockers,
+    )
+    cohort_wave = _build_migration_wave(
+        wave="cohort",
+        candidate_clients_total=min(active_clients_total, 5) if ready_branches > 0 else 0,
+        candidate_branches_total=min(ready_branches, 25),
+        hard_blockers_total=hard_blockers_total,
+        soft_blockers_total=soft_blockers_total,
+        blocked_branches_total=blocked_branches,
+        soft_blocker_budget=5,
+        top_blockers=merged_top_blockers,
+    )
+    fleet_wave = _build_migration_wave(
+        wave="fleet",
+        candidate_clients_total=active_clients_total if ready_branches > 0 else 0,
+        candidate_branches_total=ready_branches,
+        hard_blockers_total=hard_blockers_total,
+        soft_blockers_total=soft_blockers_total + (p2_actions if include_p2_mode else 0),
+        blocked_branches_total=blocked_branches,
+        soft_blocker_budget=0,
+        top_blockers=merged_top_blockers,
+    )
+    waves = [canary_wave, cohort_wave, fleet_wave]
+
+    return ConsoleAdminControlTowerMigrationProgramResponse(
+        generated_at=now.isoformat(),
+        stale_after_minutes=stale_after_minutes,
+        limit=limit,
+        include_p2=include_p2_mode,
+        summary=ConsoleAdminControlTowerMigrationProgramSummary(
+            active_clients_total=active_clients_total,
+            total_branches=total_branches,
+            ready_branches=ready_branches,
+            blocked_branches=blocked_branches,
+            p0_actions=p0_actions,
+            p1_actions=p1_actions,
+            p2_actions=p2_actions,
+            waves_go=sum(1 for wave in waves if wave.gate == "go"),
+            waves_hold=sum(1 for wave in waves if wave.gate == "hold"),
+        ),
+        waves=waves,
+    )
+
+
+def _build_admin_control_tower_readiness_board(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    include_ready_mode: bool,
+    limit: int,
+    now: datetime,
+) -> ConsoleAdminControlTowerReadinessBoardResponse:
+    if not active_clients:
+        return ConsoleAdminControlTowerReadinessBoardResponse(
+            generated_at=now.isoformat(),
+            limit=limit,
+            include_ready=include_ready_mode,
+            summary=ConsoleAdminControlTowerReadinessSummary(
+                total_branches=0,
+                ready_branches=0,
+                blocked_branches=0,
+                hard_gate_failed_branches=0,
+                go_live_draft_branches=0,
+                go_live_approved_branches=0,
+                go_live_rejected_branches=0,
+                degraded_branches=0,
+            ),
+            top_blockers=[],
+            items=[],
+        )
+
+    client_ids = [client.id for client in active_clients]
+    client_slug_map = {client.id: client.name for client in active_clients}
+    client_company_map = {
+        client.id: client.company_id
+        for client in active_clients
+        if getattr(client, "company_id", None)
+    }
+    branches = (
+        db.query(Branch)
+        .filter(
+            Branch.client_id.in_(client_ids),
+            Branch.is_active.is_(True),
+        )
+        .order_by(Branch.created_at.desc(), Branch.id.desc())
+        .all()
+    )
+
+    summary = ConsoleAdminControlTowerReadinessSummary(
+        total_branches=0,
+        ready_branches=0,
+        blocked_branches=0,
+        hard_gate_failed_branches=0,
+        go_live_draft_branches=0,
+        go_live_approved_branches=0,
+        go_live_rejected_branches=0,
+        degraded_branches=0,
+    )
+    issue_counter: dict[str, int] = {}
+    items: list[ConsoleAdminControlTowerReadinessItem] = []
+    allowed_steps = {
+        "branch_draft",
+        "integrations",
+        "team",
+        "telegram",
+        "knowledge",
+        "booking",
+        "go_no_go",
+    }
+
+    for branch in branches:
+        client_slug = client_slug_map.get(branch.client_id)
+        if not client_slug:
+            continue
+        summary.total_branches += 1
+
+        onboarding_status = build_onboarding_status(db, branch)
+        scorecard = build_onboarding_scorecard(db, branch)
+        missing = list(getattr(scorecard, "missing", []) or [])
+        readiness_kernel = getattr(scorecard, "readiness_kernel", None)
+        readiness_status = (
+            getattr(readiness_kernel, "status", None)
+            if readiness_kernel is not None
+            else None
+        )
+        if readiness_status not in {"pass", "warn", "fail"}:
+            readiness_status = "pass" if getattr(scorecard, "ready", False) else "fail"
+        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
+        hard_gate_status = "fail" if hard_gate_blockers else "pass"
+
+        if getattr(scorecard, "ready", False):
+            summary.ready_branches += 1
+        blocked = (not getattr(scorecard, "ready", False)) or bool(hard_gate_blockers)
+        if blocked:
+            summary.blocked_branches += 1
+        if hard_gate_status == "fail":
+            summary.hard_gate_failed_branches += 1
+
+        go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
+        if go_live_state == "approved":
+            summary.go_live_approved_branches += 1
+        elif go_live_state == "rejected":
+            summary.go_live_rejected_branches += 1
+        else:
+            summary.go_live_draft_branches += 1
+
+        integration_state = (_normalize_optional_text(getattr(branch, "integration_state", None)) or "ok").lower()
+        if integration_state not in {"ok", "degraded"}:
+            integration_state = "ok"
+        if integration_state == "degraded":
+            summary.degraded_branches += 1
+
+        if not include_ready_mode and not blocked:
+            continue
+
+        current_step = (
+            getattr(getattr(onboarding_status, "current_step", None), "value", None)
+            or "branch_draft"
+        )
+        if current_step not in allowed_steps:
+            current_step = "branch_draft"
+
+        company_id = client_company_map.get(branch.client_id)
+        company_name = companies_by_id.get(company_id).name if company_id and company_id in companies_by_id else None
+        item = ConsoleAdminControlTowerReadinessItem(
+            company_id=company_id,
+            company_name=company_name,
+            client_id=branch.client_id,
+            client_slug=client_slug,
+            branch_id=branch.id,
+            branch_slug=branch.slug,
+            branch_name=branch.name,
+            current_step=current_step,
+            scorecard_status="pass" if getattr(scorecard, "ready", False) else "fail",
+            readiness_status=readiness_status,
+            hard_gate_status=hard_gate_status,
+            ready=bool(getattr(scorecard, "ready", False)),
+            go_live_state=go_live_state,
+            integration_state=integration_state,
+            missing=missing,
+            hard_gate_blockers=hard_gate_blockers,
+        )
+        items.append(item)
+
+        for code in missing + hard_gate_blockers:
+            normalized = (code or "").strip()
+            if not normalized:
+                continue
+            issue_counter[normalized] = issue_counter.get(normalized, 0) + 1
+
+    readiness_rank = {"fail": 2, "warn": 1, "pass": 0}
+    items.sort(
+        key=lambda item: (
+            -int(not item.ready),
+            -int(item.hard_gate_status == "fail"),
+            -readiness_rank.get(item.readiness_status, 0),
+            -len(item.hard_gate_blockers),
+            -len(item.missing),
+            item.client_slug,
+            item.branch_name,
+        )
+    )
+    return ConsoleAdminControlTowerReadinessBoardResponse(
+        generated_at=now.isoformat(),
+        limit=limit,
+        include_ready=include_ready_mode,
+        summary=summary,
+        top_blockers=_build_control_tower_issue_counts(issue_counter, limit=10),
+        items=items[:limit],
+    )
+
+
+def _build_admin_control_tower_drift_board(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    stale_after_minutes: int,
+    only_problematic_mode: bool,
+    limit: int,
+    now: datetime,
+) -> ConsoleAdminControlTowerDriftBoardResponse:
+    if not active_clients:
+        return ConsoleAdminControlTowerDriftBoardResponse(
+            generated_at=now.isoformat(),
+            stale_after_minutes=stale_after_minutes,
+            limit=limit,
+            only_problematic=only_problematic_mode,
+            summary=ConsoleAdminControlTowerDriftSummary(
+                total_branches=0,
+                ok_branches=0,
+                warn_branches=0,
+                error_branches=0,
+                degraded_branches=0,
+                queue_p0=0,
+                queue_p1=0,
+                queue_p2=0,
+            ),
+            top_issues=[],
+            items=[],
+            provider_ops_queue=[],
+        )
+
+    client_ids = [client.id for client in active_clients]
+    client_slug_map = {client.id: client.name for client in active_clients}
+    client_company_map = {
+        client.id: client.company_id
+        for client in active_clients
+        if getattr(client, "company_id", None)
+    }
+    client_domain_map: dict[UUID, str] = {}
+    for client in active_clients:
+        config = getattr(client, "config", None)
+        if not isinstance(config, dict):
+            continue
+        domain_key = _normalize_optional_domain_slug_token(
+            config.get("domain_slug") or config.get("domain")
+        )
+        if domain_key:
+            client_domain_map[client.id] = domain_key
+
+    branches = (
+        db.query(Branch)
+        .filter(
+            Branch.client_id.in_(client_ids),
+            Branch.is_active.is_(True),
+        )
+        .order_by(Branch.created_at.desc(), Branch.id.desc())
+        .all()
+    )
+    if not branches:
+        return ConsoleAdminControlTowerDriftBoardResponse(
+            generated_at=now.isoformat(),
+            stale_after_minutes=stale_after_minutes,
+            limit=limit,
+            only_problematic=only_problematic_mode,
+            summary=ConsoleAdminControlTowerDriftSummary(
+                total_branches=0,
+                ok_branches=0,
+                warn_branches=0,
+                error_branches=0,
+                degraded_branches=0,
+                queue_p0=0,
+                queue_p1=0,
+                queue_p2=0,
+            ),
+            top_issues=[],
+            items=[],
+            provider_ops_queue=[],
+        )
+
+    branch_by_id = {branch.id: branch for branch in branches}
+    branch_client_ids = sorted({branch.client_id for branch in branches})
+    token_rows = (
+        db.query(
+            ClientSettings.client_id,
+            ClientSettings.telegram_bot_token,
+        )
+        .filter(ClientSettings.client_id.in_(branch_client_ids))
+        .all()
+    )
+    telegram_token_map: dict[UUID, bool] = {}
+    for row_client_id, token in token_rows:
+        telegram_token_map[row_client_id] = bool(_normalize_optional_text(token))
+
+    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
+        db,
+        client_ids=branch_client_ids,
+    )
+    provider_binding_by_branch = _build_provider_binding_lifecycle_map(
+        db,
+        client_ids=branch_client_ids,
+        branches=branches,
+        now=now,
+    )
+
+    all_status_items: list[ConsoleBranchIntegrationStatus] = []
+    for branch in branches:
+        client_slug = client_slug_map.get(branch.client_id)
+        if not client_slug:
+            continue
+        observed = inbound_observations.get(branch.id)
+        last_inbound_at: Optional[datetime] = observed[0] if observed else None
+        last_inbound_instance_id: Optional[str] = observed[1] if observed else None
+        all_status_items.append(
+            _build_branch_integration_status(
+                client_id=branch.client_id,
+                client_slug=client_slug,
+                branch=branch,
+                has_telegram_bot_token=telegram_token_map.get(branch.client_id, False),
+                stale_after_minutes=stale_after_minutes,
+                last_inbound_at=last_inbound_at,
+                last_inbound_instance_id=last_inbound_instance_id,
+                now=now,
+                provider_binding=provider_binding_by_branch.get(branch.id),
+            )
+        )
+
+    provider_ops_queue = _build_provider_ops_queue(
+        all_status_items,
+        generated_at=now,
+    )
+    queue_counter = {"p0": 0, "p1": 0, "p2": 0}
+    for queue_item in provider_ops_queue:
+        queue_counter[queue_item.priority] = queue_counter.get(queue_item.priority, 0) + 1
+
+    summary = ConsoleAdminControlTowerDriftSummary(
+        total_branches=len(all_status_items),
+        ok_branches=sum(1 for item in all_status_items if item.status == "ok"),
+        warn_branches=sum(1 for item in all_status_items if item.status == "warn"),
+        error_branches=sum(1 for item in all_status_items if item.status == "error"),
+        degraded_branches=sum(1 for item in all_status_items if item.integration_state == "degraded"),
+        queue_p0=queue_counter.get("p0", 0),
+        queue_p1=queue_counter.get("p1", 0),
+        queue_p2=queue_counter.get("p2", 0),
+    )
+
+    scoped_items: list[ConsoleBranchIntegrationStatus] = []
+    for status_item in all_status_items:
+        decision = _resolve_provider_ops_decision(status_item)
+        if only_problematic_mode and status_item.status == "ok" and not decision:
+            continue
+        scoped_items.append(status_item)
+
+    severity_rank = {"error": 2, "warn": 1, "ok": 0}
+    scoped_items.sort(
+        key=lambda item: (
+            -severity_rank.get(item.status, 0),
+            -int(item.integration_state == "degraded"),
+            -len(item.drift_issues),
+            item.client_slug,
+            item.branch_name,
+        )
+    )
+
+    issue_counter: dict[str, int] = {}
+    for status_item in scoped_items:
+        for issue in status_item.drift_issues:
+            normalized = (issue or "").strip()
+            if not normalized:
+                continue
+            issue_counter[normalized] = issue_counter.get(normalized, 0) + 1
+        if status_item.integration_state == "degraded":
+            issue_counter["integration_degraded"] = issue_counter.get("integration_degraded", 0) + 1
+
+    lifecycle_items: list[ConsoleProviderLifecycleItem] = []
+    for status_item in scoped_items[:limit]:
+        branch = branch_by_id.get(status_item.branch_id)
+        if not branch:
+            continue
+        company_id = client_company_map.get(status_item.client_id)
+        company_name = companies_by_id.get(company_id).name if company_id and company_id in companies_by_id else None
+        lifecycle_items.append(
+            _build_provider_lifecycle_item(
+                db=db,
+                status=status_item,
+                branch=branch,
+                company_id=company_id,
+                company_name=company_name,
+                domain_key=client_domain_map.get(status_item.client_id),
+                generated_at=now,
+                now=now,
+            )
+        )
+
+    return ConsoleAdminControlTowerDriftBoardResponse(
+        generated_at=now.isoformat(),
+        stale_after_minutes=stale_after_minutes,
+        limit=limit,
+        only_problematic=only_problematic_mode,
+        summary=summary,
+        top_issues=_build_control_tower_issue_counts(issue_counter, limit=10),
+        items=lifecycle_items,
+        provider_ops_queue=provider_ops_queue[:limit],
     )
 
 
@@ -8984,6 +10104,385 @@ async def _run_integration_reconcile_job(
         "branch_ids": [str(branch_id) for branch_id in selected_branch_ids or []],
     }
     return result
+
+
+def _normalize_compliance_lifecycle_lane(value: str | None) -> str:
+    lane = str(value or "manual").strip().lower()
+    if lane not in _COMPLIANCE_LIFECYCLE_LANES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "lane must be manual|auto")
+    return lane
+
+
+def _resolve_compliance_lifecycle_profile_defaults(
+    profile: str | None,
+) -> dict[str, int | str] | None:
+    if profile is None:
+        return None
+    token = profile.strip().lower()
+    defaults = _COMPLIANCE_LIFECYCLE_PROFILE_DEFAULTS.get(token)
+    if defaults is None:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "profile must be retention_hourly|export_daily|destruction_daily",
+        )
+    return defaults
+
+
+def _find_recent_compliance_lifecycle_ops_job(
+    db: Session,
+    *,
+    client_id: UUID,
+    scope: str,
+    branch_id: UUID | None,
+    data_class: str,
+    operation: str,
+    lane: str,
+) -> ConsoleOpsJob | None:
+    rows = (
+        db.query(ConsoleOpsJob)
+        .filter(
+            ConsoleOpsJob.client_id == client_id,
+            ConsoleOpsJob.job_type == "compliance_lifecycle",
+            ConsoleOpsJob.status == "success",
+            ConsoleOpsJob.mode == "execute",
+        )
+        .order_by(ConsoleOpsJob.created_at.desc(), ConsoleOpsJob.id.desc())
+        .limit(200)
+        .all()
+    )
+    expected_branch_text = str(branch_id) if branch_id else None
+    expected_scope = scope.strip().lower()
+    expected_data_class = data_class.strip().lower()
+    expected_operation = operation.strip().lower()
+    expected_lane = lane.strip().lower()
+
+    for row in rows:
+        request_payload = row.request_payload if isinstance(row.request_payload, dict) else {}
+        params = request_payload.get("params")
+        if not isinstance(params, dict):
+            continue
+        row_scope = str(params.get("scope") or "").strip().lower() or (
+            "branch" if params.get("branch_id") else "client"
+        )
+        row_branch_raw = params.get("branch_id")
+        row_branch_text = str(row_branch_raw).strip() if row_branch_raw else None
+        row_data_class = str(params.get("data_class") or "learned_responses").strip().lower()
+        row_operation = str(params.get("operation") or "retention_scan").strip().lower()
+        try:
+            row_lane = _normalize_compliance_lifecycle_lane(
+                str(params.get("lane") or "manual").strip().lower()
+            )
+        except ConsoleAPIError:
+            continue
+        if row_scope != expected_scope:
+            continue
+        if row_branch_text != expected_branch_text:
+            continue
+        if row_data_class != expected_data_class:
+            continue
+        if row_operation != expected_operation:
+            continue
+        if row_lane != expected_lane:
+            continue
+        return row
+    return None
+
+
+def _execute_compliance_lifecycle_preview_run(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    scope: str,
+    branch_id: UUID | None,
+    data_class: str,
+    operation: str,
+    max_items: int,
+    run_mode: str,
+    apply_actions: bool = False,
+    approval_token: str | None = None,
+) -> tuple[ComplianceLifecycleRun, list[ComplianceLifecycleRecord]]:
+    run: ComplianceLifecycleRun | None = None
+    try:
+        policy_version = resolve_effective_compliance_policy_version(
+            db,
+            data_class=data_class,
+            company_id=context.client.company_id,
+            domain_key=None,
+            client_id=context.client.id,
+            branch_id=branch_id,
+        )
+        policy_payload = resolve_effective_compliance_policy_payload(
+            db,
+            data_class=data_class,
+            company_id=context.client.company_id,
+            domain_key=None,
+            client_id=context.client.id,
+            branch_id=branch_id,
+        )
+        run = create_lifecycle_run(
+            db,
+            scope=scope,
+            data_class=data_class,
+            operation=operation,
+            client_id=context.client.id,
+            branch_id=branch_id,
+            company_id=context.client.company_id,
+            domain_key=None,
+            policy_version_id=policy_version.id if policy_version else None,
+            policy_scope=policy_version.scope if policy_version else None,
+            policy_schema_version=policy_version.schema_version if policy_version else None,
+            policy_snapshot=policy_payload.model_dump(exclude_none=True) if policy_payload else {},
+            actor_id=context.agent.id,
+            run_mode=run_mode,
+        )
+        summary = execute_lifecycle_preview(
+            db,
+            run=run,
+            max_items=max_items,
+            apply_actions=apply_actions,
+            approval_token=approval_token,
+        )
+        run = finalize_lifecycle_run(
+            db,
+            run=run,
+            status="completed",
+            summary=summary,
+            error_message=None,
+        )
+        records = list_lifecycle_records(db, run_id=run.id, limit=max_items)
+        artifact = publish_lifecycle_artifact(
+            db,
+            run=run,
+            records=records,
+            actor_id=context.agent.id,
+        )
+        run_summary = run.summary_json if isinstance(run.summary_json, dict) else {}
+        run_summary["artifact_id"] = str(artifact.id)
+        run_summary["artifact_digest"] = artifact.artifact_digest
+        run.summary_json = run_summary
+        run.updated_at = datetime.now(timezone.utc)
+        db.flush()
+        return run, records
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+    except ConsoleAPIError:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive safety branch
+        if run is not None:
+            finalize_lifecycle_run(
+                db,
+                run=run,
+                status="failed",
+                summary={"error": "runtime_failure"},
+                error_message=str(exc),
+            )
+            db.commit()
+        raise ConsoleAPIError(500, "COMPLIANCE_LIFECYCLE_FAILED", "Compliance lifecycle run failed") from exc
+
+
+async def _run_compliance_lifecycle_job(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    mode: str,
+    params: dict,
+) -> dict:
+    scope_raw = _parse_ops_job_text_param(params, name="scope", required=False, max_length=16)
+    default_scope = "branch" if context.effective_branch_id else "client"
+    normalized_scope = (scope_raw or default_scope).strip().lower()
+    if normalized_scope not in {"client", "branch"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "scope must be client|branch")
+
+    branch_id_raw = _parse_ops_job_text_param(params, name="branch_id", required=False, max_length=64)
+    if branch_id_raw:
+        requested_branch_id = _parse_uuid_param("branch_id", branch_id_raw)
+    elif normalized_scope == "branch":
+        requested_branch_id = context.effective_branch_id
+    else:
+        requested_branch_id = None
+
+    profile = _parse_ops_job_text_param(
+        params,
+        name="profile",
+        required=False,
+        max_length=64,
+    )
+    profile_defaults = _resolve_compliance_lifecycle_profile_defaults(profile)
+
+    data_class = (
+        _parse_ops_job_text_param(params, name="data_class", required=False, max_length=64)
+        or "learned_responses"
+    )
+    default_operation = (
+        str(profile_defaults["operation"])
+        if profile_defaults and isinstance(profile_defaults.get("operation"), str)
+        else "retention_scan"
+    )
+    operation = (
+        _parse_ops_job_text_param(params, name="operation", required=False, max_length=64)
+        or default_operation
+    )
+    if profile_defaults and operation != default_operation:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "operation must match selected profile",
+        )
+    default_max_items = (
+        int(profile_defaults["max_items"])
+        if profile_defaults and isinstance(profile_defaults.get("max_items"), int)
+        else 200
+    )
+    max_items = _parse_ops_job_int_param(
+        params,
+        name="max_items",
+        default=default_max_items,
+        min_value=1,
+        max_value=500,
+    )
+    lane = _normalize_compliance_lifecycle_lane(
+        _parse_ops_job_text_param(params, name="lane", required=False, max_length=16)
+    )
+    default_cadence = (
+        int(profile_defaults["cadence_minutes"])
+        if profile_defaults and isinstance(profile_defaults.get("cadence_minutes"), int)
+        else 60
+    )
+    cadence_minutes = _parse_ops_job_int_param(
+        params,
+        name="cadence_minutes",
+        default=default_cadence,
+        min_value=15,
+        max_value=10080,
+    )
+    apply_actions = _parse_ops_job_bool_param(
+        params,
+        name="apply_actions",
+        default=False,
+    )
+    approval_token = _parse_ops_job_text_param(
+        params,
+        name="approval_token",
+        required=False,
+        max_length=64,
+    )
+    reason = _parse_ops_job_text_param(params, name="reason", required=False, max_length=500)
+    if apply_actions and mode != "execute":
+        raise ConsoleAPIError(400, "INVALID_PARAM", "apply_actions requires execute mode")
+    if apply_actions and lane != "manual":
+        raise ConsoleAPIError(400, "INVALID_PARAM", "apply_actions requires lane=manual")
+    if apply_actions and not reason:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "reason is required when apply_actions=true")
+    if apply_actions and not approval_token:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "approval_token is required when apply_actions=true")
+    if apply_actions and max_items > _COMPLIANCE_LIFECYCLE_APPLY_MAX_ITEMS:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"max_items must be <= {_COMPLIANCE_LIFECYCLE_APPLY_MAX_ITEMS} when apply_actions=true",
+        )
+
+    resolved_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=normalized_scope,
+        branch_id=requested_branch_id,
+    )
+    now = datetime.now(timezone.utc)
+    if lane == "auto" and mode == "execute":
+        recent_job = _find_recent_compliance_lifecycle_ops_job(
+            db,
+            client_id=context.client.id,
+            scope=resolved_scope,
+            branch_id=resolved_branch_id,
+            data_class=data_class,
+            operation=operation,
+            lane=lane,
+        )
+        if recent_job and recent_job.created_at:
+            recent_created_at = (
+                recent_job.created_at
+                if recent_job.created_at.tzinfo
+                else recent_job.created_at.replace(tzinfo=timezone.utc)
+            )
+            next_due_at = recent_created_at + timedelta(minutes=cadence_minutes)
+            if next_due_at > now:
+                return {
+                    "mode": mode,
+                    "scope": {
+                        "client_id": str(context.client.id),
+                        "scope": resolved_scope,
+                        "branch_id": str(resolved_branch_id) if resolved_branch_id else None,
+                    },
+                    "data_class": data_class,
+                    "operation": operation,
+                    "lane": lane,
+                    "profile": profile.strip().lower() if isinstance(profile, str) else None,
+                    "cadence_minutes": cadence_minutes,
+                    "apply_actions": apply_actions,
+                    "approval_token": approval_token,
+                    "skipped": True,
+                    "skip_reason": "cadence_not_due",
+                    "last_run_job_id": str(recent_job.id),
+                    "last_run_at": recent_created_at.isoformat(),
+                    "next_due_at": next_due_at.isoformat(),
+                }
+
+    lifecycle_run_mode = "preview" if mode == "dry_run" else "manual"
+    run, records = _execute_compliance_lifecycle_preview_run(
+        db,
+        context=context,
+        scope=resolved_scope,
+        branch_id=resolved_branch_id,
+        data_class=data_class,
+        operation=operation,
+        max_items=max_items,
+        run_mode=lifecycle_run_mode,
+        apply_actions=apply_actions,
+        approval_token=approval_token,
+    )
+    artifact = get_lifecycle_artifact(
+        db,
+        run_id=run.id,
+        client_id=context.client.id,
+        scope=resolved_scope,
+        branch_id=resolved_branch_id,
+    )
+    artifact_ref = (
+        {
+            "artifact_id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "artifact_digest": artifact.artifact_digest,
+            "api_path": f"/console/v1/admin/compliance-lifecycle/runs/{run.id}/artifact",
+        }
+        if artifact is not None
+        else None
+    )
+    return {
+        "mode": mode,
+        "scope": {
+            "client_id": str(context.client.id),
+            "scope": resolved_scope,
+            "branch_id": str(resolved_branch_id) if resolved_branch_id else None,
+        },
+        "data_class": run.data_class,
+        "operation": run.operation,
+        "lane": lane,
+        "profile": profile.strip().lower() if isinstance(profile, str) else None,
+        "cadence_minutes": cadence_minutes,
+        "apply_actions": apply_actions,
+        "approval_token": approval_token,
+        "run_mode": run.run_mode,
+        "reason": reason,
+        "run_id": str(run.id),
+        "status": run.status,
+        "skipped": False,
+        "summary": run.summary_json or {},
+        "records_count": len(records),
+        "policy_version_id": str(run.policy_version_id) if run.policy_version_id else None,
+        "evidence_artifact": artifact_ref,
+    }
 
 
 def _build_ops_job_artifact(
@@ -14165,16 +15664,7 @@ async def get_ops_jobs_catalog(
     context = get_console_context(request, db)
     _require_ops_access(context, action="read")
 
-    items = [
-        ConsoleOpsJobDefinition(
-            job_type=job_type,
-            label=meta["label"],
-            description=meta["description"],
-            supports_dry_run=bool(meta["supports_dry_run"]),
-        )
-        for job_type, meta in _OPS_JOB_DEFINITIONS.items()
-    ]
-    return ConsoleOpsJobCatalogResponse(items=items)
+    return ConsoleOpsJobCatalogResponse(items=_build_ops_job_catalog_items())
 
 
 @router.get(
@@ -14318,6 +15808,13 @@ async def run_ops_job(
             )
         elif body.job_type == "incident_state":
             result_payload = await _run_incident_state_job(
+                db,
+                context=context,
+                mode=body.mode,
+                params=params,
+            )
+        elif body.job_type == "compliance_lifecycle":
+            result_payload = await _run_compliance_lifecycle_job(
                 db,
                 context=context,
                 mode=body.mode,
@@ -18267,52 +19764,15 @@ async def list_fleet_attention(
     active_clients = [
         client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
     ]
-    if not active_clients:
-        return ConsoleFleetAttentionResponse(
-            generated_at=datetime.now(timezone.utc).isoformat(),
-            stale_after_minutes=stale_after_minutes,
-            summary=ConsoleFleetAttentionSummary(
-                active_clients_total=0,
-                clients_with_attention=0,
-                high_risk_clients=0,
-                medium_risk_clients=0,
-                low_risk_clients=0,
-                stale_branches_total=0,
-                integration_error_branches_total=0,
-                integration_warn_branches_total=0,
-                outbox_failed_24h_total=0,
-                pending_handovers_total=0,
-            ),
-            items=[],
-        )
-
-    active_client_ids = {client.id for client in active_clients}
     now = datetime.now(timezone.utc)
-    attention_scope_key = _build_fleet_attention_cache_scope_key(
-        active_client_ids=active_client_ids,
-        stale_after_minutes=stale_after_minutes,
-        include_low_mode=include_low_mode,
-        limit=limit,
-    )
-    cached_response = _load_cached_fleet_attention(
-        db,
-        scope_key=attention_scope_key,
-        now=now,
-    )
-    if cached_response is not None:
-        _schedule_fleet_attention_async_refresh(
-            db,
-            scope_key=attention_scope_key,
-            active_client_ids=active_client_ids,
+    if not active_clients:
+        return _build_empty_fleet_attention_response(
+            generated_at=now,
             stale_after_minutes=stale_after_minutes,
-            include_low_mode=include_low_mode,
-            limit=limit,
-            now=now,
         )
-        return cached_response
 
     companies_by_id = {company.id: company for company in (context.companies or [])}
-    response = _build_fleet_attention_response_for_clients(
+    return _build_platform_admin_fleet_attention_response(
         db,
         active_clients=active_clients,
         companies_by_id=companies_by_id,
@@ -18321,13 +19781,6 @@ async def list_fleet_attention(
         limit=limit,
         now=now,
     )
-    _store_cached_fleet_attention(
-        db,
-        scope_key=attention_scope_key,
-        now=now,
-        response=response,
-    )
-    return response
 
 
 @router.get(
@@ -18354,82 +19807,322 @@ async def list_admin_incidents(
     active_clients = [
         client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
     ]
+    now = datetime.now(timezone.utc)
     if not active_clients:
-        return ConsoleIncidentListResponse(
-            generated_at=datetime.now(timezone.utc).isoformat(),
-            scope="fleet",
-            summary=ConsoleIncidentSummary(total=0, critical=0, warn=0, info=0),
-            items=[],
-        )
+        return _build_empty_incident_list_response(generated_at=now)
+
+    return _build_admin_incidents_response(
+        db,
+        active_clients=active_clients,
+        limit=limit,
+        now=now,
+    )
+
+
+@router.get(
+    "/admin/control-tower/overview",
+    response_model=ConsoleAdminControlTowerOverviewResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_admin_control_tower_overview(
+    request: Request,
+    attention_limit: int = 20,
+    incident_limit: int = 20,
+    ops_jobs_limit: int = 20,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    include_low: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleAdminControlTowerOverviewResponse:
+    _reject_unknown_query_params(
+        request,
+        {
+            "attention_limit",
+            "incident_limit",
+            "ops_jobs_limit",
+            "stale_after_minutes",
+            "include_low",
+        },
+    )
+    _validate_limit(attention_limit)
+    _validate_limit(incident_limit)
+    _validate_limit(ops_jobs_limit)
+
+    if not isinstance(stale_after_minutes, int):
+        stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
+    normalized_include_low = include_low
+    if normalized_include_low is not None and normalized_include_low.lower() == "null":
+        normalized_include_low = None
+    include_low_mode = _parse_bool_param("include_low", normalized_include_low, default=False)
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
 
     now = datetime.now(timezone.utc)
-    client_ids = [client.id for client in active_clients]
-    outbox_backlog_map = _query_outbox_backlog_map(db, client_ids=client_ids)
-    outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
-    pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
-    degraded_map = _query_integration_degraded_branch_count_map(db, client_ids=client_ids)
-    latest_error_map = _query_latest_failed_error_map(db, client_ids=client_ids, now=now)
-
-    items: list[ConsoleIncidentItem] = []
-    for client in active_clients:
-        signals = _IncidentSignals(
-            outbox_backlog=outbox_backlog_map.get(client.id, 0),
-            outbox_failed_24h=outbox_failed_map.get(client.id, 0),
-            pending_handovers=pending_handovers_map.get(client.id, 0),
-            integration_degraded_branches=degraded_map.get(client.id, 0),
-            last_error=latest_error_map.get(client.id),
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    if not active_clients:
+        empty_fleet_attention = _build_empty_fleet_attention_response(
+            generated_at=now,
+            stale_after_minutes=stale_after_minutes,
         )
-        items.extend(
-            _build_scope_incident_items(
-                scope="fleet",
-                signals=signals,
-                detected_at=now,
-                client_id=client.id,
-                company_id=getattr(client, "company_id", None),
-                domain_key=_normalize_optional_domain_slug_token(
-                    client.config.get("domain_slug")
-                    if isinstance(getattr(client, "config", None), dict)
-                    else None
-                ),
-                client_slug=client.name,
-                branch_id=None,
-                branch_ids=None,
-                platform_scope=True,
-                db=db,
-            )
+        empty_incidents = _build_empty_incident_list_response(generated_at=now)
+        return ConsoleAdminControlTowerOverviewResponse(
+            generated_at=now.isoformat(),
+            stale_after_minutes=stale_after_minutes,
+            attention_limit=attention_limit,
+            incident_limit=incident_limit,
+            ops_jobs_limit=ops_jobs_limit,
+            summary=ConsoleAdminControlTowerOverviewSummary(
+                active_clients_total=0,
+                clients_with_attention=0,
+                high_risk_clients=0,
+                incidents_total=0,
+                incidents_critical=0,
+                incidents_warn=0,
+                incidents_info=0,
+                ops_jobs_total_24h=0,
+                ops_jobs_failed_24h=0,
+            ),
+            fleet_attention=empty_fleet_attention,
+            incidents=empty_incidents,
+            recent_ops_jobs=[],
+            ops_job_catalog=_build_ops_job_catalog_items(),
         )
 
-    items_by_client: dict[UUID, list[ConsoleIncidentItem]] = {}
-    for item in items:
-        if item.client_id is None:
-            continue
-        items_by_client.setdefault(item.client_id, []).append(item)
-    for client_id, scoped_items in items_by_client.items():
-        state_map = _load_incident_state_map(
-            db,
-            client_id=client_id,
-            incident_ids=[item.id for item in scoped_items],
-            allowed_branch_ids=None,
-        )
-        _apply_incident_state_map(scoped_items, state_map=state_map)
-
-    severity_rank = {"critical": 2, "warn": 1, "info": 0}
-    items.sort(
-        key=lambda item: (
-            severity_rank.get(item.severity, 0),
-            int(item.metrics.get("outbox_backlog") or 0),
-            int(item.metrics.get("outbox_failed_24h") or 0),
-            int(item.metrics.get("integration_degraded_branches") or 0),
-            int(item.metrics.get("pending_handovers") or 0),
-        ),
-        reverse=True,
+    companies_by_id = {company.id: company for company in (context.companies or [])}
+    fleet_attention = _build_platform_admin_fleet_attention_response(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_low_mode=include_low_mode,
+        limit=attention_limit,
+        now=now,
     )
-    limited_items = items[:limit]
-    return ConsoleIncidentListResponse(
+    incidents = _build_admin_incidents_response(
+        db,
+        active_clients=active_clients,
+        limit=incident_limit,
+        now=now,
+    )
+    recent_ops_jobs, ops_jobs_total_24h, ops_jobs_failed_24h = _build_admin_recent_ops_jobs(
+        db,
+        client_ids=[client.id for client in active_clients],
+        limit=ops_jobs_limit,
+        now=now,
+    )
+
+    return ConsoleAdminControlTowerOverviewResponse(
         generated_at=now.isoformat(),
-        scope="fleet",
-        summary=_build_incident_summary(limited_items),
-        items=limited_items,
+        stale_after_minutes=stale_after_minutes,
+        attention_limit=attention_limit,
+        incident_limit=incident_limit,
+        ops_jobs_limit=ops_jobs_limit,
+        summary=ConsoleAdminControlTowerOverviewSummary(
+            active_clients_total=fleet_attention.summary.active_clients_total,
+            clients_with_attention=fleet_attention.summary.clients_with_attention,
+            high_risk_clients=fleet_attention.summary.high_risk_clients,
+            incidents_total=incidents.summary.total,
+            incidents_critical=incidents.summary.critical,
+            incidents_warn=incidents.summary.warn,
+            incidents_info=incidents.summary.info,
+            ops_jobs_total_24h=ops_jobs_total_24h,
+            ops_jobs_failed_24h=ops_jobs_failed_24h,
+        ),
+        fleet_attention=fleet_attention,
+        incidents=incidents,
+        recent_ops_jobs=recent_ops_jobs,
+        ops_job_catalog=_build_ops_job_catalog_items(),
+    )
+
+
+@router.get(
+    "/admin/control-tower/readiness-board",
+    response_model=ConsoleAdminControlTowerReadinessBoardResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_admin_control_tower_readiness_board(
+    request: Request,
+    limit: int = 50,
+    include_ready: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleAdminControlTowerReadinessBoardResponse:
+    _reject_unknown_query_params(request, {"limit", "include_ready"})
+    _validate_limit(limit)
+    include_ready_mode = _parse_bool_param("include_ready", include_ready, default=False)
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
+
+    now = datetime.now(timezone.utc)
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    companies_by_id = {company.id: company for company in (context.companies or [])}
+    return _build_admin_control_tower_readiness_board(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        include_ready_mode=include_ready_mode,
+        limit=limit,
+        now=now,
+    )
+
+
+@router.get(
+    "/admin/control-tower/drift-board",
+    response_model=ConsoleAdminControlTowerDriftBoardResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_admin_control_tower_drift_board(
+    request: Request,
+    limit: int = 50,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    only_problematic: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleAdminControlTowerDriftBoardResponse:
+    _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "only_problematic"})
+    _validate_limit(limit)
+    only_problematic_mode = _parse_bool_param(
+        "only_problematic",
+        only_problematic,
+        default=True,
+    )
+    if not isinstance(stale_after_minutes, int):
+        stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
+
+    now = datetime.now(timezone.utc)
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    companies_by_id = {company.id: company for company in (context.companies or [])}
+    return _build_admin_control_tower_drift_board(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        only_problematic_mode=only_problematic_mode,
+        limit=limit,
+        now=now,
+    )
+
+
+@router.get(
+    "/admin/control-tower/action-center",
+    response_model=ConsoleAdminControlTowerActionCenterResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_admin_control_tower_action_center(
+    request: Request,
+    limit: int = 50,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    include_p2: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleAdminControlTowerActionCenterResponse:
+    _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_p2"})
+    _validate_limit(limit)
+    include_p2_mode = _parse_bool_param("include_p2", include_p2, default=True)
+    if not isinstance(stale_after_minutes, int):
+        stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
+
+    now = datetime.now(timezone.utc)
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    companies_by_id = {company.id: company for company in (context.companies or [])}
+    return _build_admin_control_tower_action_center(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_p2_mode=include_p2_mode,
+        limit=limit,
+        now=now,
+    )
+
+
+@router.get(
+    "/admin/control-tower/migration-program",
+    response_model=ConsoleAdminControlTowerMigrationProgramResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_admin_control_tower_migration_program(
+    request: Request,
+    limit: int = 50,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    include_p2: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleAdminControlTowerMigrationProgramResponse:
+    _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_p2"})
+    _validate_limit(limit)
+    include_p2_mode = _parse_bool_param("include_p2", include_p2, default=True)
+    if not isinstance(stale_after_minutes, int):
+        stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
+
+    now = datetime.now(timezone.utc)
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    companies_by_id = {company.id: company for company in (context.companies or [])}
+    return _build_admin_control_tower_migration_program(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_p2_mode=include_p2_mode,
+        limit=limit,
+        now=now,
     )
 
 
@@ -20635,6 +22328,103 @@ def _serialize_policy_version_record(record: ClientPolicyVersion) -> ConsolePoli
     )
 
 
+def _serialize_compliance_policy_version_record(
+    record: CompliancePolicyVersion,
+) -> ConsoleCompliancePolicyVersionRecord:
+    try:
+        payload = CompliancePolicyPayload.model_validate(record.payload_json or {})
+    except ValidationError as exc:
+        raise ConsoleAPIError(
+            500,
+            "COMPLIANCE_POLICY_REGISTRY_INVALID",
+            "Stored compliance policy payload is invalid",
+        ) from exc
+    return ConsoleCompliancePolicyVersionRecord(
+        id=record.id,
+        scope=record.scope,
+        data_class=record.data_class,
+        company_id=record.company_id,
+        domain_key=record.domain_key,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        status=record.status,
+        schema_version=record.schema_version,
+        version_number=record.version_number,
+        payload=payload,
+        reason=record.reason,
+        source_version_id=record.source_version_id,
+        created_by=record.created_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+        published_by=record.published_by,
+        published_at=record.published_at.isoformat() if record.published_at else None,
+    )
+
+
+def _serialize_compliance_lifecycle_run_record(
+    record: ComplianceLifecycleRun,
+) -> ConsoleComplianceLifecycleRunRecord:
+    return ConsoleComplianceLifecycleRunRecord(
+        id=record.id,
+        scope=record.scope,
+        data_class=record.data_class,
+        operation=record.operation,
+        run_mode=record.run_mode,
+        status=record.status,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        policy_version_id=record.policy_version_id,
+        policy_scope=record.policy_scope,
+        summary=record.summary_json or {},
+        error_message=record.error_message,
+        started_at=record.started_at.isoformat() if record.started_at else None,
+        finished_at=record.finished_at.isoformat() if record.finished_at else None,
+        triggered_by=record.triggered_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
+def _serialize_compliance_lifecycle_record(
+    record: ComplianceLifecycleRecord,
+) -> ConsoleComplianceLifecycleRecord:
+    return ConsoleComplianceLifecycleRecord(
+        id=record.id,
+        run_id=record.run_id,
+        entity_type=record.entity_type,
+        entity_id=record.entity_id,
+        action=record.action,
+        result=record.result,
+        payload=record.payload_json or {},
+        occurred_at=record.occurred_at.isoformat() if record.occurred_at else None,
+    )
+
+
+def _serialize_compliance_lifecycle_artifact_record(
+    record: ComplianceLifecycleArtifact,
+) -> ConsoleComplianceLifecycleArtifactRecord:
+    return ConsoleComplianceLifecycleArtifactRecord(
+        id=record.id,
+        run_id=record.run_id,
+        scope=record.scope,
+        data_class=record.data_class,
+        operation=record.operation,
+        run_mode=record.run_mode,
+        status=record.status,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        artifact_type=record.artifact_type,
+        artifact_digest=record.artifact_digest,
+        payload=record.payload_json if isinstance(record.payload_json, dict) else {},
+        records_count=int(record.records_count or 0),
+        evidence_record_count=int(record.evidence_record_count or 0),
+        published_by=record.published_by,
+        published_at=record.published_at.isoformat() if record.published_at else None,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
 def _serialize_sla_profile_version_record(record: SlaProfileVersion) -> ConsoleSlaProfileVersionRecord:
     try:
         payload = SlaProfilePayload.model_validate(record.payload_json or {})
@@ -21239,6 +23029,470 @@ async def rollback_policy_registry(
         success=True,
         record=_serialize_policy_version_record(record),
         from_version_id=source_record.id,
+    )
+
+
+@router.get(
+    "/admin/compliance-policy-registry",
+    response_model=ConsoleCompliancePolicyRegistryResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def get_compliance_policy_registry(
+    request: Request,
+    data_class: str = Query(..., min_length=2, max_length=64),
+    scope: Literal["global", "domain", "client", "branch"] = Query("client"),
+    domain_key: Optional[str] = Query(None),
+    branch_id: Optional[UUID] = Query(None),
+    limit: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> ConsoleCompliancePolicyRegistryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=scope,
+        domain_key=domain_key,
+        branch_id=branch_id,
+    )
+    normalized_data_class = str(data_class or "").strip().lower()
+    try:
+        active_record = get_latest_compliance_policy_version(
+            db,
+            scope=normalized_scope,
+            data_class=normalized_data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            status="published",
+        )
+        history_records = list_compliance_policy_history(
+            db,
+            scope=normalized_scope,
+            data_class=normalized_data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+
+    return ConsoleCompliancePolicyRegistryResponse(
+        scope=normalized_scope,
+        data_class=normalized_data_class,
+        company_id=resolved_company_id,
+        domain_key=resolved_domain_key,
+        client_id=resolved_client_id,
+        branch_id=resolved_branch_id,
+        active=_serialize_compliance_policy_version_record(active_record) if active_record else None,
+        history=[_serialize_compliance_policy_version_record(item) for item in history_records],
+    )
+
+
+@router.post(
+    "/admin/compliance-policy-registry/publish",
+    response_model=ConsoleCompliancePolicyRegistryMutationResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def publish_compliance_policy_registry(
+    request: Request,
+    body: ConsoleCompliancePolicyRegistryPublishRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleCompliancePolicyRegistryMutationResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage compliance policy registry",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        domain_key=body.domain_key,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+    schema_version = body.schema_version or COMPLIANCE_POLICY_SCHEMA_VERSION
+
+    try:
+        record = publish_compliance_policy_version(
+            db,
+            scope=normalized_scope,
+            data_class=body.data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            payload=body.payload,
+            actor_id=context.agent.id,
+            reason=reason,
+            schema_version=schema_version,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="compliance_policy_registry_published",
+        entity_type="compliance_policy_version",
+        entity_id=record.id,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": normalized_scope,
+            "data_class": record.data_class,
+            "company_id": str(record.company_id) if record.company_id else None,
+            "domain_key": record.domain_key,
+            "client_id": str(record.client_id) if record.client_id else None,
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "version_number": record.version_number,
+            "reason": reason,
+        },
+    )
+    db.commit()
+    return ConsoleCompliancePolicyRegistryMutationResponse(
+        success=True,
+        record=_serialize_compliance_policy_version_record(record),
+    )
+
+
+@router.post(
+    "/admin/compliance-policy-registry/rollback",
+    response_model=ConsoleCompliancePolicyRegistryMutationResponse,
+    responses={
+        400: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def rollback_compliance_policy_registry(
+    request: Request,
+    body: ConsoleCompliancePolicyRegistryRollbackRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleCompliancePolicyRegistryMutationResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage compliance policy registry",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        domain_key=body.domain_key,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+
+    try:
+        record, source_record = rollback_compliance_policy_version(
+            db,
+            scope=normalized_scope,
+            data_class=body.data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            target_version_id=body.target_version_id,
+            actor_id=context.agent.id,
+            reason=reason,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message == "Compliance policy version not found":
+            raise ConsoleAPIError(404, "NOT_FOUND", message) from exc
+        raise ConsoleAPIError(400, "INVALID_PARAM", message) from exc
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="compliance_policy_registry_rollback",
+        entity_type="compliance_policy_version",
+        entity_id=record.id,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": normalized_scope,
+            "data_class": record.data_class,
+            "company_id": str(record.company_id) if record.company_id else None,
+            "domain_key": record.domain_key,
+            "client_id": str(record.client_id) if record.client_id else None,
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "version_number": record.version_number,
+            "reason": reason,
+            "from_version_id": str(source_record.id),
+        },
+    )
+    db.commit()
+    return ConsoleCompliancePolicyRegistryMutationResponse(
+        success=True,
+        record=_serialize_compliance_policy_version_record(record),
+        from_version_id=source_record.id,
+    )
+
+
+@router.post(
+    "/admin/compliance-lifecycle/runs",
+    response_model=ConsoleComplianceLifecycleRunResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def run_compliance_lifecycle(
+    request: Request,
+    body: ConsoleComplianceLifecycleRunRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleRunResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage compliance lifecycle",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+    run, records = _execute_compliance_lifecycle_preview_run(
+        db,
+        context=context,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+        data_class=body.data_class,
+        operation=body.operation,
+        max_items=body.max_items,
+        run_mode=body.run_mode or "preview",
+    )
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="compliance_lifecycle_run_requested",
+        entity_type="compliance_lifecycle_run",
+        entity_id=run.id,
+        client_id=context.client.id,
+        branch_id=resolved_branch_id,
+        payload={
+            "scope": run.scope,
+            "data_class": run.data_class,
+            "operation": run.operation,
+            "run_mode": run.run_mode,
+            "reason": reason,
+            "summary": run.summary_json or {},
+            "policy_version_id": str(run.policy_version_id) if run.policy_version_id else None,
+        },
+    )
+    db.commit()
+    return ConsoleComplianceLifecycleRunResponse(
+        success=True,
+        run=_serialize_compliance_lifecycle_run_record(run),
+        records=[_serialize_compliance_lifecycle_record(item) for item in records],
+    )
+
+
+@router.get(
+    "/admin/compliance-lifecycle/runs",
+    response_model=ConsoleComplianceLifecycleRunsResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def list_compliance_lifecycle_runs(
+    request: Request,
+    scope: Literal["client", "branch"] = Query("client"),
+    branch_id: Optional[UUID] = Query(None),
+    data_class: Optional[str] = Query(None),
+    operation: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleRunsResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=scope,
+        branch_id=branch_id,
+    )
+    try:
+        runs = list_lifecycle_runs(
+            db,
+            client_id=context.client.id,
+            scope=normalized_scope,
+            branch_id=resolved_branch_id,
+            data_class=data_class,
+            operation=operation,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+
+    return ConsoleComplianceLifecycleRunsResponse(
+        items=[_serialize_compliance_lifecycle_run_record(item) for item in runs]
+    )
+
+
+@router.get(
+    "/admin/compliance-lifecycle/runs/{run_id}",
+    response_model=ConsoleComplianceLifecycleRunResponse,
+    responses={
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def get_compliance_lifecycle_run(
+    run_id: UUID,
+    request: Request,
+    scope: Literal["client", "branch"] = Query("client"),
+    branch_id: Optional[UUID] = Query(None),
+    records_limit: int = Query(200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleRunResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=scope,
+        branch_id=branch_id,
+    )
+    run = get_lifecycle_run(
+        db,
+        run_id=run_id,
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+    )
+    if run is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Compliance lifecycle run not found")
+    records = list_lifecycle_records(db, run_id=run.id, limit=records_limit)
+    return ConsoleComplianceLifecycleRunResponse(
+        success=True,
+        run=_serialize_compliance_lifecycle_run_record(run),
+        records=[_serialize_compliance_lifecycle_record(item) for item in records],
+    )
+
+
+@router.get(
+    "/admin/compliance-lifecycle/runs/{run_id}/artifact",
+    response_model=ConsoleComplianceLifecycleArtifactResponse,
+    responses={
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def get_compliance_lifecycle_artifact(
+    run_id: UUID,
+    request: Request,
+    scope: Literal["client", "branch"] = Query("client"),
+    branch_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleArtifactResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=scope,
+        branch_id=branch_id,
+    )
+    run = get_lifecycle_run(
+        db,
+        run_id=run_id,
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+    )
+    if run is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Compliance lifecycle run not found")
+
+    artifact = get_lifecycle_artifact(
+        db,
+        run_id=run.id,
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+    )
+    if artifact is None:
+        records = list_lifecycle_records(db, run_id=run.id, limit=1000)
+        artifact = publish_lifecycle_artifact(
+            db,
+            run=run,
+            records=records,
+            actor_id=context.agent.id,
+        )
+        run_summary = run.summary_json if isinstance(run.summary_json, dict) else {}
+        run_summary["artifact_id"] = str(artifact.id)
+        run_summary["artifact_digest"] = artifact.artifact_digest
+        run.summary_json = run_summary
+        run.updated_at = datetime.now(timezone.utc)
+        db.commit()
+
+    return ConsoleComplianceLifecycleArtifactResponse(
+        success=True,
+        artifact=_serialize_compliance_lifecycle_artifact_record(artifact),
     )
 
 
