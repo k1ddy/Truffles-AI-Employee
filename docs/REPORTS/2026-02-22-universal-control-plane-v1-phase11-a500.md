@@ -106,6 +106,7 @@ Date
   - Added lifecycle lane contract (`manual|auto`) with deterministic validation.
   - Added profile presets (`retention_hourly|export_daily|destruction_daily`) for operation/max-items/cadence defaults.
   - Added auto-lane cadence gate: if matching successful run is not due, job returns explicit `skipped=true` payload with `last_run_at` and `next_due_at`.
+  - Cadence gate is execute-only (`dry_run` always remains available for diagnostics).
   - Added fail-closed checks:
     - invalid profile rejected,
     - profile/operation mismatch rejected.
@@ -122,7 +123,7 @@ Date
 - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass after contract sync (`openapi.v1.yaml` updated).
 - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK` (after Slice 4).
 - `cd truffles-api && ruff check app/routers/console.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `All checks passed`.
-- `cd truffles-api && pytest -q tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `27 passed`.
+- `cd truffles-api && pytest -q tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `28 passed`.
 - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass (no OpenAPI drift after Slice 4).
 
 ## Iteration budget outcomes

@@ -9079,6 +9079,7 @@ def _find_recent_compliance_lifecycle_ops_job(
             ConsoleOpsJob.client_id == client_id,
             ConsoleOpsJob.job_type == "compliance_lifecycle",
             ConsoleOpsJob.status == "success",
+            ConsoleOpsJob.mode == "execute",
         )
         .order_by(ConsoleOpsJob.created_at.desc(), ConsoleOpsJob.id.desc())
         .limit(200)
@@ -9282,7 +9283,7 @@ async def _run_compliance_lifecycle_job(
         branch_id=requested_branch_id,
     )
     now = datetime.now(timezone.utc)
-    if lane == "auto":
+    if lane == "auto" and mode == "execute":
         recent_job = _find_recent_compliance_lifecycle_ops_job(
             db,
             client_id=context.client.id,

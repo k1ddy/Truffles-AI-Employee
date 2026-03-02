@@ -23,7 +23,7 @@
   - Slice 2 implemented: compliance lifecycle run ledger + execution records + preview endpoints (`/admin/compliance-lifecycle/runs*`).
   - Added deterministic lifecycle tests and synced OpenAPI contract.
   - Slice 3 implemented: `console_ops_jobs` orchestration for `compliance_lifecycle` with trigger/failure/audit coverage.
-  - Slice 4 implemented: compliance lifecycle automation guardrails (`lane/profile/cadence`) with deterministic auto-lane skip/run behavior and fail-closed validation.
+  - Slice 4 implemented: compliance lifecycle automation guardrails (`lane/profile/cadence`) with deterministic auto-lane skip/run behavior, execute-only cadence gate, and fail-closed validation.
 - next:
   - Build Slice 5: compliance lifecycle execution/action mapping (`retention/export/destruction`) with deterministic safety envelope for non-preview mode.
   - Add evidence for promotion criteria from `in_progress` to `passed` (policy/run/action chain + rollback signals).
@@ -45,6 +45,6 @@
   - truffles-api/tests/test_console_compliance_lifecycle.py
   - truffles-api/tests/test_console_ops_jobs.py
   - truffles-api/app/schemas/console.py (`ConsoleOpsJobType += compliance_lifecycle`)
-  - pytest -q truffles-api/tests/test_console_compliance_policy_registry.py truffles-api/tests/test_console_compliance_lifecycle.py truffles-api/tests/test_console_ops_jobs.py (`27 passed`)
+  - pytest -q truffles-api/tests/test_console_compliance_policy_registry.py truffles-api/tests/test_console_compliance_lifecycle.py truffles-api/tests/test_console_ops_jobs.py (`28 passed`)
   - SESSION_AGENT=a700 scripts/session_check.sh (`Session OK`)
 - last_updated: 2026-03-03

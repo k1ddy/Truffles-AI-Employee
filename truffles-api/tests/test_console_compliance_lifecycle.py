@@ -283,6 +283,46 @@ async def test_run_compliance_lifecycle_job_auto_lane_skips_when_not_due(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_run_compliance_lifecycle_job_auto_lane_dry_run_ignores_cadence(monkeypatch):
+    db = Mock()
+    context = _mock_context(role="platform_admin")
+    run = _run_record(client_id=context.client.id, agent_id=context.agent.id)
+    records = [_record_item(run_id=run.id)]
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(console_router, "_resolve_policy_registry_scope", lambda *args, **kwargs: ("client", None))
+    monkeypatch.setattr(
+        console_router,
+        "_find_recent_compliance_lifecycle_ops_job",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("cadence lookup must be execute-only")),
+    )
+
+    def _fake_execute(*args, **kwargs):
+        captured["run_mode"] = kwargs["run_mode"]
+        captured["operation"] = kwargs["operation"]
+        return run, records
+
+    monkeypatch.setattr(console_router, "_execute_compliance_lifecycle_preview_run", _fake_execute)
+
+    result = await console_router._run_compliance_lifecycle_job(
+        db,
+        context=context,
+        mode="dry_run",
+        params={
+            "lane": "auto",
+            "operation": "retention_scan",
+            "cadence_minutes": 60,
+        },
+    )
+
+    assert result["mode"] == "dry_run"
+    assert result["skipped"] is False
+    assert result["lane"] == "auto"
+    assert captured["operation"] == "retention_scan"
+    assert captured["run_mode"] == "preview"
+
+
+@pytest.mark.asyncio
 async def test_run_compliance_lifecycle_job_auto_lane_runs_when_due(monkeypatch):
     db = Mock()
     context = _mock_context(role="platform_admin")
