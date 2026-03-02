@@ -82,8 +82,35 @@ Date
 - Wave contract:
   - `canary`: strict gate for P0/hard blockers and low soft-blocker budget.
   - `cohort`: medium soft-blocker budget with same hard-block protections.
-  - `fleet`: zero-budget promotion gate (hold when blockers remain).
+- `fleet`: zero-budget promotion gate (hold when blockers remain).
 - Rollback triggers are emitted as deterministic reason codes (`incident_p0_open`, `readiness_hard_gate_failed`, `provider_ops_p0_queue`, etc.).
+
+## Slice 2 update (signals + promotion actions)
+- Migration program response extended with rollout signals:
+  - `ready_branches` (`pass/fail`, threshold `>=1`),
+  - `hard_blockers` (`pass/fail`, threshold `==0`),
+  - `soft_blockers` (`pass/warn/fail`, threshold `<=3`),
+  - `blocked_branches` (`pass/fail`, threshold `==0`).
+- Empty scope response now explicitly emits fail signal `active_clients` with threshold `1` to keep fail-closed behavior transparent in UI/API.
+- Added deterministic promotion action projection:
+  - action-center items map to migration wave by priority (`p0 -> canary`, `p1 -> cohort`, `p2 -> fleet`),
+  - each projected action carries current wave gate (`go|hold`) for operator-facing promotion queue.
+- Contract and schema deltas:
+  - `ConsoleAdminControlTowerMigrationSignal`,
+  - `ConsoleAdminControlTowerPromotionAction`,
+  - `signals` and `promotion_actions` added to migration program response.
+- Deterministic test coverage extended:
+  - validates signal statuses and thresholds in aggregated response,
+  - validates action-to-wave mapping and gate propagation,
+  - validates explicit empty-scope fail signal behavior.
+
+## Slice 2 checks + outcomes
+- `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_owner_business.py` -> `All checks passed`.
+- `cd truffles-api && pytest -q tests/test_console_owner_business.py -k \"migration_program or control_tower\"` -> `15 passed, 41 deselected`.
+- `cd truffles-api && pytest -q tests/test_console_owner_business.py tests/test_console_fleet_attention.py tests/test_console_ops_jobs.py tests/test_console_onboarding_state.py` -> `105 passed`.
+- `cd truffles-api && python3 scripts/generate_openapi.py --check` -> contract check passed after syncing `contracts/console_api/openapi.v1.yaml` from generated spec.
+- `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md --report docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md --graph docs/BLOCK_GRAPH.yaml` -> `zero_context_gate: OK`.
+- `SESSION_AGENT=a702 scripts/session_check.sh` -> `Session OK`.
 
 ## Checks + outcomes
 - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_owner_business.py` -> `All checks passed`.
@@ -109,6 +136,7 @@ Date
 - `truffles-api/app/schemas/console.py`
 - `truffles-api/tests/test_console_owner_business.py`
 - `contracts/console_api/openapi.v1.yaml`
+- `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase13-slice2-a702.md`
 
 ## Release safety decision
 - `Strategy used` -> read-only platform-admin API contract expansion.

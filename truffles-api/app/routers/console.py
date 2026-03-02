@@ -90,9 +90,11 @@ from app.schemas.console import (
     ConsoleAdminControlTowerIssueCount,
     ConsoleAdminControlTowerMigrationProgramResponse,
     ConsoleAdminControlTowerMigrationProgramSummary,
+    ConsoleAdminControlTowerMigrationSignal,
     ConsoleAdminControlTowerMigrationWave,
     ConsoleAdminControlTowerOverviewResponse,
     ConsoleAdminControlTowerOverviewSummary,
+    ConsoleAdminControlTowerPromotionAction,
     ConsoleAdminControlTowerReadinessBoardResponse,
     ConsoleAdminControlTowerReadinessItem,
     ConsoleAdminControlTowerReadinessSummary,
@@ -8897,6 +8899,95 @@ def _build_migration_wave(
     )
 
 
+def _resolve_migration_wave_for_priority(
+    priority: Literal["p0", "p1", "p2"],
+) -> Literal["canary", "cohort", "fleet"]:
+    if priority == "p0":
+        return "canary"
+    if priority == "p1":
+        return "cohort"
+    return "fleet"
+
+
+def _build_migration_signals(
+    *,
+    ready_branches: int,
+    blocked_branches: int,
+    hard_blockers_total: int,
+    soft_blockers_total: int,
+) -> list[ConsoleAdminControlTowerMigrationSignal]:
+    if soft_blockers_total <= 0:
+        soft_status: Literal["pass", "warn", "fail"] = "pass"
+    elif soft_blockers_total <= 3:
+        soft_status = "warn"
+    else:
+        soft_status = "fail"
+    return [
+        ConsoleAdminControlTowerMigrationSignal(
+            code="ready_branches",
+            status="pass" if ready_branches > 0 else "fail",
+            value=max(ready_branches, 0),
+            threshold=1,
+            note="at least one ready branch is required for promotion",
+        ),
+        ConsoleAdminControlTowerMigrationSignal(
+            code="hard_blockers",
+            status="pass" if hard_blockers_total == 0 else "fail",
+            value=max(hard_blockers_total, 0),
+            threshold=0,
+            note="p0 incidents + hard-gate failures + p0 action queue",
+        ),
+        ConsoleAdminControlTowerMigrationSignal(
+            code="soft_blockers",
+            status=soft_status,
+            value=max(soft_blockers_total, 0),
+            threshold=3,
+            note="p1 drift queue + p1 action queue",
+        ),
+        ConsoleAdminControlTowerMigrationSignal(
+            code="blocked_branches",
+            status="pass" if blocked_branches == 0 else "fail",
+            value=max(blocked_branches, 0),
+            threshold=0,
+            note="fleet promotion requires zero blocked branches",
+        ),
+    ]
+
+
+def _build_migration_promotion_actions(
+    *,
+    action_center: ConsoleAdminControlTowerActionCenterResponse,
+    waves: list[ConsoleAdminControlTowerMigrationWave],
+    limit: int,
+) -> list[ConsoleAdminControlTowerPromotionAction]:
+    wave_by_id = {wave.wave: wave for wave in waves}
+    collected: list[ConsoleAdminControlTowerPromotionAction] = []
+    for item in action_center.items:
+        wave_id = _resolve_migration_wave_for_priority(item.priority)
+        wave_gate = wave_by_id.get(wave_id).gate if wave_id in wave_by_id else "hold"
+        collected.append(
+            ConsoleAdminControlTowerPromotionAction(
+                id=item.id,
+                wave=wave_id,
+                gate=wave_gate,
+                priority=item.priority,
+                source=item.source,
+                kind=item.kind,
+                title=item.title,
+                description=item.description,
+                reasons=list(item.reasons or []),
+                href=item.href,
+                job_type=item.job_type,
+                mode=item.mode,
+                params=item.params if isinstance(item.params, dict) else None,
+                evidence_links=list(item.evidence_links or []),
+            )
+        )
+        if len(collected) >= limit:
+            break
+    return collected
+
+
 def _build_admin_control_tower_migration_program(
     db: Session,
     *,
@@ -8938,6 +9029,16 @@ def _build_admin_control_tower_migration_program(
                 waves_hold=3,
             ),
             waves=empty_waves,
+            signals=[
+                ConsoleAdminControlTowerMigrationSignal(
+                    code="active_clients",
+                    status="fail",
+                    value=0,
+                    threshold=1,
+                    note="no active clients in scope",
+                )
+            ],
+            promotion_actions=[],
         )
 
     board_limit = max(limit, 200)
@@ -9022,6 +9123,17 @@ def _build_admin_control_tower_migration_program(
         top_blockers=merged_top_blockers,
     )
     waves = [canary_wave, cohort_wave, fleet_wave]
+    signals = _build_migration_signals(
+        ready_branches=ready_branches,
+        blocked_branches=blocked_branches,
+        hard_blockers_total=hard_blockers_total,
+        soft_blockers_total=soft_blockers_total,
+    )
+    promotion_actions = _build_migration_promotion_actions(
+        action_center=action_center,
+        waves=waves,
+        limit=limit,
+    )
 
     return ConsoleAdminControlTowerMigrationProgramResponse(
         generated_at=now.isoformat(),
@@ -9040,6 +9152,8 @@ def _build_admin_control_tower_migration_program(
             waves_hold=sum(1 for wave in waves if wave.gate == "hold"),
         ),
         waves=waves,
+        signals=signals,
+        promotion_actions=promotion_actions,
     )
 
 

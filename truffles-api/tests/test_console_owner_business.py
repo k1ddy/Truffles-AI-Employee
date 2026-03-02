@@ -1702,7 +1702,32 @@ def test_build_admin_control_tower_migration_program_aggregates_wave_gates(monke
                 count=2,
             )
         ],
-        items=[],
+        items=[
+            console_router.ConsoleAdminControlTowerActionItem(
+                id="incident:critical:run",
+                priority="p0",
+                source="incident",
+                kind="ops_job",
+                title="Run critical remediation",
+                description="Dry-run reconcile",
+                reasons=["delivery:failed_24h_critical"],
+                job_type="integration_reconcile",
+                mode="dry_run",
+                params={"limit": 10},
+                evidence_links=["/admin/incidents"],
+            ),
+            console_router.ConsoleAdminControlTowerActionItem(
+                id="drift:warn:navigate",
+                priority="p2",
+                source="provider_ops",
+                kind="navigate",
+                title="Open integrations",
+                description="Inspect drift lane",
+                reasons=["provider_binding_alert_critical"],
+                href="/integrations",
+                evidence_links=["/admin/control-tower/drift-board"],
+            ),
+        ],
     )
 
     monkeypatch.setattr(
@@ -1745,6 +1770,33 @@ def test_build_admin_control_tower_migration_program_aggregates_wave_gates(monke
     assert "incident_p0_open" in response.waves[0].rollback_triggers
     assert response.waves[0].top_blockers[0].code == "delivery:failed_24h_critical"
     assert response.waves[0].top_blockers[0].count == 6
+    assert len(response.signals) == 4
+    assert any(signal.code == "hard_blockers" and signal.status == "fail" for signal in response.signals)
+    assert len(response.promotion_actions) == 2
+    assert response.promotion_actions[0].wave == "canary"
+    assert response.promotion_actions[0].gate == "hold"
+    assert response.promotion_actions[0].job_type == "integration_reconcile"
+    assert response.promotion_actions[1].wave == "fleet"
+    assert response.promotion_actions[1].gate == "hold"
+
+
+def test_build_admin_control_tower_migration_program_empty_scope_has_fail_signal() -> None:
+    response = console_router._build_admin_control_tower_migration_program(
+        SimpleNamespace(),
+        active_clients=[],
+        companies_by_id={},
+        stale_after_minutes=60,
+        include_p2_mode=True,
+        limit=20,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert response.summary.active_clients_total == 0
+    assert response.summary.waves_hold == 3
+    assert response.waves[0].reason == "no_active_clients"
+    assert response.signals[0].code == "active_clients"
+    assert response.signals[0].status == "fail"
+    assert response.promotion_actions == []
 
 
 @pytest.mark.asyncio
