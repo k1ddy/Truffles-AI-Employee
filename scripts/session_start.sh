@@ -344,6 +344,7 @@ if [[ ! -f "$session_file" ]]; then
 - root_cause_gate: required
 - reuse_gate: required
 - release_safety_gate: required
+- context_integrity_gate: required
 - branch: ${branch}
 - worktree: ${worktree}
 - base_ref: ${base_ref}

@@ -33,7 +33,14 @@ def _load_quality_helpers():
         "LLM_QUALITY_REGEX_LEXICON_RESOLVER_PREFIXES",
         "LLM_QUALITY_REGEX_LEXICON_TEST_PREFIX",
         "LLM_QUALITY_HARDCODE_CORE_PREFIXES",
+        "LLM_QUALITY_HARDCODE_SCOPE_WEBHOOK_PREFIX",
+        "LLM_QUALITY_HARDCODE_SCOPE_SERVICE_PREFIX",
+        "LLM_QUALITY_HARDCODE_SCOPE_SERVICE_FILES",
+        "LLM_QUALITY_HARDCODE_SCOPE_SERVICE_SUFFIXES",
+        "LLM_QUALITY_MATRIX_MIN_NON_SALON_PACKS",
+        "LLM_QUALITY_MATRIX_NON_SALON_EXCLUDED_SLUGS",
         "LLM_QUALITY_HARDCODE_ALLOW_MARKER",
+        "LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS",
         "LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE",
         "LLM_QUALITY_PROGRESS_SKIP_TAGS",
         "LLM_QUALITY_REQUIRED_RUN_ARTIFACTS",
@@ -80,6 +87,9 @@ def _load_quality_helpers():
         "_llm_quality_build_run_economy_status",
         "_llm_quality_parse_coverage_tokens",
         "_llm_quality_build_quality_constant_status",
+        "_parse_csv_values",
+        "_llm_quality_normalize_matrix_client_slugs",
+        "_llm_quality_build_cross_domain_matrix_contract_status",
         "_llm_quality_collect_workaround_marker_hits",
         "_llm_quality_collect_workaround_register_ids",
         "_llm_quality_build_workaround_register_status",
@@ -945,6 +955,65 @@ def test_quality_constant_dev_lane_disallows_baseline_update_only():
     assert blocked["reasons"] == ["dev_lane_disallows_update_baseline"]
 
 
+def test_cross_domain_matrix_contract_accepts_two_non_salon_slugs():
+    ns = _load_quality_helpers()
+    build_contract = ns["_llm_quality_build_cross_domain_matrix_contract_status"]
+
+    status = build_contract(
+        mode="block",
+        client_slugs=["demo_salon", "clinic_pack", "dental_pack"],
+        excluded_slugs=["demo_salon", "generic"],
+        min_non_salon=2,
+    )
+
+    assert status["valid"] is True
+    assert status["required"] is True
+    assert status["non_salon_count"] == 2
+    assert status["reasons"] == []
+
+
+def test_cross_domain_matrix_contract_blocks_when_non_salon_under_minimum():
+    ns = _load_quality_helpers()
+    build_contract = ns["_llm_quality_build_cross_domain_matrix_contract_status"]
+
+    status = build_contract(
+        mode="block",
+        client_slugs=["demo_salon", "generic"],
+        excluded_slugs=["demo_salon", "generic"],
+        min_non_salon=2,
+    )
+
+    assert status["valid"] is False
+    assert status["required"] is True
+    assert status["reasons"] == ["cross_domain_non_salon_lt_2:0"]
+
+
+def test_cross_domain_matrix_contract_warn_mode_is_non_blocking():
+    ns = _load_quality_helpers()
+    build_contract = ns["_llm_quality_build_cross_domain_matrix_contract_status"]
+
+    status = build_contract(
+        mode="warn",
+        client_slugs=["demo_salon"],
+        excluded_slugs=["demo_salon", "generic"],
+        min_non_salon=2,
+    )
+
+    assert status["enforced"] is True
+    assert status["required"] is False
+    assert status["valid"] is False
+    assert status["reasons"] == ["cross_domain_non_salon_lt_2:0"]
+
+
+def test_cross_domain_matrix_slug_normalization_is_casefold_dedup():
+    ns = _load_quality_helpers()
+    normalize = ns["_llm_quality_normalize_matrix_client_slugs"]
+
+    slugs = normalize("demo_salon,Clinic_Pack,clinic_pack,dental_pack")
+
+    assert slugs == ["demo_salon", "Clinic_Pack", "dental_pack"]
+
+
 def test_workaround_register_gate_blocks_unregistered_marker(tmp_path):
     ns = _load_quality_helpers()
     build_gate = ns["_llm_quality_build_workaround_register_status"]
@@ -1189,6 +1258,26 @@ def test_line_has_phrase_branching_allows_resolver_or_allow_marker():
     assert not detector('if "без записи" in _normalize_text(message_text):  # hardcode-gate: allow')
 
 
+def test_line_has_phrase_branching_blocks_domain_regex_in_signal_services():
+    ns = _load_quality_helpers()
+    detector = ns["_llm_quality_line_has_phrase_branching"]
+
+    assert detector(
+        '(re.compile(r"\\bпослезавтраш\\w*|\\bпослезавтра\\b", re.IGNORECASE), "послезавтра"),',
+        path="truffles-api/app/services/booking_signal_service.py",
+    )
+
+
+def test_line_has_phrase_branching_allows_technical_format_regex_in_signal_services():
+    ns = _load_quality_helpers()
+    detector = ns["_llm_quality_line_has_phrase_branching"]
+
+    assert not detector(
+        'if re.search(r"\\d{4}-\\d{2}-\\d{2}", token):',
+        path="truffles-api/app/services/booking_signal_service.py",
+    )
+
+
 def test_hardcode_core_gate_blocks_phrase_branching_in_core_diff():
     ns = _load_quality_helpers()
     build_gate = ns["_llm_quality_build_hardcode_core_gate_status"]
@@ -1234,6 +1323,25 @@ def test_hardcode_core_gate_ignores_non_core_changes():
     assert status["reasons"] == []
     assert status["core_changed_files"] == []
     assert status["violations"] == []
+
+
+def test_hardcode_core_gate_scopes_signal_services():
+    ns = _load_quality_helpers()
+    core_paths = set(ns["LLM_QUALITY_HARDCODE_CORE_PREFIXES"])
+
+    assert "truffles-api/app/services/booking_signal_service.py" in core_paths
+    assert "truffles-api/app/services/info_signal_service.py" in core_paths
+
+
+def test_hardcode_core_scope_includes_webhook_and_runtime_signal_files():
+    ns = _load_quality_helpers()
+    is_scope_file = ns["_llm_quality_is_hardcode_core_file"]
+
+    assert is_scope_file("truffles-api/app/routers/webhook/policy.py")
+    assert is_scope_file("truffles-api/app/services/booking_signal_service.py")
+    assert is_scope_file("truffles-api/app/services/any_runtime_service.py")
+    assert is_scope_file("truffles-api/app/services/pack_runtime_service.py")
+    assert not is_scope_file("docs/REPORTS/sample.md")
 
 
 def test_hq1_classifier_detects_handoff_miss():

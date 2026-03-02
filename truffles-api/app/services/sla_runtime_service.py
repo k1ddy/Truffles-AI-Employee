@@ -65,7 +65,7 @@ def _resolve_scope_inputs(
         .filter(Client.id == conversation.client_id)
         .first()
     )
-    company_id = client.company_id if client else None
+    company_id = getattr(client, "company_id", None) if client else None
     runtime_capabilities = build_runtime_capabilities(
         db,
         client_id=conversation.client_id,

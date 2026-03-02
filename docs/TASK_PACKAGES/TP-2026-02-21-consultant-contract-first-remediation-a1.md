@@ -842,27 +842,18 @@ Forensic only (not acceptance):
 
 ### Что уже реализовано (и что это закрывает)
 
-1. `run_manifest + _index + latest_by_mode` реализованы.
-   - Закрывает трассировку артефактов по run.
-2. `manual_audit_gate` реализован fail-closed.
-   - Блокирует старт при `manual_audit_pending`.
-3. `run_economy` fingerprint gate реализован.
-   - Блокирует replay на non-canonical baseline и repeat lock после non-canonical fingerprint.
-4. `runtime_state + --resume` реализованы.
-   - Позволяет продолжать interrupted run без старта с нуля.
-5. `quality lane` (`dev/acceptance`) реализован.
-   - Фиксирует envelope acceptance требований.
-6. `run_manifest` содержит `resume_command`.
-   - Есть deterministic recovery command.
+- Chain-level state machine реализован в `scripts/quality_chain_controller.sh` с `lock -> replay -> full`, run_id/mode контрактом, resume-only и ROI stop-loss.
+- Acceptance token gate реализован в `ops/diagnose.py` и блокирует acceptance без chain-token.
+- Guarded wrapper делегирует acceptance в controller и требует `--pg-checklist` для acceptance lock (`scripts/llm_quality_guarded.sh`).
+- Bootstrap/import command для legacy run-артефактов добавлен в `scripts/quality_chain_controller.sh` (создает chain state из summary/run_manifest).
+- `run_manifest.json` + индекс `_index` + `resume_command` формируются в `ops/diagnose.py`.
+- `manual_audit_gate`, `oracle_conflict_gate`, `forensic_sla_gate`, `scenario_governance_gate`, `quality_constant_gate`, `hardcode_core_gate`, `lexicon_regex_delta_gate` реализованы в `ops/diagnose.py`.
+- Deterministic тесты для controller/guard/гейтов есть в `truffles-api/tests/test_booking_quality_chain_controller.py`, `truffles-api/tests/test_booking_quality_guarded_wrapper.py`, `truffles-api/tests/test_booking_quality_status_gate.py`.
+- Handoff brief enforced для перехода между шагами (`brief_for_next_agent.md`) в `scripts/quality_chain_controller.sh`.
 
 ### Что не реализовано (ключевые пробелы)
 
-1. Нет единого chain-level state machine (`lock -> replay -> full`) как обязательного entrypoint.
-2. Нет hard запрета на прямой запуск `ops/diagnose.py llm-quality` в acceptance lane.
-3. Нет строгого контракта `run_id` vs `mode`; mismatch не блокируется.
-4. Нет global stop-loss логики по ROI (повтор без улучшения target blocker).
-5. Guard работает mode-local, а не chain-local.
-6. Нет обязательного bootstrap handoff контекста для следующего агента (anti-amnesia на уровне запуска).
+- Нет новых ключевых пробелов в chain controller после bootstrap; открытые пункты остаются в `P4/P5/P7/P9/P12/P13/P14` по Execution Status.
 
 ### Что может сломаться даже после текущих gate (failure map)
 
@@ -1148,59 +1139,39 @@ Forensic only (not acceptance):
   - Запустить L3 только после прохождения Stage A-F и PG0..PG6.
   - Exit criteria: `lock -> replay -> full` используется как release confirmation, не как debug loop.
 
-### Execution Status Update (2026-03-01, fact-checked)
+### Execution Status Update (2026-03-02, code-fact audit refresh)
 
-- Completed implementation (code + tests):
-  - Chain controller introduced and wired as acceptance step owner:
-    - `scripts/quality_chain_controller.sh`
-    - `scripts/llm_quality_guarded.sh`
-  - Acceptance token gate enforced in runtime preflight:
-    - `ops/diagnose.py` (`chain_controller_required`, step/token/mode checks).
-  - Resume/order/identity enforcement implemented:
-    - `chain_step_order_violation`, `chain_resume_required`, `run_id_mode_mismatch`.
-  - Go-to-Full enforcement upgraded from docs-only to runtime gate:
-    - acceptance `lock` requires `--pg-checklist`,
-    - checklist must include `PG0..PG6`,
-    - checklist must include `root_cause_statement`,
-    - checklist must include `defect_mapping` entries (`defect_class`, `target_test`, `gate`, `owner`),
-    - `target_test` is validated as real repository reference (`path::test_name` exists),
-    - checklist must include `l1_evidence.junit_xml_path`,
-    - every `defect_mapping.target_test` is machine-linked to a `passed` testcase in L1 JUnit artifact,
-    - checklist must include `l2_evidence.summary_path`,
-    - `l2_evidence.summary_path` is machine-validated as green (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`) and non-acceptance lane,
-    - L1/L2 evidence freshness window is enforced fail-closed (`evidence_freshness_hours`, default `24h`).
-  - Deterministic regression coverage exists and is green for this layer:
-    - `truffles-api/tests/test_booking_quality_chain_controller.py`
-    - `truffles-api/tests/test_booking_quality_guarded_wrapper.py`
-    - `truffles-api/tests/test_booking_quality_status_gate.py`
-    - `truffles-api/tests/test_booking_quality_progress_gate.py`
-  - PR `#848` merged to `main` (`1698d74f`) with acceptance preflight packet:
-    - `oracle_conflict_gate` (contract-first arbitration),
-    - `forensic_sla_gate` (manual audit SLA completeness),
-    - `scenario_governance_gate` + governance registry promotion checks.
-  - Post-merge hardening delivered in current branch:
-    - forensic/oracle gates now filter by `chain_id` to avoid cross-chain audit contamination,
-    - acceptance lane fails closed if forensic/oracle gate is requested without `chain_id`,
-    - deterministic coverage extended in `test_booking_quality_status_gate.py` for chain filter/missing-chain-id cases.
-  - Branch protection enforced on `main` (`2026-03-01`):
-    - required checks: `session-gate`, `lint`, `unit-tests`, `core-eval`,
-    - `required_status_checks.strict=true`,
-    - `enforce_admins=true`.
+- `P0 Governance Lock` partial: L0 static gates are implemented in `ops/diagnose.py` and wired in `.github/workflows/ci.yml` via `llm-quality-gates`; doc sync and runtime evidence are not code-verified.
+- `P1 Semantic Decision Envelope` implemented in `truffles-api/app/routers/webhook/decision.py` with coverage in `truffles-api/tests/test_llm_policy_core.py`.
+- `P2 Structured Policy-Core Adapter` implemented in `truffles-api/app/services/intent_service.py` + `truffles-api/app/schemas/intent.py` with tests in `truffles-api/tests/test_llm_policy_core.py`.
+- `P3 Semantic Firewall` implemented in `truffles-api/app/routers/webhook/decision.py` with reason-code enforcement coverage in `truffles-api/tests/test_message_endpoint.py`.
+- `P4 Expected-Reply Refactor` partial: expected-reply contract exists in `truffles-api/app/services/expected_reply_contract.py` and master intent resolver in `truffles-api/app/services/pack_runtime_service.py` + `truffles-api/app/schemas/intent.py`, but expected-reply still participates in routing in `truffles-api/app/routers/webhook/booking.py` and `truffles-api/app/routers/webhook/info.py`.
+- `P5 Pack Query Engine v2` missing: `truffles-api/app/services/pack_runtime_service.py` uses `semantic_service_match` only and does not implement hybrid retrieval or rerank.
+- `P6 Capability Manifest + Protocol Gate` implemented in `truffles-api/app/services/capability_manifest_service.py`, `truffles-api/app/services/capabilities_runtime.py`, `truffles-api/app/services/tool_registry_service.py` with tests `truffles-api/tests/test_tool_protocol_gate.py` and `truffles-api/tests/test_cross_domain_capability_isolation.py`; dedicated `tool_protocol_gateway.py` file not found.
+- `P7 Core De-hardcoding Sweep` done: phrase/regex routing removed from `truffles-api/app/routers/webhook/info.py`, `truffles-api/app/routers/webhook/booking.py`, `truffles-api/app/services/tool_registry_service.py` by moving matchers to `truffles-api/app/services/info_signal_service.py` and `truffles-api/app/services/booking_signal_service.py`; checks green (`test_booking_appointments.py`, `test_master_info_flow.py`, `test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply"`).
+- `P7` continuity follow-up opened as mandatory program block `SIG-PROGRAM-S0-S4` in `docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md` to prevent context loss and enforce `S1/S2/S3/S4` completion without residual hardcode drift.
+- `P8 Acceptance Engine Split` implemented in `ops/diagnose.py` (`semantic_acceptance` and `delivery_acceptance`).
+- `P9 Contract Test Migration` partial: master long-hair tests migrated to contract meta asserts (`truffles-api/tests/test_info_master_long_hair.py`, checks green as of 2026-03-02) and demo_salon semantic service tests migrated (message_endpoint `semantic_service_matcher/semantic_question_type`, checks green as of 2026-03-02), but text-based oracles remain elsewhere in `truffles-api/tests/test_message_endpoint.py` and `truffles-api/tests/test_knowledge_service.py`.
+- `P10 Canonical Quality Chain` implemented: chain controller + acceptance token gate implemented in `scripts/quality_chain_controller.sh`, `scripts/llm_quality_guarded.sh`, `ops/diagnose.py`, and multi-seed drift enforcement added to PG checklist validation (`multi_seed_evidence` required for acceptance lock).
+- `P11 Budget-Go-To-Full Control` implemented in `scripts/quality_chain_controller.sh` (PG checklist + L1/L2 evidence linkage) and enforced via `scripts/llm_quality_guarded.sh` for acceptance lock.
+- Chain controller bootstrap/import implemented in `scripts/quality_chain_controller.sh` with deterministic coverage in `truffles-api/tests/test_booking_quality_chain_controller.py`.
+- `P12 Cross-domain Hardening` partial: deterministic cross-domain suite now covers two non-salon runtime packs (`truffles-api/tests/test_cross_domain_signal_contract_suite.py`) and quality tooling now has matrix non-salon contract gate in `ops/diagnose.py` (`--cross-domain-contract off|warn|block`); live quality matrix evidence for real non-salon clients is still pending.
+- `P13 Canary + Rollback` missing: no canary/rollback automation or tests found in repo.
+- `P14 Evidence + STATE Handoff` partial: `ops/diagnose.py` writes `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl`, `run_manifest.json`; `STATE.md` handoff remains a process step, not a coded gate.
+- `P15 Timeout-Degrade Reliability Remediation` implemented: timeout degrade retry limit and clarify/handoff escalation logic exist in `truffles-api/app/routers/webhook/decision.py` with deterministic tests in `truffles-api/tests/test_message_endpoint.py` (booking timeout retry exhaust -> handoff).
 
-- Completed implementation (code + tests, post-#852 hardening):
-  - Stage D Scenario Governance version policy:
-    - registry schema is versioned (`schema_version=2`) and checked fail-closed for acceptance replay/full,
-    - registry entries now carry `realism_sla` contract (required buckets + minimum dialog/turn envelope),
-    - promotion lifecycle is explicit and stateful (`candidate -> eligible -> approved`), with deterministic full-run promotion only on canonical acceptance full (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`),
-    - deterministic coverage extended in `truffles-api/tests/test_booking_quality_status_gate.py` for schema-version gating, realism SLA enforcement, and full-promotion lifecycle.
+### Mandatory Continuation for P7 (S0..S4, code-fact status at 2026-03-02)
 
-- Partially completed (policy defined, enforcement not fully automated yet):
-  - Stage E Fail-Fast Economics:
-    - run-economy and stop-loss signals exist,
-    - acceptance `lock` now fail-closes on missing/non-green L1/L2 evidence and stale evidence windows.
-
-- Remaining implementation items before declaring Stage A-G complete:
-  - None in this TP track; next cycle is operational evidence run through `L0 -> L1 -> L2 -> L3` with PG0..PG6 checklist.
+- `S0 No-Hardcode Gate Scope Fix` done: static hardcode gate in `ops/diagnose.py` now includes signal-layer files (`truffles-api/app/services/booking_signal_service.py`, `truffles-api/app/services/info_signal_service.py`) and explicit technical-format whitelist (`LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS`); coverage updated in `truffles-api/tests/test_booking_quality_status_gate.py`.
+- `S1 Signal Manifest Externalization` done: domain regex/markers moved out of runtime signal services into declarative manifest + schema:
+  - manifest: `truffles-api/app/knowledge/generic/SIGNAL_MANIFEST.yaml`
+  - schema: `contracts/packs/signal_manifest.v1.jsonschema`
+  - runtime loader: `truffles-api/app/services/signal_manifest_service.py`
+  - consumers migrated: `truffles-api/app/services/booking_signal_service.py`, `truffles-api/app/services/info_signal_service.py`
+  - deterministic evidence: `pytest -q truffles-api/tests/test_signal_manifest_service.py`, `pytest -q truffles-api/tests/test_booking_appointments.py`, `pytest -q truffles-api/tests/test_master_info_flow.py`, `pytest -q truffles-api/tests/test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply"`.
+- `S2 Signal Runtime Compiler` done: signal loader now builds compiled runtime bundle with explicit version/fingerprint/signature metadata and cache-by-signature contract in `truffles-api/app/services/signal_manifest_service.py` (`CompiledSignalManifest`, `compiled_version`, `manifest_fingerprint`, `manifest_signature`, `get_signal_manifest_runtime_meta`); deterministic proof in `truffles-api/tests/test_signal_manifest_service.py` (`8 passed`).
+- `S3 No-Hardcode Gate v2` done for scope enforcement: hardcode gate path policy in `ops/diagnose.py` now fail-checks `runtime/core/signal` scope (`webhook/*.py`, `*_signal_service.py`, `*_runtime_service.py`, `pack_runtime_service.py`, `tool_registry_service.py`) with deterministic scope tests in `truffles-api/tests/test_booking_quality_status_gate.py` (`8 passed` for scope/gate slice).
+- `S4 Cross-domain Contract Suite` done (code-fact): dedicated deterministic suite for minimum two non-salon packs added in `truffles-api/tests/test_cross_domain_signal_contract_suite.py` (covers info/booking/tool_registry contract path via runtime truth datasets), and quality matrix now supports fail-closed cross-domain gate (`ops/diagnose.py`, helper `_llm_quality_build_cross_domain_matrix_contract_status`, args `--cross-domain-contract`, `--cross-domain-min-non-salon`, `--cross-domain-excluded-slugs`) with deterministic coverage in `truffles-api/tests/test_booking_quality_status_gate.py` (`cross_domain_matrix_contract*` tests).
 
 ### DoD for this Addendum
 

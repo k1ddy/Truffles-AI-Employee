@@ -42,12 +42,13 @@ If context compaction happens: run `scripts/session_resume.sh --agent $SESSION_A
    - `session_start` must pass sync gate (`local main == origin/main`) and duplicate block gate (no active session with same `BLOCK_ID` when TP defines it).
    - Doc-only в `main` требует `docs/SESSIONS/*` + `docs/SESSION_INDEX.md` в том же коммите.
    - Статус `done` ставится в финальном коммите работы; отдельный commit/PR ради закрытия запрещён.
-   - Research-gate modes in session metadata are `required|optional|off`; new sessions default to `required` for `research/root_cause/reuse/release_safety`.
+  - Research-gate modes in session metadata are `required|optional|off`; new sessions default to `required` for `research/root_cause/reuse/release_safety/context_integrity`.
 4) Run Question Gate (per `AGENTS.md`): check docs/code/env before asking questions. If debugging message flow, start with `ops/diagnose.py explain` (Fast Debug SOP) before logs/SQL.
 5) Before first code change in the block, run FACT pre-check against live code/contracts/tests and capture baseline evidence in report (`Input baseline (FACT)` + commands/results).
 6) Implement with one-issue flow: smallest change that satisfies the invariant + DoD.
 7) Verify: tests/CI/live-check/evidence + запись в `STATE.md` (Brain или Top Architect, до merge для core/поведенческих изменений). No evidence => PLAN/GAP.
 8) Close doc/code drift in the same block (or record explicit GAP owner/follow-up) and include this in report.
+   - `Task Package` must include `Residual architecture debt (mandatory)` and `Next-block contract (mandatory)` with explicit follow-up TP IDs.
 9) Hand-off summary for Brain: what changed, how verified, evidence pointers, remaining risks (summary must match actual diff).
 
 ---
@@ -105,6 +106,8 @@ C) Task Package (required fields):
    - DoD
    - Checks (commands)
    - Evidence plan (what will be captured + запись в `STATE.md` до merge при изменениях поведения/core)
+   - Residual architecture debt (mandatory)
+   - Next-block contract (mandatory)
    - Rollback
    - No-go
    - Branch + Worktree path + Base ref + Merge policy + Cleanup

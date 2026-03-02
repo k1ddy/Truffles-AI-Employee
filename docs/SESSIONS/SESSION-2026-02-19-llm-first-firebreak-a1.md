@@ -73,13 +73,51 @@
   - Executed fresh dev-lane replay `booking-human-critical-hq1-20260227-promofix-a1-r5a` on runtime `:32768`: canonical (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`, `manual_audit=done`, `artifact_integrity=true`).
   - Executed judge-enabled dev-lane replay `booking-human-critical-hq1-20260227-promofix-a1-r5b-dev1`: run completed with full integrity (`infra_valid=true`, `run_integrity_valid=true`, `manual_audit=done`) but semantic remained `invalid` by threshold (`degraded_fallback_rate=0.0909 > 0.05`).
   - Captured degraded fallback cluster (timeout-degrade guard path) at turn-level evidence: `...-002-10-3fe325`, `...-002-11-2e8a9a`, `...-003-06-631f4b`; root class tracked as `runtime_pipeline_latency_budget_exceeded`.
+  - Contract-test migration (master long hair): removed text-based asserts and switched to contract meta checks (`intent_class`, `action_class`, `fact_intents`, `info_sections`, `master_reply_mode`).
+  - Created TP for this packet: `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-master-a1.md`.
+  - Chain controller bootstrap/import command added to support legacy run artifacts; deterministic test added and green.
+  - Created TP for chain controller bootstrap packet: `docs/TASK_PACKAGES/TP-2026-03-02-chain-controller-bootstrap-a1.md`.
+  - Refreshed TP execution status with code-fact audit: P15 implemented (timeout-degrade retry + escalation tests), P12 partial (capability isolation only), P9 still has text-based oracles in `test_message_endpoint.py`/`test_knowledge_service.py`, open items now `P4/P5/P7/P9/P10/P12/P13/P14`.
+  - Implemented multi-seed drift enforcement for acceptance PG checklist in `scripts/quality_chain_controller.sh` and added unit coverage in `truffles-api/tests/test_booking_quality_chain_controller.py`.
+  - Created TP for multi-seed gate: `docs/TASK_PACKAGES/TP-2026-03-02-multi-seed-drift-gate-a1.md`.
+  - Validation: `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py` (`15 passed`).
+  - Verified master long-hair contract test migration: `pytest -q truffles-api/tests/test_info_master_long_hair.py` (`2 passed`) and `pytest -q truffles-api/tests/test_master_info_flow.py` (`29 passed`); updated TP evidence.
+  - Migrated demo_salon semantic service tests to contract meta asserts (removed text oracles) and added TP: `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-semantic-service-a1.md`.
+  - Completed P7 Core De-hardcoding Sweep: moved phrase/regex matchers into `truffles-api/app/services/info_signal_service.py` and `truffles-api/app/services/booking_signal_service.py`, removed core patterns from `info/booking/tool_registry`, and passed targeted tests (`test_booking_appointments.py`, `test_master_info_flow.py`, `test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply"`).
+  - Added process-continuity hardening block `SIG-PROGRAM-S0-S4`: created program TP `docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md`, introduced `context_integrity_gate` in session tooling (`session_start` default required for new sessions, `session_check` enforcement), and updated session/runbook/TP template contracts to require residual debt + next-block continuity.
+  - Completed `S0+S1` block via `docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md`: hardcode gate now includes signal services in `ops/diagnose.py` with technical whitelist, and booking/info signal literals were externalized into declarative manifest+schema (`truffles-api/app/knowledge/generic/SIGNAL_MANIFEST.yaml`, `contracts/packs/signal_manifest.v1.jsonschema`) through `truffles-api/app/services/signal_manifest_service.py`.
+  - Completed `S2+S3` block via `docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md`: signal runtime compiler contract is now explicit in `truffles-api/app/services/signal_manifest_service.py` (`CompiledSignalManifest`, `compiled_version`, `manifest_fingerprint`, `manifest_signature`, cache keyed by manifest signature), and hardcode gate v2 scope in `ops/diagnose.py` now enforces runtime/core/signal policy (`webhook/*.py`, `*_signal_service.py`, `*_runtime_service.py`, `pack_runtime_service.py`, `tool_registry_service.py`) with deterministic tests.
+  - Completed `S4` block via `docs/TASK_PACKAGES/TP-2026-03-02-s4-cross-domain-contract-suite-a1.md`: introduced cross-domain matrix quality contract in `ops/diagnose.py` (`--cross-domain-contract off|warn|block`, min non-salon gate + excluded slug contract), and added dedicated deterministic suite for two non-salon runtime packs in `truffles-api/tests/test_cross_domain_signal_contract_suite.py` covering info/booking/tool_registry paths.
 - next:
-  - Re-canonicalize `/tmp/booking_quality/blocking_scenarios_human.json` (remove `weak_oracle_turn`) so HQ1 full scenario set can pass scenario-contract preflight without waivers.
-  - Re-run HQ1 full chain (`L1` no-judge + `L2` critical) on re-canonicalized human scenarios with same runtime parity and replay isolation flags.
-  - Execute fresh canonical lock-run (`judge-mode all`, fail-on-thresholds) on current `main` head and replay against that lock baseline.
-  - Continue TP Track B runtime refactor for remaining post-tool semantic rewrites outside policy-core guard scope and remove lexical degrade paths where reason-coded clarify/handoff is required.
-  - Keep structured scenario-generation progress in llm-quality summaries for faster infra triage.
+  - Execute live/dev matrix evidence with real non-salon clients (when environment/client slugs are ready) and attach artifacts.
 - evidence:
+- docs/TASK_PACKAGES/TP-2026-03-02-s4-cross-domain-contract-suite-a1.md
+- pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py (`2 passed`)
+- pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "cross_domain_matrix_contract or matrix_slug_normalization" (`4 passed, 73 deselected`)
+- pytest -q truffles-api/tests/test_cross_domain_capability_isolation.py (`2 passed`)
+- python3 -m py_compile ops/diagnose.py truffles-api/tests/test_cross_domain_signal_contract_suite.py truffles-api/tests/test_booking_quality_status_gate.py
+- ruff check ops/diagnose.py truffles-api/tests/test_cross_domain_signal_contract_suite.py truffles-api/tests/test_booking_quality_status_gate.py (`All checks passed`)
+- scripts/session_check.sh
+- docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md
+- pytest -q truffles-api/tests/test_signal_manifest_service.py (`8 passed`)
+- pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "hardcode_core_gate or line_has_phrase_branching or hardcode_core_scope" (`8 passed, 65 deselected`)
+- python3 -m py_compile truffles-api/app/services/signal_manifest_service.py ops/diagnose.py truffles-api/app/services/booking_signal_service.py truffles-api/app/services/info_signal_service.py
+- ruff check truffles-api/app/services/signal_manifest_service.py ops/diagnose.py truffles-api/tests/test_signal_manifest_service.py truffles-api/tests/test_booking_quality_status_gate.py (`All checks passed`)
+- docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md
+- pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "hardcode_core_gate or line_has_phrase_branching" (`7 passed`)
+- pytest -q truffles-api/tests/test_signal_manifest_service.py (`6 passed`)
+- pytest -q truffles-api/tests/test_booking_appointments.py (`60 passed`)
+- pytest -q truffles-api/tests/test_master_info_flow.py (`29 passed`)
+- pytest -q truffles-api/tests/test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply" (`18 passed, 252 deselected`)
+- ruff check ops/diagnose.py truffles-api/app/services/signal_manifest_service.py truffles-api/app/services/booking_signal_service.py truffles-api/app/services/info_signal_service.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_signal_manifest_service.py (`All checks passed`)
+- docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md
+- bash -n scripts/session_check.sh
+- bash -n scripts/session_start.sh
+- scripts/session_check.sh
+- pytest -q truffles-api/tests/test_booking_quality_chain_controller.py (`14 passed`)
+- pytest -q truffles-api/tests/test_info_master_long_hair.py (`2 passed`)
+- pytest -q truffles-api/tests/test_master_info_flow.py (`29 passed`)
+- pytest -q truffles-api/tests/test_message_endpoint.py -k "semantic_service_matcher or semantic_question_type" (`7 passed, 263 deselected`)
   - pytest -q truffles-api/tests/test_demo_salon_eval.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_chaos_dialogs.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_message_endpoint.py
   - 289 passed, 2 warnings
   - ruff check truffles-api/app/services/ai_service.py truffles-api/tests/test_ai_service.py
@@ -352,4 +390,4 @@
     - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`69 passed`)
     - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
     - `scripts/session_check.sh`
-- last_updated: 2026-03-02T06:11:08+05:00
+- last_updated: 2026-03-02T10:05:00+05:00

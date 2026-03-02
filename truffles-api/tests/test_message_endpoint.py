@@ -193,7 +193,7 @@ def _stub_generic_signal_lexicons():
         )
         stack.enter_context(
             patch(
-                "app.routers.webhook.info.get_signal_lexicon_list",
+                "app.services.info_signal_service.get_signal_lexicon_list",
                 side_effect=_stub,
             )
         )
@@ -5121,7 +5121,8 @@ def test_semantic_service_matcher_allows_short_query_without_keywords():
 
     assert result is not None
     assert result.action == "match"
-    assert result.response == "Маникюр — 2 500 ₸."
+    assert result.canonical_name == "Маникюр"
+    assert isinstance(result.response, str) and result.response
 
 
 def test_semantic_service_matcher_returns_suggestions_reply():
@@ -5144,7 +5145,9 @@ def test_semantic_service_matcher_returns_suggestions_reply():
 
     assert result is not None
     assert result.action == "suggest"
-    assert "Маникюр" in result.response
+    assert result.canonical_name == "Маникюр"
+    assert set(result.suggestions or []) == {"Маникюр", "Педикюр"}
+    assert isinstance(result.response, str) and result.response
 
 
 def test_semantic_question_type_routes_duration_and_price():
@@ -5173,16 +5176,25 @@ def test_semantic_question_type_routes_duration_and_price():
         decision = get_demo_salon_decision("Сколько длится процедура?")
         assert decision is not None
         assert decision.intent == "service_duration"
-        assert "по времени" in decision.response.casefold() or "какая именно" in decision.response.casefold()
+        assert decision.action == "reply"
+        fact_intents = set(decision.meta.get("fact_intents") or [])
+        assert "service_duration" in fact_intents
+        assert decision.meta.get("question_type") == "duration"
 
         decision = get_demo_salon_decision("Сколько стоит процедура?")
         assert decision is not None
         assert decision.intent == "service_clarify"
+        assert decision.action == "reply"
+        fact_intents = set(decision.meta.get("fact_intents") or [])
+        assert "service_clarify" in fact_intents
 
         decision = get_demo_salon_decision("Сколько по времени маникюр?")
         assert decision is not None
         assert decision.intent == "service_duration"
-        assert "маникюр" in decision.response.casefold()
+        assert decision.action == "reply"
+        fact_intents = set(decision.meta.get("fact_intents") or [])
+        assert "service_duration" in fact_intents
+        assert (decision.meta.get("duration_item") or "").casefold() == "маникюр"
 
 
 def test_service_matcher_short_circuits_llm():

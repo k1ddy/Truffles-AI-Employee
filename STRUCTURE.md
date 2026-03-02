@@ -30,6 +30,7 @@
 | `contracts/llm/llm_policy_core_output.v1.jsonschema` | Контракт LLM policy core | Архитектор/Backend |
 | `contracts/packs/` | Pack-compiler artifacts (signal graph, indexes) | Архитектор/Backend |
 | `contracts/packs/signal_graph.v1.jsonschema` | Канон сигнального графа (anchors/lexicons) | Архитектор/Backend |
+| `contracts/packs/signal_manifest.v1.jsonschema` | Канон signal manifest (regex/tokens/layout map) для signal-layer | Архитектор/Backend |
 | `contracts/policy/` | Policy DSL bundles | Архитектор/Backend |
 | `contracts/policy/policy_bundle.v1.jsonschema` | Канон policy bundle (guards/sections) | Архитектор/Backend |
 | `contracts/integrations/provider_inbound.v1.jsonschema` | Provider inbound envelope (gateway) | Архитектор/Backend |
@@ -91,6 +92,9 @@
 | `truffles-api/app/services/learned_response_service.py` | Auto-ingest + approval wiring for learned responses | Backend |
 | `truffles-api/app/services/calendar_sync_service.py` | Calendar provider sync via outbox + cursors + busy blocks | Backend |
 | `truffles-api/app/services/tool_registry_service.py` | Tool registry executor (calendar/catalog) for LLM plan | Backend |
+| `truffles-api/app/services/info_signal_service.py` | Info/lexicon signal helpers (routing-neutral) | Backend |
+| `truffles-api/app/services/booking_signal_service.py` | Booking/date/time signal helpers (manifest-backed regex/tokens + lexicon) | Backend |
+| `truffles-api/app/services/signal_manifest_service.py` | Signal manifest runtime compiler/loader (schema validation + signature cache + version meta) | Backend |
 | `truffles-api/app/services/appointment_reminder_service.py` | Appointment reminder/follow-up jobs + outbox enqueue | Backend |
 | `truffles-api/app/services/metrics_daily_service.py` | Daily metrics snapshot (metrics_daily) | Backend |
 | `truffles-api/app/services/marketing/service.py` | Marketing Pro lifecycle/audience/preflight/execute/retry logic | Backend |
@@ -184,6 +188,15 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-s4-cross-domain-contract-suite-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-multi-seed-drift-gate-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-chain-controller-bootstrap-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-master-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-semantic-service-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-core-dehardcoding-sweep-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-02-27-research-gates-rollout-a900.md`
 - `docs/TASK_PACKAGES/TP-2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md`
 - `docs/TASK_PACKAGES/TP-2026-02-22-outreach-auto-case-a200.md`
@@ -481,6 +494,7 @@
 | `knowledge/<client_slug>/*` | Канон RAG‑контента |
 | `truffles-api/app/knowledge/generic/*` | Generic pack scaffold (CI/tests) |
 | `truffles-api/app/knowledge/generic/SYSTEM_LEXICONS.yaml` | System language lexicons (shared) |
+| `truffles-api/app/knowledge/generic/SIGNAL_MANIFEST.yaml` | Declarative signal patterns/tokens/layout map for signal services |
 | `knowledge/generic/*` | Generic RAG docs (CI/tests) |
 
 ---
@@ -716,6 +730,7 @@ truffles-api/
 | `truffles-api/tests/test_safe_mode_gate.py` | Unit: Minimum Data safe-mode gate |
 | `truffles-api/tests/test_admin_health.py` | Unit: Admin health minimum-data readiness |
 | `truffles-api/tests/test_pack_compiler.py` | Unit: pack compiler artifacts + checksum |
+| `truffles-api/tests/test_cross_domain_signal_contract_suite.py` | Unit: cross-domain info/booking/tool_registry contract on two non-salon runtime packs |
 | `truffles-api/tests/test_policy_dsl.py` | Unit: policy DSL schema validation |
 | `truffles-api/tests/test_knowledge_registry_chunking.py` | Unit: Qdrant pack chunking by size |
 
