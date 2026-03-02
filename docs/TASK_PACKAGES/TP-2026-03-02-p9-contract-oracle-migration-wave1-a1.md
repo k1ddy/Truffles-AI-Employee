@@ -1,5 +1,9 @@
 # TP-2026-03-02-p9-contract-oracle-migration-wave1-a1
 
+## Status
+- `SUPERSEDED_BY`: `docs/TASK_PACKAGES/TP-2026-03-02-p9-contract-oracle-full-closure-a1.md`
+- `REASON`: this file covers wave1 only; complete closure now tracks all remaining P9 scope in one TP.
+
 ## Block identity
 - `BLOCK_ID`: SIG-P9-CONTRACT-ORACLE-MIGRATION-W1-A1
 - `PARENT_BLOCK_ID`: TP-2026-02-21-consultant-contract-first-remediation-a1
