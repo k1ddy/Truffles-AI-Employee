@@ -191,6 +191,7 @@
 - `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-master-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-semantic-service-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-core-dehardcoding-sweep-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-02-27-research-gates-rollout-a900.md`
 - `docs/TASK_PACKAGES/TP-2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md`
 - `docs/TASK_PACKAGES/TP-2026-02-22-outreach-auto-case-a200.md`

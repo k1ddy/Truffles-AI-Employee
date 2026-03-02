@@ -84,13 +84,18 @@
   - Verified master long-hair contract test migration: `pytest -q truffles-api/tests/test_info_master_long_hair.py` (`2 passed`) and `pytest -q truffles-api/tests/test_master_info_flow.py` (`29 passed`); updated TP evidence.
   - Migrated demo_salon semantic service tests to contract meta asserts (removed text oracles) and added TP: `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-semantic-service-a1.md`.
   - Completed P7 Core De-hardcoding Sweep: moved phrase/regex matchers into `truffles-api/app/services/info_signal_service.py` and `truffles-api/app/services/booking_signal_service.py`, removed core patterns from `info/booking/tool_registry`, and passed targeted tests (`test_booking_appointments.py`, `test_master_info_flow.py`, `test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply"`).
+  - Added process-continuity hardening block `SIG-PROGRAM-S0-S4`: created program TP `docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md`, introduced `context_integrity_gate` in session tooling (`session_start` default required for new sessions, `session_check` enforcement), and updated session/runbook/TP template contracts to require residual debt + next-block continuity.
 - next:
-  - Re-canonicalize `/tmp/booking_quality/blocking_scenarios_human.json` (remove `weak_oracle_turn`) so HQ1 full scenario set can pass scenario-contract preflight without waivers.
-  - Re-run HQ1 full chain (`L1` no-judge + `L2` critical) on re-canonicalized human scenarios with same runtime parity and replay isolation flags.
-  - Execute fresh canonical lock-run (`judge-mode all`, fail-on-thresholds) on current `main` head and replay against that lock baseline.
-  - Continue TP Track B runtime refactor for remaining post-tool semantic rewrites outside policy-core guard scope and remove lexical degrade paths where reason-coded clarify/handoff is required.
-  - Keep structured scenario-generation progress in llm-quality summaries for faster infra triage.
+  - Execute `S0` first: extend hardcode gate scope to include `*_signal_service.py` and add explicit technical-format whitelist only.
+  - Start `S1`: externalize signal literals/regex into declarative manifests + schema.
+  - Start `S2`: implement signal runtime compiler/loader (cache, validation, versioning) and make signal services thin-runtime.
+  - Run `S3`: enforce no-hardcode gate v2 across core/runtime/signal.
+  - Run `S4`: add cross-domain contract suite on minimum two non-salon packs.
 - evidence:
+- docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md
+- bash -n scripts/session_check.sh
+- bash -n scripts/session_start.sh
+- scripts/session_check.sh
 - pytest -q truffles-api/tests/test_booking_quality_chain_controller.py (`14 passed`)
 - pytest -q truffles-api/tests/test_info_master_long_hair.py (`2 passed`)
 - pytest -q truffles-api/tests/test_master_info_flow.py (`29 passed`)
@@ -367,4 +372,4 @@
     - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`69 passed`)
     - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
     - `scripts/session_check.sh`
-- last_updated: 2026-03-02T07:10:00+05:00
+- last_updated: 2026-03-02T09:12:14+05:00
