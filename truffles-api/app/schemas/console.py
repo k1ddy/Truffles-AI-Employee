@@ -1622,6 +1622,50 @@ class ConsoleAdminControlTowerOverviewResponse(BaseModel):
     ops_job_catalog: list[ConsoleOpsJobDefinition]
 
 
+class ConsoleAdminControlTowerIssueCount(BaseModel):
+    code: str
+    count: int
+
+
+class ConsoleAdminControlTowerReadinessItem(BaseModel):
+    company_id: Optional[UUID] = None
+    company_name: Optional[str] = None
+    client_id: UUID
+    client_slug: str
+    branch_id: UUID
+    branch_slug: str
+    branch_name: str
+    current_step: OnboardingStepId
+    scorecard_status: OnboardingScorecardStatusValue
+    readiness_status: OnboardingReadinessStatusValue
+    hard_gate_status: OnboardingReadinessHardGateStatusValue
+    ready: bool
+    go_live_state: str
+    integration_state: Literal["ok", "degraded"] = "ok"
+    missing: list[str] = []
+    hard_gate_blockers: list[str] = []
+
+
+class ConsoleAdminControlTowerReadinessSummary(BaseModel):
+    total_branches: int
+    ready_branches: int
+    blocked_branches: int
+    hard_gate_failed_branches: int
+    go_live_draft_branches: int
+    go_live_approved_branches: int
+    go_live_rejected_branches: int
+    degraded_branches: int
+
+
+class ConsoleAdminControlTowerReadinessBoardResponse(BaseModel):
+    generated_at: str
+    limit: int
+    include_ready: bool = False
+    summary: ConsoleAdminControlTowerReadinessSummary
+    top_blockers: list[ConsoleAdminControlTowerIssueCount] = []
+    items: list[ConsoleAdminControlTowerReadinessItem]
+
+
 ConsoleBranchChangeStatus = Literal["draft", "validated", "publish_failed", "published", "rolled_back"]
 
 
@@ -2421,6 +2465,28 @@ class ConsoleIntegrationsListResponse(BaseModel):
     has_more: bool = False
     total_in_scope: int = 0
     items: list[ConsoleBranchIntegrationStatus]
+    provider_ops_queue: list[ConsoleProviderOpsQueueItem] = []
+
+
+class ConsoleAdminControlTowerDriftSummary(BaseModel):
+    total_branches: int
+    ok_branches: int
+    warn_branches: int
+    error_branches: int
+    degraded_branches: int
+    queue_p0: int
+    queue_p1: int
+    queue_p2: int
+
+
+class ConsoleAdminControlTowerDriftBoardResponse(BaseModel):
+    generated_at: str
+    stale_after_minutes: int
+    limit: int
+    only_problematic: bool = True
+    summary: ConsoleAdminControlTowerDriftSummary
+    top_issues: list[ConsoleAdminControlTowerIssueCount] = []
+    items: list[ConsoleProviderLifecycleItem]
     provider_ops_queue: list[ConsoleProviderOpsQueueItem] = []
 
 
