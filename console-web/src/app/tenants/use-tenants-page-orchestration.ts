@@ -20,7 +20,6 @@ type ApiErrorReporter = (
 ) => void;
 
 type UseTenantsPageOrchestrationParams = {
-    controlTowerEnabled: boolean;
     workspaceMode: TenantsWorkspaceMode;
     queryClient: QueryClient;
     reportInlineError: InlineErrorReporter;
@@ -29,14 +28,13 @@ type UseTenantsPageOrchestrationParams = {
 };
 
 export function useTenantsPageOrchestration({
-    controlTowerEnabled,
     workspaceMode,
     queryClient,
     reportInlineError,
     reportError,
     resolveErrorScopeFromWorkspace,
 }: UseTenantsPageOrchestrationParams) {
-    const activeErrorScope = resolveErrorScopeFromWorkspace(controlTowerEnabled ? workspaceMode : "portfolio");
+    const activeErrorScope = resolveErrorScopeFromWorkspace(workspaceMode);
 
     const reportValidationError = useCallback((message: string, code = "VALIDATION_ERROR", scope?: string) => {
         const resolvedScope = scope ?? activeErrorScope;
@@ -62,6 +60,8 @@ export function useTenantsPageOrchestration({
         queryClient.invalidateQueries({ queryKey: ["tenants-clients"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-branches"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-fleet-attention"] });
+        queryClient.invalidateQueries({ queryKey: ["tenants-control-tower-action-center"] });
+        queryClient.invalidateQueries({ queryKey: ["tenants-control-tower-migration-program"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-branch-changes-recent-kpi"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-client-lifecycle-audit-api"] });
     }, [queryClient]);

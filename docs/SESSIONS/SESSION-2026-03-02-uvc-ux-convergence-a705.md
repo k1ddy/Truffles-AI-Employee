@@ -1,0 +1,39 @@
+# SESSION 2026-03-02-uvc-ux-convergence-a705 — Session 2026-03-02-uvc-ux-convergence-a705
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-convergence-a705.md
+- block_id: UVC-CONSOLE-UX-CONVERGENCE-A705
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-02-uvc-ux-convergence-a705
+- worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-convergence-a705
+- base_ref: origin/main
+- scope: UVC frontend convergence in existing tabs (Tenants/Integrations/Workspace) + contract sync + e2e linkage guard.
+- done:
+  - Regenerated `console-web/src/types/api.generated.ts` from актуального OpenAPI.
+  - Added frontend `adminApi` methods for `/admin/control-tower/*` (`overview/readiness/drift/action-center/migration/wave`).
+  - Switched Tenants action queue to backend `control-tower/action-center` + migration summary (with deterministic intent routing).
+  - Added explicit Workspace deep-link contract via query params (`recommended_action`, `action_source`, `action_reasons`, `branch_id`).
+  - Removed duplicate provider-ops queue block from Integrations overview while keeping matrix/today execute CTA.
+  - Updated Workspace to consume deep-link action context (query-first, localStorage fallback).
+  - Added e2e guard for `Tenants action queue -> Workspace execute` and extended deterministic mocks for control-tower APIs.
+- next:
+  - Optional follow-up: decompose `tenants/page.tsx` into smaller bounded modules (residual debt from TP).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-convergence-a705.md
+  - console-web/src/lib/api-client.ts
+  - console-web/src/app/tenants/use-tenants-action-queue.ts
+  - console-web/src/app/tenants/use-tenants-actions.ts
+  - console-web/src/app/tenants/use-tenants-data-queries.ts
+  - console-web/src/app/integrations/page.tsx
+  - console-web/src/app/company-workspace/page.tsx
+  - console-web/e2e/platform-admin.spec.ts
+  - `cd console-web && npm run lint`
+  - `cd console-web && npm run build`
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants"` (19 passed)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check`
+- last_updated: 2026-03-02
