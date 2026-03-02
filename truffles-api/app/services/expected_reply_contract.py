@@ -45,6 +45,20 @@ def normalize_expected_reply_type(value: str | None) -> str | None:
     return cleaned
 
 
+def should_skip_booking_interrupt_for_expected_reply(
+    *,
+    expected_reply_type: str | None,
+    expected_reply_blocked_by_info: bool,
+    has_info_interrupt: bool,
+) -> bool:
+    expected_type = normalize_expected_reply_type(expected_reply_type)
+    if not expected_type:
+        return False
+    if expected_reply_blocked_by_info:
+        return False
+    return not has_info_interrupt
+
+
 def resolve_services_overview_contract_update(
     *,
     tool_action: str | None,

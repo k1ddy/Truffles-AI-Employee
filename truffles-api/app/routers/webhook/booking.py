@@ -53,6 +53,9 @@ from app.services.booking_signal_service import (
     swap_keyboard_layout as _swap_keyboard_layout,
 )
 from app.services.capabilities_runtime import get_runtime_capabilities
+from app.services.expected_reply_contract import (
+    should_skip_booking_interrupt_for_expected_reply,
+)
 from app.services.pack_runtime_service import get_system_lexicon_list, phrase_match_intent
 
 if TYPE_CHECKING:
@@ -1603,7 +1606,11 @@ def _handle_booking_interrupt(
     has_info_interrupt = bool(info_class_intents)
     if not has_info_interrupt and intent_decomp_set:
         has_info_interrupt = bool(intent_decomp_set & legacy.INFO_INTENTS)
-    if expected_reply_type and not expected_reply_blocked_by_info and not has_info_interrupt:
+    if should_skip_booking_interrupt_for_expected_reply(
+        expected_reply_type=expected_reply_type,
+        expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+        has_info_interrupt=has_info_interrupt,
+    ):
         return None
 
     booking_interrupt_text = _select_booking_interrupt_text(

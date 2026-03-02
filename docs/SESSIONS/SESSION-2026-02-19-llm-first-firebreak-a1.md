@@ -400,4 +400,29 @@
     - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`69 passed`)
     - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
     - `scripts/session_check.sh`
-- last_updated: 2026-03-02T10:05:00+05:00
+  - Started continuation packet for remaining remediation items (`P4/P5b/P9`):
+    - created dedicated TP blocks with mandatory gates:
+      - `docs/TASK_PACKAGES/TP-2026-03-02-p4-expected-reply-routing-decouple-a1.md`
+      - `docs/TASK_PACKAGES/TP-2026-03-02-p5b-distributed-retrieval-backend-a1.md`
+      - `docs/TASK_PACKAGES/TP-2026-03-02-p9-contract-oracle-migration-wave1-a1.md`
+    - synchronized parent TP execution status to reference these blocks.
+  - Implemented `P9 wave1` (contract-oracle migration, test-only):
+    - migrated target tests in `truffles-api/tests/test_message_endpoint.py` from phrase-level business asserts to contract/meta/trace assertions:
+      - `test_consult_recommendation_prefers_pack_service_decision_over_service_matcher`
+      - `test_booking_info_interrupt_pricing_with_expected_name_suppresses_booking_prompt`
+      - `test_multi_truth_reply_handles_hours_and_price_in_single_segment`
+    - validation:
+      - `pytest -q truffles-api/tests/test_message_endpoint.py -k "consult_recommendation_prefers_pack_service_decision_over_service_matcher or booking_info_interrupt_pricing_with_expected_name_suppresses_booking_prompt or multi_truth_reply_handles_hours_and_price_in_single_segment"` (`3 passed, 267 deselected`)
+      - `ruff check truffles-api/tests/test_message_endpoint.py` (`All checks passed`)
+  - Synced canonical logs:
+    - updated `STATE.md` with P9 wave1 evidence and new dedicated continuation TPs for `P4` and `P5b`.
+  - Started `P4a` implementation (behavior-preserving router decouple step):
+    - added contract helper `should_skip_booking_interrupt_for_expected_reply` in `truffles-api/app/services/expected_reply_contract.py`,
+    - switched booking router gate call-site to contract helper in `truffles-api/app/routers/webhook/booking.py`,
+    - added deterministic contract tests in `truffles-api/tests/test_expected_reply_contract.py`.
+  - Validation (green, P4a step1):
+    - `pytest -q truffles-api/tests/test_expected_reply_contract.py` (`11 passed`)
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k "booking_info_interrupt or expected_reply"` (`22 passed, 248 deselected`)
+    - `ruff check truffles-api/app/services/expected_reply_contract.py truffles-api/app/routers/webhook/booking.py truffles-api/tests/test_expected_reply_contract.py truffles-api/tests/test_message_endpoint.py` (`All checks passed`)
+    - `SESSION_AGENT=a1 scripts/session_check.sh`
+- last_updated: 2026-03-02T15:02:00+05:00

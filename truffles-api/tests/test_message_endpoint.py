@@ -2411,8 +2411,9 @@ def test_consult_recommendation_prefers_pack_service_decision_over_service_match
 
     assert response.success is True
     assert response.bot_response is not None
-    assert "Рекомендую" in response.bot_response
-    assert "MATCHER RESPONSE" not in response.bot_response
+    assert matcher_decision.response not in response.bot_response
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("action") == "reply"
     mock_pack_service_decision.assert_called_once()
     service_matcher.assert_not_called()
     mock_llm.assert_not_called()
@@ -4280,11 +4281,17 @@ def test_booking_info_interrupt_pricing_with_expected_name_suppresses_booking_pr
         )
 
     assert response.success is True
-    assert "5 000" in (response.bot_response or "")
+    assert response.bot_response is not None
     assert webhook_router.MSG_BOOKING_ASK_DATETIME not in response.bot_response
     assert webhook_router.MSG_BOOKING_ASK_NAME not in response.bot_response
     assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_NAME
     meta = saved_message.message_metadata.get("decision_meta", {})
+    fact_intents = meta.get("fact_intents")
+    assert isinstance(fact_intents, list)
+    assert "pricing" in {str(item).strip().casefold() for item in fact_intents if isinstance(item, str)}
+    info_sections = meta.get("info_sections")
+    assert isinstance(info_sections, list)
+    assert "pricing" in {str(item).strip().casefold() for item in info_sections if isinstance(item, str)}
     assert meta.get("booking_info_interrupt") is True
     assert meta.get("expected_reply_blocked_by_info") is True
     assert meta.get("carryover_ignored") is True
@@ -24518,10 +24525,20 @@ def test_multi_truth_reply_handles_hours_and_price_in_single_segment():
 
     assert response.success is True
     assert response.bot_response is not None
-    response_text = response.bot_response.casefold()
-    assert "педикюр" in response_text
-    assert "5 000" in response.bot_response
-    assert any(token in response_text for token in ("9:00", "21:00", "ежедневно", "без выходных"))
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("intent") == "multi_truth"
+    fact_intents = meta.get("fact_intents")
+    assert isinstance(fact_intents, list)
+    normalized_fact_intents = {
+        str(item).strip().casefold() for item in fact_intents if isinstance(item, str)
+    }
+    assert {"hours", "pricing"} <= normalized_fact_intents
+    info_sections = meta.get("info_sections")
+    assert isinstance(info_sections, list)
+    normalized_info_sections = {
+        str(item).strip().casefold() for item in info_sections if isinstance(item, str)
+    }
+    assert {"hours", "pricing"} <= normalized_info_sections
     assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response.bot_response
     assert webhook_router.MSG_BOOKING_ASK_DATETIME not in response.bot_response
     assert webhook_router.MSG_BOOKING_ASK_NAME not in response.bot_response
