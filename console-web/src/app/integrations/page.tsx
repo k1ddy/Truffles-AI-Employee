@@ -18,11 +18,8 @@ import {
     type ProviderOpsQueueItem,
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
-import { writeBrowserStorage } from "@/lib/browser-storage";
 import { useConsoleContextScope } from "@/lib/use-console-context-scope";
 import type { components } from "@/types/api.generated";
-
-const WORKSPACE_RECOMMENDED_ACTION_KEY = "console:workspace_recommended_action";
 
 const STALE_AFTER_OPTIONS = [15, 30, 60, 180] as const;
 const API_LIST_LIMIT = 100;
@@ -32,14 +29,6 @@ type ScopeTarget = {
     companyId?: string | null;
     clientId?: string | null;
     branchId?: string | null;
-};
-
-type WorkspaceRecommendedActionContext = {
-    branch_id: string;
-    action: ProviderOpsQueueItem["recommended_action"];
-    reasons: string[];
-    source: "queue" | "matrix";
-    captured_at: string;
 };
 
 type StatusFilter = "all" | "error" | "warn" | "ok";
@@ -104,14 +93,6 @@ function mergeMembershipStats(...items: Array<MembershipStats | undefined>): Mem
         merged.support += item.support;
     }
     return merged;
-}
-
-function setWorkspaceRecommendedActionContext(value: WorkspaceRecommendedActionContext | null) {
-    if (value === null) {
-        writeBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
-        return;
-    }
-    writeBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY, JSON.stringify(value));
 }
 
 function normalizeText(value?: string | null): string {
@@ -212,23 +193,22 @@ function formatTimestamp(value?: string | null): string {
     return new Date(value).toLocaleString("ru-RU");
 }
 
-function providerOpsActionLabel(action: ProviderOpsQueueItem["recommended_action"]): string {
-    if (action === "provider_start_rebind") {
-        return "Старт перепривязки";
+function parseProviderAction(value?: string | null): ProviderOpsQueueItem["recommended_action"] | null {
+    if (!value) {
+        return null;
     }
-    if (action === "provider_complete_rebind") {
-        return "Завершить перепривязку";
+    const normalized = value.trim();
+    if (
+        normalized === "integration_reconcile"
+        || normalized === "provider_start_rebind"
+        || normalized === "provider_complete_rebind"
+        || normalized === "provider_renewal_confirmed"
+        || normalized === "provider_webhook_updated"
+        || normalized === "provider_send_reminder"
+    ) {
+        return normalized;
     }
-    if (action === "provider_renewal_confirmed") {
-        return "Подтвердить продление";
-    }
-    if (action === "provider_webhook_updated") {
-        return "Webhook обновлен";
-    }
-    if (action === "provider_send_reminder") {
-        return "Отправить напоминание";
-    }
-    return "Сверка";
+    return null;
 }
 
 function providerSlaBadgeClass(value?: string | null): string {
@@ -994,7 +974,16 @@ export default function IntegrationsPage() {
         toast.success("Контекст сохранен");
     };
 
-    const persistScopeAndOpenWorkspace = (target: ScopeTarget, note?: string) => {
+    const persistScopeAndOpenWorkspace = (
+        target: ScopeTarget,
+        note?: string,
+        actionContext?: {
+            recommendedAction?: ProviderOpsQueueItem["recommended_action"];
+            reasons?: string[];
+            source?: "matrix" | "today";
+            mode?: "dry_run" | "execute";
+        },
+    ) => {
         const normalizedClient = target.clientId ? String(target.clientId) : "";
         const normalizedBranch = target.branchId ? String(target.branchId) : "";
         const normalizedCompany = target.companyId
@@ -1014,22 +1003,28 @@ export default function IntegrationsPage() {
         if (note) {
             toast.success(note);
         }
-        router.push("/company-workspace");
+        const params = new URLSearchParams();
+        if (normalizedBranch) {
+            params.set("branch_id", normalizedBranch);
+        }
+        if (actionContext?.recommendedAction) {
+            params.set("recommended_action", actionContext.recommendedAction);
+            params.set("action_source", actionContext.source ?? "matrix");
+            params.set("action_mode", actionContext.mode ?? "execute");
+            const normalizedReasons = (actionContext.reasons ?? [])
+                .map((reason) => reason.trim())
+                .filter((reason) => reason.length > 0)
+                .slice(0, 6);
+            if (normalizedReasons.length > 0) {
+                params.set("action_reasons", normalizedReasons.join(","));
+            }
+        }
+        const query = params.toString();
+        router.push(query ? `/company-workspace?${query}` : "/company-workspace");
     };
 
     const openWorkspaceForRow = (row: EnrichedRow) => {
         const recommendation = providerOpsByBranchId.get(row.branch_id);
-        if (recommendation) {
-            setWorkspaceRecommendedActionContext({
-                branch_id: recommendation.branch_id,
-                action: recommendation.recommended_action,
-                reasons: recommendation.reasons ?? [],
-                source: "matrix",
-                captured_at: new Date().toISOString(),
-            });
-        } else {
-            setWorkspaceRecommendedActionContext(null);
-        }
         persistScopeAndOpenWorkspace(
             {
                 companyId: row.company_id,
@@ -1037,27 +1032,17 @@ export default function IntegrationsPage() {
                 branchId: row.branch_id,
             },
             "Переход в Workspace",
-        );
-    };
-
-    const openWorkspaceForQueueItem = (queueItem: ProviderOpsQueueItem) => {
-        setWorkspaceRecommendedActionContext({
-            branch_id: queueItem.branch_id,
-            action: queueItem.recommended_action,
-            reasons: queueItem.reasons ?? [],
-            source: "queue",
-            captured_at: new Date().toISOString(),
-        });
-        persistScopeAndOpenWorkspace(
-            {
-                clientId: queueItem.client_id,
-                branchId: queueItem.branch_id,
-            },
-            `Queue -> ${providerOpsActionLabel(queueItem.recommended_action)}`,
+            recommendation ? {
+                recommendedAction: recommendation.recommended_action,
+                reasons: recommendation.reasons ?? [],
+                source: "matrix",
+                mode: "execute",
+            } : undefined,
         );
     };
 
     const openWorkspaceForLifecycleItem = (item: ProviderLifecycleItem) => {
+        const lifecycleAction = parseProviderAction(item.next_action);
         persistScopeAndOpenWorkspace(
             {
                 companyId: item.company_id,
@@ -1065,6 +1050,12 @@ export default function IntegrationsPage() {
                 branchId: item.branch_id,
             },
             "Today -> Workspace",
+            lifecycleAction ? {
+                recommendedAction: lifecycleAction,
+                reasons: item.blockers ?? [],
+                source: "today",
+                mode: "execute",
+            } : undefined,
         );
     };
 
@@ -1557,42 +1548,6 @@ export default function IntegrationsPage() {
 
             {viewMode === "overview" ? (
                 <>
-                    {providerOpsQueue.length > 0 && (
-                        <section className="mt-4 rounded-xl border border-amber-300/60 bg-amber-50/60 p-4" data-testid="provider-ops-queue">
-                            <div className="mb-2 text-sm font-semibold text-amber-900">
-                                Очередь provider-операций ({providerOpsQueue.length})
-                            </div>
-                            <div className="space-y-2">
-                                {providerOpsQueue.map((queueItem) => (
-                                    <div
-                                        key={`queue-${queueItem.branch_id}`}
-                                        className="flex flex-wrap items-center justify-between gap-3 rounded border border-amber-300/50 bg-background/80 p-2 text-xs"
-                                    >
-                                        <div>
-                                            <div className="font-medium text-foreground">
-                                                {queueItem.client_slug} / {queueItem.branch_name}
-                                            </div>
-                                            <div className="text-muted-foreground">
-                                                приоритет {queueItem.priority.toUpperCase()} · действие {providerOpsActionLabel(queueItem.recommended_action)}
-                                            </div>
-                                            <div className="text-muted-foreground">
-                                                причины: {queueItem.reasons.map((reason) => statusLabel(reason)).join(", ")}
-                                            </div>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-border/60 px-3 py-1 font-medium hover:bg-muted"
-                                            onClick={() => openWorkspaceForQueueItem(queueItem)}
-                                            data-testid="integrations-queue-open-workspace"
-                                        >
-                                            Открыть в Workspace
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
-                    )}
-
                     <section className="mt-4 rounded-xl border border-border/60 bg-card p-3 sm:p-4" data-testid="integrations-branch-matrix">
                         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                             <div className="text-sm font-semibold">Матрица филиалов</div>

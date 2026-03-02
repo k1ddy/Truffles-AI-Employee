@@ -232,7 +232,6 @@ export default function TenantsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const queryClient = useQueryClient();
-    const controlTowerEnabled = process.env.NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER !== "0";
     const { errors: inlineErrors, reportError, reportInlineError, clearErrors } = useInlineErrorSummary();
     const [clientQuery, setClientQuery] = useState("");
     const [branchQuery, setBranchQuery] = useState("");
@@ -268,7 +267,7 @@ export default function TenantsPage() {
         clientId: "",
     });
     const [quickCreateRunning, setQuickCreateRunning] = useState<"company" | "client" | "branch" | null>(null);
-    const effectiveWorkspaceMode: TenantsWorkspaceMode = controlTowerEnabled ? workspaceMode : "portfolio";
+    const effectiveWorkspaceMode: TenantsWorkspaceMode = workspaceMode;
     const {
         activeErrorScope,
         reportValidationError,
@@ -277,7 +276,6 @@ export default function TenantsPage() {
         refreshTenants,
         auditSensitiveAccess,
     } = useTenantsPageOrchestration({
-        controlTowerEnabled,
         workspaceMode,
         queryClient,
         reportInlineError,
@@ -353,6 +351,8 @@ export default function TenantsPage() {
         clientsQuery,
         branchesQuery,
         fleetAttentionQuery,
+        controlTowerActionCenterQuery,
+        controlTowerMigrationProgramQuery,
         branchChangesQuery,
         recentBranchChangesKpiQuery,
         selectedClientAuditQuery,
@@ -625,6 +625,8 @@ export default function TenantsPage() {
     const { actionQueue, isClientArchived } = useTenantsActionQueue({
         tenantLifecycle,
         fleetAttention,
+        controlTowerActionCenter: controlTowerActionCenterQuery.data,
+        controlTowerMigrationProgram: controlTowerMigrationProgramQuery.data,
         operationalKpi,
         clientsSummary,
     });
@@ -637,6 +639,8 @@ export default function TenantsPage() {
     const decommissionFocused = effectiveWorkspaceMode === "decommission";
 
     const refreshActionQueue = () => {
+        controlTowerActionCenterQuery.refetch();
+        controlTowerMigrationProgramQuery.refetch();
         tenantsPortfolioQuery.refetch();
         if (pageFilterCompanyId) {
             tenantsCompanyCockpitQuery.refetch();
@@ -668,7 +672,6 @@ export default function TenantsPage() {
             meLoading={meLoading}
             canReadTenants={canReadTenants}
             canWriteTenants={canWriteTenants}
-            controlTowerEnabled={controlTowerEnabled}
             tenantLifecycle={tenantLifecycle}
             onTenantLifecycleChange={setTenantLifecycle}
             topControlsProps={{
@@ -697,12 +700,9 @@ export default function TenantsPage() {
                 onPageFilterBranchChange: setPageFilterBranch,
                 onApplyContextToPageFilters: applyContextToPageFilters,
                 onClearPageFilters: clearPageFilters,
-                controlTowerEnabled,
                 workspaceMode: effectiveWorkspaceMode,
                 onWorkspaceModeChange: (value) => {
-                    if (controlTowerEnabled) {
-                        setWorkspaceMode(value);
-                    }
+                    setWorkspaceMode(value);
                 },
                 viewPreset,
                 onViewPresetChange: setViewPreset,
@@ -727,10 +727,12 @@ export default function TenantsPage() {
                 onOpenWorkspace: () => router.push("/company-workspace"),
             }}
             actionQueue={{
-                show: controlTowerEnabled,
+                show: true,
                 items: actionQueue,
                 refreshing: (
-                    tenantsPortfolioQuery.isFetching
+                    controlTowerActionCenterQuery.isFetching
+                    || controlTowerMigrationProgramQuery.isFetching
+                    || tenantsPortfolioQuery.isFetching
                     || tenantsCompanyCockpitQuery.isFetching
                     || fleetAttentionQuery.isFetching
                     || recentBranchChangesKpiQuery.isFetching
@@ -741,7 +743,7 @@ export default function TenantsPage() {
                 onSetClientContext: setClientContextAndPageFilters,
             }}
             operationalKpiPanel={{
-                show: controlTowerEnabled && showPortfolio && tenantLifecycle === "active",
+                show: showPortfolio && tenantLifecycle === "active",
                 props: {
                     isRefreshing: (
                         tenantsPortfolioQuery.isFetching
@@ -784,7 +786,7 @@ export default function TenantsPage() {
                 },
             }}
             fleetAttentionPanel={{
-                show: controlTowerEnabled && showPortfolio && tenantLifecycle === "active",
+                show: showPortfolio && tenantLifecycle === "active",
                 props: {
                     fleetAttention,
                     loading: fleetAttentionLoading,

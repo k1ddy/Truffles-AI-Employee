@@ -23,7 +23,6 @@ type TenantsPageViewProps<TActionItem extends TenantsActionQueueItem> = {
     meLoading: boolean;
     canReadTenants: boolean;
     canWriteTenants: boolean;
-    controlTowerEnabled: boolean;
     tenantLifecycle: TenantLifecycleMode;
     onTenantLifecycleChange: (mode: TenantLifecycleMode) => void;
     topControlsProps: ComponentProps<typeof TenantsTopControls>;
@@ -71,7 +70,6 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
     meLoading,
     canReadTenants,
     canWriteTenants,
-    controlTowerEnabled,
     tenantLifecycle,
     onTenantLifecycleChange,
     topControlsProps,
@@ -113,11 +111,6 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
     return (
         <div className="max-w-5xl mx-auto p-6" data-testid="tenants-page">
             <div className="flex flex-col gap-2 mb-6">
-                {!controlTowerEnabled ? (
-                    <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900" data-testid="tenants-control-tower-flag-banner">
-                        Включён базовый режим Tenants: доступен обзор портфеля и управление контекстом.
-                    </div>
-                ) : null}
                 <TenantsTopControls {...topControlsProps} />
                 <TenantsScopedErrorSummary {...scopedErrorSummaryProps} />
                 {canWriteTenants ? (
