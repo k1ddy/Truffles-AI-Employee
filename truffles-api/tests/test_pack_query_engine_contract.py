@@ -122,6 +122,7 @@ def test_pack_query_engine_contract_hybrid_meta_propagates_to_resolver_contract(
     retrieval = meta.get("retrieval_meta")
     assert isinstance(retrieval, dict)
     assert retrieval.get("engine") == "pack_query_engine.v2"
+    assert retrieval.get("engine_version") == "2026-03-02"
     assert retrieval.get("method") == "hybrid_sparse_semantic_rerank"
     assert retrieval.get("best_candidate") == "УЗИ брюшной полости"
     assert retrieval.get("candidate_count", 0) >= 1
