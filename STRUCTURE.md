@@ -30,6 +30,7 @@
 | `contracts/llm/llm_policy_core_output.v1.jsonschema` | Контракт LLM policy core | Архитектор/Backend |
 | `contracts/packs/` | Pack-compiler artifacts (signal graph, indexes) | Архитектор/Backend |
 | `contracts/packs/signal_graph.v1.jsonschema` | Канон сигнального графа (anchors/lexicons) | Архитектор/Backend |
+| `contracts/packs/signal_manifest.v1.jsonschema` | Канон signal manifest (regex/tokens/layout map) для signal-layer | Архитектор/Backend |
 | `contracts/policy/` | Policy DSL bundles | Архитектор/Backend |
 | `contracts/policy/policy_bundle.v1.jsonschema` | Канон policy bundle (guards/sections) | Архитектор/Backend |
 | `contracts/integrations/provider_inbound.v1.jsonschema` | Provider inbound envelope (gateway) | Архитектор/Backend |
@@ -92,7 +93,8 @@
 | `truffles-api/app/services/calendar_sync_service.py` | Calendar provider sync via outbox + cursors + busy blocks | Backend |
 | `truffles-api/app/services/tool_registry_service.py` | Tool registry executor (calendar/catalog) for LLM plan | Backend |
 | `truffles-api/app/services/info_signal_service.py` | Info/lexicon signal helpers (routing-neutral) | Backend |
-| `truffles-api/app/services/booking_signal_service.py` | Booking/date/time signal helpers (regex + lexicon) | Backend |
+| `truffles-api/app/services/booking_signal_service.py` | Booking/date/time signal helpers (manifest-backed regex/tokens + lexicon) | Backend |
+| `truffles-api/app/services/signal_manifest_service.py` | Signal manifest loader + schema validation + regex/token accessors | Backend |
 | `truffles-api/app/services/appointment_reminder_service.py` | Appointment reminder/follow-up jobs + outbox enqueue | Backend |
 | `truffles-api/app/services/metrics_daily_service.py` | Daily metrics snapshot (metrics_daily) | Backend |
 | `truffles-api/app/services/marketing/service.py` | Marketing Pro lifecycle/audience/preflight/execute/retry logic | Backend |
@@ -186,6 +188,7 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-multi-seed-drift-gate-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-chain-controller-bootstrap-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-master-a1.md`
@@ -489,6 +492,7 @@
 | `knowledge/<client_slug>/*` | Канон RAG‑контента |
 | `truffles-api/app/knowledge/generic/*` | Generic pack scaffold (CI/tests) |
 | `truffles-api/app/knowledge/generic/SYSTEM_LEXICONS.yaml` | System language lexicons (shared) |
+| `truffles-api/app/knowledge/generic/SIGNAL_MANIFEST.yaml` | Declarative signal patterns/tokens/layout map for signal services |
 | `knowledge/generic/*` | Generic RAG docs (CI/tests) |
 
 ---

@@ -34,6 +34,7 @@ def _load_quality_helpers():
         "LLM_QUALITY_REGEX_LEXICON_TEST_PREFIX",
         "LLM_QUALITY_HARDCODE_CORE_PREFIXES",
         "LLM_QUALITY_HARDCODE_ALLOW_MARKER",
+        "LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS",
         "LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE",
         "LLM_QUALITY_PROGRESS_SKIP_TAGS",
         "LLM_QUALITY_REQUIRED_RUN_ARTIFACTS",
@@ -1189,6 +1190,26 @@ def test_line_has_phrase_branching_allows_resolver_or_allow_marker():
     assert not detector('if "без записи" in _normalize_text(message_text):  # hardcode-gate: allow')
 
 
+def test_line_has_phrase_branching_blocks_domain_regex_in_signal_services():
+    ns = _load_quality_helpers()
+    detector = ns["_llm_quality_line_has_phrase_branching"]
+
+    assert detector(
+        '(re.compile(r"\\bпослезавтраш\\w*|\\bпослезавтра\\b", re.IGNORECASE), "послезавтра"),',
+        path="truffles-api/app/services/booking_signal_service.py",
+    )
+
+
+def test_line_has_phrase_branching_allows_technical_format_regex_in_signal_services():
+    ns = _load_quality_helpers()
+    detector = ns["_llm_quality_line_has_phrase_branching"]
+
+    assert not detector(
+        'if re.search(r"\\d{4}-\\d{2}-\\d{2}", token):',
+        path="truffles-api/app/services/booking_signal_service.py",
+    )
+
+
 def test_hardcode_core_gate_blocks_phrase_branching_in_core_diff():
     ns = _load_quality_helpers()
     build_gate = ns["_llm_quality_build_hardcode_core_gate_status"]
@@ -1234,6 +1255,14 @@ def test_hardcode_core_gate_ignores_non_core_changes():
     assert status["reasons"] == []
     assert status["core_changed_files"] == []
     assert status["violations"] == []
+
+
+def test_hardcode_core_gate_scopes_signal_services():
+    ns = _load_quality_helpers()
+    core_paths = set(ns["LLM_QUALITY_HARDCODE_CORE_PREFIXES"])
+
+    assert "truffles-api/app/services/booking_signal_service.py" in core_paths
+    assert "truffles-api/app/services/info_signal_service.py" in core_paths
 
 
 def test_hq1_classifier_detects_handoff_miss():

@@ -11,10 +11,13 @@ from app.services.pack_runtime_service import (
     get_signal_lexicon_list,
     get_system_lexicon_list,
 )
+from app.services.signal_manifest_service import get_info_regex_pattern
+
+_TOKENIZE_WORD_RE = get_info_regex_pattern("tokenize_word_pattern") or re.compile(r"\w+")
 
 
 def tokenize_for_matching(normalized: str) -> list[str]:
-    return re.findall(r"\w+", normalized)
+    return _TOKENIZE_WORD_RE.findall(normalized)
 
 
 def has_token_prefix(tokens: list[str], prefix: str) -> bool:

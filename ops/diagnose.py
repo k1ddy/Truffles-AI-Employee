@@ -980,8 +980,21 @@ LLM_QUALITY_HARDCODE_CORE_PREFIXES = (
     "truffles-api/app/routers/webhook/booking.py",
     "truffles-api/app/routers/webhook/info.py",
     "truffles-api/app/services/tool_registry_service.py",
+    "truffles-api/app/services/booking_signal_service.py",
+    "truffles-api/app/services/info_signal_service.py",
 )
 LLM_QUALITY_HARDCODE_ALLOW_MARKER = "hardcode-gate: allow"
+LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS = (
+    're.findall(r"\\w+",',
+    "re.search(r\"[а-яё]\"",
+    "re.search(r\"[a-z]\"",
+    "re.findall(r\"[a-z]\"",
+    "re.match(r\"^(?P<year>\\d{4})-(?P<month>\\d{2})-(?P<day>\\d{2})",
+    "re.search(r\"\\d{4}-\\d{2}-\\d{2}\"",
+    "re.search(r\"\\b\\d{1,2}[./-]\\d{1,2}(?:[./-]\\d{2,4})?\\b\"",
+    "re.fullmatch(r\"([01]?\\d|2[0-3]):([0-5]\\d)\"",
+    "str.maketrans(",
+)
 LLM_QUALITY_REASON_LABELS = {
     "decision_meta_missing": "decision_meta missing for inbound turn",
     "decision_trace_missing": "decision_trace missing for inbound turn",
@@ -5496,16 +5509,20 @@ def _llm_quality_is_hardcode_core_file(path):
     return normalized in LLM_QUALITY_HARDCODE_CORE_PREFIXES
 
 
-def _llm_quality_line_has_phrase_branching(line):
+def _llm_quality_line_has_phrase_branching(line, *, path=None):
     if not isinstance(line, str):
         return False
     stripped = line.strip()
     if not stripped:
         return False
     lowered = stripped.casefold()
+    normalized_path = str(path or "").strip().replace("\\", "/").casefold()
+    is_signal_file = normalized_path.endswith("_signal_service.py")
     if lowered.startswith("#"):
         return False
     if LLM_QUALITY_HARDCODE_ALLOW_MARKER in lowered:
+        return False
+    if any(token in lowered for token in LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS):
         return False
     if any(
         token in lowered
@@ -5527,7 +5544,8 @@ def _llm_quality_line_has_phrase_branching(line):
         )
     )
     if not has_context_token:
-        return False
+        if not is_signal_file:
+            return False
     has_branch_operator = any(
         token in lowered
         for token in (
@@ -5536,6 +5554,8 @@ def _llm_quality_line_has_phrase_branching(line):
             ".endswith(",
             "re.search(",
             "re.match(",
+            "re.compile(",
+            "=",
         )
     )
     if not has_branch_operator:
@@ -5615,7 +5635,7 @@ def _llm_quality_collect_hardcode_core_violations(
             if not raw_line.startswith("+") or raw_line.startswith("+++"):
                 continue
             content = raw_line[1:]
-            if not _llm_quality_line_has_phrase_branching(content):
+            if not _llm_quality_line_has_phrase_branching(content, path=current_file):
                 continue
             violations.append(
                 {

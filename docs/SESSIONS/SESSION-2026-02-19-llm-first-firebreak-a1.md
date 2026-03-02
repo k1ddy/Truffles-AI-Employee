@@ -85,13 +85,19 @@
   - Migrated demo_salon semantic service tests to contract meta asserts (removed text oracles) and added TP: `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-semantic-service-a1.md`.
   - Completed P7 Core De-hardcoding Sweep: moved phrase/regex matchers into `truffles-api/app/services/info_signal_service.py` and `truffles-api/app/services/booking_signal_service.py`, removed core patterns from `info/booking/tool_registry`, and passed targeted tests (`test_booking_appointments.py`, `test_master_info_flow.py`, `test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply"`).
   - Added process-continuity hardening block `SIG-PROGRAM-S0-S4`: created program TP `docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md`, introduced `context_integrity_gate` in session tooling (`session_start` default required for new sessions, `session_check` enforcement), and updated session/runbook/TP template contracts to require residual debt + next-block continuity.
+  - Completed `S0+S1` block via `docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md`: hardcode gate now includes signal services in `ops/diagnose.py` with technical whitelist, and booking/info signal literals were externalized into declarative manifest+schema (`truffles-api/app/knowledge/generic/SIGNAL_MANIFEST.yaml`, `contracts/packs/signal_manifest.v1.jsonschema`) through `truffles-api/app/services/signal_manifest_service.py`.
 - next:
-  - Execute `S0` first: extend hardcode gate scope to include `*_signal_service.py` and add explicit technical-format whitelist only.
-  - Start `S1`: externalize signal literals/regex into declarative manifests + schema.
   - Start `S2`: implement signal runtime compiler/loader (cache, validation, versioning) and make signal services thin-runtime.
   - Run `S3`: enforce no-hardcode gate v2 across core/runtime/signal.
   - Run `S4`: add cross-domain contract suite on minimum two non-salon packs.
 - evidence:
+- docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md
+- pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "hardcode_core_gate or line_has_phrase_branching" (`7 passed`)
+- pytest -q truffles-api/tests/test_signal_manifest_service.py (`6 passed`)
+- pytest -q truffles-api/tests/test_booking_appointments.py (`60 passed`)
+- pytest -q truffles-api/tests/test_master_info_flow.py (`29 passed`)
+- pytest -q truffles-api/tests/test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply" (`18 passed, 252 deselected`)
+- ruff check ops/diagnose.py truffles-api/app/services/signal_manifest_service.py truffles-api/app/services/booking_signal_service.py truffles-api/app/services/info_signal_service.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_signal_manifest_service.py (`All checks passed`)
 - docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md
 - bash -n scripts/session_check.sh
 - bash -n scripts/session_start.sh
@@ -372,4 +378,4 @@
     - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`69 passed`)
     - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
     - `scripts/session_check.sh`
-- last_updated: 2026-03-02T09:12:14+05:00
+- last_updated: 2026-03-02T09:32:17+05:00

@@ -1160,6 +1160,19 @@ Forensic only (not acceptance):
 - `P14 Evidence + STATE Handoff` partial: `ops/diagnose.py` writes `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl`, `run_manifest.json`; `STATE.md` handoff remains a process step, not a coded gate.
 - `P15 Timeout-Degrade Reliability Remediation` implemented: timeout degrade retry limit and clarify/handoff escalation logic exist in `truffles-api/app/routers/webhook/decision.py` with deterministic tests in `truffles-api/tests/test_message_endpoint.py` (booking timeout retry exhaust -> handoff).
 
+### Mandatory Continuation for P7 (S0..S4, code-fact status at 2026-03-02)
+
+- `S0 No-Hardcode Gate Scope Fix` done: static hardcode gate in `ops/diagnose.py` now includes signal-layer files (`truffles-api/app/services/booking_signal_service.py`, `truffles-api/app/services/info_signal_service.py`) and explicit technical-format whitelist (`LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS`); coverage updated in `truffles-api/tests/test_booking_quality_status_gate.py`.
+- `S1 Signal Manifest Externalization` done: domain regex/markers moved out of runtime signal services into declarative manifest + schema:
+  - manifest: `truffles-api/app/knowledge/generic/SIGNAL_MANIFEST.yaml`
+  - schema: `contracts/packs/signal_manifest.v1.jsonschema`
+  - runtime loader: `truffles-api/app/services/signal_manifest_service.py`
+  - consumers migrated: `truffles-api/app/services/booking_signal_service.py`, `truffles-api/app/services/info_signal_service.py`
+  - deterministic evidence: `pytest -q truffles-api/tests/test_signal_manifest_service.py`, `pytest -q truffles-api/tests/test_booking_appointments.py`, `pytest -q truffles-api/tests/test_master_info_flow.py`, `pytest -q truffles-api/tests/test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply"`.
+- `S2 Signal Runtime Compiler` pending (not implemented): no dedicated signal manifest compiler/loader with schema validation + cache/version contract found in `truffles-api/app/services/*`.
+- `S3 No-Hardcode Gate v2` partial: hardcode gate covers signal-layer now, but allow/deny policy still needs explicit runtime-core/signal whitelist policy hardening as a standalone block.
+- `S4 Cross-domain Contract Suite` pending (not implemented): deterministic/quality coverage for minimum two non-salon packs is not present as a dedicated contract suite artifact in `truffles-api/tests/*`.
+
 ### DoD for this Addendum
 
 - TP явно фиксирует L0-L3 operating model.
