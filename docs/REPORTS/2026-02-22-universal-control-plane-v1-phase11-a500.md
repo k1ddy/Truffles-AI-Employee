@@ -1,0 +1,107 @@
+# Universal Control Plane v1 - Phase 11 Compliance KZ Retention/Lifecycle (a500)
+
+Date
+- 2026-03-02
+
+## Block identity
+- `BLOCK_ID`: UCPV1-PHASE11
+- `PARENT_BLOCK_ID`: UCPV1
+- `DEPENDS_ON`: UCPV1-PHASE10
+- `UNLOCKS`: UCPV1-PHASE12
+
+## Input baseline (FACT)
+- `UCPV1-PHASE10` is `passed`, so dependency lock for phase11 is removed.
+- Current platform has partial retention-related controls:
+  - learning retention (`learning_retention_days`, `retention_expires_at`),
+  - media cleanup endpoint (`/admin/media/cleanup`),
+  - archive mechanisms for selected operational tables.
+- Unified compliance lifecycle (`retention -> export -> destruction`) with centralized policy and audit chain is not implemented.
+
+## FACT pre-check evidence (before changes)
+- `rg -n "retention|retention_expires_at|anonymization|media/cleanup|archive_pending_outbox|deleted_at" truffles-api/app truffles-api/tests` -> confirms fragmented controls in isolated modules.
+- `ls -1 truffles-api/migrations | tail -n 20` -> latest migration is phase10 (`046_add_sla_profile_versions.sql`), no phase11 compliance schema yet.
+- `rg -n "UCPV1-PHASE11|phase11" docs/BLOCK_GRAPH.yaml docs/REPORTS docs/TASK_PACKAGES` -> graph references phase11 paths, but implementation artifacts were absent before this bootstrap.
+
+## One web search evidence
+- `Query (exact)` -> `Kazakhstan personal data law Article 12 storage in database located in the territory of the Republic of Kazakhstan Article 18 destruction`
+- `Sources opened` -> `https://adilet.zan.kz/eng/docs/Z1300000094`
+- `Key extracted norms`:
+  - Article 12: personal data shall be stored in a database located in the territory of RK; storage term ties to purpose unless law states otherwise.
+  - Article 18: destruction required on storage-term expiry, legal-relation termination, and other legal triggers.
+- `Decision` -> phase11 contracts must include localization evidence + retention-term policy + destruction triggers + auditable execution ledger.
+
+## Root cause validation
+- `Symptom` -> B11 planned but not delivered as deterministic compliance lifecycle.
+- `Minimal reproduction` -> inspect retention-related code paths (`learning_service`, `admin media cleanup`, `archive_pending_outbox`); no central compliance registry or lifecycle run ledger.
+- `Root cause statement` -> compliance controls were introduced as local operational utilities, not as unified legal-governed lifecycle layer.
+- `Fix mechanism` -> implement phase11 registry + lifecycle jobs + export/destruction evidence chain under platform-admin governance.
+
+## Reuse-first outcome
+- `Internal reuse applied` -> yes (`console_ops_jobs`, lifecycle/archive patterns, learning retention fields).
+- `External reuse applied` -> yes (RK law primary source via Adilet for legal anchors).
+- `Build-new scope` -> only compliance orchestration layer (registry + audit + deterministic checks), no rewrite of existing runtime semantics.
+
+## Contract delta (analysis scope)
+- Planned phase11 contracts:
+  - compliance data-class registry (`data_class`, `owner`, `legal_basis`, `ttl`, `destruction_mode`),
+  - lifecycle run ledger (`run_id`, `scope`, `policy_version`, `result`, `evidence_ref`),
+  - export/destruction operation records with tenant isolation and immutable audit events.
+- Planned API additions (platform-admin only):
+  - compliance policy read/write,
+  - lifecycle run trigger/preview,
+  - export/destruction evidence retrieval.
+
+## Implemented changes
+- Added phase11 block artifacts:
+  - `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md`
+  - `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md`
+- Canon sync for phase11 execution start:
+  - `docs/BLOCK_GRAPH.yaml` (`UCPV1-PHASE11: in_progress`)
+  - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md` (B11 status/queue update)
+  - `STATE.md` (NOW evidence for phase11 analysis start)
+
+## Checks + outcomes
+- `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
+- `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md --report docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md --graph docs/BLOCK_GRAPH.yaml` -> `zero_context_gate: OK`.
+
+## Iteration budget outcomes
+- `Planned max runs` -> 0 expensive realism runs (analysis/doc sync only).
+- `Actual runs` -> 0 expensive realism runs.
+- `Stop condition respected` -> yes.
+- `If exceeded` -> n/a.
+
+## Evidence
+- `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md`
+- `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md`
+- `docs/BLOCK_GRAPH.yaml`
+- `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
+- `STATE.md`
+- `https://adilet.zan.kz/eng/docs/Z1300000094`
+
+## Release safety decision
+- `Strategy used` -> analysis-first bootstrap only; no production rollout in this slice.
+- `Go/no-go signals observed` -> doc/gate prerequisites are being normalized to pass deterministic governance checks.
+- `Rollback readiness` -> trivial (docs-only revert).
+
+## Canon/doc sync updates
+- `Updated docs`:
+  - `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md`
+  - `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md`
+  - `docs/BLOCK_GRAPH.yaml`
+  - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
+  - `STATE.md`
+
+## Residual GAP / Risks
+- Data-class coverage risk: incomplete inventory can produce false-positive compliance status.
+- Destructive-path risk: policy mistakes can trigger irreversible deletions.
+- Process hygiene debt remains non-blocking and must not stall phase11 delivery.
+
+## Handoff (for zero-context next agent)
+- `Ready for next agent`: yes.
+- `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md`
+- `Do not touch`: unrelated tracks.
+- `Open risks`: data-class mapping completeness and destruction safety.
+- `First command to verify`: `rg -n "UCPV1-PHASE11|in_progress|phase11-a500" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md`
+
+## Verdict
+- `In Progress`
