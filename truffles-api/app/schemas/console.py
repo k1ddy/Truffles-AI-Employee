@@ -1627,6 +1627,54 @@ class ConsoleAdminControlTowerIssueCount(BaseModel):
     count: int
 
 
+ConsoleAdminControlTowerActionPriority = Literal["p0", "p1", "p2"]
+ConsoleAdminControlTowerActionSource = Literal["incident", "provider_ops", "readiness"]
+ConsoleAdminControlTowerActionKind = Literal["navigate", "ops_job", "provider_action"]
+
+
+class ConsoleAdminControlTowerActionItem(BaseModel):
+    id: str
+    priority: ConsoleAdminControlTowerActionPriority
+    source: ConsoleAdminControlTowerActionSource
+    kind: ConsoleAdminControlTowerActionKind
+    title: str
+    description: str
+    reasons: list[str] = []
+    href: Optional[str] = None
+    incident_id: Optional[str] = None
+    client_id: Optional[UUID] = None
+    client_slug: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    branch_slug: Optional[str] = None
+    branch_name: Optional[str] = None
+    job_type: Optional[ConsoleOpsJobType] = None
+    mode: Optional[ConsoleOpsJobMode] = None
+    params: Optional[dict] = None
+    provider_action: Optional[str] = None
+    requires_confirmation: bool = False
+    evidence_links: list[str] = []
+
+
+class ConsoleAdminControlTowerActionCenterSummary(BaseModel):
+    total_actions: int
+    p0_actions: int
+    p1_actions: int
+    p2_actions: int
+    incident_actions: int
+    provider_ops_actions: int
+    readiness_actions: int
+
+
+class ConsoleAdminControlTowerActionCenterResponse(BaseModel):
+    generated_at: str
+    stale_after_minutes: int
+    limit: int
+    include_p2: bool = True
+    summary: ConsoleAdminControlTowerActionCenterSummary
+    top_reasons: list[ConsoleAdminControlTowerIssueCount] = []
+    items: list[ConsoleAdminControlTowerActionItem]
+
+
 class ConsoleAdminControlTowerReadinessItem(BaseModel):
     company_id: Optional[UUID] = None
     company_name: Optional[str] = None

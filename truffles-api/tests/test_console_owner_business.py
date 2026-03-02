@@ -1302,6 +1302,253 @@ async def test_admin_control_tower_drift_board_passes_scope_and_flags(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_admin_control_tower_action_center_requires_platform_admin(monkeypatch):
+    context = _build_context(role="owner")
+    context.accessible_clients = []
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_admin_control_tower_action_center(
+            request=SimpleNamespace(query_params={}),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_control_tower_action_center_passes_scope_and_flags(monkeypatch):
+    client_id = uuid4()
+    company_id = uuid4()
+    context = _build_context(role="platform_admin")
+    context.companies = [SimpleNamespace(id=company_id, name="Acme")]
+    context.accessible_clients = [
+        SimpleNamespace(id=client_id, name="alpha", status="active", company_id=company_id, config={})
+    ]
+    captured: dict[str, object] = {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_control_tower_action_center",
+        lambda _db, *, active_clients, companies_by_id, stale_after_minutes, include_p2_mode, limit, now: (
+            captured.update(
+                {
+                    "active_clients": active_clients,
+                    "companies_by_id": companies_by_id,
+                    "stale_after_minutes": stale_after_minutes,
+                    "include_p2_mode": include_p2_mode,
+                    "limit": limit,
+                }
+            )
+            or console_router.ConsoleAdminControlTowerActionCenterResponse(
+                generated_at=now_iso,
+                stale_after_minutes=stale_after_minutes,
+                limit=limit,
+                include_p2=include_p2_mode,
+                summary=console_router.ConsoleAdminControlTowerActionCenterSummary(
+                    total_actions=0,
+                    p0_actions=0,
+                    p1_actions=0,
+                    p2_actions=0,
+                    incident_actions=0,
+                    provider_ops_actions=0,
+                    readiness_actions=0,
+                ),
+                top_reasons=[],
+                items=[],
+            )
+        ),
+    )
+
+    response = await console_router.get_admin_control_tower_action_center(
+        request=SimpleNamespace(query_params={"include_p2": "false", "stale_after_minutes": "120", "limit": "11"}),
+        include_p2="false",
+        stale_after_minutes=120,
+        limit=11,
+        db=SimpleNamespace(),
+    )
+
+    assert captured["limit"] == 11
+    assert captured["stale_after_minutes"] == 120
+    assert captured["include_p2_mode"] is False
+    assert captured["active_clients"][0].id == client_id
+    assert company_id in captured["companies_by_id"]
+    assert response.limit == 11
+    assert response.include_p2 is False
+
+
+def test_build_admin_control_tower_action_center_aggregates_sources_and_filters_p2(monkeypatch) -> None:
+    client_id = uuid4()
+    company_id = uuid4()
+    branch_id = uuid4()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    active_clients = [SimpleNamespace(id=client_id, name="alpha", company_id=company_id, status="active", config={})]
+    companies_by_id = {company_id: SimpleNamespace(id=company_id, name="Acme")}
+
+    incidents = console_router.ConsoleIncidentListResponse(
+        generated_at=now_iso,
+        scope="fleet",
+        summary=console_router.ConsoleIncidentSummary(total=2, critical=1, warn=0, info=1),
+        items=[
+            console_router.ConsoleIncidentItem(
+                id="incident-critical",
+                scope="fleet",
+                severity="critical",
+                title="Critical delivery risk",
+                summary="outbox failed",
+                reason_code="integration_degraded",
+                reason_label="Integration degraded",
+                source="outbox_messages+branches",
+                detected_at=now_iso,
+                client_id=client_id,
+                client_slug="alpha",
+                branch_id=branch_id,
+                metrics={},
+                actions=[
+                    console_router.ConsoleIncidentAction(
+                        id="integration_reconcile_dry_run",
+                        title="Run integration dry-run",
+                        description="Dry-run integration remediation",
+                        job_type="integration_reconcile",
+                        mode="dry_run",
+                        params={"limit": 10},
+                    )
+                ],
+            ),
+            console_router.ConsoleIncidentItem(
+                id="incident-info",
+                scope="fleet",
+                severity="info",
+                title="Info signal",
+                summary="observe only",
+                reason_code="unknown",
+                reason_label="Unknown",
+                source="outbox_messages+branches",
+                detected_at=now_iso,
+                client_id=client_id,
+                client_slug="alpha",
+                branch_id=branch_id,
+                metrics={},
+                actions=[
+                    console_router.ConsoleIncidentAction(
+                        id="open_ops",
+                        title="Open ops",
+                        description="Navigate to ops",
+                        href="/ops",
+                    )
+                ],
+            ),
+        ],
+    )
+    drift_board = console_router.ConsoleAdminControlTowerDriftBoardResponse(
+        generated_at=now_iso,
+        stale_after_minutes=60,
+        limit=20,
+        only_problematic=True,
+        summary=console_router.ConsoleAdminControlTowerDriftSummary(
+            total_branches=1,
+            ok_branches=0,
+            warn_branches=0,
+            error_branches=1,
+            degraded_branches=1,
+            queue_p0=0,
+            queue_p1=1,
+            queue_p2=0,
+        ),
+        top_issues=[],
+        items=[],
+        provider_ops_queue=[
+            console_router.ConsoleProviderOpsQueueItem(
+                client_id=client_id,
+                client_slug="alpha",
+                branch_id=branch_id,
+                branch_slug="main",
+                branch_name="Main Branch",
+                priority="p1",
+                recommended_action="provider_start_rebind",
+                reasons=["provider_binding_alert_critical"],
+                requires_confirmation=True,
+            )
+        ],
+    )
+    readiness_board = console_router.ConsoleAdminControlTowerReadinessBoardResponse(
+        generated_at=now_iso,
+        limit=20,
+        include_ready=False,
+        summary=console_router.ConsoleAdminControlTowerReadinessSummary(
+            total_branches=1,
+            ready_branches=0,
+            blocked_branches=1,
+            hard_gate_failed_branches=1,
+            go_live_draft_branches=1,
+            go_live_approved_branches=0,
+            go_live_rejected_branches=0,
+            degraded_branches=1,
+        ),
+        top_blockers=[],
+        items=[
+            console_router.ConsoleAdminControlTowerReadinessItem(
+                company_id=company_id,
+                company_name="Acme",
+                client_id=client_id,
+                client_slug="alpha",
+                branch_id=branch_id,
+                branch_slug="main",
+                branch_name="Main Branch",
+                current_step="go_no_go",
+                scorecard_status="fail",
+                readiness_status="fail",
+                hard_gate_status="fail",
+                ready=False,
+                go_live_state="pending",
+                integration_state="degraded",
+                missing=["knowledge:missing_facts"],
+                hard_gate_blockers=["delivery:failed_24h_critical"],
+            )
+        ],
+    )
+
+    monkeypatch.setattr(console_router, "_build_admin_incidents_response", lambda *_args, **_kwargs: incidents)
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_control_tower_drift_board",
+        lambda *_args, **_kwargs: drift_board,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_control_tower_readiness_board",
+        lambda *_args, **_kwargs: readiness_board,
+    )
+
+    response = console_router._build_admin_control_tower_action_center(
+        SimpleNamespace(),
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=60,
+        include_p2_mode=False,
+        limit=20,
+        now=now,
+    )
+
+    assert response.summary.total_actions == 3
+    assert response.summary.p0_actions == 2
+    assert response.summary.p1_actions == 1
+    assert response.summary.p2_actions == 0
+    assert response.summary.incident_actions == 1
+    assert response.summary.provider_ops_actions == 1
+    assert response.summary.readiness_actions == 1
+    assert response.items[0].priority == "p0"
+    assert all(item.priority != "p2" for item in response.items)
+    assert any(item.source == "provider_ops" and item.provider_action == "provider_start_rebind" for item in response.items)
+    assert any(item.source == "readiness" and item.href == "/tenants" for item in response.items)
+    assert any(item.source == "incident" and item.job_type == "integration_reconcile" for item in response.items)
+
+
+@pytest.mark.asyncio
 async def test_subscription_summary_requires_subscription_permission(monkeypatch):
     context = _build_context(role="support")
     monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
