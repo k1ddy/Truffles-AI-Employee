@@ -1,4 +1,5 @@
 from app.schemas.callback import CallbackRequest, CallbackResponse
+from app.schemas.compliance_policy import CompliancePolicyPayload
 from app.schemas.consult import (
     ConsultControllerOutput,
     ConsultPlaybook,
@@ -50,6 +51,7 @@ __all__ = [
     "ResponseContract",
     "MemoryContract",
     "TraceContract",
+    "CompliancePolicyPayload",
     "SlaProfilePayload",
     "SlaThresholds",
     "SlaViolationActions",

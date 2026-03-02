@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from app.schemas.capabilities import CapabilitiesPayload, CapabilityPolicyOverrides
+from app.schemas.compliance_policy import CompliancePolicyPayload
 from app.schemas.onboarding_contract import (
     OnboardingContractPayload,
     OnboardingProviderBindingPayload,
@@ -1775,6 +1776,63 @@ class ConsolePolicyRegistryRollbackRequest(BaseModel):
 class ConsolePolicyRegistryMutationResponse(BaseModel):
     success: bool
     record: ConsolePolicyVersionRecord
+    from_version_id: Optional[UUID] = None
+
+
+class ConsoleCompliancePolicyVersionRecord(BaseModel):
+    id: UUID
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    company_id: Optional[UUID] = None
+    domain_key: Optional[str] = None
+    client_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    status: Literal["published", "archived"]
+    schema_version: str
+    version_number: int
+    payload: CompliancePolicyPayload
+    reason: Optional[str] = None
+    source_version_id: Optional[UUID] = None
+    created_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    published_by: Optional[UUID] = None
+    published_at: Optional[str] = None
+
+
+class ConsoleCompliancePolicyRegistryResponse(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    company_id: Optional[UUID] = None
+    domain_key: Optional[str] = None
+    client_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    active: Optional[ConsoleCompliancePolicyVersionRecord] = None
+    history: list[ConsoleCompliancePolicyVersionRecord] = []
+
+
+class ConsoleCompliancePolicyRegistryPublishRequest(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    domain_key: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    schema_version: Optional[str] = None
+    reason: str
+    payload: CompliancePolicyPayload
+
+
+class ConsoleCompliancePolicyRegistryRollbackRequest(BaseModel):
+    scope: Literal["global", "domain", "client", "branch"]
+    data_class: str
+    domain_key: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    target_version_id: UUID
+    reason: str
+
+
+class ConsoleCompliancePolicyRegistryMutationResponse(BaseModel):
+    success: bool
+    record: ConsoleCompliancePolicyVersionRecord
     from_version_id: Optional[UUID] = None
 
 

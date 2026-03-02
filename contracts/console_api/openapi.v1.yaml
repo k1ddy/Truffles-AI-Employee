@@ -4927,6 +4927,152 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/compliance-policy-registry:
+    get:
+      tags:
+      - console
+      summary: Get Compliance Policy Registry
+      operationId: get_compliance_policy_registry_console_v1_admin_compliance_policy_registry_get
+      parameters:
+      - name: data_class
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 2
+          maxLength: 64
+          title: Data Class
+      - name: scope
+        in: query
+        required: false
+        schema:
+          enum:
+          - global
+          - domain
+          - client
+          - branch
+          type: string
+          default: client
+          title: Scope
+      - name: domain_key
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Key
+      - name: branch_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 20
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCompliancePolicyRegistryResponse'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/compliance-policy-registry/publish:
+    post:
+      tags:
+      - console
+      summary: Publish Compliance Policy Registry
+      operationId: publish_compliance_policy_registry_console_v1_admin_compliance_policy_registry_publish_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleCompliancePolicyRegistryPublishRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCompliancePolicyRegistryMutationResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/compliance-policy-registry/rollback:
+    post:
+      tags:
+      - console
+      summary: Rollback Compliance Policy Registry
+      operationId: rollback_compliance_policy_registry_console_v1_admin_compliance_policy_registry_rollback_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleCompliancePolicyRegistryRollbackRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCompliancePolicyRegistryMutationResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/sla-profile-registry:
     get:
       tags:
@@ -6340,6 +6486,60 @@ components:
       additionalProperties: false
       type: object
       title: CapabilityTools
+    CompliancePolicyPayload:
+      properties:
+        policy_name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Policy Name
+          default: default
+        legal_basis:
+          type: string
+          enum:
+          - consent
+          - contract
+          - legal_obligation
+          - legitimate_interest
+          - vital_interest
+          - other
+          title: Legal Basis
+          default: legal_obligation
+        retention_days:
+          type: integer
+          maximum: 36500.0
+          minimum: 1.0
+          title: Retention Days
+          default: 365
+        export_mode:
+          type: string
+          enum:
+          - on_demand
+          - scheduled
+          - disabled
+          title: Export Mode
+          default: on_demand
+        destruction_mode:
+          type: string
+          enum:
+          - delete
+          - anonymize
+          - archive
+          title: Destruction Mode
+          default: delete
+        kz_storage_required:
+          type: boolean
+          title: Kz Storage Required
+          default: true
+        notes:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+          title: Notes
+      additionalProperties: false
+      type: object
+      title: CompliancePolicyPayload
     ConsoleAgent:
       properties:
         id:
@@ -8411,6 +8611,256 @@ components:
       additionalProperties: false
       type: object
       title: ConsoleCompanyUpdateRequest
+    ConsoleCompliancePolicyRegistryMutationResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        record:
+          $ref: '#/components/schemas/ConsoleCompliancePolicyVersionRecord'
+        from_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: From Version Id
+      type: object
+      required:
+      - success
+      - record
+      title: ConsoleCompliancePolicyRegistryMutationResponse
+    ConsoleCompliancePolicyRegistryPublishRequest:
+      properties:
+        scope:
+          type: string
+          enum:
+          - global
+          - domain
+          - client
+          - branch
+          title: Scope
+        data_class:
+          type: string
+          title: Data Class
+        domain_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Key
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        schema_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Schema Version
+        reason:
+          type: string
+          title: Reason
+        payload:
+          $ref: '#/components/schemas/CompliancePolicyPayload'
+      type: object
+      required:
+      - scope
+      - data_class
+      - reason
+      - payload
+      title: ConsoleCompliancePolicyRegistryPublishRequest
+    ConsoleCompliancePolicyRegistryResponse:
+      properties:
+        scope:
+          type: string
+          enum:
+          - global
+          - domain
+          - client
+          - branch
+          title: Scope
+        data_class:
+          type: string
+          title: Data Class
+        company_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Company Id
+        domain_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Key
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        active:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCompliancePolicyVersionRecord'
+          - type: 'null'
+        history:
+          items:
+            $ref: '#/components/schemas/ConsoleCompliancePolicyVersionRecord'
+          type: array
+          title: History
+          default: []
+      type: object
+      required:
+      - scope
+      - data_class
+      title: ConsoleCompliancePolicyRegistryResponse
+    ConsoleCompliancePolicyRegistryRollbackRequest:
+      properties:
+        scope:
+          type: string
+          enum:
+          - global
+          - domain
+          - client
+          - branch
+          title: Scope
+        data_class:
+          type: string
+          title: Data Class
+        domain_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Key
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        target_version_id:
+          type: string
+          format: uuid
+          title: Target Version Id
+        reason:
+          type: string
+          title: Reason
+      type: object
+      required:
+      - scope
+      - data_class
+      - target_version_id
+      - reason
+      title: ConsoleCompliancePolicyRegistryRollbackRequest
+    ConsoleCompliancePolicyVersionRecord:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        scope:
+          type: string
+          enum:
+          - global
+          - domain
+          - client
+          - branch
+          title: Scope
+        data_class:
+          type: string
+          title: Data Class
+        company_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Company Id
+        domain_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Key
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        status:
+          type: string
+          enum:
+          - published
+          - archived
+          title: Status
+        schema_version:
+          type: string
+          title: Schema Version
+        version_number:
+          type: integer
+          title: Version Number
+        payload:
+          $ref: '#/components/schemas/CompliancePolicyPayload'
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+        source_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Source Version Id
+        created_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Created By
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+        published_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Published By
+        published_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Published At
+      type: object
+      required:
+      - id
+      - scope
+      - data_class
+      - status
+      - schema_version
+      - version_number
+      - payload
+      title: ConsoleCompliancePolicyVersionRecord
     ConsoleConfirmationCreateRequest:
       properties:
         action:
@@ -13387,6 +13837,37 @@ components:
           - overdue
           title: Sla State
           default: none
+        sla_violation_action:
+          anyOf:
+          - type: string
+            enum:
+            - none
+            - notify_manager
+            - escalate
+            - collect_only
+          - type: 'null'
+          title: Sla Violation Action
+        sla_profile_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Sla Profile Id
+        sla_profile_version:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Sla Profile Version
+        sla_profile_scope:
+          anyOf:
+          - type: string
+            enum:
+            - global
+            - domain
+            - client
+            - branch
+          - type: 'null'
+          title: Sla Profile Scope
         generated_at:
           anyOf:
           - type: string

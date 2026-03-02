@@ -59,10 +59,30 @@ Date
   - `docs/BLOCK_GRAPH.yaml` (`UCPV1-PHASE11: in_progress`)
   - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md` (B11 status/queue update)
   - `STATE.md` (NOW evidence for phase11 analysis start)
+- Slice 1 delivery (`compliance policy registry`):
+  - migration: `truffles-api/migrations/047_add_compliance_policy_versions.sql`
+  - model: `truffles-api/app/models/compliance_policy_version.py`
+  - schema: `truffles-api/app/schemas/compliance_policy.py`
+  - service: `truffles-api/app/services/compliance_policy_registry_service.py`
+  - console API:
+    - `GET /console/v1/admin/compliance-policy-registry`
+    - `POST /console/v1/admin/compliance-policy-registry/publish`
+    - `POST /console/v1/admin/compliance-policy-registry/rollback`
+  - router/schema wiring:
+    - `truffles-api/app/routers/console.py`
+    - `truffles-api/app/schemas/console.py`
+  - deterministic tests:
+    - `truffles-api/tests/test_compliance_policy_registry_service.py`
+    - `truffles-api/tests/test_console_compliance_policy_registry.py`
+  - OpenAPI canon sync:
+    - `contracts/console_api/openapi.v1.yaml`
 
 ## Checks + outcomes
 - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
 - `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md --report docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md --graph docs/BLOCK_GRAPH.yaml` -> `zero_context_gate: OK`.
+- `cd truffles-api && ruff check app/models/__init__.py app/models/compliance_policy_version.py app/schemas/__init__.py app/schemas/compliance_policy.py app/schemas/console.py app/services/compliance_policy_registry_service.py app/routers/console.py tests/test_compliance_policy_registry_service.py tests/test_console_compliance_policy_registry.py` -> `All checks passed`.
+- `cd truffles-api && pytest -q tests/test_compliance_policy_registry_service.py tests/test_console_compliance_policy_registry.py tests/test_policy_registry_service.py tests/test_console_policy_registry.py tests/test_sla_profile_registry_service.py tests/test_console_sla_profile_registry.py` -> `25 passed`.
+- `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass after contract sync (`openapi.v1.yaml` updated).
 
 ## Iteration budget outcomes
 - `Planned max runs` -> 0 expensive realism runs (analysis/doc sync only).
@@ -77,11 +97,17 @@ Date
 - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
 - `STATE.md`
 - `https://adilet.zan.kz/eng/docs/Z1300000094`
+- `truffles-api/migrations/047_add_compliance_policy_versions.sql`
+- `truffles-api/app/services/compliance_policy_registry_service.py`
+- `truffles-api/app/routers/console.py`
+- `truffles-api/tests/test_compliance_policy_registry_service.py`
+- `truffles-api/tests/test_console_compliance_policy_registry.py`
+- `contracts/console_api/openapi.v1.yaml`
 
 ## Release safety decision
-- `Strategy used` -> analysis-first bootstrap only; no production rollout in this slice.
-- `Go/no-go signals observed` -> doc/gate prerequisites are being normalized to pass deterministic governance checks.
-- `Rollback readiness` -> trivial (docs-only revert).
+- `Strategy used` -> registry-only canary slice (policy registry surface only, without destructive lifecycle jobs).
+- `Go/no-go signals observed` -> deterministic tests green + API contract synced + no runtime semantic path changes.
+- `Rollback readiness` -> revert Slice 1 commit + keep B11 status `in_progress` until lifecycle jobs are delivered.
 
 ## Canon/doc sync updates
 - `Updated docs`:

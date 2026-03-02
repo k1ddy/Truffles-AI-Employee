@@ -43,6 +43,7 @@ from app.models import (
     ClientPolicyVersion,
     ClientSettings,
     Company,
+    CompliancePolicyVersion,
     ConsoleBranchChange,
     ConsoleOpsJob,
     Conversation,
@@ -76,6 +77,7 @@ from app.schemas.capabilities import (
     CapabilitiesPayload,
     CapabilityPolicyOverrides,
 )
+from app.schemas.compliance_policy import CompliancePolicyPayload
 from app.schemas.console import (
     ConsoleAgent,
     ConsoleAgentCreateRequest,
@@ -125,6 +127,11 @@ from app.schemas.console import (
     ConsoleCompanyCreateResponse,
     ConsoleCompanyListResponse,
     ConsoleCompanyUpdateRequest,
+    ConsoleCompliancePolicyRegistryMutationResponse,
+    ConsoleCompliancePolicyRegistryPublishRequest,
+    ConsoleCompliancePolicyRegistryResponse,
+    ConsoleCompliancePolicyRegistryRollbackRequest,
+    ConsoleCompliancePolicyVersionRecord,
     ConsoleConfirmationCreateRequest,
     ConsoleConfirmationResponse,
     ConsoleDataTrustSummaryResponse,
@@ -316,6 +323,13 @@ from app.services.capabilities_service import (
     payload_to_dict,
 )
 from app.services.chatflow_service import get_instance_id, send_bot_response
+from app.services.compliance_policy_registry_service import (
+    COMPLIANCE_POLICY_SCHEMA_VERSION,
+    get_latest_compliance_policy_version,
+    list_compliance_policy_history,
+    publish_compliance_policy_version,
+    rollback_compliance_policy_version,
+)
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
@@ -20635,6 +20649,39 @@ def _serialize_policy_version_record(record: ClientPolicyVersion) -> ConsolePoli
     )
 
 
+def _serialize_compliance_policy_version_record(
+    record: CompliancePolicyVersion,
+) -> ConsoleCompliancePolicyVersionRecord:
+    try:
+        payload = CompliancePolicyPayload.model_validate(record.payload_json or {})
+    except ValidationError as exc:
+        raise ConsoleAPIError(
+            500,
+            "COMPLIANCE_POLICY_REGISTRY_INVALID",
+            "Stored compliance policy payload is invalid",
+        ) from exc
+    return ConsoleCompliancePolicyVersionRecord(
+        id=record.id,
+        scope=record.scope,
+        data_class=record.data_class,
+        company_id=record.company_id,
+        domain_key=record.domain_key,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        status=record.status,
+        schema_version=record.schema_version,
+        version_number=record.version_number,
+        payload=payload,
+        reason=record.reason,
+        source_version_id=record.source_version_id,
+        created_by=record.created_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+        published_by=record.published_by,
+        published_at=record.published_at.isoformat() if record.published_at else None,
+    )
+
+
 def _serialize_sla_profile_version_record(record: SlaProfileVersion) -> ConsoleSlaProfileVersionRecord:
     try:
         payload = SlaProfilePayload.model_validate(record.payload_json or {})
@@ -21238,6 +21285,244 @@ async def rollback_policy_registry(
     return ConsolePolicyRegistryMutationResponse(
         success=True,
         record=_serialize_policy_version_record(record),
+        from_version_id=source_record.id,
+    )
+
+
+@router.get(
+    "/admin/compliance-policy-registry",
+    response_model=ConsoleCompliancePolicyRegistryResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def get_compliance_policy_registry(
+    request: Request,
+    data_class: str = Query(..., min_length=2, max_length=64),
+    scope: Literal["global", "domain", "client", "branch"] = Query("client"),
+    domain_key: Optional[str] = Query(None),
+    branch_id: Optional[UUID] = Query(None),
+    limit: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> ConsoleCompliancePolicyRegistryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=scope,
+        domain_key=domain_key,
+        branch_id=branch_id,
+    )
+    normalized_data_class = str(data_class or "").strip().lower()
+    try:
+        active_record = get_latest_compliance_policy_version(
+            db,
+            scope=normalized_scope,
+            data_class=normalized_data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            status="published",
+        )
+        history_records = list_compliance_policy_history(
+            db,
+            scope=normalized_scope,
+            data_class=normalized_data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+
+    return ConsoleCompliancePolicyRegistryResponse(
+        scope=normalized_scope,
+        data_class=normalized_data_class,
+        company_id=resolved_company_id,
+        domain_key=resolved_domain_key,
+        client_id=resolved_client_id,
+        branch_id=resolved_branch_id,
+        active=_serialize_compliance_policy_version_record(active_record) if active_record else None,
+        history=[_serialize_compliance_policy_version_record(item) for item in history_records],
+    )
+
+
+@router.post(
+    "/admin/compliance-policy-registry/publish",
+    response_model=ConsoleCompliancePolicyRegistryMutationResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def publish_compliance_policy_registry(
+    request: Request,
+    body: ConsoleCompliancePolicyRegistryPublishRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleCompliancePolicyRegistryMutationResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage compliance policy registry",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        domain_key=body.domain_key,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+    schema_version = body.schema_version or COMPLIANCE_POLICY_SCHEMA_VERSION
+
+    try:
+        record = publish_compliance_policy_version(
+            db,
+            scope=normalized_scope,
+            data_class=body.data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            payload=body.payload,
+            actor_id=context.agent.id,
+            reason=reason,
+            schema_version=schema_version,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="compliance_policy_registry_published",
+        entity_type="compliance_policy_version",
+        entity_id=record.id,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": normalized_scope,
+            "data_class": record.data_class,
+            "company_id": str(record.company_id) if record.company_id else None,
+            "domain_key": record.domain_key,
+            "client_id": str(record.client_id) if record.client_id else None,
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "version_number": record.version_number,
+            "reason": reason,
+        },
+    )
+    db.commit()
+    return ConsoleCompliancePolicyRegistryMutationResponse(
+        success=True,
+        record=_serialize_compliance_policy_version_record(record),
+    )
+
+
+@router.post(
+    "/admin/compliance-policy-registry/rollback",
+    response_model=ConsoleCompliancePolicyRegistryMutationResponse,
+    responses={
+        400: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def rollback_compliance_policy_registry(
+    request: Request,
+    body: ConsoleCompliancePolicyRegistryRollbackRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleCompliancePolicyRegistryMutationResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only platform admin can manage compliance policy registry",
+    )
+    _require_platform_admin(context)
+
+    (
+        normalized_scope,
+        resolved_company_id,
+        resolved_domain_key,
+        resolved_client_id,
+        resolved_branch_id,
+    ) = _resolve_sla_profile_scope(
+        db,
+        context=context,
+        scope=body.scope,
+        domain_key=body.domain_key,
+        branch_id=body.branch_id,
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+
+    try:
+        record, source_record = rollback_compliance_policy_version(
+            db,
+            scope=normalized_scope,
+            data_class=body.data_class,
+            company_id=resolved_company_id,
+            domain_key=resolved_domain_key,
+            client_id=resolved_client_id,
+            branch_id=resolved_branch_id,
+            target_version_id=body.target_version_id,
+            actor_id=context.agent.id,
+            reason=reason,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message == "Compliance policy version not found":
+            raise ConsoleAPIError(404, "NOT_FOUND", message) from exc
+        raise ConsoleAPIError(400, "INVALID_PARAM", message) from exc
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="compliance_policy_registry_rollback",
+        entity_type="compliance_policy_version",
+        entity_id=record.id,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": normalized_scope,
+            "data_class": record.data_class,
+            "company_id": str(record.company_id) if record.company_id else None,
+            "domain_key": record.domain_key,
+            "client_id": str(record.client_id) if record.client_id else None,
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "version_number": record.version_number,
+            "reason": reason,
+            "from_version_id": str(source_record.id),
+        },
+    )
+    db.commit()
+    return ConsoleCompliancePolicyRegistryMutationResponse(
+        success=True,
+        record=_serialize_compliance_policy_version_record(record),
         from_version_id=source_record.id,
     )
 

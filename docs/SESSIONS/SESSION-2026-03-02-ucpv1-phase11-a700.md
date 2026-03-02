@@ -17,13 +17,21 @@
   - Phase11 Task Package created with mandatory gates (`One web search`, `Root cause`, `Reuse`, `Release safety`).
   - Phase11 report created with factual baseline and legal anchor.
   - Canon synced: `docs/BLOCK_GRAPH.yaml` and master report moved phase11 from `planned` to `in_progress`.
+  - Slice 1 implemented: compliance policy registry schema/migration/service/console API + deterministic tests.
+  - OpenAPI contract synced with new `/admin/compliance-policy-registry*` endpoints.
 - next:
-  - Run zero-context/session gates and commit bootstrap artifacts.
-  - Start phase11 contract delta (schema/API/job ledger) in bounded slice.
+  - Build Slice 2: lifecycle run ledger + compliance export/destruction execution records.
+  - Add deterministic ops-job coverage for retention -> export -> destruction flow.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md
   - docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md
   - docs/BLOCK_GRAPH.yaml
   - docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md
   - https://adilet.zan.kz/eng/docs/Z1300000094
+  - truffles-api/migrations/047_add_compliance_policy_versions.sql
+  - truffles-api/app/services/compliance_policy_registry_service.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/tests/test_compliance_policy_registry_service.py
+  - truffles-api/tests/test_console_compliance_policy_registry.py
+  - contracts/console_api/openapi.v1.yaml
 - last_updated: 2026-03-02
