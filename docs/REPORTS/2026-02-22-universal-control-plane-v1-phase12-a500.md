@@ -122,6 +122,17 @@ Date
   - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass after contract sync.
   - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
 
+## Closure update (pass-gate, 2026-03-02)
+- Post-merge closure checks on fresh `origin/main` are green:
+  - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_owner_business.py tests/test_console_fleet_attention.py tests/test_console_ops_jobs.py tests/test_console_onboarding_state.py` -> pass.
+  - `cd truffles-api && pytest -q tests/test_console_owner_business.py tests/test_console_fleet_attention.py tests/test_console_ops_jobs.py tests/test_console_onboarding_state.py` -> `101 passed`.
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass.
+  - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
+  - `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase12-a500.md --report docs/REPORTS/2026-02-22-universal-control-plane-v1-phase12-a500.md --graph docs/BLOCK_GRAPH.yaml` -> `zero_context_gate: OK`.
+- Canon sync decision:
+  - `docs/BLOCK_GRAPH.yaml`: `UCPV1-PHASE12` moved `in_progress -> passed`.
+  - master report queue head switched from phase12 to phase13 planning track.
+
 ## Iteration budget outcomes
 - `Planned max runs` -> 0 expensive realism runs.
 - `Actual runs` -> 0 expensive realism runs.
@@ -165,14 +176,14 @@ Date
 ## Residual GAP / Risks
 - Control-tower code is still concentrated in `console.py`; later slices need decomposition without behavior drift.
 - SLO threshold policy for strict auto-prioritization is still open.
-- Phase12 remains open until implementation slices complete and `passed` criteria are met.
+- Remaining risks are non-blocking for phase12 acceptance; follow-up belongs to phase13 migration/decomposition track.
 
 ## Handoff (for zero-context next agent)
 - `Ready for next agent`: yes.
-- `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase12-a500.md`
+- `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md`
 - `Do not touch`: unrelated tracks outside phase12/control-tower.
 - `Open risks`: SLO policy thresholds and router decomposition blast radius.
-- `First command to verify`: `rg -n "UCPV1-PHASE12|in_progress|phase12-a500" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase12-a500.md`
+- `First command to verify`: `rg -n "UCPV1-PHASE12|passed|phase12-a500" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase12-a500.md`
 
 ## Verdict
-- `In Progress`
+- `Passed`
