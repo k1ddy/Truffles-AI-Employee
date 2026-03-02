@@ -3997,6 +3997,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/control-tower/migration-program/{wave}:
+    get:
+      tags:
+      - console
+      summary: Get Admin Control Tower Migration Wave Detail
+      operationId: get_admin_control_tower_migration_wave_detail_console_v1_admin_control_tower_migration_program__wave__get
+      parameters:
+      - name: wave
+        in: path
+        required: true
+        schema:
+          enum:
+          - canary
+          - cohort
+          - fleet
+          type: string
+          title: Wave
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          title: Limit
+      - name: stale_after_minutes
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1440
+          minimum: 5
+          default: 60
+          title: Stale After Minutes
+      - name: include_p2
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Include P2
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationWaveDetailResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/companies/{company_id}:
     patch:
       tags:
@@ -7496,6 +7562,68 @@ components:
       - candidate_branches_total
       - blockers_total
       title: ConsoleAdminControlTowerMigrationWave
+    ConsoleAdminControlTowerMigrationWaveDetailResponse:
+      properties:
+        generated_at:
+          type: string
+          title: Generated At
+        stale_after_minutes:
+          type: integer
+          title: Stale After Minutes
+        limit:
+          type: integer
+          title: Limit
+        include_p2:
+          type: boolean
+          title: Include P2
+          default: true
+        wave:
+          type: string
+          enum:
+          - canary
+          - cohort
+          - fleet
+          title: Wave
+        decision:
+          type: string
+          enum:
+          - promote
+          - hold
+          title: Decision
+        reason:
+          type: string
+          title: Reason
+        summary:
+          $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationProgramSummary'
+        wave_state:
+          $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationWave'
+        signals:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationSignal'
+          type: array
+          title: Signals
+          default: []
+        promotion_actions_total:
+          type: integer
+          title: Promotion Actions Total
+        promotion_actions:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerPromotionAction'
+          type: array
+          title: Promotion Actions
+          default: []
+      type: object
+      required:
+      - generated_at
+      - stale_after_minutes
+      - limit
+      - wave
+      - decision
+      - reason
+      - summary
+      - wave_state
+      - promotion_actions_total
+      title: ConsoleAdminControlTowerMigrationWaveDetailResponse
     ConsoleAdminControlTowerOverviewResponse:
       properties:
         generated_at:

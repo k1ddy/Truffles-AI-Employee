@@ -1460,6 +1460,144 @@ async def test_admin_control_tower_migration_program_passes_scope_and_flags(monk
     assert response.include_p2 is False
 
 
+@pytest.mark.asyncio
+async def test_admin_control_tower_migration_wave_detail_requires_platform_admin(monkeypatch):
+    context = _build_context(role="owner")
+    context.accessible_clients = []
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_admin_control_tower_migration_wave_detail(
+            wave="canary",
+            request=SimpleNamespace(query_params={}),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_control_tower_migration_wave_detail_passes_scope_and_filters(monkeypatch):
+    client_id = uuid4()
+    company_id = uuid4()
+    context = _build_context(role="platform_admin")
+    context.companies = [SimpleNamespace(id=company_id, name="Acme")]
+    context.accessible_clients = [
+        SimpleNamespace(id=client_id, name="alpha", status="active", company_id=company_id, config={})
+    ]
+    captured: dict[str, object] = {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_build_admin_control_tower_migration_program",
+        lambda _db, *, active_clients, companies_by_id, stale_after_minutes, include_p2_mode, limit, now: (
+            captured.update(
+                {
+                    "active_clients": active_clients,
+                    "companies_by_id": companies_by_id,
+                    "stale_after_minutes": stale_after_minutes,
+                    "include_p2_mode": include_p2_mode,
+                    "limit": limit,
+                }
+            )
+            or console_router.ConsoleAdminControlTowerMigrationProgramResponse(
+                generated_at=now_iso,
+                stale_after_minutes=stale_after_minutes,
+                limit=limit,
+                include_p2=include_p2_mode,
+                summary=console_router.ConsoleAdminControlTowerMigrationProgramSummary(
+                    active_clients_total=1,
+                    total_branches=3,
+                    ready_branches=2,
+                    blocked_branches=1,
+                    p0_actions=1,
+                    p1_actions=1,
+                    p2_actions=0,
+                    waves_go=1,
+                    waves_hold=2,
+                ),
+                waves=[
+                    console_router.ConsoleAdminControlTowerMigrationWave(
+                        wave="canary",
+                        gate="go",
+                        reason="wave_ready_for_promotion",
+                        candidate_clients_total=1,
+                        candidate_branches_total=2,
+                        blockers_total=0,
+                    ),
+                    console_router.ConsoleAdminControlTowerMigrationWave(
+                        wave="cohort",
+                        gate="hold",
+                        reason="hard_blockers_present",
+                        candidate_clients_total=1,
+                        candidate_branches_total=2,
+                        blockers_total=2,
+                    ),
+                    console_router.ConsoleAdminControlTowerMigrationWave(
+                        wave="fleet",
+                        gate="hold",
+                        reason="blocked_branches_remaining",
+                        candidate_clients_total=1,
+                        candidate_branches_total=2,
+                        blockers_total=2,
+                    ),
+                ],
+                signals=[],
+                promotion_actions=[
+                    console_router.ConsoleAdminControlTowerPromotionAction(
+                        id="a1",
+                        wave="canary",
+                        gate="go",
+                        priority="p0",
+                        source="incident",
+                        kind="ops_job",
+                        title="Run canary",
+                        description="Canary action",
+                        job_type="integration_reconcile",
+                        mode="dry_run",
+                    ),
+                    console_router.ConsoleAdminControlTowerPromotionAction(
+                        id="a2",
+                        wave="cohort",
+                        gate="hold",
+                        priority="p1",
+                        source="provider_ops",
+                        kind="navigate",
+                        title="Open integrations",
+                        description="Cohort action",
+                        href="/integrations",
+                    ),
+                ],
+            )
+        ),
+    )
+
+    response = await console_router.get_admin_control_tower_migration_wave_detail(
+        wave="canary",
+        request=SimpleNamespace(query_params={"include_p2": "false", "stale_after_minutes": "90", "limit": "13"}),
+        include_p2="false",
+        stale_after_minutes=90,
+        limit=13,
+        db=SimpleNamespace(),
+    )
+
+    assert captured["limit"] == 13
+    assert captured["stale_after_minutes"] == 90
+    assert captured["include_p2_mode"] is False
+    assert captured["active_clients"][0].id == client_id
+    assert company_id in captured["companies_by_id"]
+    assert response.wave == "canary"
+    assert response.decision == "promote"
+    assert response.reason == "wave_ready_for_promotion"
+    assert response.promotion_actions_total == 1
+    assert len(response.promotion_actions) == 1
+    assert response.promotion_actions[0].wave == "canary"
+    assert response.include_p2 is False
+
+
 def test_build_admin_control_tower_action_center_aggregates_sources_and_filters_p2(monkeypatch) -> None:
     client_id = uuid4()
     company_id = uuid4()
@@ -1797,6 +1935,99 @@ def test_build_admin_control_tower_migration_program_empty_scope_has_fail_signal
     assert response.signals[0].code == "active_clients"
     assert response.signals[0].status == "fail"
     assert response.promotion_actions == []
+
+
+def test_build_admin_control_tower_migration_wave_detail_filters_actions_and_counts() -> None:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    migration_program = console_router.ConsoleAdminControlTowerMigrationProgramResponse(
+        generated_at=now_iso,
+        stale_after_minutes=60,
+        limit=10,
+        include_p2=True,
+        summary=console_router.ConsoleAdminControlTowerMigrationProgramSummary(
+            active_clients_total=2,
+            total_branches=6,
+            ready_branches=4,
+            blocked_branches=2,
+            p0_actions=1,
+            p1_actions=2,
+            p2_actions=1,
+            waves_go=1,
+            waves_hold=2,
+        ),
+        waves=[
+            console_router.ConsoleAdminControlTowerMigrationWave(
+                wave="canary",
+                gate="go",
+                reason="wave_ready_for_promotion",
+                candidate_clients_total=1,
+                candidate_branches_total=2,
+                blockers_total=0,
+            ),
+            console_router.ConsoleAdminControlTowerMigrationWave(
+                wave="cohort",
+                gate="hold",
+                reason="soft_blocker_budget_exceeded",
+                candidate_clients_total=2,
+                candidate_branches_total=4,
+                blockers_total=3,
+            ),
+            console_router.ConsoleAdminControlTowerMigrationWave(
+                wave="fleet",
+                gate="hold",
+                reason="blocked_branches_remaining",
+                candidate_clients_total=2,
+                candidate_branches_total=4,
+                blockers_total=4,
+            ),
+        ],
+        signals=[],
+        promotion_actions=[
+            console_router.ConsoleAdminControlTowerPromotionAction(
+                id="cohort-a1",
+                wave="cohort",
+                gate="hold",
+                priority="p1",
+                source="provider_ops",
+                kind="navigate",
+                title="Open integrations",
+                description="Investigate cohort drift",
+            ),
+            console_router.ConsoleAdminControlTowerPromotionAction(
+                id="cohort-a2",
+                wave="cohort",
+                gate="hold",
+                priority="p1",
+                source="readiness",
+                kind="navigate",
+                title="Open tenants",
+                description="Clear readiness blockers",
+            ),
+            console_router.ConsoleAdminControlTowerPromotionAction(
+                id="fleet-a1",
+                wave="fleet",
+                gate="hold",
+                priority="p2",
+                source="provider_ops",
+                kind="navigate",
+                title="Observe fleet drift",
+                description="Non-blocking follow-up",
+            ),
+        ],
+    )
+
+    response = console_router._build_admin_control_tower_migration_wave_detail(
+        migration_program=migration_program,
+        wave="cohort",
+        limit=1,
+    )
+
+    assert response.wave == "cohort"
+    assert response.decision == "hold"
+    assert response.reason == "soft_blocker_budget_exceeded"
+    assert response.promotion_actions_total == 2
+    assert len(response.promotion_actions) == 1
+    assert response.promotion_actions[0].id == "cohort-a1"
 
 
 @pytest.mark.asyncio

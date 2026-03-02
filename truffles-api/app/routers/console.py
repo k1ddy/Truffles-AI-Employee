@@ -92,6 +92,7 @@ from app.schemas.console import (
     ConsoleAdminControlTowerMigrationProgramSummary,
     ConsoleAdminControlTowerMigrationSignal,
     ConsoleAdminControlTowerMigrationWave,
+    ConsoleAdminControlTowerMigrationWaveDetailResponse,
     ConsoleAdminControlTowerOverviewResponse,
     ConsoleAdminControlTowerOverviewSummary,
     ConsoleAdminControlTowerPromotionAction,
@@ -8986,6 +8987,54 @@ def _build_migration_promotion_actions(
         if len(collected) >= limit:
             break
     return collected
+
+
+def _build_admin_control_tower_migration_wave_detail(
+    *,
+    migration_program: ConsoleAdminControlTowerMigrationProgramResponse,
+    wave: Literal["canary", "cohort", "fleet"],
+    limit: int,
+) -> ConsoleAdminControlTowerMigrationWaveDetailResponse:
+    selected_wave: Optional[ConsoleAdminControlTowerMigrationWave] = None
+    for candidate in migration_program.waves:
+        if candidate.wave == wave:
+            selected_wave = candidate
+            break
+    if selected_wave is None:
+        selected_wave = ConsoleAdminControlTowerMigrationWave(
+            wave=wave,
+            gate="hold",
+            reason="wave_not_available",
+            candidate_clients_total=0,
+            candidate_branches_total=0,
+            blockers_total=0,
+            rollback_triggers=["wave_not_available"],
+            top_blockers=[],
+        )
+
+    selected_actions = [
+        item
+        for item in migration_program.promotion_actions
+        if item.wave == wave
+    ][:limit]
+    decision: Literal["promote", "hold"] = "promote" if selected_wave.gate == "go" else "hold"
+    reason = selected_wave.reason if selected_wave.reason else ("wave_ready_for_promotion" if decision == "promote" else "wave_hold")
+    return ConsoleAdminControlTowerMigrationWaveDetailResponse(
+        generated_at=migration_program.generated_at,
+        stale_after_minutes=migration_program.stale_after_minutes,
+        limit=limit,
+        include_p2=migration_program.include_p2,
+        wave=wave,
+        decision=decision,
+        reason=reason,
+        summary=migration_program.summary,
+        wave_state=selected_wave,
+        signals=list(migration_program.signals or []),
+        promotion_actions_total=sum(
+            1 for item in migration_program.promotion_actions if item.wave == wave
+        ),
+        promotion_actions=selected_actions,
+    )
 
 
 def _build_admin_control_tower_migration_program(
@@ -20237,6 +20286,58 @@ async def get_admin_control_tower_migration_program(
         include_p2_mode=include_p2_mode,
         limit=limit,
         now=now,
+    )
+
+
+@router.get(
+    "/admin/control-tower/migration-program/{wave}",
+    response_model=ConsoleAdminControlTowerMigrationWaveDetailResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_admin_control_tower_migration_wave_detail(
+    wave: Literal["canary", "cohort", "fleet"],
+    request: Request,
+    limit: int = 50,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    include_p2: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleAdminControlTowerMigrationWaveDetailResponse:
+    _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_p2"})
+    _validate_limit(limit)
+    include_p2_mode = _parse_bool_param("include_p2", include_p2, default=True)
+    if not isinstance(stale_after_minutes, int):
+        stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
+
+    now = datetime.now(timezone.utc)
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    companies_by_id = {company.id: company for company in (context.companies or [])}
+    migration_program = _build_admin_control_tower_migration_program(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_p2_mode=include_p2_mode,
+        limit=limit,
+        now=now,
+    )
+    return _build_admin_control_tower_migration_wave_detail(
+        migration_program=migration_program,
+        wave=wave,
+        limit=limit,
     )
 
 

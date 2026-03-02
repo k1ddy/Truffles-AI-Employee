@@ -1,0 +1,34 @@
+# SESSION 2026-03-02-ucpv1-phase13-slice3-a703 — Session 2026-03-02-ucpv1-phase13-slice3-a703
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md
+- block_id: UCPV1-PHASE13
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- branch: feat/2026-03-02-ucpv1-phase13-slice3-a703
+- worktree: /home/zhan/worktrees/2026-03-02-ucpv1-phase13-slice3-a703
+- base_ref: origin/main
+- scope: Phase13 slice3 operational wave-detail contract for migration program (`/migration-program/{wave}`) with deterministic decision payload and per-wave action filtering.
+- done:
+  - Added migration wave detail schema (`ConsoleAdminControlTowerMigrationWaveDetailResponse`) with `decision`, `reason`, and per-wave action counters.
+  - Implemented helper `_build_admin_control_tower_migration_wave_detail` reusing migration-program output.
+  - Added endpoint `GET /console/v1/admin/control-tower/migration-program/{wave}` (`canary|cohort|fleet`) under platform-admin RBAC.
+  - Extended deterministic tests for RBAC, pass-through wiring, wave filtering, and action counting behavior.
+  - Synced OpenAPI contract after new endpoint addition.
+  - Synced phase13/state/master report evidence for slice3.
+- next:
+  - Run final gates (`zero_context_gate`, `session_check`) and close session.
+  - Commit, push, and open PR for slice3.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md
+  - docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md
+  - docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md
+  - STATE.md
+  - truffles-api/app/routers/console.py
+  - truffles-api/app/schemas/console.py
+  - truffles-api/tests/test_console_owner_business.py
+  - contracts/console_api/openapi.v1.yaml
+- last_updated: 2026-03-02
