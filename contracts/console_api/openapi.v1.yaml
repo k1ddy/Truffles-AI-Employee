@@ -3885,6 +3885,62 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/control-tower/action-center:
+    get:
+      tags:
+      - console
+      summary: Get Admin Control Tower Action Center
+      operationId: get_admin_control_tower_action_center_console_v1_admin_control_tower_action_center_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          title: Limit
+      - name: stale_after_minutes
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1440
+          minimum: 5
+          default: 60
+          title: Stale After Minutes
+      - name: include_p2
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Include P2
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleAdminControlTowerActionCenterResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/companies/{company_id}:
     patch:
       tags:
@@ -6938,6 +6994,199 @@ components:
       additionalProperties: false
       type: object
       title: CompliancePolicyPayload
+    ConsoleAdminControlTowerActionCenterResponse:
+      properties:
+        generated_at:
+          type: string
+          title: Generated At
+        stale_after_minutes:
+          type: integer
+          title: Stale After Minutes
+        limit:
+          type: integer
+          title: Limit
+        include_p2:
+          type: boolean
+          title: Include P2
+          default: true
+        summary:
+          $ref: '#/components/schemas/ConsoleAdminControlTowerActionCenterSummary'
+        top_reasons:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerIssueCount'
+          type: array
+          title: Top Reasons
+          default: []
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerActionItem'
+          type: array
+          title: Items
+      type: object
+      required:
+      - generated_at
+      - stale_after_minutes
+      - limit
+      - summary
+      - items
+      title: ConsoleAdminControlTowerActionCenterResponse
+    ConsoleAdminControlTowerActionCenterSummary:
+      properties:
+        total_actions:
+          type: integer
+          title: Total Actions
+        p0_actions:
+          type: integer
+          title: P0 Actions
+        p1_actions:
+          type: integer
+          title: P1 Actions
+        p2_actions:
+          type: integer
+          title: P2 Actions
+        incident_actions:
+          type: integer
+          title: Incident Actions
+        provider_ops_actions:
+          type: integer
+          title: Provider Ops Actions
+        readiness_actions:
+          type: integer
+          title: Readiness Actions
+      type: object
+      required:
+      - total_actions
+      - p0_actions
+      - p1_actions
+      - p2_actions
+      - incident_actions
+      - provider_ops_actions
+      - readiness_actions
+      title: ConsoleAdminControlTowerActionCenterSummary
+    ConsoleAdminControlTowerActionItem:
+      properties:
+        id:
+          type: string
+          title: Id
+        priority:
+          type: string
+          enum:
+          - p0
+          - p1
+          - p2
+          title: Priority
+        source:
+          type: string
+          enum:
+          - incident
+          - provider_ops
+          - readiness
+          title: Source
+        kind:
+          type: string
+          enum:
+          - navigate
+          - ops_job
+          - provider_action
+          title: Kind
+        title:
+          type: string
+          title: Title
+        description:
+          type: string
+          title: Description
+        reasons:
+          items:
+            type: string
+          type: array
+          title: Reasons
+          default: []
+        href:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Href
+        incident_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Incident Id
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        client_slug:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Slug
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        branch_slug:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Branch Slug
+        branch_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Branch Name
+        job_type:
+          anyOf:
+          - type: string
+            enum:
+            - outbox_process
+            - integration_reconcile
+            - heal
+            - metrics_snapshot
+            - incident_state
+            - compliance_lifecycle
+          - type: 'null'
+          title: Job Type
+        mode:
+          anyOf:
+          - type: string
+            enum:
+            - dry_run
+            - execute
+          - type: 'null'
+          title: Mode
+        params:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Params
+        provider_action:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Provider Action
+        requires_confirmation:
+          type: boolean
+          title: Requires Confirmation
+          default: false
+        evidence_links:
+          items:
+            type: string
+          type: array
+          title: Evidence Links
+          default: []
+      type: object
+      required:
+      - id
+      - priority
+      - source
+      - kind
+      - title
+      - description
+      title: ConsoleAdminControlTowerActionItem
     ConsoleAdminControlTowerDriftBoardResponse:
       properties:
         generated_at:

@@ -102,6 +102,26 @@ Date
   - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass after contract sync.
   - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
 
+## Slice 3 update (runtime integration, 2026-03-02)
+- Delivered platform-admin action-center endpoint:
+  - `GET /console/v1/admin/control-tower/action-center`.
+- Reuse-first implementation:
+  - reused incident action descriptors from `_build_admin_incidents_response`,
+  - reused provider queue recommendations from `_build_admin_control_tower_drift_board`,
+  - reused readiness blockers from `_build_admin_control_tower_readiness_board`,
+  - aggregated all three sources into a single priority queue (`p0/p1/p2`) with evidence links for operator navigation.
+- Contract update:
+  - new schemas in `app/schemas/console.py`:
+    - `ConsoleAdminControlTowerActionItem`,
+    - `ConsoleAdminControlTowerActionCenterSummary`,
+    - `ConsoleAdminControlTowerActionCenterResponse`.
+  - OpenAPI contract synchronized (`openapi.v1.yaml`) after drift gate.
+- Deterministic checks for slice3:
+  - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_owner_business.py` -> pass.
+  - `cd truffles-api && pytest -q tests/test_console_owner_business.py tests/test_console_fleet_attention.py tests/test_console_ops_jobs.py tests/test_console_onboarding_state.py` -> `101 passed`.
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass after contract sync.
+  - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
+
 ## Iteration budget outcomes
 - `Planned max runs` -> 0 expensive realism runs.
 - `Actual runs` -> 0 expensive realism runs.
@@ -115,6 +135,7 @@ Date
 - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
 - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase12-a700.md`
 - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase12-slice2-a700.md`
+- `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase12-slice3-a700.md`
 - `STATE.md`
 - `truffles-api/tests/test_console_fleet_attention.py`
 - `truffles-api/tests/test_console_owner_business.py`
@@ -126,7 +147,7 @@ Date
 
 ## Release safety decision
 - `Strategy used` -> runtime read-only contract expansion behind platform-admin authorization.
-- `Go/no-go signals observed` -> deterministic checks are green (`ruff`, `98 passed`, OpenAPI drift gate pass).
+- `Go/no-go signals observed` -> deterministic checks are green (`ruff`, `101 passed`, OpenAPI drift gate pass).
 - `Rollback readiness` -> single commit revert restores previous control-tower contract.
 
 ## Canon/doc sync updates
@@ -137,6 +158,7 @@ Date
   - `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`
   - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase12-a700.md`
   - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase12-slice2-a700.md`
+  - `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase12-slice3-a700.md`
   - `STATE.md`
 - `Drift resolved` -> yes (phase12 artifact gap closed).
 

@@ -82,6 +82,9 @@ from app.schemas.capabilities import (
 )
 from app.schemas.compliance_policy import CompliancePolicyPayload
 from app.schemas.console import (
+    ConsoleAdminControlTowerActionCenterResponse,
+    ConsoleAdminControlTowerActionCenterSummary,
+    ConsoleAdminControlTowerActionItem,
     ConsoleAdminControlTowerDriftBoardResponse,
     ConsoleAdminControlTowerDriftSummary,
     ConsoleAdminControlTowerIssueCount,
@@ -8588,6 +8591,235 @@ def _build_control_tower_issue_counts(
         ConsoleAdminControlTowerIssueCount(code=code, count=count)
         for code, count in ranked[: max(limit, 0)]
     ]
+
+
+def _control_tower_incident_priority(severity: str) -> Literal["p0", "p1", "p2"]:
+    if severity == "critical":
+        return "p0"
+    if severity == "warn":
+        return "p1"
+    return "p2"
+
+
+def _control_tower_provider_action_label(action: str) -> str:
+    labels = {
+        "integration_reconcile": "Запустить integration reconcile",
+        "provider_start_rebind": "Начать provider rebind",
+        "provider_complete_rebind": "Завершить provider rebind",
+        "provider_renewal_confirmed": "Подтвердить продление провайдера",
+        "provider_webhook_updated": "Обновить webhook/instance",
+        "provider_send_reminder": "Отправить напоминание провайдеру",
+    }
+    return labels.get(action, "Запустить provider action")
+
+
+def _dedupe_non_empty(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = (value or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        deduped.append(normalized)
+        seen.add(normalized)
+    return deduped
+
+
+def _build_admin_control_tower_action_center(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    stale_after_minutes: int,
+    include_p2_mode: bool,
+    limit: int,
+    now: datetime,
+) -> ConsoleAdminControlTowerActionCenterResponse:
+    if not active_clients:
+        return ConsoleAdminControlTowerActionCenterResponse(
+            generated_at=now.isoformat(),
+            stale_after_minutes=stale_after_minutes,
+            limit=limit,
+            include_p2=include_p2_mode,
+            summary=ConsoleAdminControlTowerActionCenterSummary(
+                total_actions=0,
+                p0_actions=0,
+                p1_actions=0,
+                p2_actions=0,
+                incident_actions=0,
+                provider_ops_actions=0,
+                readiness_actions=0,
+            ),
+            top_reasons=[],
+            items=[],
+        )
+
+    incident_limit = max(limit, 50)
+    board_limit = max(limit, 50)
+    client_ids = [client.id for client in active_clients]
+
+    incidents = _build_admin_incidents_response(
+        db,
+        active_clients=active_clients,
+        limit=incident_limit,
+        now=now,
+    )
+    drift_board = _build_admin_control_tower_drift_board(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        only_problematic_mode=True,
+        limit=board_limit,
+        now=now,
+    )
+    readiness_board = _build_admin_control_tower_readiness_board(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        include_ready_mode=False,
+        limit=board_limit,
+        now=now,
+    )
+
+    reason_counter: dict[str, int] = {}
+    collected: list[ConsoleAdminControlTowerActionItem] = []
+
+    for incident in incidents.items:
+        priority = _control_tower_incident_priority(incident.severity)
+        reasons = _dedupe_non_empty([incident.reason_code])
+        for reason in reasons:
+            reason_counter[reason] = reason_counter.get(reason, 0) + 1
+        for action in incident.actions:
+            collected.append(
+                ConsoleAdminControlTowerActionItem(
+                    id=f"incident:{incident.id}:{action.id}",
+                    priority=priority,
+                    source="incident",
+                    kind="ops_job" if action.job_type else "navigate",
+                    title=action.title,
+                    description=action.description,
+                    reasons=reasons,
+                    href=action.href,
+                    incident_id=incident.id,
+                    client_id=incident.client_id,
+                    client_slug=incident.client_slug,
+                    branch_id=incident.branch_id,
+                    job_type=action.job_type,
+                    mode=action.mode,
+                    params=action.params if isinstance(action.params, dict) else None,
+                    requires_confirmation=bool(action.requires_confirmation),
+                    evidence_links=_dedupe_non_empty(
+                        ["/admin/incidents", action.href or "", "/admin/control-tower/overview"]
+                    ),
+                )
+            )
+
+    for queue_item in drift_board.provider_ops_queue:
+        reasons = _dedupe_non_empty(list(queue_item.reasons or []))
+        for reason in reasons:
+            reason_counter[reason] = reason_counter.get(reason, 0) + 1
+        collected.append(
+            ConsoleAdminControlTowerActionItem(
+                id=f"provider:{queue_item.branch_id}:{queue_item.recommended_action}",
+                priority=queue_item.priority,
+                source="provider_ops",
+                kind="provider_action",
+                title=_control_tower_provider_action_label(queue_item.recommended_action),
+                description=(
+                    f"{queue_item.client_slug}/{queue_item.branch_name}: "
+                    f"priority={queue_item.priority}, reasons={', '.join(reasons) or 'n/a'}"
+                ),
+                reasons=reasons,
+                href="/integrations",
+                client_id=queue_item.client_id,
+                client_slug=queue_item.client_slug,
+                branch_id=queue_item.branch_id,
+                branch_slug=queue_item.branch_slug,
+                branch_name=queue_item.branch_name,
+                provider_action=queue_item.recommended_action,
+                params={
+                    "branch_id": str(queue_item.branch_id),
+                    "action": queue_item.recommended_action,
+                    "mode": "execute",
+                    "requires_confirmation": bool(queue_item.requires_confirmation),
+                },
+                requires_confirmation=bool(queue_item.requires_confirmation),
+                evidence_links=[
+                    "/admin/control-tower/drift-board",
+                    f"/admin/integrations/{queue_item.branch_id}/reconcile",
+                ],
+            )
+        )
+
+    for readiness_item in readiness_board.items:
+        reasons = _dedupe_non_empty(
+            list(readiness_item.hard_gate_blockers or []) + list(readiness_item.missing or [])
+        )
+        if not reasons:
+            reasons = ["readiness_blocked"]
+        for reason in reasons:
+            reason_counter[reason] = reason_counter.get(reason, 0) + 1
+        collected.append(
+            ConsoleAdminControlTowerActionItem(
+                id=f"readiness:{readiness_item.branch_id}",
+                priority="p0" if readiness_item.hard_gate_status == "fail" else "p1",
+                source="readiness",
+                kind="navigate",
+                title=f"Закрыть go-live blockers: {readiness_item.client_slug}/{readiness_item.branch_name}",
+                description=(
+                    "Проверьте hard-gate и недостающие onboarding шаги перед продвижением филиала."
+                ),
+                reasons=reasons,
+                href="/tenants",
+                client_id=readiness_item.client_id,
+                client_slug=readiness_item.client_slug,
+                branch_id=readiness_item.branch_id,
+                branch_slug=readiness_item.branch_slug,
+                branch_name=readiness_item.branch_name,
+                evidence_links=["/admin/control-tower/readiness-board", "/tenants"],
+            )
+        )
+
+    scoped_items: list[ConsoleAdminControlTowerActionItem] = []
+    for item in collected:
+        if item.client_id and item.client_id not in client_ids:
+            continue
+        if not include_p2_mode and item.priority == "p2":
+            continue
+        scoped_items.append(item)
+
+    priority_rank = {"p0": 0, "p1": 1, "p2": 2}
+    source_rank = {"incident": 0, "provider_ops": 1, "readiness": 2}
+    scoped_items.sort(
+        key=lambda item: (
+            priority_rank.get(item.priority, 99),
+            source_rank.get(item.source, 99),
+            item.client_slug or "",
+            item.branch_name or "",
+            item.title,
+        )
+    )
+
+    summary = ConsoleAdminControlTowerActionCenterSummary(
+        total_actions=len(scoped_items),
+        p0_actions=sum(1 for item in scoped_items if item.priority == "p0"),
+        p1_actions=sum(1 for item in scoped_items if item.priority == "p1"),
+        p2_actions=sum(1 for item in scoped_items if item.priority == "p2"),
+        incident_actions=sum(1 for item in scoped_items if item.source == "incident"),
+        provider_ops_actions=sum(1 for item in scoped_items if item.source == "provider_ops"),
+        readiness_actions=sum(1 for item in scoped_items if item.source == "readiness"),
+    )
+
+    return ConsoleAdminControlTowerActionCenterResponse(
+        generated_at=now.isoformat(),
+        stale_after_minutes=stale_after_minutes,
+        limit=limit,
+        include_p2=include_p2_mode,
+        summary=summary,
+        top_reasons=_build_control_tower_issue_counts(reason_counter, limit=10),
+        items=scoped_items[:limit],
+    )
 
 
 def _build_admin_control_tower_readiness_board(
@@ -19576,6 +19808,52 @@ async def get_admin_control_tower_drift_board(
         companies_by_id=companies_by_id,
         stale_after_minutes=stale_after_minutes,
         only_problematic_mode=only_problematic_mode,
+        limit=limit,
+        now=now,
+    )
+
+
+@router.get(
+    "/admin/control-tower/action-center",
+    response_model=ConsoleAdminControlTowerActionCenterResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_admin_control_tower_action_center(
+    request: Request,
+    limit: int = 50,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    include_p2: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleAdminControlTowerActionCenterResponse:
+    _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_p2"})
+    _validate_limit(limit)
+    include_p2_mode = _parse_bool_param("include_p2", include_p2, default=True)
+    if not isinstance(stale_after_minutes, int):
+        stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
+
+    now = datetime.now(timezone.utc)
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    companies_by_id = {company.id: company for company in (context.companies or [])}
+    return _build_admin_control_tower_action_center(
+        db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        stale_after_minutes=stale_after_minutes,
+        include_p2_mode=include_p2_mode,
         limit=limit,
         now=now,
     )
