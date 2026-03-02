@@ -295,12 +295,14 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
   - новый run запрещён, если предыдущий в том же режиме `incomplete/invalid/failed` или `manual_audit != done`,
   - запрещено повторять один и тот же run_id или fingerprint без явного forensic override.
 
-**Командный шаблон:**
-- lock: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 42 --judge-mode all --fail-on-thresholds --run-id booking-lock-42`
-- replay: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression --max-failures 20`
- - каноничный запуск: `scripts/llm_quality_guarded.sh --mode <lock|replay|full> --run-id <id> -- --base-url ...`
- - отчёт по артефактам: `scripts/quality_artifact_report.py --hours 24 --show-commands`
- - подробный SOP/quickstart (`lock/replay/full/resume/guard blocks`): `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` (section `Guarded llm-quality quickstart (single entrypoint)`).
+**Командный шаблон (single entrypoint, без скрытого поиска):**
+- acceptance lock: `scripts/llm_quality_guarded.sh --mode lock --run-id booking-lock-<id> --pg-checklist /tmp/booking_quality/pg_checklist-<id>.json -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds`
+- acceptance replay: `scripts/llm_quality_guarded.sh --mode replay --run-id booking-replay-<id> -- --base-url <url> --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-<id>/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --max-failures 20`
+- acceptance full: `scripts/llm_quality_guarded.sh --mode full --run-id booking-full-<id> -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json`
+- post-run audit: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/<run-id> --status done --strict-artifacts`
+- direct `python3 ops/diagnose.py llm-quality ...` разрешён только для `dev/forensic` и не является acceptance-evidence.
+- отчёт по артефактам: `scripts/quality_artifact_report.py --hours 24 --show-commands`
+- подробный SOP/quickstart (`lock/replay/full/resume/guard blocks`): `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` (section `Guarded llm-quality quickstart (single entrypoint)`).
 
 **Локальные тесты:**
 - локально запускаются в первую очередь и определяют качество поведения.

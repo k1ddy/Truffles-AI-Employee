@@ -70,6 +70,10 @@ TESTING CONTRACT (summary)
   - full critical pytest suites,
   - `scripts/llm_quality_guarded.sh` as canonical llm-quality entrypoint (acceptance via chain controller; `lock` requires `--pg-checklist` with `PG0..PG6`, `root_cause_statement`, `defect_mapping`),
   - evidence from `decision_meta/decision_trace` + tool outcomes (not text-only).
+- Acceptance quickstart (copy/paste, single entrypoint):
+  - lock: `scripts/llm_quality_guarded.sh --mode lock --run-id booking-lock-<id> --pg-checklist /tmp/booking_quality/pg_checklist-<id>.json -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds`
+  - replay: `scripts/llm_quality_guarded.sh --mode replay --run-id booking-replay-<id> -- --base-url <url> --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-<id>/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --max-failures 20`
+  - full: `scripts/llm_quality_guarded.sh --mode full --run-id booking-full-<id> -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json`
 - Direct `python3 ops/diagnose.py llm-quality` is not an acceptance entrypoint; use it only for dev/forensic diagnostics.
 - Before first quality run in a session, read `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`:
   - `LLM-quality start here (mandatory for new agents)`,

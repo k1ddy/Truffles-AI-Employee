@@ -342,4 +342,14 @@
     - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py` (`2 passed`)
     - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py` (`12 passed`)
     - `scripts/session_check.sh`
-- last_updated: 2026-03-01T11:10:00+05:00
+  - PR `#855` CI fail-package handled and remediated:
+    - failed job: `session-gate` (`run 22538752361`, `job 65335452835`),
+    - failed step: `Session gate`,
+    - error: `ERROR: Missing session log updates (docs/SESSIONS + docs/SESSION_INDEX.md).`,
+    - fix: updated this session log + `docs/SESSION_INDEX.md` within the same branch packet.
+  - Validation (green, PR `#855` remediation packet):
+    - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py` (`13 passed`)
+    - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`69 passed`)
+    - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
+    - `scripts/session_check.sh`
+- last_updated: 2026-03-02T06:11:08+05:00
