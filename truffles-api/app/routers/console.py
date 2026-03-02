@@ -43,6 +43,7 @@ from app.models import (
     ClientPolicyVersion,
     ClientSettings,
     Company,
+    ComplianceLifecycleArtifact,
     ComplianceLifecycleRecord,
     ComplianceLifecycleRun,
     CompliancePolicyVersion,
@@ -129,6 +130,8 @@ from app.schemas.console import (
     ConsoleCompanyCreateResponse,
     ConsoleCompanyListResponse,
     ConsoleCompanyUpdateRequest,
+    ConsoleComplianceLifecycleArtifactRecord,
+    ConsoleComplianceLifecycleArtifactResponse,
     ConsoleComplianceLifecycleRecord,
     ConsoleComplianceLifecycleRunRecord,
     ConsoleComplianceLifecycleRunRequest,
@@ -330,6 +333,10 @@ from app.services.capabilities_service import (
     payload_to_dict,
 )
 from app.services.chatflow_service import get_instance_id, send_bot_response
+from app.services.compliance_lifecycle_artifact_service import (
+    get_lifecycle_artifact,
+    publish_lifecycle_artifact,
+)
 from app.services.compliance_lifecycle_service import (
     create_lifecycle_run,
     execute_lifecycle_preview,
@@ -9186,6 +9193,18 @@ def _execute_compliance_lifecycle_preview_run(
             error_message=None,
         )
         records = list_lifecycle_records(db, run_id=run.id, limit=max_items)
+        artifact = publish_lifecycle_artifact(
+            db,
+            run=run,
+            records=records,
+            actor_id=context.agent.id,
+        )
+        run_summary = run.summary_json if isinstance(run.summary_json, dict) else {}
+        run_summary["artifact_id"] = str(artifact.id)
+        run_summary["artifact_digest"] = artifact.artifact_digest
+        run.summary_json = run_summary
+        run.updated_at = datetime.now(timezone.utc)
+        db.flush()
         return run, records
     except ValueError as exc:
         raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
@@ -9365,6 +9384,23 @@ async def _run_compliance_lifecycle_job(
         apply_actions=apply_actions,
         approval_token=approval_token,
     )
+    artifact = get_lifecycle_artifact(
+        db,
+        run_id=run.id,
+        client_id=context.client.id,
+        scope=resolved_scope,
+        branch_id=resolved_branch_id,
+    )
+    artifact_ref = (
+        {
+            "artifact_id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "artifact_digest": artifact.artifact_digest,
+            "api_path": f"/console/v1/admin/compliance-lifecycle/runs/{run.id}/artifact",
+        }
+        if artifact is not None
+        else None
+    )
     return {
         "mode": mode,
         "scope": {
@@ -9387,6 +9423,7 @@ async def _run_compliance_lifecycle_job(
         "summary": run.summary_json or {},
         "records_count": len(records),
         "policy_version_id": str(run.policy_version_id) if run.policy_version_id else None,
+        "evidence_artifact": artifact_ref,
     }
 
 
@@ -21118,6 +21155,31 @@ def _serialize_compliance_lifecycle_record(
     )
 
 
+def _serialize_compliance_lifecycle_artifact_record(
+    record: ComplianceLifecycleArtifact,
+) -> ConsoleComplianceLifecycleArtifactRecord:
+    return ConsoleComplianceLifecycleArtifactRecord(
+        id=record.id,
+        run_id=record.run_id,
+        scope=record.scope,
+        data_class=record.data_class,
+        operation=record.operation,
+        run_mode=record.run_mode,
+        status=record.status,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        artifact_type=record.artifact_type,
+        artifact_digest=record.artifact_digest,
+        payload=record.payload_json if isinstance(record.payload_json, dict) else {},
+        records_count=int(record.records_count or 0),
+        evidence_record_count=int(record.evidence_record_count or 0),
+        published_by=record.published_by,
+        published_at=record.published_at.isoformat() if record.published_at else None,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
 def _serialize_sla_profile_version_record(record: SlaProfileVersion) -> ConsoleSlaProfileVersionRecord:
     try:
         payload = SlaProfilePayload.model_validate(record.payload_json or {})
@@ -22118,6 +22180,74 @@ async def get_compliance_lifecycle_run(
         success=True,
         run=_serialize_compliance_lifecycle_run_record(run),
         records=[_serialize_compliance_lifecycle_record(item) for item in records],
+    )
+
+
+@router.get(
+    "/admin/compliance-lifecycle/runs/{run_id}/artifact",
+    response_model=ConsoleComplianceLifecycleArtifactResponse,
+    responses={
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def get_compliance_lifecycle_artifact(
+    run_id: UUID,
+    request: Request,
+    scope: Literal["client", "branch"] = Query("client"),
+    branch_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleComplianceLifecycleArtifactResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+    _require_platform_admin(context)
+
+    normalized_scope, resolved_branch_id = _resolve_policy_registry_scope(
+        db,
+        context=context,
+        scope=scope,
+        branch_id=branch_id,
+    )
+    run = get_lifecycle_run(
+        db,
+        run_id=run_id,
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+    )
+    if run is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Compliance lifecycle run not found")
+
+    artifact = get_lifecycle_artifact(
+        db,
+        run_id=run.id,
+        client_id=context.client.id,
+        scope=normalized_scope,
+        branch_id=resolved_branch_id,
+    )
+    if artifact is None:
+        records = list_lifecycle_records(db, run_id=run.id, limit=1000)
+        artifact = publish_lifecycle_artifact(
+            db,
+            run=run,
+            records=records,
+            actor_id=context.agent.id,
+        )
+        run_summary = run.summary_json if isinstance(run.summary_json, dict) else {}
+        run_summary["artifact_id"] = str(artifact.id)
+        run_summary["artifact_digest"] = artifact.artifact_digest
+        run.summary_json = run_summary
+        run.updated_at = datetime.now(timezone.utc)
+        db.commit()
+
+    return ConsoleComplianceLifecycleArtifactResponse(
+        success=True,
+        artifact=_serialize_compliance_lifecycle_artifact_record(artifact),
     )
 
 

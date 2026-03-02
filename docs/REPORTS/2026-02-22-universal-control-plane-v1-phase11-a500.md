@@ -142,6 +142,20 @@ Date
   - deterministic tests:
     - `truffles-api/tests/test_console_compliance_lifecycle.py` (apply-actions guardrails + pass-through),
     - `truffles-api/tests/test_compliance_lifecycle_service.py` (manual apply behavior and counters).
+- Slice 6 implementation (`external evidence artifact publication + read API`):
+  - Added immutable artifact persistence layer:
+    - migration: `truffles-api/migrations/049_add_compliance_lifecycle_artifacts.sql`,
+    - model: `truffles-api/app/models/compliance_lifecycle_artifact.py`,
+    - service: `truffles-api/app/services/compliance_lifecycle_artifact_service.py`.
+  - Artifact publication is executed on every lifecycle run completion (ops + direct endpoint path), with `artifact_id`/`artifact_digest` mirrored into run summary.
+  - Added read API:
+    - `GET /console/v1/admin/compliance-lifecycle/runs/{run_id}/artifact`.
+  - On-demand backfill behavior for legacy runs:
+    - if artifact row is missing, endpoint publishes artifact from existing run+records and commits deterministic snapshot.
+  - Ops lifecycle result payload now includes `evidence_artifact` reference (`artifact_id`, `artifact_type`, `artifact_digest`, `api_path`).
+  - deterministic tests:
+    - `truffles-api/tests/test_compliance_lifecycle_artifact_service.py`,
+    - `truffles-api/tests/test_console_compliance_lifecycle.py` (artifact endpoint + ops payload assertion).
 
 ## Checks + outcomes
 - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
@@ -159,6 +173,9 @@ Date
 - `cd truffles-api && pytest -q tests/test_compliance_lifecycle_service.py tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `33 passed`.
 - `cd truffles-api && ruff check app/services/compliance_lifecycle_service.py app/routers/console.py tests/test_compliance_lifecycle_service.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `All checks passed` (after apply-actions slice).
 - `cd truffles-api && pytest -q tests/test_compliance_lifecycle_service.py tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `39 passed`.
+- `cd truffles-api && ruff check app/models/compliance_lifecycle_artifact.py app/services/compliance_lifecycle_artifact_service.py app/services/compliance_lifecycle_service.py app/routers/console.py app/schemas/console.py tests/test_compliance_lifecycle_artifact_service.py tests/test_compliance_lifecycle_service.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `All checks passed`.
+- `cd truffles-api && pytest -q tests/test_compliance_lifecycle_artifact_service.py tests/test_compliance_lifecycle_service.py tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `44 passed`.
+- `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass after adding lifecycle artifact endpoint to contract.
 
 ## Iteration budget outcomes
 - `Planned max runs` -> 0 expensive realism runs (analysis/doc sync only).
@@ -179,7 +196,11 @@ Date
 - `truffles-api/tests/test_compliance_policy_registry_service.py`
 - `truffles-api/tests/test_console_compliance_policy_registry.py`
 - `truffles-api/migrations/048_add_compliance_lifecycle_runs.sql`
+- `truffles-api/migrations/049_add_compliance_lifecycle_artifacts.sql`
+- `truffles-api/app/models/compliance_lifecycle_artifact.py`
+- `truffles-api/app/services/compliance_lifecycle_artifact_service.py`
 - `truffles-api/app/services/compliance_lifecycle_service.py`
+- `truffles-api/tests/test_compliance_lifecycle_artifact_service.py`
 - `truffles-api/tests/test_compliance_lifecycle_service.py`
 - `truffles-api/tests/test_console_compliance_lifecycle.py`
 - `truffles-api/tests/test_console_ops_jobs.py`
@@ -187,9 +208,9 @@ Date
 - `contracts/console_api/openapi.v1.yaml`
 
 ## Release safety decision
-- `Strategy used` -> registry + preview-only lifecycle slice with ops trigger (no destructive mutation path in runtime).
-- `Go/no-go signals observed` -> deterministic tests green + API contract synced + no runtime semantic path changes.
-- `Rollback readiness` -> revert Slice 1/2 commits + keep B11 status `in_progress` until scheduled orchestration is delivered.
+- `Strategy used` -> guarded mutation lane with explicit operator intent (`reason`, `approval_token`, `lane=manual`, `max_items<=50`) plus immutable evidence publication per run.
+- `Go/no-go signals observed` -> deterministic tests green + API contract synced + artifact digest/read path available for audit.
+- `Rollback readiness` -> revert Slice 4/5/6 commits and disable apply-actions path while keeping preview evidence lane active; keep B11 status `in_progress` until closure checklist is complete.
 
 ## Canon/doc sync updates
 - `Updated docs`:

@@ -1881,6 +1881,27 @@ class ConsoleComplianceLifecycleRecord(BaseModel):
     occurred_at: Optional[str] = None
 
 
+class ConsoleComplianceLifecycleArtifactRecord(BaseModel):
+    id: UUID
+    run_id: UUID
+    scope: Literal["client", "branch"]
+    data_class: str
+    operation: Literal["retention_scan", "export_preview", "destruction_preview"]
+    run_mode: Literal["preview", "manual"]
+    status: Literal["running", "completed", "failed"]
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    artifact_type: Literal["compliance_lifecycle_evidence"]
+    artifact_digest: str
+    payload: dict = {}
+    records_count: int = 0
+    evidence_record_count: int = 0
+    published_by: Optional[UUID] = None
+    published_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 class ConsoleComplianceLifecycleRunRequest(BaseModel):
     scope: Literal["client", "branch"]
     branch_id: Optional[UUID] = None
@@ -1899,6 +1920,11 @@ class ConsoleComplianceLifecycleRunResponse(BaseModel):
 
 class ConsoleComplianceLifecycleRunsResponse(BaseModel):
     items: list[ConsoleComplianceLifecycleRunRecord]
+
+
+class ConsoleComplianceLifecycleArtifactResponse(BaseModel):
+    success: bool
+    artifact: ConsoleComplianceLifecycleArtifactRecord
 
 
 class ConsoleSlaProfileVersionRecord(BaseModel):

@@ -5240,6 +5240,64 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/compliance-lifecycle/runs/{run_id}/artifact:
+    get:
+      tags:
+      - console
+      summary: Get Compliance Lifecycle Artifact
+      operationId: get_compliance_lifecycle_artifact_console_v1_admin_compliance_lifecycle_runs__run_id__artifact_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      - name: scope
+        in: query
+        required: false
+        schema:
+          enum:
+          - client
+          - branch
+          type: string
+          default: client
+          title: Scope
+      - name: branch_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleComplianceLifecycleArtifactResponse'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/sla-profile-registry:
     get:
       tags:
@@ -8778,6 +8836,119 @@ components:
       additionalProperties: false
       type: object
       title: ConsoleCompanyUpdateRequest
+    ConsoleComplianceLifecycleArtifactRecord:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        run_id:
+          type: string
+          format: uuid
+          title: Run Id
+        scope:
+          type: string
+          enum:
+          - client
+          - branch
+          title: Scope
+        data_class:
+          type: string
+          title: Data Class
+        operation:
+          type: string
+          enum:
+          - retention_scan
+          - export_preview
+          - destruction_preview
+          title: Operation
+        run_mode:
+          type: string
+          enum:
+          - preview
+          - manual
+          title: Run Mode
+        status:
+          type: string
+          enum:
+          - running
+          - completed
+          - failed
+          title: Status
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        artifact_type:
+          const: compliance_lifecycle_evidence
+          title: Artifact Type
+        artifact_digest:
+          type: string
+          title: Artifact Digest
+        payload:
+          type: object
+          title: Payload
+          default: {}
+        records_count:
+          type: integer
+          title: Records Count
+          default: 0
+        evidence_record_count:
+          type: integer
+          title: Evidence Record Count
+          default: 0
+        published_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Published By
+        published_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Published At
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - id
+      - run_id
+      - scope
+      - data_class
+      - operation
+      - run_mode
+      - status
+      - client_id
+      - artifact_type
+      - artifact_digest
+      title: ConsoleComplianceLifecycleArtifactRecord
+    ConsoleComplianceLifecycleArtifactResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        artifact:
+          $ref: '#/components/schemas/ConsoleComplianceLifecycleArtifactRecord'
+      type: object
+      required:
+      - success
+      - artifact
+      title: ConsoleComplianceLifecycleArtifactResponse
     ConsoleComplianceLifecycleRecord:
       properties:
         id:

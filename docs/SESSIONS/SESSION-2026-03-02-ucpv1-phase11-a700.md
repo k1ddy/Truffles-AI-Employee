@@ -28,8 +28,9 @@
   - Slice 5 safety path implemented: `apply_actions` execution gate (`execute` + `lane=manual` + mandatory reason) and deterministic apply-action outcomes in compliance lifecycle records.
   - Slice 5 evidence path implemented: lifecycle summary now includes deterministic `evidence_digest` and `evidence_record_count` for immutable outcome tracing.
   - Slice 5 rollout controls implemented: `approval_token` required for apply-actions and canary cap (`max_items <= 50`) enforced for mutation lane.
+  - Slice 6 implemented: external compliance evidence artifacts persisted (`049` migration), auto-published per lifecycle run, and exposed via `GET /console/v1/admin/compliance-lifecycle/runs/{run_id}/artifact` with deterministic digest payload.
 - next:
-  - Publish external immutable evidence artifacts and prepare pass-gate checklist for phase11 closure.
+  - Prepare pass-gate checklist for phase11 closure (`in_progress` -> `passed`) using artifact publication evidence + rollback signals.
   - Add evidence for promotion criteria from `in_progress` to `passed` (policy/run/action chain + rollback signals).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md
@@ -52,7 +53,13 @@
   - truffles-api/tests/test_compliance_lifecycle_service.py
   - truffles-api/app/routers/console.py
   - truffles-api/tests/test_console_compliance_lifecycle.py
+  - truffles-api/migrations/049_add_compliance_lifecycle_artifacts.sql
+  - truffles-api/app/models/compliance_lifecycle_artifact.py
+  - truffles-api/app/services/compliance_lifecycle_artifact_service.py
+  - truffles-api/tests/test_compliance_lifecycle_artifact_service.py
   - truffles-api/app/schemas/console.py (`ConsoleOpsJobType += compliance_lifecycle`)
-  - pytest -q truffles-api/tests/test_compliance_lifecycle_service.py truffles-api/tests/test_console_compliance_policy_registry.py truffles-api/tests/test_console_compliance_lifecycle.py truffles-api/tests/test_console_ops_jobs.py (`39 passed`)
+  - contracts/console_api/openapi.v1.yaml (synced with artifact endpoint)
+  - pytest -q truffles-api/tests/test_compliance_lifecycle_artifact_service.py truffles-api/tests/test_compliance_lifecycle_service.py truffles-api/tests/test_console_compliance_policy_registry.py truffles-api/tests/test_console_compliance_lifecycle.py truffles-api/tests/test_console_ops_jobs.py (`44 passed`)
+  - python3 truffles-api/scripts/generate_openapi.py --check (pass after sync)
   - SESSION_AGENT=a700 scripts/session_check.sh (`Session OK`)
 - last_updated: 2026-03-03

@@ -61,6 +61,30 @@ def _record_item(*, run_id):
     )
 
 
+def _artifact_item(*, run_id, client_id, branch_id=None):
+    now = datetime.now(timezone.utc)
+    return SimpleNamespace(
+        id=uuid4(),
+        run_id=run_id,
+        scope="client" if branch_id is None else "branch",
+        data_class="learned_responses",
+        operation="retention_scan",
+        run_mode="preview",
+        status="completed",
+        client_id=client_id,
+        branch_id=branch_id,
+        artifact_type="compliance_lifecycle_evidence",
+        artifact_digest="a" * 64,
+        payload_json={"summary": {"candidate_count": 1}},
+        records_count=1,
+        evidence_record_count=1,
+        published_by=uuid4(),
+        published_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 @pytest.mark.asyncio
 async def test_run_compliance_lifecycle_requires_platform_admin(monkeypatch):
     context = _mock_context(role="owner")
@@ -168,6 +192,58 @@ async def test_get_compliance_lifecycle_run_returns_not_found(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_compliance_lifecycle_artifact_returns_not_found(monkeypatch):
+    context = _mock_context(role="platform_admin")
+    db = Mock()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_policy_registry_scope", lambda *args, **kwargs: ("client", None))
+    monkeypatch.setattr(console_router, "get_lifecycle_run", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_compliance_lifecycle_artifact(
+            run_id=uuid4(),
+            request=Mock(),
+            scope="client",
+            branch_id=None,
+            db=db,
+        )
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_compliance_lifecycle_artifact_publishes_on_demand(monkeypatch):
+    context = _mock_context(role="platform_admin")
+    db = Mock()
+    run = _run_record(client_id=context.client.id, agent_id=context.agent.id)
+    records = [_record_item(run_id=run.id)]
+    artifact = _artifact_item(run_id=run.id, client_id=context.client.id)
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_policy_registry_scope", lambda *args, **kwargs: ("client", None))
+    monkeypatch.setattr(console_router, "get_lifecycle_run", lambda *args, **kwargs: run)
+    monkeypatch.setattr(console_router, "get_lifecycle_artifact", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "list_lifecycle_records", lambda *args, **kwargs: records)
+    monkeypatch.setattr(console_router, "publish_lifecycle_artifact", lambda *args, **kwargs: artifact)
+
+    response = await console_router.get_compliance_lifecycle_artifact(
+        run_id=run.id,
+        request=Mock(),
+        scope="client",
+        branch_id=None,
+        db=db,
+    )
+
+    assert response.success is True
+    assert response.artifact.run_id == run.id
+    assert response.artifact.artifact_type == "compliance_lifecycle_evidence"
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_list_compliance_lifecycle_runs_returns_items(monkeypatch):
     client_id = uuid4()
     context = _mock_context(role="platform_admin", client_id=client_id)
@@ -229,6 +305,7 @@ async def test_run_compliance_lifecycle_job_returns_preview_summary(monkeypatch)
     assert captured["operation"] == "destruction_preview"
     assert captured["max_items"] == 12
     assert captured["apply_actions"] is False
+    assert isinstance(result["evidence_artifact"], dict)
 
 
 @pytest.mark.asyncio
