@@ -26,8 +26,9 @@
   - Slice 4 implemented: compliance lifecycle automation guardrails (`lane/profile/cadence`) with deterministic auto-lane skip/run behavior, execute-only cadence gate, and fail-closed validation.
   - Slice 5 foundation implemented: deterministic `execution_action` mapping in lifecycle summaries/records (preview vs manual + destruction mode mapping).
   - Slice 5 safety path implemented: `apply_actions` execution gate (`execute` + `lane=manual` + mandatory reason) and deterministic apply-action outcomes in compliance lifecycle records.
+  - Slice 5 evidence path implemented: lifecycle summary now includes deterministic `evidence_digest` and `evidence_record_count` for immutable outcome tracing.
 - next:
-  - Extend apply-action path with rollout controls and immutable external evidence artifacts.
+  - Extend apply-action path with rollout controls and immutable external evidence artifacts publication.
   - Add evidence for promotion criteria from `in_progress` to `passed` (policy/run/action chain + rollback signals).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md

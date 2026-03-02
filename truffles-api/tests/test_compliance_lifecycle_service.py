@@ -102,6 +102,8 @@ def test_execute_lifecycle_preview_creates_candidate_records(monkeypatch):
     assert summary["skipped_count"] == 0
     assert summary["error_count"] == 0
     assert summary["apply_actions"] is False
+    assert summary["evidence_record_count"] == 2
+    assert len(summary["evidence_digest"]) == 64
     assert summary["execution_action"] == "destruction_preview"
     assert summary["run_mode"] == "preview"
     assert len(captured) == 2
@@ -165,6 +167,8 @@ def test_execute_lifecycle_preview_manual_mode_sets_execution_action(monkeypatch
     assert summary["skipped_count"] == 0
     assert summary["error_count"] == 0
     assert summary["apply_actions"] is True
+    assert summary["evidence_record_count"] == 1
+    assert len(summary["evidence_digest"]) == 64
     assert summary["execution_action"] == "anonymize_record"
     assert captured[0]["payload"]["execution_action"] == "anonymize_record"
     assert captured[0]["payload"]["applied"] is True

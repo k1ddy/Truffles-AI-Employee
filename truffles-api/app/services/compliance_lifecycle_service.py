@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -353,6 +354,7 @@ def execute_lifecycle_preview(
     applied_count = 0
     skipped_count = 0
     error_count = 0
+    evidence_parts: list[str] = []
     for item in due_items:
         payload = {
             "retention_expires_at": (
@@ -388,6 +390,16 @@ def execute_lifecycle_preview(
                 error_count += 1
         else:
             payload["applied"] = False
+        evidence_parts.append(
+            ":".join(
+                [
+                    str(item.id),
+                    result,
+                    execution_action,
+                    "1" if payload.get("applied") is True else "0",
+                ]
+            )
+        )
         append_lifecycle_record(
             db,
             run_id=run.id,
@@ -400,11 +412,14 @@ def execute_lifecycle_preview(
         if result == "candidate":
             created += 1
 
+    evidence_digest = hashlib.sha256("|".join(evidence_parts).encode("utf-8")).hexdigest()
     return {
         "candidate_count": created,
         "applied_count": applied_count,
         "skipped_count": skipped_count,
         "error_count": error_count,
+        "evidence_record_count": len(evidence_parts),
+        "evidence_digest": evidence_digest,
         "max_items": capped_limit,
         "evaluated_at": now.isoformat(),
         "operation": run.operation,

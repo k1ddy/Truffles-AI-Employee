@@ -129,6 +129,9 @@ Date
   - Added apply-action execution outcomes in lifecycle service:
     - summary fields: `apply_actions`, `applied_count`, `skipped_count`, `error_count`,
     - per-record payload fields: `apply_actions`, `applied`, `action_status`, `apply_error` (on failure).
+  - Added immutable evidence envelope in lifecycle summary:
+    - `evidence_record_count` (number of entity outcomes),
+    - `evidence_digest` (SHA-256 over deterministic per-entity outcome tokens).
   - For `learned_responses` manual destruction mode:
     - `delete` -> deactivate record,
     - `anonymize` -> redact question/response + deactivate,
