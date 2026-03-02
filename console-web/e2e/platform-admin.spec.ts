@@ -1096,6 +1096,31 @@ test.describe('Platform Admin Tenants', () => {
         expect(deepLinkParams.source).toBeTruthy();
     });
 
+    test('should keep provider copy plain-language in Tenants -> Workspace flow @smoke', async ({ page }) => {
+        const actionQueue = page.getByTestId('tenants-action-queue');
+        await expect(actionQueue).toBeVisible();
+
+        await expect(actionQueue).not.toContainText('provider_start_rebind');
+        await expect(actionQueue).not.toContainText('provider_binding_rebind_required');
+
+        const openWorkspaceButton = actionQueue.getByRole('button', { name: 'Открыть Workspace' }).first();
+        await expect(openWorkspaceButton).toBeVisible();
+        await openWorkspaceButton.click();
+
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        const recommendationSection = page.getByTestId('company-workspace-recommended-action');
+        await expect(recommendationSection).toBeVisible();
+
+        await expect(recommendationSection).toContainText('Рекомендуется:');
+        await expect(recommendationSection).toContainText('Старт перепривязки');
+        await expect(recommendationSection).not.toContainText('provider_start_rebind');
+        await expect(recommendationSection).not.toContainText('provider_binding_rebind_required');
+        await expect(recommendationSection).toContainText('Что это значит:');
+        await expect(recommendationSection).toContainText('Причины');
+        await expect(recommendationSection).toContainText('нужна перепривязка канала');
+    });
+
     test('should ignore legacy workspace recommendation storage without query context @smoke', async ({ page }) => {
         await page.evaluate((branchId) => {
             window.localStorage.setItem(
