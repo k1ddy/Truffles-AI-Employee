@@ -109,12 +109,12 @@ Completed in this program chain:
 - `UCPV1-PHASE12` passed.
 
 Current active block:
-- `UCPV1-PHASE13` (`in_progress`, migration program slice1).
+- `UCPV1-PHASE13` (`in_progress`, migration program slices `1-3` delivered; closure pending).
 
 Current queue head:
 - `UCPV1-PHASE13` delivery track (`docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md`, `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md`).
 - Latest completed block (2026-03-02): `UCPV1-PHASE12` closure with deterministic pass-gate evidence (`101 passed`) plus governance/contract checks (`SESSION_AGENT=a700 scripts/session_check.sh`, `scripts/zero_context_gate.sh`, `python3 scripts/generate_openapi.py --check`).
-- Latest closed slice update (2026-03-02): `UCPV1-PHASE12` slice3 added `GET /console/v1/admin/control-tower/action-center` (incident + provider-ops + readiness aggregation) with synchronized OpenAPI contract.
+- Latest closed slice update (2026-03-02): `UCPV1-PHASE13` slice3 added `GET /console/v1/admin/control-tower/migration-program/{wave}` with per-wave deterministic decision (`promote|hold`) and wave-filtered promotion action queue.
 
 ## 8) Program-level DoD
 
