@@ -55,18 +55,21 @@ def _write_l1_junit(
     *,
     target_refs: list[str],
     failed_targets: set[str] | None = None,
+    path_attr_overrides: dict[str, str] | None = None,
 ) -> None:
     failed_targets = failed_targets or set()
+    path_attr_overrides = path_attr_overrides or {}
     now_iso = datetime.now(timezone.utc).isoformat()
     failure_count = 0
     testcase_lines = []
     for target_ref in target_refs:
         path_part, test_name = target_ref.split("::", 1)
+        report_path = str(path_attr_overrides.get(target_ref) or path_part).strip() or path_part
         test_symbol = test_name.split("[", 1)[0].strip()
-        class_name = path_part.replace("/", ".").removesuffix(".py")
+        class_name = report_path.replace("/", ".").removesuffix(".py")
         base = (
             f'  <testcase classname="{class_name}" '
-            f'name="{test_symbol}" file="{path_part}">'
+            f'name="{test_symbol}" file="{report_path}">'
         )
         if target_ref in failed_targets:
             failure_count += 1
@@ -351,6 +354,59 @@ def test_chain_controller_prepare_and_finalize_advances_to_replay(tmp_path):
     assert payload["status"] == "active"
     assert "--mode replay" in (payload.get("next_command") or "")
     assert (output_dir / "brief_for_next_agent.md").exists()
+
+
+def test_chain_controller_accepts_repo_target_with_nested_junit_paths(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    run_id = "booking-lock-chain-junit-path-normalized"
+    output_dir = tmp_path / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pg_checklist = tmp_path / "pg_checklist_junit_path_normalized.json"
+    l1_junit_path = tmp_path / "l1_junit_path_normalized.xml"
+    l2_summary_path = tmp_path / "l2_summary_junit_path_normalized.json"
+    _write_l1_junit(
+        l1_junit_path,
+        target_refs=[_TARGET_TEST_REF],
+        path_attr_overrides={_TARGET_TEST_REF: "tests/test_message_endpoint.py"},
+    )
+    _write_l2_summary(l2_summary_path, run_id="booking-l2-junit-path-normalized")
+    _write_pg_checklist(
+        pg_checklist,
+        l1_junit_path=l1_junit_path,
+        l2_summary_path=l2_summary_path,
+        l2_run_id="booking-l2-junit-path-normalized",
+    )
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(tmp_path / "chain")
+
+    prepare = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "lock",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            str(output_dir),
+            "--pg-checklist",
+            str(pg_checklist),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+
+    chain_id, chain_step, chain_token = prepare.stdout.strip().split("\t")
+    assert chain_id
+    assert chain_step == "lock"
+    assert chain_token
 
 
 def test_chain_controller_blocks_lock_without_pg_checklist(tmp_path):
