@@ -11,6 +11,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
+from app.services.knowledge_runtime import get_runtime_truth
 from app.services.pack_runtime_default import (
     _build_fact_meta,
     _detect_promotion_intent,
@@ -31,7 +32,6 @@ from app.services.pack_runtime_default import (
     get_pack_adapter,
     get_pack_price_item,
     get_pack_price_reply,
-    get_pack_service_hint,
     get_signal_lexicon_list,
     get_system_anchor_groups,
     get_system_lexicon_list,
@@ -40,13 +40,18 @@ from app.services.pack_runtime_default import (
     load_yaml_truth,
     phrase_match_intent,
     semantic_question_type,
-    semantic_service_match,
 )
 from app.services.pack_runtime_default import (
     get_pack_decision as _runtime_get_pack_decision,
 )
 from app.services.pack_runtime_default import (
     get_pack_service_decision as _runtime_get_pack_service_decision,
+)
+from app.services.pack_runtime_default import (
+    get_pack_service_hint as _runtime_get_pack_service_hint,
+)
+from app.services.pack_runtime_default import (
+    semantic_service_match as _runtime_semantic_service_match,
 )
 from app.services.pack_runtime_types import PackDecision
 
@@ -94,6 +99,37 @@ _MASTER_QUERY_COLLECTION_ACTION = "collect"
 _MASTER_QUERY_FACT_ACTION = "reply"
 _MASTER_QUERY_FACT_INTENT = "master"
 _MASTER_QUERY_SERVICE_CLARIFY_REASON = "missing_service_query"
+_PACK_QUERY_ENGINE_ID = "pack_query_engine.v2"
+_PACK_QUERY_ENGINE_VERSION = "2026-03-02"
+_PACK_QUERY_MATCH_MIN_SCORE = 0.56
+_PACK_QUERY_HINT_MIN_SCORE = 0.48
+_PACK_QUERY_SUGGEST_MIN_SCORE = 0.32
+_PACK_QUERY_MAX_SUGGESTIONS = 5
+_PACK_QUERY_FALLBACK_PRESENCE_REPLY = "Da, usluga {service} dostupna."
+_PACK_QUERY_FALLBACK_NOT_FOUND_REPLY = (
+    "V spiske uslug net takoi pozicii. Mogu predlozhit: {suggestions}."
+)
+
+
+@dataclass(frozen=True)
+class PackQuerySemanticMatch:
+    action: str
+    response: str
+    score: float
+    canonical_name: str | None = None
+    suggestions: list[str] | None = None
+    meta: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class PackQueryCandidate:
+    canonical_name: str
+    sparse_score: float
+    dense_score: float
+    rerank_bonus: float
+    final_score: float
+    matched_alias: str | None = None
+    service_item: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -146,6 +182,345 @@ def _coerce_text_list(value: Any) -> list[str]:
         seen.add(key)
         values.append(token)
     return values
+
+
+def _normalize_scope_token(value: Any) -> str | None:
+    if value is None:
+        return None
+    token = str(value).strip()
+    if not token:
+        return None
+    return token.casefold()
+
+
+def _coerce_scope_values(value: Any) -> set[str]:
+    if isinstance(value, (list, tuple, set)):
+        source = value
+    elif value is None:
+        source = []
+    else:
+        source = [value]
+    tokens: set[str] = set()
+    for item in source:
+        if isinstance(item, dict):
+            for key in ("id", "slug", "code", "name"):
+                token = _normalize_scope_token(item.get(key))
+                if token:
+                    tokens.add(token)
+            continue
+        token = _normalize_scope_token(item)
+        if token:
+            tokens.add(token)
+    return tokens
+
+
+def _resolve_runtime_scope(client_slug: str | None) -> tuple[str | None, str | None]:
+    runtime_truth = get_runtime_truth()
+    runtime_slug = _normalize_scope_token(runtime_truth.client_slug) if runtime_truth else None
+    runtime_branch = _normalize_scope_token(runtime_truth.branch_id) if runtime_truth else None
+    requested_slug = _normalize_scope_token(client_slug)
+    effective_slug = requested_slug or runtime_slug
+    return effective_slug, runtime_branch
+
+
+def _service_entries_from_truth(truth: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(truth, dict):
+        return []
+    containers: list[Any] = [
+        truth.get("services_catalog"),
+    ]
+    client_pack = truth.get("client_pack")
+    if isinstance(client_pack, dict):
+        containers.append(client_pack.get("services_catalog"))
+    rows: list[dict[str, Any]] = []
+    for container in containers:
+        if isinstance(container, list):
+            rows.extend(item for item in container if isinstance(item, dict))
+            continue
+        if not isinstance(container, dict):
+            continue
+        for key in ("services", "items"):
+            values = container.get(key)
+            if isinstance(values, list):
+                rows.extend(item for item in values if isinstance(item, dict))
+                break
+    return rows
+
+
+def _service_aliases(service_item: dict[str, Any]) -> list[str]:
+    aliases = _coerce_text_list(service_item.get("aliases"))
+    name = _coerce_text_token(service_item.get("name"))
+    if name:
+        aliases.insert(0, name)
+    unique: list[str] = []
+    seen: set[str] = set()
+    for alias in aliases:
+        normalized = _normalize_text(alias)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique.append(alias.strip())
+    return unique
+
+
+def _tenant_scope_for_service(service_item: dict[str, Any]) -> set[str]:
+    tenant_scope = _coerce_scope_values(service_item.get("tenant_slug"))
+    tenant_scope |= _coerce_scope_values(service_item.get("tenant"))
+    tenant_scope |= _coerce_scope_values(service_item.get("client_slug"))
+    tenant_scope |= _coerce_scope_values(service_item.get("client"))
+    return tenant_scope
+
+
+def _branch_scope_for_service(service_item: dict[str, Any]) -> set[str]:
+    branch_scope = _coerce_scope_values(service_item.get("branch_id"))
+    branch_scope |= _coerce_scope_values(service_item.get("branch_ids"))
+    branch_scope |= _coerce_scope_values(service_item.get("branches"))
+    branch_scope |= _coerce_scope_values(service_item.get("branch_scope"))
+    return branch_scope
+
+
+def _tokenize(text: str) -> set[str]:
+    normalized = _normalize_text(text)
+    return {token for token in normalized.split() if token}
+
+
+def _token_overlap_score(query_tokens: set[str], alias_tokens: set[str]) -> float:
+    if not query_tokens or not alias_tokens:
+        return 0.0
+    overlap = len(query_tokens & alias_tokens)
+    if overlap <= 0:
+        return 0.0
+    return min(1.0, overlap / float(max(len(query_tokens), len(alias_tokens))))
+
+
+def _char_ngram_score(query_text: str, alias_text: str, n: int = 3) -> float:
+    if not query_text or not alias_text:
+        return 0.0
+    query_norm = _normalize_text(query_text).replace(" ", "")
+    alias_norm = _normalize_text(alias_text).replace(" ", "")
+    if len(query_norm) < n or len(alias_norm) < n:
+        return 1.0 if query_norm == alias_norm else 0.0
+    query_grams = {query_norm[idx : idx + n] for idx in range(len(query_norm) - n + 1)}
+    alias_grams = {alias_norm[idx : idx + n] for idx in range(len(alias_norm) - n + 1)}
+    if not query_grams or not alias_grams:
+        return 0.0
+    union = len(query_grams | alias_grams)
+    if union <= 0:
+        return 0.0
+    return len(query_grams & alias_grams) / float(union)
+
+
+def _sparse_alias_score(query_text: str, alias: str) -> float:
+    query_tokens = _tokenize(query_text)
+    alias_tokens = _tokenize(alias)
+    overlap = _token_overlap_score(query_tokens, alias_tokens)
+    ngram = _char_ngram_score(query_text, alias)
+    score = 0.72 * overlap + 0.28 * ngram
+    query_norm = _normalize_text(query_text)
+    alias_norm = _normalize_text(alias)
+    if query_norm and alias_norm and (query_norm in alias_norm or alias_norm in query_norm):
+        score += 0.12
+    return max(0.0, min(score, 1.0))
+
+
+def _semantic_rerank_bonus(query_text: str, alias: str) -> float:
+    query_norm = _normalize_text(query_text)
+    alias_norm = _normalize_text(alias)
+    if not query_norm or not alias_norm:
+        return 0.0
+    if query_norm == alias_norm:
+        return 0.22
+    if alias_norm.startswith(query_norm) or query_norm.startswith(alias_norm):
+        return 0.12
+    if alias_norm in query_norm or query_norm in alias_norm:
+        return 0.08
+    return 0.0
+
+
+def _supports_branch_filter(service_item: dict[str, Any]) -> bool:
+    return bool(_branch_scope_for_service(service_item))
+
+
+def _pack_query_catalog_templates(truth: dict[str, Any]) -> tuple[str, str]:
+    if not isinstance(truth, dict):
+        return _PACK_QUERY_FALLBACK_PRESENCE_REPLY, _PACK_QUERY_FALLBACK_NOT_FOUND_REPLY
+    containers: list[Any] = [truth.get("services_catalog")]
+    client_pack = truth.get("client_pack")
+    if isinstance(client_pack, dict):
+        containers.append(client_pack.get("services_catalog"))
+    presence_reply = None
+    not_found_reply = None
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        if not presence_reply:
+            token = _coerce_text_token(container.get("service_presence_reply"))
+            if token:
+                presence_reply = token
+        if not not_found_reply:
+            token = _coerce_text_token(container.get("not_found_reply"))
+            if token:
+                not_found_reply = token
+    return (
+        presence_reply or _PACK_QUERY_FALLBACK_PRESENCE_REPLY,
+        not_found_reply or _PACK_QUERY_FALLBACK_NOT_FOUND_REPLY,
+    )
+
+
+def _build_pack_query_candidates(
+    text: str,
+    *,
+    client_slug: str | None,
+    branch_id: str | None = None,
+) -> tuple[list[PackQueryCandidate], dict[str, Any]]:
+    truth = load_yaml_truth(client_slug)
+    if not isinstance(truth, dict):
+        return [], {}
+    effective_slug, runtime_branch = _resolve_runtime_scope(client_slug)
+    effective_branch = _normalize_scope_token(branch_id) or runtime_branch
+    runtime_semantic = _runtime_semantic_service_match(text, client_slug or "generic")
+    dense_name = None
+    dense_score = 0.0
+    dense_action = None
+    if runtime_semantic:
+        dense_action = _coerce_text_token(getattr(runtime_semantic, "action", None))
+        dense_name = _normalize_text(str(getattr(runtime_semantic, "canonical_name", "") or ""))
+        dense_score = _coerce_confidence(getattr(runtime_semantic, "score", None)) or 0.0
+
+    candidates: list[PackQueryCandidate] = []
+    branch_scoped_items_seen = False
+    filtered_out_by_branch = False
+    filtered_out_by_tenant = False
+    for service_item in _service_entries_from_truth(truth):
+        canonical_name = _coerce_text_token(service_item.get("name"))
+        if not canonical_name:
+            continue
+        tenant_scope = _tenant_scope_for_service(service_item)
+        if effective_slug and tenant_scope and effective_slug not in tenant_scope:
+            filtered_out_by_tenant = True
+            continue
+        branch_scope = _branch_scope_for_service(service_item)
+        if branch_scope:
+            branch_scoped_items_seen = True
+        if effective_branch and branch_scope and effective_branch not in branch_scope:
+            filtered_out_by_branch = True
+            continue
+        aliases = _service_aliases(service_item)
+        if not aliases:
+            aliases = [canonical_name]
+
+        best_sparse = 0.0
+        best_bonus = 0.0
+        best_alias = None
+        for alias in aliases:
+            sparse_score = _sparse_alias_score(text, alias)
+            if sparse_score <= 0.0:
+                continue
+            rerank_bonus = _semantic_rerank_bonus(text, alias)
+            if sparse_score > best_sparse:
+                best_sparse = sparse_score
+                best_bonus = rerank_bonus
+                best_alias = alias
+
+        dense_match_score = 0.0
+        canonical_norm = _normalize_text(canonical_name)
+        if dense_name and canonical_norm and dense_name == canonical_norm:
+            dense_match_score = dense_score
+        elif dense_name and dense_score > 0.0:
+            for alias in aliases:
+                if _normalize_text(alias) == dense_name:
+                    dense_match_score = dense_score
+                    break
+
+        if best_sparse <= 0.0 and dense_match_score <= 0.0:
+            continue
+
+        hybrid_score = 0.58 * dense_match_score + 0.42 * best_sparse
+        final_score = max(0.0, min(hybrid_score + best_bonus, 1.0))
+        candidates.append(
+            PackQueryCandidate(
+                canonical_name=canonical_name,
+                sparse_score=best_sparse,
+                dense_score=dense_match_score,
+                rerank_bonus=best_bonus,
+                final_score=final_score,
+                matched_alias=best_alias,
+                service_item=service_item,
+            )
+        )
+
+    candidates.sort(key=lambda row: row.final_score, reverse=True)
+    templates = _pack_query_catalog_templates(truth)
+    meta = {
+        "engine": _PACK_QUERY_ENGINE_ID,
+        "engine_version": _PACK_QUERY_ENGINE_VERSION,
+        "method": "hybrid_sparse_semantic_rerank",
+        "filters": {
+            "tenant_slug": effective_slug,
+            "branch_id": effective_branch,
+        },
+        "scope": {
+            "branch_filter_active": bool(effective_branch),
+            "branch_scoped_items_seen": branch_scoped_items_seen,
+            "filtered_out_by_branch": filtered_out_by_branch,
+            "filtered_out_by_tenant": filtered_out_by_tenant,
+        },
+        "dense_signal": {
+            "action": dense_action,
+            "canonical_name": dense_name,
+            "score": dense_score,
+        },
+        "candidate_count": len(candidates),
+        "templates": {
+            "presence_reply": templates[0],
+            "not_found_reply": templates[1],
+        },
+    }
+    return candidates, meta
+
+
+def _build_pack_query_retrieval_meta(
+    candidates: list[PackQueryCandidate],
+    *,
+    engine_meta: dict[str, Any],
+) -> dict[str, Any]:
+    best = candidates[0] if candidates else None
+    suggestions = [candidate.canonical_name for candidate in candidates[:_PACK_QUERY_MAX_SUGGESTIONS]]
+    payload = {
+        "engine": engine_meta.get("engine"),
+        "engine_version": engine_meta.get("engine_version"),
+        "method": engine_meta.get("method"),
+        "candidate_count": len(candidates),
+        "filters": engine_meta.get("filters") if isinstance(engine_meta.get("filters"), dict) else {},
+        "scope": engine_meta.get("scope") if isinstance(engine_meta.get("scope"), dict) else {},
+        "best_candidate": best.canonical_name if best else None,
+        "best_score": round(float(best.final_score), 4) if best else 0.0,
+        "best_sparse_score": round(float(best.sparse_score), 4) if best else 0.0,
+        "best_dense_score": round(float(best.dense_score), 4) if best else 0.0,
+        "best_rerank_bonus": round(float(best.rerank_bonus), 4) if best else 0.0,
+        "suggestions": suggestions,
+    }
+    return payload
+
+
+def _to_runtime_semantic_match(raw_match: Any, *, meta: dict[str, Any] | None = None) -> PackQuerySemanticMatch | None:
+    if raw_match is None:
+        return None
+    action = _coerce_text_token(getattr(raw_match, "action", None))
+    response = _coerce_text_token(getattr(raw_match, "response", None))
+    if not action or not response:
+        return None
+    score = _coerce_confidence(getattr(raw_match, "score", None)) or 0.0
+    canonical_name = _coerce_text_token(getattr(raw_match, "canonical_name", None))
+    suggestions = _coerce_text_list(getattr(raw_match, "suggestions", None))
+    return PackQuerySemanticMatch(
+        action=action,
+        response=response,
+        score=score,
+        canonical_name=canonical_name,
+        suggestions=suggestions or None,
+        meta=meta,
+    )
 
 
 def _first_signal_hit(normalized_message: str, terms: list[str]) -> str | None:
@@ -675,6 +1050,41 @@ def _derive_abstain_reason(
     return None
 
 
+def _normalize_retrieval_meta(meta: Any) -> dict[str, Any] | None:
+    if not isinstance(meta, dict):
+        return None
+    filters = meta.get("filters") if isinstance(meta.get("filters"), dict) else {}
+    scope = meta.get("scope") if isinstance(meta.get("scope"), dict) else {}
+    suggestions = _coerce_text_list(meta.get("suggestions"))
+    raw_candidate_count = meta.get("candidate_count")
+    try:
+        candidate_count = int(raw_candidate_count or 0)
+    except (TypeError, ValueError):
+        candidate_count = 0
+    return {
+        "engine": _coerce_text_token(meta.get("engine")),
+        "engine_version": _coerce_text_token(meta.get("engine_version")),
+        "method": _coerce_text_token(meta.get("method")),
+        "candidate_count": candidate_count,
+        "best_candidate": _coerce_text_token(meta.get("best_candidate")),
+        "best_score": _coerce_confidence(meta.get("best_score")) or 0.0,
+        "best_sparse_score": _coerce_confidence(meta.get("best_sparse_score")) or 0.0,
+        "best_dense_score": _coerce_confidence(meta.get("best_dense_score")) or 0.0,
+        "best_rerank_bonus": _coerce_confidence(meta.get("best_rerank_bonus")) or 0.0,
+        "suggestions": suggestions,
+        "filters": {
+            "tenant_slug": _coerce_text_token(filters.get("tenant_slug")),
+            "branch_id": _coerce_text_token(filters.get("branch_id")),
+        },
+        "scope": {
+            "branch_filter_active": bool(scope.get("branch_filter_active")),
+            "branch_scoped_items_seen": bool(scope.get("branch_scoped_items_seen")),
+            "filtered_out_by_branch": bool(scope.get("filtered_out_by_branch")),
+            "filtered_out_by_tenant": bool(scope.get("filtered_out_by_tenant")),
+        },
+    }
+
+
 def ensure_resolver_meta(
     meta: dict[str, Any] | None,
     *,
@@ -727,6 +1137,9 @@ def ensure_resolver_meta(
         "resolver_version": resolver_version_token,
         "ruleset_version": ruleset_token,
     }
+    retrieval_meta = _normalize_retrieval_meta(payload.get("retrieval_meta"))
+    if retrieval_meta:
+        resolver_contract["retrieval"] = retrieval_meta
     fact_bundle = _build_fact_bundle(
         meta=payload,
         intent=intent,
@@ -741,6 +1154,8 @@ def ensure_resolver_meta(
     payload["resolver_contract"] = resolver_contract
     payload["resolver_confidence"] = confidence
     payload["resolver_candidates"] = entity_refs
+    if retrieval_meta:
+        payload["retrieval_meta"] = retrieval_meta
     payload["fact_bundle"] = fact_bundle
     payload["provenance"] = {
         "pack_id": fact_bundle["pack_id"],
@@ -779,6 +1194,124 @@ def enrich_pack_decision(
     )
 
 
+def _format_pack_query_presence_reply(service_name: str, template: str) -> str:
+    try:
+        rendered = template.format(service=service_name)
+    except Exception:
+        rendered = ""
+    if isinstance(rendered, str) and rendered.strip():
+        return rendered.strip()
+    return _PACK_QUERY_FALLBACK_PRESENCE_REPLY.format(service=service_name)
+
+
+def _format_pack_query_suggest_reply(suggestions: list[str], template: str) -> str:
+    joined = ", ".join(suggestions[:_PACK_QUERY_MAX_SUGGESTIONS])
+    try:
+        rendered = template.format(suggestions=joined)
+    except Exception:
+        rendered = ""
+    if isinstance(rendered, str) and rendered.strip():
+        return rendered.strip()
+    if joined:
+        return _PACK_QUERY_FALLBACK_NOT_FOUND_REPLY.format(suggestions=joined)
+    return _PACK_QUERY_FALLBACK_NOT_FOUND_REPLY.format(suggestions="n/a")
+
+
+def _is_strict_scope_block(meta: dict[str, Any]) -> bool:
+    scope = meta.get("scope") if isinstance(meta.get("scope"), dict) else {}
+    branch_filter_active = bool(scope.get("branch_filter_active"))
+    branch_scoped_items_seen = bool(scope.get("branch_scoped_items_seen"))
+    filtered_out_by_branch = bool(scope.get("filtered_out_by_branch"))
+    filtered_out_by_tenant = bool(scope.get("filtered_out_by_tenant"))
+    if branch_filter_active and branch_scoped_items_seen and filtered_out_by_branch:
+        return True
+    return filtered_out_by_tenant
+
+
+def semantic_service_match(
+    text: str,
+    client_slug: str | None,
+    *,
+    branch_id: str | None = None,
+) -> PackQuerySemanticMatch | None:
+    query = _coerce_text_token(text)
+    if not query:
+        return None
+    normalized_slug = _coerce_text_token(client_slug) or "generic"
+    candidates, engine_meta = _build_pack_query_candidates(
+        query,
+        client_slug=normalized_slug,
+        branch_id=branch_id,
+    )
+    retrieval_meta = _build_pack_query_retrieval_meta(candidates, engine_meta=engine_meta)
+    strict_scope_block = _is_strict_scope_block(engine_meta)
+    templates = engine_meta.get("templates") if isinstance(engine_meta.get("templates"), dict) else {}
+    presence_template = _coerce_text_token(templates.get("presence_reply")) or _PACK_QUERY_FALLBACK_PRESENCE_REPLY
+    not_found_template = _coerce_text_token(templates.get("not_found_reply")) or _PACK_QUERY_FALLBACK_NOT_FOUND_REPLY
+
+    if candidates:
+        best = candidates[0]
+        suggestions = [candidate.canonical_name for candidate in candidates[:_PACK_QUERY_MAX_SUGGESTIONS]]
+        if best.final_score >= _PACK_QUERY_MATCH_MIN_SCORE:
+            response = _format_pack_query_presence_reply(best.canonical_name, presence_template)
+            return PackQuerySemanticMatch(
+                action="match",
+                response=response,
+                score=best.final_score,
+                canonical_name=best.canonical_name,
+                suggestions=suggestions,
+                meta=retrieval_meta,
+            )
+        if best.final_score >= _PACK_QUERY_SUGGEST_MIN_SCORE and suggestions:
+            response = _format_pack_query_suggest_reply(suggestions, not_found_template)
+            return PackQuerySemanticMatch(
+                action="suggest",
+                response=response,
+                score=best.final_score,
+                canonical_name=best.canonical_name,
+                suggestions=suggestions,
+                meta=retrieval_meta,
+            )
+
+    if strict_scope_block:
+        return None
+
+    fallback_match = _to_runtime_semantic_match(
+        _runtime_semantic_service_match(query, normalized_slug),
+        meta=retrieval_meta,
+    )
+    if not fallback_match:
+        return None
+    dense_signal = engine_meta.get("dense_signal") if isinstance(engine_meta.get("dense_signal"), dict) else {}
+    dense_name = _coerce_text_token(dense_signal.get("canonical_name"))
+    if dense_name and fallback_match.canonical_name:
+        if _normalize_text(fallback_match.canonical_name) != _normalize_text(dense_name):
+            return None
+    return fallback_match
+
+
+def get_pack_service_hint(
+    message: str,
+    *,
+    client_slug: str | None = None,
+    branch_id: str | None = None,
+) -> str | None:
+    query = _coerce_text_token(message)
+    if not query:
+        return None
+    normalized_slug = _coerce_text_token(client_slug) or "generic"
+    candidates, engine_meta = _build_pack_query_candidates(
+        query,
+        client_slug=normalized_slug,
+        branch_id=branch_id,
+    )
+    if candidates and candidates[0].final_score >= _PACK_QUERY_HINT_MIN_SCORE:
+        return candidates[0].canonical_name
+    if _is_strict_scope_block(engine_meta):
+        return None
+    return _runtime_get_pack_service_hint(query, client_slug=normalized_slug)
+
+
 def get_pack_decision(
     message: str,
     *,
@@ -808,6 +1341,27 @@ def get_pack_service_decision(
         client_slug=client_slug,
         intent_decomp=intent_decomp,
     )
+    if isinstance(decision, PackDecision):
+        meta = dict(decision.meta) if isinstance(decision.meta, dict) else {}
+        candidates, engine_meta = _build_pack_query_candidates(
+            message,
+            client_slug=client_slug,
+        )
+        if candidates:
+            best = candidates[0]
+            meta.setdefault("service_query", best.canonical_name)
+            meta.setdefault("service_query_source", "pack_query_engine_v2")
+            meta["service_query_score"] = round(float(best.final_score), 4)
+        retrieval_meta = _build_pack_query_retrieval_meta(candidates, engine_meta=engine_meta)
+        if retrieval_meta:
+            meta["retrieval_meta"] = retrieval_meta
+        decision = PackDecision(
+            action=decision.action,
+            response=decision.response,
+            intent=decision.intent,
+            collect=decision.collect,
+            meta=meta,
+        )
     return enrich_pack_decision(
         decision,
         resolver_id="pack_runtime.service_matcher",
