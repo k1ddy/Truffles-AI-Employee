@@ -5,6 +5,7 @@ from app.services.expected_reply_contract import (
     normalize_expected_reply_type,
     resolve_services_overview_contract_update,
     resolve_tool_expected_reply_contract,
+    should_skip_booking_interrupt_for_expected_reply,
 )
 
 
@@ -36,6 +37,39 @@ def test_services_overview_contract_update_skips_when_expected_reply_exists():
     )
 
     assert update is None
+
+
+def test_booking_interrupt_skip_requires_active_expected_reply_without_info_block():
+    assert (
+        should_skip_booking_interrupt_for_expected_reply(
+            expected_reply_type=EXPECTED_REPLY_TIME,
+            expected_reply_blocked_by_info=False,
+            has_info_interrupt=False,
+        )
+        is True
+    )
+
+
+def test_booking_interrupt_skip_is_disabled_when_info_interrupt_exists():
+    assert (
+        should_skip_booking_interrupt_for_expected_reply(
+            expected_reply_type=EXPECTED_REPLY_TIME,
+            expected_reply_blocked_by_info=False,
+            has_info_interrupt=True,
+        )
+        is False
+    )
+
+
+def test_booking_interrupt_skip_is_disabled_when_expected_reply_blocked():
+    assert (
+        should_skip_booking_interrupt_for_expected_reply(
+            expected_reply_type=EXPECTED_REPLY_TIME,
+            expected_reply_blocked_by_info=True,
+            has_info_interrupt=False,
+        )
+        is False
+    )
 
 
 def test_tool_contract_list_slots_prefers_time_when_service_known():

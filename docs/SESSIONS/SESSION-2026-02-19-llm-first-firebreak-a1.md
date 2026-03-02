@@ -416,4 +416,13 @@
       - `ruff check truffles-api/tests/test_message_endpoint.py` (`All checks passed`)
   - Synced canonical logs:
     - updated `STATE.md` with P9 wave1 evidence and new dedicated continuation TPs for `P4` and `P5b`.
-- last_updated: 2026-03-02T14:58:00+05:00
+  - Started `P4a` implementation (behavior-preserving router decouple step):
+    - added contract helper `should_skip_booking_interrupt_for_expected_reply` in `truffles-api/app/services/expected_reply_contract.py`,
+    - switched booking router gate call-site to contract helper in `truffles-api/app/routers/webhook/booking.py`,
+    - added deterministic contract tests in `truffles-api/tests/test_expected_reply_contract.py`.
+  - Validation (green, P4a step1):
+    - `pytest -q truffles-api/tests/test_expected_reply_contract.py` (`11 passed`)
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k "booking_info_interrupt or expected_reply"` (`22 passed, 248 deselected`)
+    - `ruff check truffles-api/app/services/expected_reply_contract.py truffles-api/app/routers/webhook/booking.py truffles-api/tests/test_expected_reply_contract.py truffles-api/tests/test_message_endpoint.py` (`All checks passed`)
+    - `SESSION_AGENT=a1 scripts/session_check.sh`
+- last_updated: 2026-03-02T15:02:00+05:00
