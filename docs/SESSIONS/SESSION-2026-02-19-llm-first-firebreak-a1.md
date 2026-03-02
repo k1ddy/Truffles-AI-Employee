@@ -87,9 +87,17 @@
   - Added process-continuity hardening block `SIG-PROGRAM-S0-S4`: created program TP `docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md`, introduced `context_integrity_gate` in session tooling (`session_start` default required for new sessions, `session_check` enforcement), and updated session/runbook/TP template contracts to require residual debt + next-block continuity.
   - Completed `S0+S1` block via `docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md`: hardcode gate now includes signal services in `ops/diagnose.py` with technical whitelist, and booking/info signal literals were externalized into declarative manifest+schema (`truffles-api/app/knowledge/generic/SIGNAL_MANIFEST.yaml`, `contracts/packs/signal_manifest.v1.jsonschema`) through `truffles-api/app/services/signal_manifest_service.py`.
   - Completed `S2+S3` block via `docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md`: signal runtime compiler contract is now explicit in `truffles-api/app/services/signal_manifest_service.py` (`CompiledSignalManifest`, `compiled_version`, `manifest_fingerprint`, `manifest_signature`, cache keyed by manifest signature), and hardcode gate v2 scope in `ops/diagnose.py` now enforces runtime/core/signal policy (`webhook/*.py`, `*_signal_service.py`, `*_runtime_service.py`, `pack_runtime_service.py`, `tool_registry_service.py`) with deterministic tests.
+  - Completed `S4` block via `docs/TASK_PACKAGES/TP-2026-03-02-s4-cross-domain-contract-suite-a1.md`: introduced cross-domain matrix quality contract in `ops/diagnose.py` (`--cross-domain-contract off|warn|block`, min non-salon gate + excluded slug contract), and added dedicated deterministic suite for two non-salon runtime packs in `truffles-api/tests/test_cross_domain_signal_contract_suite.py` covering info/booking/tool_registry paths.
 - next:
-  - Run `S4`: add cross-domain contract suite on minimum two non-salon packs.
+  - Execute live/dev matrix evidence with real non-salon clients (when environment/client slugs are ready) and attach artifacts.
 - evidence:
+- docs/TASK_PACKAGES/TP-2026-03-02-s4-cross-domain-contract-suite-a1.md
+- pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py (`2 passed`)
+- pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "cross_domain_matrix_contract or matrix_slug_normalization" (`4 passed, 73 deselected`)
+- pytest -q truffles-api/tests/test_cross_domain_capability_isolation.py (`2 passed`)
+- python3 -m py_compile ops/diagnose.py truffles-api/tests/test_cross_domain_signal_contract_suite.py truffles-api/tests/test_booking_quality_status_gate.py
+- ruff check ops/diagnose.py truffles-api/tests/test_cross_domain_signal_contract_suite.py truffles-api/tests/test_booking_quality_status_gate.py (`All checks passed`)
+- scripts/session_check.sh
 - docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md
 - pytest -q truffles-api/tests/test_signal_manifest_service.py (`8 passed`)
 - pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "hardcode_core_gate or line_has_phrase_branching or hardcode_core_scope" (`8 passed, 65 deselected`)
@@ -382,4 +390,4 @@
     - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`69 passed`)
     - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
     - `scripts/session_check.sh`
-- last_updated: 2026-03-02T09:42:00+05:00
+- last_updated: 2026-03-02T10:05:00+05:00

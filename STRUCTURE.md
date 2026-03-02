@@ -190,6 +190,7 @@
 **Активные Task Packages:**
 - `docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-s4-cross-domain-contract-suite-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-multi-seed-drift-gate-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-chain-controller-bootstrap-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-contract-test-migration-master-a1.md`
@@ -729,6 +730,7 @@ truffles-api/
 | `truffles-api/tests/test_safe_mode_gate.py` | Unit: Minimum Data safe-mode gate |
 | `truffles-api/tests/test_admin_health.py` | Unit: Admin health minimum-data readiness |
 | `truffles-api/tests/test_pack_compiler.py` | Unit: pack compiler artifacts + checksum |
+| `truffles-api/tests/test_cross_domain_signal_contract_suite.py` | Unit: cross-domain info/booking/tool_registry contract on two non-salon runtime packs |
 | `truffles-api/tests/test_policy_dsl.py` | Unit: policy DSL schema validation |
 | `truffles-api/tests/test_knowledge_registry_chunking.py` | Unit: Qdrant pack chunking by size |
 

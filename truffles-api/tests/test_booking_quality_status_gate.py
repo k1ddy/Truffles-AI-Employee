@@ -37,6 +37,8 @@ def _load_quality_helpers():
         "LLM_QUALITY_HARDCODE_SCOPE_SERVICE_PREFIX",
         "LLM_QUALITY_HARDCODE_SCOPE_SERVICE_FILES",
         "LLM_QUALITY_HARDCODE_SCOPE_SERVICE_SUFFIXES",
+        "LLM_QUALITY_MATRIX_MIN_NON_SALON_PACKS",
+        "LLM_QUALITY_MATRIX_NON_SALON_EXCLUDED_SLUGS",
         "LLM_QUALITY_HARDCODE_ALLOW_MARKER",
         "LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS",
         "LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE",
@@ -85,6 +87,9 @@ def _load_quality_helpers():
         "_llm_quality_build_run_economy_status",
         "_llm_quality_parse_coverage_tokens",
         "_llm_quality_build_quality_constant_status",
+        "_parse_csv_values",
+        "_llm_quality_normalize_matrix_client_slugs",
+        "_llm_quality_build_cross_domain_matrix_contract_status",
         "_llm_quality_collect_workaround_marker_hits",
         "_llm_quality_collect_workaround_register_ids",
         "_llm_quality_build_workaround_register_status",
@@ -948,6 +953,65 @@ def test_quality_constant_dev_lane_disallows_baseline_update_only():
     )
     assert blocked["valid"] is False
     assert blocked["reasons"] == ["dev_lane_disallows_update_baseline"]
+
+
+def test_cross_domain_matrix_contract_accepts_two_non_salon_slugs():
+    ns = _load_quality_helpers()
+    build_contract = ns["_llm_quality_build_cross_domain_matrix_contract_status"]
+
+    status = build_contract(
+        mode="block",
+        client_slugs=["demo_salon", "clinic_pack", "dental_pack"],
+        excluded_slugs=["demo_salon", "generic"],
+        min_non_salon=2,
+    )
+
+    assert status["valid"] is True
+    assert status["required"] is True
+    assert status["non_salon_count"] == 2
+    assert status["reasons"] == []
+
+
+def test_cross_domain_matrix_contract_blocks_when_non_salon_under_minimum():
+    ns = _load_quality_helpers()
+    build_contract = ns["_llm_quality_build_cross_domain_matrix_contract_status"]
+
+    status = build_contract(
+        mode="block",
+        client_slugs=["demo_salon", "generic"],
+        excluded_slugs=["demo_salon", "generic"],
+        min_non_salon=2,
+    )
+
+    assert status["valid"] is False
+    assert status["required"] is True
+    assert status["reasons"] == ["cross_domain_non_salon_lt_2:0"]
+
+
+def test_cross_domain_matrix_contract_warn_mode_is_non_blocking():
+    ns = _load_quality_helpers()
+    build_contract = ns["_llm_quality_build_cross_domain_matrix_contract_status"]
+
+    status = build_contract(
+        mode="warn",
+        client_slugs=["demo_salon"],
+        excluded_slugs=["demo_salon", "generic"],
+        min_non_salon=2,
+    )
+
+    assert status["enforced"] is True
+    assert status["required"] is False
+    assert status["valid"] is False
+    assert status["reasons"] == ["cross_domain_non_salon_lt_2:0"]
+
+
+def test_cross_domain_matrix_slug_normalization_is_casefold_dedup():
+    ns = _load_quality_helpers()
+    normalize = ns["_llm_quality_normalize_matrix_client_slugs"]
+
+    slugs = normalize("demo_salon,Clinic_Pack,clinic_pack,dental_pack")
+
+    assert slugs == ["demo_salon", "Clinic_Pack", "dental_pack"]
 
 
 def test_workaround_register_gate_blocks_unregistered_marker(tmp_path):

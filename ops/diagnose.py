@@ -993,6 +993,11 @@ LLM_QUALITY_HARDCODE_SCOPE_SERVICE_SUFFIXES = (
     "_signal_service.py",
     "_runtime_service.py",
 )
+LLM_QUALITY_MATRIX_MIN_NON_SALON_PACKS = 2
+LLM_QUALITY_MATRIX_NON_SALON_EXCLUDED_SLUGS = (
+    "demo_salon",
+    "generic",
+)
 LLM_QUALITY_HARDCODE_ALLOW_MARKER = "hardcode-gate: allow"
 LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS = (
     're.findall(r"\\w+",',
@@ -11228,6 +11233,31 @@ def _parse_llm_quality_matrix_args(argv):
     )
     parser.add_argument("--allow-output-overwrite", action="store_true")
     parser.add_argument("--continue-on-error", action="store_true")
+    parser.add_argument(
+        "--cross-domain-contract",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_MATRIX_CROSS_DOMAIN_CONTRACT", "off"),
+        help="Validate non-salon matrix coverage contract.",
+    )
+    parser.add_argument(
+        "--cross-domain-min-non-salon",
+        type=int,
+        default=int(
+            os.environ.get(
+                "LLM_QUALITY_MATRIX_MIN_NON_SALON_PACKS",
+                str(LLM_QUALITY_MATRIX_MIN_NON_SALON_PACKS),
+            )
+        ),
+        help="Minimum number of non-salon slugs required by matrix contract.",
+    )
+    parser.add_argument(
+        "--cross-domain-excluded-slugs",
+        default=os.environ.get(
+            "LLM_QUALITY_MATRIX_NON_SALON_EXCLUDED_SLUGS",
+            ",".join(LLM_QUALITY_MATRIX_NON_SALON_EXCLUDED_SLUGS),
+        ),
+        help="Comma-separated slugs excluded from non-salon count.",
+    )
     args, llm_quality_args = parser.parse_known_args(argv)
     args.llm_quality_args = list(llm_quality_args or [])
     return args
@@ -12076,6 +12106,75 @@ def _parse_csv_values(value):
     if not value:
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _llm_quality_normalize_matrix_client_slugs(value):
+    client_slugs = []
+    seen_slugs = set()
+    for slug in _parse_csv_values(value):
+        normalized = slug.strip()
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen_slugs:
+            continue
+        seen_slugs.add(key)
+        client_slugs.append(normalized)
+    return client_slugs
+
+
+def _llm_quality_build_cross_domain_matrix_contract_status(
+    *,
+    mode,
+    client_slugs,
+    excluded_slugs=None,
+    min_non_salon=None,
+):
+    mode_token = str(mode or "off").strip().lower()
+    if mode_token not in {"off", "warn", "block"}:
+        mode_token = "off"
+    required = mode_token == "block"
+    enforced = mode_token in {"warn", "block"}
+    minimum = min_non_salon
+    if not isinstance(minimum, int) or minimum < 1:
+        minimum = LLM_QUALITY_MATRIX_MIN_NON_SALON_PACKS
+    excluded_source = excluded_slugs
+    if excluded_source is None:
+        excluded_source = LLM_QUALITY_MATRIX_NON_SALON_EXCLUDED_SLUGS
+    if isinstance(excluded_source, (list, tuple, set)):
+        excluded_values = [str(item) for item in excluded_source]
+    else:
+        excluded_values = _parse_csv_values(excluded_source)
+    excluded = {
+        str(item or "").strip().casefold()
+        for item in excluded_values
+        if str(item or "").strip()
+    }
+    if isinstance(client_slugs, (list, tuple, set)):
+        normalized_slugs = _llm_quality_normalize_matrix_client_slugs(
+            ",".join(str(item) for item in client_slugs if str(item).strip())
+        )
+    else:
+        normalized_slugs = _llm_quality_normalize_matrix_client_slugs(client_slugs)
+    non_salon = [
+        slug for slug in normalized_slugs if slug.casefold() not in excluded
+    ]
+    reasons = []
+    if len(non_salon) < minimum:
+        reasons.append(f"cross_domain_non_salon_lt_{minimum}:{len(non_salon)}")
+    return {
+        "mode": mode_token,
+        "required": required,
+        "enforced": enforced,
+        "valid": not reasons,
+        "reasons": reasons,
+        "client_slug_count": len(normalized_slugs),
+        "non_salon_count": len(non_salon),
+        "minimum_non_salon_required": minimum,
+        "non_salon_client_slugs": non_salon,
+        "excluded_client_slugs": sorted(excluded),
+    }
+
 
 def _resolve_allowlist_jids(explicit, container_name):
     for value in (
@@ -18035,17 +18134,43 @@ def _run_llm_quality_gates(args):
 
 
 def _run_llm_quality_matrix(args):
-    raw_client_slugs = _parse_csv_values(getattr(args, "client_slugs", None))
-    client_slugs = []
-    seen_slugs = set()
-    for slug in raw_client_slugs:
-        normalized = slug.strip()
-        if not normalized or normalized in seen_slugs:
-            continue
-        seen_slugs.add(normalized)
-        client_slugs.append(normalized)
+    client_slugs = _llm_quality_normalize_matrix_client_slugs(
+        getattr(args, "client_slugs", None)
+    )
     if not client_slugs:
         raise SystemExit("llm-quality-matrix: provide at least one --client-slugs value")
+    cross_domain_contract = _llm_quality_build_cross_domain_matrix_contract_status(
+        mode=getattr(args, "cross_domain_contract", "off"),
+        client_slugs=client_slugs,
+        excluded_slugs=getattr(args, "cross_domain_excluded_slugs", None),
+        min_non_salon=getattr(args, "cross_domain_min_non_salon", None),
+    )
+    if cross_domain_contract.get("enforced"):
+        print(
+            json.dumps(
+                {
+                    "stage": "llm_quality_matrix_cross_domain_contract",
+                    "mode": cross_domain_contract.get("mode"),
+                    "required": cross_domain_contract.get("required"),
+                    "valid": cross_domain_contract.get("valid"),
+                    "reasons": cross_domain_contract.get("reasons", []),
+                    "non_salon_count": cross_domain_contract.get("non_salon_count"),
+                    "minimum_non_salon_required": cross_domain_contract.get(
+                        "minimum_non_salon_required"
+                    ),
+                    "excluded_client_slugs": cross_domain_contract.get(
+                        "excluded_client_slugs"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        )
+    if cross_domain_contract.get("required") and not cross_domain_contract.get("valid", True):
+        reason_tokens = cross_domain_contract.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality-matrix: cross-domain contract failed "
+            f"({','.join(reason_tokens)})"
+        )
 
     forwarded_args = list(getattr(args, "llm_quality_args", []) or [])
     if forwarded_args and forwarded_args[0] == "--":
@@ -18173,6 +18298,7 @@ def _run_llm_quality_matrix(args):
         "run_id_prefix": run_id_prefix,
         "output_dir": output_dir,
         "client_slugs": client_slugs,
+        "cross_domain_contract": cross_domain_contract,
         "all_ok": all_ok,
         "rows": matrix_rows,
         "forwarded_args": forwarded_args,
