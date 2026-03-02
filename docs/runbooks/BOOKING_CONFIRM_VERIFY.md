@@ -44,7 +44,7 @@ Tool map (quick reference)
 | Tool | Main use | Never use for |
 |------|----------|---------------|
 | `scripts/llm_quality_guarded.sh` | Canonical runner entrypoint (dev/acceptance) | Bypassing chain/order/gates |
-| `scripts/quality_chain_controller.sh` | Step orchestration (`prepare/finalize/status/abort/close`) | Running quality itself |
+| `scripts/quality_chain_controller.sh` | Step orchestration (`prepare/finalize/status/abort/rollback/close`) | Running quality itself |
 | `python3 ops/diagnose.py llm-quality` | Low-level engine (invoked by wrapper) | Manual acceptance launch without chain token |
 | `python3 ops/diagnose.py llm-quality-audit` | Mandatory post-run manual audit artifact | Replacing contract evidence with judge text |
 
@@ -559,15 +559,17 @@ Guarded llm-quality quickstart (single entrypoint)
    - `scripts/llm_quality_guarded.sh --mode lock --run-id booking-lock-<id> --pg-checklist /tmp/booking_quality/pg_checklist-<id>.json -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds`
 3. Replay run (same scenarios + baseline)
    - `scripts/llm_quality_guarded.sh --mode replay --run-id booking-replay-<id> -- --base-url <url> --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-<id>/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --max-failures 20`
-4. Full run (same acceptance lane)
+4. Canary run (stage C, promotion gate)
+   - `scripts/llm_quality_guarded.sh --mode canary --run-id booking-canary-<id> -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json`
+5. Full run (same acceptance lane)
    - `scripts/llm_quality_guarded.sh --mode full --run-id booking-full-<id> -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json`
-5. Mandatory post-run audit
+6. Mandatory post-run audit
    - `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/<run-id> --status done --strict-artifacts`
    - For conflict runs, include explicit arbitration:
      `--oracle-judge-alignment conflicted --oracle-winner contract --oracle-resolution-summary "<contract evidence wins>"`
-6. Resume one interrupted run
-   - `scripts/llm_quality_guarded.sh --mode <lock|replay|full> --run-id <same-run-id> -- --base-url <url> --client-slug demo_salon --resume --output-dir /tmp/booking_quality/<run-id> ...`
-7. Why a run can be blocked by guard
+7. Resume one interrupted run
+   - `scripts/llm_quality_guarded.sh --mode <lock|replay|canary|full> --run-id <same-run-id> -- --base-url <url> --client-slug demo_salon --resume --output-dir /tmp/booking_quality/<run-id> ...`
+8. Why a run can be blocked by guard
    - Previous run in same mode is `incomplete/invalid/failed`.
    - Previous run has `manual_audit != done`.
    - Forensic SLA invalid (`manual_audit` missing analyst/timestamp/root-cause/next-step/oracle arbitration contract).
@@ -576,12 +578,13 @@ Guarded llm-quality quickstart (single entrypoint)
    - Duplicate fingerprint or reused run-id.
    - Chain-controller preflight failed (step-order/run_id-mode mismatch/resume-only/token mismatch).
    - Acceptance `lock` missing/failed `--pg-checklist` (`PG0..PG6`).
-8. Allowed override (for stale historical index only)
+9. Allowed override (for stale historical index only)
    - Use `--allow-pending-previous` only to bypass old unrelated mode blockers.
    - Do not use it to bypass current run failures; fix root cause first.
-9. Chain controller status / lifecycle
+10. Chain controller status / lifecycle
    - Status: `scripts/quality_chain_controller.sh status --chain-id <id>`
    - Manual abort: `scripts/quality_chain_controller.sh abort --chain-id <id> --reason root_cause_required`
+   - Manual rollback: `scripts/quality_chain_controller.sh rollback --chain-id <id> --reason canary_no_go`
    - Manual close (after accepted full canonical): `scripts/quality_chain_controller.sh close --chain-id <id>`
 
 Artifacts
@@ -704,7 +707,7 @@ Quality Operating Model v2 (mandatory for all future runs)
    - `L0`: static/contract checks (no expensive LLM runs).
    - `L1`: deterministic targeted tests for concrete root-cause.
    - `L2`: micro chaos fail-fast (`--max-failures`), cheap validation.
-   - `L3`: acceptance release chain only (`lock -> replay -> full`).
+   - `L3`: acceptance release chain only (`lock -> replay -> canary -> full`).
 2. Key rule
    - `L3` is not a debug loop. It is a release gate and runs only after `L0/L1/L2` are green.
 3. No-Loop Law

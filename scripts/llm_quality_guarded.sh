@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage:
   scripts/llm_quality_guarded.sh \
-    --mode <lock|replay|full> \
+    --mode <lock|replay|canary|full> \
     --run-id <id> \
     [--pg-checklist <path>] \
     [--owner-file <path>]... \
@@ -130,7 +130,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$MODE" ]] || die "--mode is required"
-[[ "$MODE" =~ ^(lock|replay|full)$ ]] || die "--mode must be one of: lock|replay|full"
+[[ "$MODE" =~ ^(lock|replay|canary|full)$ ]] || die "--mode must be one of: lock|replay|canary|full"
 [[ -n "$RUN_ID" ]] || die "--run-id is required"
 [[ ${#QUALITY_ARGS[@]} -gt 0 ]] || die "llm-quality args are required after --"
 

@@ -881,7 +881,7 @@ LLM_QUALITY_MANIFEST_VERSION = 1
 LLM_QUALITY_INDEX_ROOT = "/tmp/booking_quality/_index"
 LLM_QUALITY_MANIFEST_MAX_LATEST = 200
 LLM_QUALITY_CHAIN_ROOT = "/tmp/booking_quality/_chain"
-LLM_QUALITY_CHAIN_STEPS = ("lock", "replay", "full")
+LLM_QUALITY_CHAIN_STEPS = ("lock", "replay", "canary", "full")
 LLM_QUALITY_CHAIN_BLOCKED_STATUSES = {"blocked", "aborted"}
 LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY = "/tmp/booking_quality/_scenario_governance_registry.json"
 LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION = 2
@@ -7022,7 +7022,7 @@ def _llm_quality_build_scenario_governance_status(
     lane_token = str(lane_effective or "").strip().casefold()
     required = lane_token == "acceptance"
     step_mode = str((chain_controller_status or {}).get("mode") or "").strip().casefold()
-    if step_mode not in {"lock", "replay", "full"}:
+    if step_mode not in {"lock", "replay", "canary", "full"}:
         step_mode = _llm_quality_chain_resolve_requested_mode(
             args=type("S", (), {"scenarios_file": scenarios_file})(),
             run_id=run_id,
@@ -7060,7 +7060,7 @@ def _llm_quality_build_scenario_governance_status(
         return gate
     if registry_status.get("error") and registry_status.get("error") != "missing":
         gate["reasons"].append(f"scenario_registry_unreadable:{registry_status.get('error')}")
-    if required and step_mode in {"replay", "full"}:
+    if required and step_mode in {"replay", "canary", "full"}:
         if schema_version < LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION:
             gate["reasons"].append(
                 "scenario_registry_schema_version_unsupported"
@@ -8177,12 +8177,16 @@ def _llm_quality_chain_resolve_requested_mode(*, args, run_id):
     run_token = str(run_id or "").strip().casefold()
     if run_token.startswith("booking-full-"):
         return "full", "run_id_prefix"
+    if run_token.startswith("booking-canary-"):
+        return "canary", "run_id_prefix"
     if run_token.startswith("booking-replay-"):
         return "replay", "run_id_prefix"
     if run_token.startswith("booking-lock-"):
         return "lock", "run_id_prefix"
     if "full" in run_token:
         return "full", "run_id_token"
+    if "canary" in run_token:
+        return "canary", "run_id_token"
     if "replay" in run_token:
         return "replay", "run_id_token"
     if "lock" in run_token:
@@ -8208,6 +8212,11 @@ def _llm_quality_acceptance_entrypoint_hint(*, args, run_id):
             "--baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json "
             "--reset-before-dialog --fail-on-regression"
         )
+    if requested_mode == "canary":
+        return (
+            f"{head} --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json "
+            "--fail-on-regression"
+        )
     return (
         f"{head} --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json "
         "--fail-on-regression"
@@ -8216,7 +8225,7 @@ def _llm_quality_acceptance_entrypoint_hint(*, args, run_id):
 
 def _llm_quality_chain_validate_run_id_mode_contract(run_id, requested_mode):
     normalized_mode = str(requested_mode or "").strip().casefold()
-    if normalized_mode not in {"lock", "replay", "full"}:
+    if normalized_mode not in {"lock", "replay", "canary", "full"}:
         return False, "mode_unknown"
     run_token = str(run_id or "").strip().casefold()
     if not run_token:

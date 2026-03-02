@@ -102,6 +102,17 @@
 - Deterministic tests для canary/rollback зеленые.
 - Parent TP: `P13` -> `done`.
 
+## Execution update (2026-03-02)
+- `DONE`: `scripts/quality_chain_controller.sh` now supports `lock|replay|canary|full`, promotes `replay -> canary -> full`, includes explicit `rollback` command, and auto-executes rollback on non-canonical canary finalize (`blocked_reason=canary_rollback_executed`) with `rollback.json` artifact.
+- `DONE`: `scripts/llm_quality_guarded.sh` accepts `--mode canary` and continues chain-token orchestration via controller.
+- `DONE`: `ops/diagnose.py` chain-controller gate accepts `canary` step/mode contract and keeps acceptance hints consistent.
+- `DONE`: deterministic coverage updated:
+  - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py` (`18 passed`)
+  - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py` (`3 passed`)
+  - `ruff check ops/diagnose.py truffles-api/tests/test_booking_quality_chain_controller.py truffles-api/tests/test_booking_quality_guarded_wrapper.py` (`All checks passed`)
+  - `bash -n scripts/quality_chain_controller.sh`
+  - `bash -n scripts/llm_quality_guarded.sh`
+
 ## Checks
 - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py`
 - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py`

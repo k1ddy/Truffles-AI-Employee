@@ -934,3 +934,392 @@ def test_chain_controller_blocks_lock_with_pg_checklist_stale_l1_evidence(tmp_pa
 
     assert prepare.returncode != 0
     assert "go_to_full_l1_evidence_stale" in prepare.stderr
+
+
+def test_chain_controller_replay_finalize_advances_to_canary(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    chain_id = "chain-canary-progress"
+    chain_root = tmp_path / "chain"
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(chain_root)
+
+    lock_run_id = f"booking-lock-{chain_id}"
+    lock_output_dir = tmp_path / lock_run_id
+    lock_output_dir.mkdir(parents=True, exist_ok=True)
+    lock_summary_path = lock_output_dir / "summary.json"
+    _write_l2_summary(lock_summary_path, run_id=lock_run_id)
+
+    bootstrap = subprocess.run(
+        [
+            str(script_path),
+            "bootstrap",
+            "--mode",
+            "lock",
+            "--run-id",
+            lock_run_id,
+            "--output-dir",
+            str(lock_output_dir),
+            "--summary-path",
+            str(lock_summary_path),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert bootstrap.returncode == 0, bootstrap.stderr
+
+    replay_run_id = f"booking-replay-{chain_id}"
+    replay_output_dir = tmp_path / replay_run_id
+    replay_output_dir.mkdir(parents=True, exist_ok=True)
+    prepare_replay = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "replay",
+            "--run-id",
+            replay_run_id,
+            "--output-dir",
+            str(replay_output_dir),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert prepare_replay.returncode == 0, prepare_replay.stderr
+
+    replay_summary = {
+        "run_id": replay_run_id,
+        "stop_reason": "done",
+        "quality_status": {
+            "infra_valid": True,
+            "semantic_valid": True,
+            "run_integrity_valid": True,
+        },
+        "blocking_reasons": {"reasons": {}},
+        "judge": {"counts": {"judged": 40}},
+    }
+    replay_manifest = {
+        "run_id": replay_run_id,
+        "mode": "replay",
+        "status": "canonical",
+        "stop_reason": "done",
+    }
+    replay_summary_path = replay_output_dir / "summary.json"
+    replay_manifest_path = replay_output_dir / "run_manifest.json"
+    replay_summary_path.write_text(
+        json.dumps(replay_summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    replay_manifest_path.write_text(
+        json.dumps(replay_manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    finalize_replay = subprocess.run(
+        [
+            str(script_path),
+            "finalize",
+            "--mode",
+            "replay",
+            "--run-id",
+            replay_run_id,
+            "--output-dir",
+            str(replay_output_dir),
+            "--summary-path",
+            str(replay_summary_path),
+            "--exit-code",
+            "0",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert finalize_replay.returncode == 0, finalize_replay.stderr
+
+    status = subprocess.run(
+        [str(script_path), "status", "--chain-id", chain_id],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    payload = json.loads(status.stdout)
+    assert payload["steps"]["replay"]["status"] == "canonical"
+    assert payload["active"]["step"] == "canary"
+    assert "--mode canary" in (payload.get("next_command") or "")
+
+
+def test_chain_controller_canary_failure_executes_rollback(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    chain_id = "chain-canary-rollback"
+    chain_root = tmp_path / "chain"
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(chain_root)
+
+    lock_run_id = f"booking-lock-{chain_id}"
+    lock_output_dir = tmp_path / lock_run_id
+    lock_output_dir.mkdir(parents=True, exist_ok=True)
+    lock_summary_path = lock_output_dir / "summary.json"
+    _write_l2_summary(lock_summary_path, run_id=lock_run_id)
+    bootstrap = subprocess.run(
+        [
+            str(script_path),
+            "bootstrap",
+            "--mode",
+            "lock",
+            "--run-id",
+            lock_run_id,
+            "--output-dir",
+            str(lock_output_dir),
+            "--summary-path",
+            str(lock_summary_path),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert bootstrap.returncode == 0, bootstrap.stderr
+
+    replay_run_id = f"booking-replay-{chain_id}"
+    replay_output_dir = tmp_path / replay_run_id
+    replay_output_dir.mkdir(parents=True, exist_ok=True)
+    prepare_replay = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "replay",
+            "--run-id",
+            replay_run_id,
+            "--output-dir",
+            str(replay_output_dir),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert prepare_replay.returncode == 0, prepare_replay.stderr
+
+    replay_summary = {
+        "run_id": replay_run_id,
+        "stop_reason": "done",
+        "quality_status": {
+            "infra_valid": True,
+            "semantic_valid": True,
+            "run_integrity_valid": True,
+        },
+        "blocking_reasons": {"reasons": {}},
+        "judge": {"counts": {"judged": 40}},
+    }
+    replay_manifest = {
+        "run_id": replay_run_id,
+        "mode": "replay",
+        "status": "canonical",
+        "stop_reason": "done",
+    }
+    replay_summary_path = replay_output_dir / "summary.json"
+    replay_manifest_path = replay_output_dir / "run_manifest.json"
+    replay_summary_path.write_text(
+        json.dumps(replay_summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    replay_manifest_path.write_text(
+        json.dumps(replay_manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    finalize_replay = subprocess.run(
+        [
+            str(script_path),
+            "finalize",
+            "--mode",
+            "replay",
+            "--run-id",
+            replay_run_id,
+            "--output-dir",
+            str(replay_output_dir),
+            "--summary-path",
+            str(replay_summary_path),
+            "--exit-code",
+            "0",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert finalize_replay.returncode == 0, finalize_replay.stderr
+
+    canary_run_id = f"booking-canary-{chain_id}"
+    canary_output_dir = tmp_path / canary_run_id
+    canary_output_dir.mkdir(parents=True, exist_ok=True)
+    prepare_canary = subprocess.run(
+        [
+            str(script_path),
+            "prepare",
+            "--mode",
+            "canary",
+            "--run-id",
+            canary_run_id,
+            "--output-dir",
+            str(canary_output_dir),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert prepare_canary.returncode == 0, prepare_canary.stderr
+
+    canary_summary = {
+        "run_id": canary_run_id,
+        "stop_reason": "semantic_regression",
+        "quality_status": {
+            "infra_valid": True,
+            "semantic_valid": False,
+            "run_integrity_valid": True,
+        },
+        "blocking_reasons": {"reasons": {"wrong_action": 1}},
+        "judge": {"counts": {"judged": 40}},
+    }
+    canary_manifest = {
+        "run_id": canary_run_id,
+        "mode": "canary",
+        "status": "failed",
+        "stop_reason": "semantic_regression",
+    }
+    canary_summary_path = canary_output_dir / "summary.json"
+    canary_manifest_path = canary_output_dir / "run_manifest.json"
+    canary_summary_path.write_text(
+        json.dumps(canary_summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    canary_manifest_path.write_text(
+        json.dumps(canary_manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    finalize_canary = subprocess.run(
+        [
+            str(script_path),
+            "finalize",
+            "--mode",
+            "canary",
+            "--run-id",
+            canary_run_id,
+            "--output-dir",
+            str(canary_output_dir),
+            "--summary-path",
+            str(canary_summary_path),
+            "--exit-code",
+            "1",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert finalize_canary.returncode == 0, finalize_canary.stderr
+
+    status = subprocess.run(
+        [str(script_path), "status", "--chain-id", chain_id],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    payload = json.loads(status.stdout)
+    rollback = payload.get("rollback") if isinstance(payload.get("rollback"), dict) else {}
+    assert payload["status"] == "blocked"
+    assert payload["blocked_reason"] == "canary_rollback_executed"
+    assert rollback.get("status") == "executed"
+    assert rollback.get("source") == "auto_canary_no_go"
+    assert rollback.get("failed_mode") == "canary"
+    assert rollback.get("baseline_step") == "replay"
+    assert payload.get("next_command") is None
+    assert (canary_output_dir / "rollback.json").exists()
+    assert (chain_root / f"{chain_id}-rollback.json").exists()
+
+
+def test_chain_controller_manual_rollback_command(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    chain_id = "chain-manual-rollback"
+    chain_root = tmp_path / "chain"
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(chain_root)
+
+    lock_run_id = f"booking-lock-{chain_id}"
+    lock_output_dir = tmp_path / lock_run_id
+    lock_output_dir.mkdir(parents=True, exist_ok=True)
+    lock_summary_path = lock_output_dir / "summary.json"
+    _write_l2_summary(lock_summary_path, run_id=lock_run_id)
+
+    bootstrap = subprocess.run(
+        [
+            str(script_path),
+            "bootstrap",
+            "--mode",
+            "lock",
+            "--run-id",
+            lock_run_id,
+            "--output-dir",
+            str(lock_output_dir),
+            "--summary-path",
+            str(lock_summary_path),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert bootstrap.returncode == 0, bootstrap.stderr
+
+    rollback = subprocess.run(
+        [
+            str(script_path),
+            "rollback",
+            "--chain-id",
+            chain_id,
+            "--reason",
+            "manual-stop",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert rollback.returncode == 0, rollback.stderr
+
+    status = subprocess.run(
+        [str(script_path), "status", "--chain-id", chain_id],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    payload = json.loads(status.stdout)
+    rollback_payload = payload.get("rollback") if isinstance(payload.get("rollback"), dict) else {}
+    assert payload["status"] == "blocked"
+    assert payload["blocked_reason"] == "rollback_executed"
+    assert rollback_payload.get("source") == "manual"
+    assert rollback_payload.get("reason") == "manual-stop"
