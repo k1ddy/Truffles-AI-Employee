@@ -1677,6 +1677,8 @@ class ConsoleAdminControlTowerActionCenterResponse(BaseModel):
 
 ConsoleAdminControlTowerMigrationWaveId = Literal["canary", "cohort", "fleet"]
 ConsoleAdminControlTowerMigrationWaveGate = Literal["go", "hold"]
+ConsoleAdminControlTowerMigrationSignalStatus = Literal["pass", "warn", "fail"]
+ConsoleAdminControlTowerMigrationDecision = Literal["promote", "hold"]
 
 
 class ConsoleAdminControlTowerMigrationWave(BaseModel):
@@ -1688,6 +1690,31 @@ class ConsoleAdminControlTowerMigrationWave(BaseModel):
     blockers_total: int
     rollback_triggers: list[str] = []
     top_blockers: list[ConsoleAdminControlTowerIssueCount] = []
+
+
+class ConsoleAdminControlTowerMigrationSignal(BaseModel):
+    code: str
+    status: ConsoleAdminControlTowerMigrationSignalStatus
+    value: int
+    threshold: int
+    note: Optional[str] = None
+
+
+class ConsoleAdminControlTowerPromotionAction(BaseModel):
+    id: str
+    wave: ConsoleAdminControlTowerMigrationWaveId
+    gate: ConsoleAdminControlTowerMigrationWaveGate
+    priority: ConsoleAdminControlTowerActionPriority
+    source: ConsoleAdminControlTowerActionSource
+    kind: ConsoleAdminControlTowerActionKind
+    title: str
+    description: str
+    reasons: list[str] = []
+    href: Optional[str] = None
+    job_type: Optional[ConsoleOpsJobType] = None
+    mode: Optional[ConsoleOpsJobMode] = None
+    params: Optional[dict] = None
+    evidence_links: list[str] = []
 
 
 class ConsoleAdminControlTowerMigrationProgramSummary(BaseModel):
@@ -1709,6 +1736,23 @@ class ConsoleAdminControlTowerMigrationProgramResponse(BaseModel):
     include_p2: bool = True
     summary: ConsoleAdminControlTowerMigrationProgramSummary
     waves: list[ConsoleAdminControlTowerMigrationWave]
+    signals: list[ConsoleAdminControlTowerMigrationSignal] = []
+    promotion_actions: list[ConsoleAdminControlTowerPromotionAction] = []
+
+
+class ConsoleAdminControlTowerMigrationWaveDetailResponse(BaseModel):
+    generated_at: str
+    stale_after_minutes: int
+    limit: int
+    include_p2: bool = True
+    wave: ConsoleAdminControlTowerMigrationWaveId
+    decision: ConsoleAdminControlTowerMigrationDecision
+    reason: str
+    summary: ConsoleAdminControlTowerMigrationProgramSummary
+    wave_state: ConsoleAdminControlTowerMigrationWave
+    signals: list[ConsoleAdminControlTowerMigrationSignal] = []
+    promotion_actions_total: int
+    promotion_actions: list[ConsoleAdminControlTowerPromotionAction] = []
 
 
 class ConsoleAdminControlTowerReadinessItem(BaseModel):

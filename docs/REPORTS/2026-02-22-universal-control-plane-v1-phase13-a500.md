@@ -82,8 +82,60 @@ Date
 - Wave contract:
   - `canary`: strict gate for P0/hard blockers and low soft-blocker budget.
   - `cohort`: medium soft-blocker budget with same hard-block protections.
-  - `fleet`: zero-budget promotion gate (hold when blockers remain).
+- `fleet`: zero-budget promotion gate (hold when blockers remain).
 - Rollback triggers are emitted as deterministic reason codes (`incident_p0_open`, `readiness_hard_gate_failed`, `provider_ops_p0_queue`, etc.).
+
+## Slice 2 update (signals + promotion actions)
+- Migration program response extended with rollout signals:
+  - `ready_branches` (`pass/fail`, threshold `>=1`),
+  - `hard_blockers` (`pass/fail`, threshold `==0`),
+  - `soft_blockers` (`pass/warn/fail`, threshold `<=3`),
+  - `blocked_branches` (`pass/fail`, threshold `==0`).
+- Empty scope response now explicitly emits fail signal `active_clients` with threshold `1` to keep fail-closed behavior transparent in UI/API.
+- Added deterministic promotion action projection:
+  - action-center items map to migration wave by priority (`p0 -> canary`, `p1 -> cohort`, `p2 -> fleet`),
+  - each projected action carries current wave gate (`go|hold`) for operator-facing promotion queue.
+- Contract and schema deltas:
+  - `ConsoleAdminControlTowerMigrationSignal`,
+  - `ConsoleAdminControlTowerPromotionAction`,
+  - `signals` and `promotion_actions` added to migration program response.
+- Deterministic test coverage extended:
+  - validates signal statuses and thresholds in aggregated response,
+  - validates action-to-wave mapping and gate propagation,
+  - validates explicit empty-scope fail signal behavior.
+
+## Slice 2 checks + outcomes
+- `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_owner_business.py` -> `All checks passed`.
+- `cd truffles-api && pytest -q tests/test_console_owner_business.py -k \"migration_program or control_tower\"` -> `15 passed, 41 deselected`.
+- `cd truffles-api && pytest -q tests/test_console_owner_business.py tests/test_console_fleet_attention.py tests/test_console_ops_jobs.py tests/test_console_onboarding_state.py` -> `105 passed`.
+- `cd truffles-api && python3 scripts/generate_openapi.py --check` -> contract check passed after syncing `contracts/console_api/openapi.v1.yaml` from generated spec.
+- `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md --report docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md --graph docs/BLOCK_GRAPH.yaml` -> `zero_context_gate: OK`.
+- `SESSION_AGENT=a702 scripts/session_check.sh` -> `Session OK`.
+
+## Slice 3 update (wave detail execution view)
+- Added per-wave operational endpoint:
+  - `GET /console/v1/admin/control-tower/migration-program/{wave}` for `wave in {canary, cohort, fleet}`.
+- New wave-detail contract returns deterministic operator decision:
+  - `decision`: `promote|hold`,
+  - `reason`: current wave reason,
+  - `promotion_actions`: only actions for selected wave,
+  - `promotion_actions_total`: full action count for selected wave before limit.
+- Reuse path preserved:
+  - wave detail endpoint reuses existing migration program builder output (no duplicated control-tower aggregation queries).
+- Contract/schema deltas:
+  - `ConsoleAdminControlTowerMigrationWaveDetailResponse` added to console schemas.
+- Deterministic test coverage extended:
+  - RBAC deny for non-platform role on wave-detail endpoint,
+  - endpoint parameter pass-through + per-wave action filtering,
+  - helper-level action-count/limit behavior for selected wave.
+
+## Slice 3 checks + outcomes
+- `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_owner_business.py` -> `All checks passed`.
+- `cd truffles-api && pytest -q tests/test_console_owner_business.py -k \"migration_program or migration_wave_detail or control_tower\"` -> `18 passed, 41 deselected`.
+- `cd truffles-api && pytest -q tests/test_console_owner_business.py tests/test_console_fleet_attention.py tests/test_console_ops_jobs.py tests/test_console_onboarding_state.py` -> `108 passed`.
+- `cd truffles-api && python3 scripts/generate_openapi.py --check` -> initial drift found (`GET /console/v1/admin/control-tower/migration-program/{wave}` missing in contract), then synced `contracts/console_api/openapi.v1.yaml` from generated spec and recheck passed.
+- `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md --report docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md --graph docs/BLOCK_GRAPH.yaml` -> `zero_context_gate: OK`.
+- `SESSION_AGENT=a703 scripts/session_check.sh` -> `Session OK`.
 
 ## Checks + outcomes
 - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_owner_business.py` -> `All checks passed`.
@@ -109,6 +161,8 @@ Date
 - `truffles-api/app/schemas/console.py`
 - `truffles-api/tests/test_console_owner_business.py`
 - `contracts/console_api/openapi.v1.yaml`
+- `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase13-slice2-a702.md`
+- `docs/SESSIONS/SESSION-2026-03-02-ucpv1-phase13-slice3-a703.md`
 
 ## Release safety decision
 - `Strategy used` -> read-only platform-admin API contract expansion.
@@ -129,11 +183,11 @@ Date
 - Control-tower logic concentration in `console.py` remains technical debt for later decomposition.
 
 ## Handoff (for zero-context next agent)
-- `Ready for next agent`: after slice1 checks pass.
+- `Ready for next agent`: after current slice checks pass.
 - `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md`.
 - `Do not touch`: unrelated tracks outside phase13 migration contract.
 - `Open risks`: threshold calibration and router blast radius.
-- `First command to verify`: `rg -n "UCPV1-PHASE13|migration-program|in_progress" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md truffles-api/app/routers/console.py`.
+- `First command to verify`: `rg -n "UCPV1-PHASE13|migration-program|migration-program/\\{wave\\}|in_progress" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md truffles-api/app/routers/console.py`.
 
 ## Verdict
 - `In progress`

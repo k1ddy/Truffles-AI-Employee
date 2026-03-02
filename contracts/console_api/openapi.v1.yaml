@@ -3997,6 +3997,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/control-tower/migration-program/{wave}:
+    get:
+      tags:
+      - console
+      summary: Get Admin Control Tower Migration Wave Detail
+      operationId: get_admin_control_tower_migration_wave_detail_console_v1_admin_control_tower_migration_program__wave__get
+      parameters:
+      - name: wave
+        in: path
+        required: true
+        schema:
+          enum:
+          - canary
+          - cohort
+          - fleet
+          type: string
+          title: Wave
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          title: Limit
+      - name: stale_after_minutes
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1440
+          minimum: 5
+          default: 60
+          title: Stale After Minutes
+      - name: include_p2
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Include P2
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationWaveDetailResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/companies/{company_id}:
     patch:
       tags:
@@ -7357,6 +7423,18 @@ components:
             $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationWave'
           type: array
           title: Waves
+        signals:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationSignal'
+          type: array
+          title: Signals
+          default: []
+        promotion_actions:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerPromotionAction'
+          type: array
+          title: Promotion Actions
+          default: []
       type: object
       required:
       - generated_at
@@ -7406,6 +7484,36 @@ components:
       - waves_go
       - waves_hold
       title: ConsoleAdminControlTowerMigrationProgramSummary
+    ConsoleAdminControlTowerMigrationSignal:
+      properties:
+        code:
+          type: string
+          title: Code
+        status:
+          type: string
+          enum:
+          - pass
+          - warn
+          - fail
+          title: Status
+        value:
+          type: integer
+          title: Value
+        threshold:
+          type: integer
+          title: Threshold
+        note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Note
+      type: object
+      required:
+      - code
+      - status
+      - value
+      - threshold
+      title: ConsoleAdminControlTowerMigrationSignal
     ConsoleAdminControlTowerMigrationWave:
       properties:
         wave:
@@ -7454,6 +7562,68 @@ components:
       - candidate_branches_total
       - blockers_total
       title: ConsoleAdminControlTowerMigrationWave
+    ConsoleAdminControlTowerMigrationWaveDetailResponse:
+      properties:
+        generated_at:
+          type: string
+          title: Generated At
+        stale_after_minutes:
+          type: integer
+          title: Stale After Minutes
+        limit:
+          type: integer
+          title: Limit
+        include_p2:
+          type: boolean
+          title: Include P2
+          default: true
+        wave:
+          type: string
+          enum:
+          - canary
+          - cohort
+          - fleet
+          title: Wave
+        decision:
+          type: string
+          enum:
+          - promote
+          - hold
+          title: Decision
+        reason:
+          type: string
+          title: Reason
+        summary:
+          $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationProgramSummary'
+        wave_state:
+          $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationWave'
+        signals:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationSignal'
+          type: array
+          title: Signals
+          default: []
+        promotion_actions_total:
+          type: integer
+          title: Promotion Actions Total
+        promotion_actions:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerPromotionAction'
+          type: array
+          title: Promotion Actions
+          default: []
+      type: object
+      required:
+      - generated_at
+      - stale_after_minutes
+      - limit
+      - wave
+      - decision
+      - reason
+      - summary
+      - wave_state
+      - promotion_actions_total
+      title: ConsoleAdminControlTowerMigrationWaveDetailResponse
     ConsoleAdminControlTowerOverviewResponse:
       properties:
         generated_at:
@@ -7541,6 +7711,104 @@ components:
       - ops_jobs_total_24h
       - ops_jobs_failed_24h
       title: ConsoleAdminControlTowerOverviewSummary
+    ConsoleAdminControlTowerPromotionAction:
+      properties:
+        id:
+          type: string
+          title: Id
+        wave:
+          type: string
+          enum:
+          - canary
+          - cohort
+          - fleet
+          title: Wave
+        gate:
+          type: string
+          enum:
+          - go
+          - hold
+          title: Gate
+        priority:
+          type: string
+          enum:
+          - p0
+          - p1
+          - p2
+          title: Priority
+        source:
+          type: string
+          enum:
+          - incident
+          - provider_ops
+          - readiness
+          title: Source
+        kind:
+          type: string
+          enum:
+          - navigate
+          - ops_job
+          - provider_action
+          title: Kind
+        title:
+          type: string
+          title: Title
+        description:
+          type: string
+          title: Description
+        reasons:
+          items:
+            type: string
+          type: array
+          title: Reasons
+          default: []
+        href:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Href
+        job_type:
+          anyOf:
+          - type: string
+            enum:
+            - outbox_process
+            - integration_reconcile
+            - heal
+            - metrics_snapshot
+            - incident_state
+            - compliance_lifecycle
+          - type: 'null'
+          title: Job Type
+        mode:
+          anyOf:
+          - type: string
+            enum:
+            - dry_run
+            - execute
+          - type: 'null'
+          title: Mode
+        params:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Params
+        evidence_links:
+          items:
+            type: string
+          type: array
+          title: Evidence Links
+          default: []
+      type: object
+      required:
+      - id
+      - wave
+      - gate
+      - priority
+      - source
+      - kind
+      - title
+      - description
+      title: ConsoleAdminControlTowerPromotionAction
     ConsoleAdminControlTowerReadinessBoardResponse:
       properties:
         generated_at:
