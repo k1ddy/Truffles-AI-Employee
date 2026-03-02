@@ -1,8 +1,11 @@
+from contextlib import contextmanager
 from pathlib import Path
+from uuid import uuid4
 
 from app.services import demo_salon_knowledge as demo_runtime
 from app.services import pack_runtime_default as default_runtime
 from app.services import pack_runtime_service as runtime
+from app.services.knowledge_runtime import RuntimeTruth, set_runtime_truth
 from app.services.pack_runtime_types import PackDecision
 
 
@@ -19,13 +22,30 @@ def _services_file(relative_path: str) -> Path:
     return root / relative_path
 
 
+@contextmanager
+def _runtime_truth(payload: dict, *, slug: str, branch_id=None):
+    runtime_payload = RuntimeTruth(
+        truth=payload,
+        client_slug=slug,
+        branch_id=branch_id,
+        source="test_pack_runtime_service",
+        allow_fallback=False,
+    )
+    set_runtime_truth(runtime_payload)
+    try:
+        yield
+    finally:
+        set_runtime_truth(None)
+
+
 def test_pack_runtime_service_reexports_default_adapter() -> None:
     assert runtime.get_pack_decision is not default_runtime.get_pack_decision
     assert runtime.get_pack_service_decision is not default_runtime.get_pack_service_decision
     assert runtime.get_pack_adapter is default_runtime.get_pack_adapter
     assert runtime.get_pack_price_reply is default_runtime.get_pack_price_reply
     assert runtime.get_pack_price_item is default_runtime.get_pack_price_item
-    assert runtime.get_pack_service_hint is default_runtime.get_pack_service_hint
+    assert runtime.get_pack_service_hint is not default_runtime.get_pack_service_hint
+    assert runtime.semantic_service_match is not default_runtime.semantic_service_match
 
 
 def test_get_pack_decision_enriches_resolver_contract(monkeypatch) -> None:
@@ -184,3 +204,38 @@ def test_pack_runtime_default_routes_demo_slug_to_explicit_adapter() -> None:
 
     default_adapter = default_runtime._resolve_adapter("non_existing_slug")
     assert default_adapter.__name__ == "app.services.pack_runtime_generic_adapter"
+
+
+def test_pack_runtime_service_semantic_match_returns_hybrid_meta() -> None:
+    branch_id = uuid4()
+    truth = {
+        "services_catalog": [
+            {
+                "name": "Профессиональная чистка зубов",
+                "aliases": ["чистка зубов", "профчистка"],
+                "tenant_slug": "dental_pack",
+                "branch_ids": [str(branch_id)],
+            }
+        ]
+    }
+    with _runtime_truth(truth, slug="dental_pack", branch_id=branch_id):
+        result = runtime.semantic_service_match("чистка зубов", "dental_pack")
+
+    assert result is not None
+    assert result.action == "match"
+    assert result.canonical_name == "Профессиональная чистка зубов"
+    assert isinstance(result.meta, dict)
+    assert result.meta.get("engine") == "pack_query_engine.v2"
+    assert result.meta.get("filters", {}).get("tenant_slug") == "dental_pack"
+    assert result.meta.get("filters", {}).get("branch_id") == str(branch_id)
+
+
+def test_pack_runtime_service_get_pack_service_hint_uses_runtime_fallback_when_scope_allows(monkeypatch) -> None:
+    truth = {"services_catalog": []}
+    monkeypatch.setattr(runtime, "_runtime_get_pack_service_hint", lambda *_args, **_kwargs: "Fallback Service")
+    with _runtime_truth(truth, slug="demo_salon"):
+        service_hint = runtime.get_pack_service_hint(
+            "нужна услуга",
+            client_slug="demo_salon",
+        )
+    assert service_hint == "Fallback Service"

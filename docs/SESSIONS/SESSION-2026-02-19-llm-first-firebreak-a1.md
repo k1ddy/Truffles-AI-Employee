@@ -88,9 +88,19 @@
   - Completed `S0+S1` block via `docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md`: hardcode gate now includes signal services in `ops/diagnose.py` with technical whitelist, and booking/info signal literals were externalized into declarative manifest+schema (`truffles-api/app/knowledge/generic/SIGNAL_MANIFEST.yaml`, `contracts/packs/signal_manifest.v1.jsonschema`) through `truffles-api/app/services/signal_manifest_service.py`.
   - Completed `S2+S3` block via `docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md`: signal runtime compiler contract is now explicit in `truffles-api/app/services/signal_manifest_service.py` (`CompiledSignalManifest`, `compiled_version`, `manifest_fingerprint`, `manifest_signature`, cache keyed by manifest signature), and hardcode gate v2 scope in `ops/diagnose.py` now enforces runtime/core/signal policy (`webhook/*.py`, `*_signal_service.py`, `*_runtime_service.py`, `pack_runtime_service.py`, `tool_registry_service.py`) with deterministic tests.
   - Completed `S4` block via `docs/TASK_PACKAGES/TP-2026-03-02-s4-cross-domain-contract-suite-a1.md`: introduced cross-domain matrix quality contract in `ops/diagnose.py` (`--cross-domain-contract off|warn|block`, min non-salon gate + excluded slug contract), and added dedicated deterministic suite for two non-salon runtime packs in `truffles-api/tests/test_cross_domain_signal_contract_suite.py` covering info/booking/tool_registry paths.
+  - Started and completed dedicated `P5` packet via `docs/TASK_PACKAGES/TP-2026-03-02-p5-pack-query-engine-v2-a1.md`: `truffles-api/app/services/pack_runtime_service.py` now runs hybrid pack query retrieval (`sparse + semantic`) with rerank, strict tenant/branch filters, and retrieval provenance wired into `resolver_contract`; deterministic coverage extended in `truffles-api/tests/test_pack_query_engine_contract.py`, `truffles-api/tests/test_pack_query_engine_abstain.py`, `truffles-api/tests/test_pack_runtime_service.py`.
 - next:
-  - Execute live/dev matrix evidence with real non-salon clients (when environment/client slugs are ready) and attach artifacts.
+  - Open separate PR for `P5` packet and attach deterministic evidence bundle.
+  - Continue `P9` residual text-oracle migration after `P5` merge.
+  - Execute live/dev matrix evidence with real non-salon clients when slugs become available.
 - evidence:
+- docs/TASK_PACKAGES/TP-2026-03-02-p5-pack-query-engine-v2-a1.md
+- pytest -q truffles-api/tests/test_pack_query_engine_contract.py (`4 passed`)
+- pytest -q truffles-api/tests/test_pack_query_engine_abstain.py (`5 passed`)
+- pytest -q truffles-api/tests/test_pack_runtime_service.py (`13 passed`)
+- pytest -q truffles-api/tests/test_message_endpoint.py -k "semantic_service_matcher or service_not_found" (`6 passed, 264 deselected`)
+- python3 -m py_compile truffles-api/app/services/pack_runtime_service.py truffles-api/tests/test_pack_query_engine_contract.py truffles-api/tests/test_pack_query_engine_abstain.py truffles-api/tests/test_pack_runtime_service.py
+- ruff check truffles-api/app/services/pack_runtime_service.py truffles-api/tests/test_pack_query_engine_contract.py truffles-api/tests/test_pack_query_engine_abstain.py truffles-api/tests/test_pack_runtime_service.py (`All checks passed`)
 - docs/TASK_PACKAGES/TP-2026-03-02-s4-cross-domain-contract-suite-a1.md
 - pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py (`2 passed`)
 - pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "cross_domain_matrix_contract or matrix_slug_normalization" (`4 passed, 73 deselected`)
