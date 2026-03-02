@@ -466,4 +466,17 @@
     - parent execution status updated in `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md` (`P4 -> done`)
     - full-closure evidence recorded in `docs/TASK_PACKAGES/TP-2026-03-02-p4-expected-reply-full-closure-a1.md`
     - `STATE.md` NOW updated with P4 closure evidence.
-- last_updated: 2026-03-02T15:44:10+05:00
+  - Opened PR for P4 closure + full-closure TP normalization packet:
+    - `https://github.com/k1ddy/Truffles-AI-Employee/pull/870`
+    - branch: `fix/llm-first-firebreak-2026-02-19`, commit: `54ab8609`.
+  - Started `P9` full-closure implementation (contract-oracle migration pass 1):
+    - reduced phrase-level business assertions in `truffles-api/tests/test_message_endpoint.py` for consult recommendation, booking-info-interrupt, intent-queue, mixed info/booking scenarios (replaced with contract/state/meta checks),
+    - converted `truffles-api/tests/test_knowledge_service.py` to structural line-based assertions.
+  - Validation (green, P9 pass 1):
+    - `ruff check truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_knowledge_service.py` (`All checks passed`)
+    - `pytest -q truffles-api/tests/test_knowledge_service.py` (`10 passed`)
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k "consult_recommendation_prefers_pack_service_decision_over_service_matcher or consult_recommendation_forces_consult_intent_for_pack_service_decision or booking_info_interrupt_keeps_info_reply_without_prompt_leak or booking_info_interrupt_with_expected_reply_type_keeps_info_reply or booking_time_service_question_keeps_time_contract or booking_info_interrupt_without_policy_handler_uses_service_hint_for_pricing or intent_queue_sets_context_and_prompt or intent_queue_info_limit_skips_booking or intent_queue_choice_pricing_replies_and_updates_queue or intent_queue_choice_hours_matches_time_phrase or llm_policy_core_service_query_non_service_refs_routes_to_info or multi_truth_reply_handles_hours_and_service_without_booking or llm_policy_core_catalog_tool_decision_mismatch_contract_error_escalates_handoff or llm_policy_core_consult_duration_signal_sets_info_meta"` (`12 passed, 258 deselected`)
+  - Canon sync for P9 in-progress:
+    - updated `docs/TASK_PACKAGES/TP-2026-03-02-p9-contract-oracle-full-closure-a1.md` execution status (`in_progress` + evidence + remaining scope),
+    - updated `STATE.md` NOW with P9 in-progress evidence.
+- last_updated: 2026-03-02T16:07:00+05:00

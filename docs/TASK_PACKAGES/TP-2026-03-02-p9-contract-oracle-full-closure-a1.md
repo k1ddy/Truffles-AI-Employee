@@ -144,10 +144,34 @@
 - `Linked follow-up Task Package(s)`: none.
 - `Expiry/trigger to stop deferral`: n/a.
 
+## Execution Status Update (2026-03-02)
+- `STATUS`: in_progress.
+- `Delivered in this pass`:
+  - migrated a deterministic slice in `truffles-api/tests/test_message_endpoint.py` away from hardcoded business phrases toward contract/state checks for:
+    - `test_consult_recommendation_prefers_pack_service_decision_over_service_matcher`
+    - `test_consult_recommendation_forces_consult_intent_for_pack_service_decision`
+    - `test_booking_info_interrupt_keeps_info_reply_without_prompt_leak`
+    - `test_booking_info_interrupt_with_expected_reply_type_keeps_info_reply`
+    - `test_booking_time_service_question_keeps_time_contract`
+    - `test_booking_info_interrupt_without_policy_handler_uses_service_hint_for_pricing`
+    - `test_intent_queue_sets_context_and_prompt`
+    - `test_intent_queue_info_limit_skips_booking`
+    - `test_intent_queue_choice_pricing_replies_and_updates_queue`
+    - `test_intent_queue_choice_hours_matches_time_phrase`
+    - `test_llm_policy_core_service_query_non_service_refs_routes_to_info`
+    - `test_multi_truth_reply_handles_hours_and_service_without_booking`
+  - converted `truffles-api/tests/test_knowledge_service.py` formatting asserts to structural line-based checks.
+- `Validation`:
+  - `ruff check truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_knowledge_service.py` -> pass;
+  - `pytest -q truffles-api/tests/test_knowledge_service.py` -> `10 passed`;
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "consult_recommendation_prefers_pack_service_decision_over_service_matcher or consult_recommendation_forces_consult_intent_for_pack_service_decision or booking_info_interrupt_keeps_info_reply_without_prompt_leak or booking_info_interrupt_with_expected_reply_type_keeps_info_reply or booking_time_service_question_keeps_time_contract or booking_info_interrupt_without_policy_handler_uses_service_hint_for_pricing or intent_queue_sets_context_and_prompt or intent_queue_info_limit_skips_booking or intent_queue_choice_pricing_replies_and_updates_queue or intent_queue_choice_hours_matches_time_phrase or llm_policy_core_service_query_non_service_refs_routes_to_info or multi_truth_reply_handles_hours_and_service_without_booking or llm_policy_core_catalog_tool_decision_mismatch_contract_error_escalates_handoff or llm_policy_core_consult_duration_signal_sets_info_meta"` -> `12 passed, 258 deselected`.
+- `Remaining scope`:
+  - literal phrase-oracle asserts still exist in other `test_message_endpoint.py` sections (inventory command from this block still returns non-zero), therefore `P9` remains open.
+
 ## Next-block contract (mandatory)
-- `Next block objective`: close `P12` non-salon runtime evidence.
-- `First deterministic check command`: `pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py`
-- `Blocked-by conditions`: red contract-oracle suite.
+- `Next block objective`: continue `P9` migration on remaining literal phrase-oracle assertions in `test_message_endpoint.py`.
+- `First deterministic check command`: `rg -n "assert .*\"[^\"]+\" .*response\\.bot_response" truffles-api/tests/test_message_endpoint.py`
+- `Blocked-by conditions`: regressions in migrated deterministic slice.
 - `Owner role for closure`: Brain + Top Architect.
 
 ## Handoff (for zero-context next agent)
