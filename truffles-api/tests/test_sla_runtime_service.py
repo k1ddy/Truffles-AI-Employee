@@ -152,3 +152,20 @@ def test_collect_only_runtime_context_helpers():
     }
 
     assert sla_runtime_service.is_collect_only_runtime_active(context, now=now)
+
+
+def test_resolve_scope_inputs_handles_client_without_company_id(monkeypatch):
+    conv = _conversation(minutes_ago=5)
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id=conv.client_id)
+
+    monkeypatch.setattr(
+        sla_runtime_service,
+        "build_runtime_capabilities",
+        lambda *_args, **_kwargs: SimpleNamespace(payload=SimpleNamespace(domain_slug="generic")),
+    )
+
+    company_id, domain_key = sla_runtime_service._resolve_scope_inputs(db, conversation=conv)
+
+    assert company_id is None
+    assert domain_key == "generic"

@@ -72,6 +72,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 
 ### 1.1 Canon + Quality Gates (обязательно)
 - **Canon Sync Gate:** `/home/zhan/AGENTS.md` и `truffles-main/AGENTS.md` не должны расходиться по каноническим правилам (формула, quality contract, stop-the-line, fitness). Расхождение = GAP, запуск сессии/CI блокируется до синхронизации.
+- **Context Integrity Gate:** каждая новая сессия должна иметь `context_integrity_gate: required`; Task Package без секций `Residual architecture debt (mandatory)` и `Next-block contract (mandatory)` блокируется `session_check/session_gate`.
 - **Quality Validity Gate:** quality-run считается валидным только при `infra_valid=true` и `semantic_valid=true`.
 - **Hard Preflight Gate:** при невалидном preflight (`webhook_secret`/branch/env/judge key) run = `INVALID`; сравнение метрик и baseline для такого run запрещены.
 - **Baseline Integrity Gate:** canonical baseline обновляется только если `infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`.
@@ -156,6 +157,8 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 8) **Rollback**: как откатить.
 9) **No-go**: что запрещено.
 10) **Canon refs**: owner‑doc(и) + ссылка на `STATE.md` NOW/GAP; **CA_ID** если фикс закрывает CA‑пункт.
+11) **Residual architecture debt (mandatory)**: что остаётся техническим долгом после блока и почему.
+12) **Next-block contract (mandatory)**: точный следующий блок, его первый deterministic check и блокирующие условия.
 
 Шаблон (копируй в задачу):
 - Название/цель (1–2 предложения)
@@ -171,6 +174,8 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Rollback
 - No-go
 - Риски/блокеры
+- Residual architecture debt (mandatory)
+- Next-block contract (mandatory)
 
 ### 5.1 External Research Gate (обязательно)
 - Для каждой нетривиальной реализации/фикса до начала кода обязателен **ровно один точный web-search**.
@@ -208,6 +213,22 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
   - stop condition.
 - Две подряд итерации без новой evidence => stop-the-line, возврат к RCA/research.
 - Запрещено ослаблять acceptance-гейты/thresholds для «ускорения».
+
+### 5.5 Context Continuity Gate (обязательно)
+- В каждом TP обязательны секции:
+  - `Residual architecture debt (mandatory)`:
+    - `Current residuals accepted in this block`
+    - `Why not in this block`
+    - `Risk if deferred`
+    - `Linked follow-up Task Package(s)`
+    - `Expiry/trigger to stop deferral`
+  - `Next-block contract (mandatory)`:
+    - `Next block objective`
+    - `First deterministic check command`
+    - `Blocked-by conditions`
+    - `Owner role for closure`
+- Для новых сессий `context_integrity_gate` всегда создаётся как `required` через `scripts/session_start.sh`.
+- В блоке нельзя закрывать задачу без явного follow-up TP ID, если residual-debt остаётся.
 
 ---
 
@@ -345,11 +366,11 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Doc-only в `main` требует `docs/SESSIONS/*` + `docs/SESSION_INDEX.md` в том же коммите (session_check блокирует без них).
 
 ### 7.2 Research-gate adoption matrix (обязательно)
-- Допустимые режимы для `research_gate`, `root_cause_gate`, `reuse_gate`, `release_safety_gate`: `required | optional | off`.
+- Допустимые режимы для `research_gate`, `root_cause_gate`, `reuse_gate`, `release_safety_gate`, `context_integrity_gate`: `required | optional | off`.
 - `required`: `session_check`/`session_gate` блокируют commit/push/CI при нарушении TP-контракта.
 - `optional`: секции не блокируют поток, но учитываются в `session_audit` coverage.
 - `off`: секция не проверяется.
-- Новые сессии создаются с `required` по всем четырём gate-полям (через `scripts/session_start.sh`).
+- Новые сессии создаются с `required` по всем пяти gate-полям (через `scripts/session_start.sh`).
 - Backward compatibility: если в legacy-сессии задан только `research_gate: required` без явных `root_cause/reuse/release`, применяется bundled enforcement как `required` для этих секций.
 - Перевод legacy-сессий в `required` выполняется поэтапно: сначала обновление session metadata + TP, затем включение блокирующего режима.
 - Контроль покрытия выполняется через `scripts/session_audit.sh` (сводка gate adoption обязательна в evidence для process-blocks).

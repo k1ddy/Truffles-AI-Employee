@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -23,9 +22,39 @@ from app.services.appointment_reminder_service import (
     schedule_default_reminders,
 )
 from app.services.appointment_service import AppointmentConflictError, SchedulingService
+from app.services.booking_signal_service import (
+    clean_specialist_name as _clean_specialist_name_impl,
+)
+from app.services.booking_signal_service import (
+    coerce_time_token as _coerce_time_token,
+)
+from app.services.booking_signal_service import (
+    extract_daypart_token as _extract_daypart_token,
+)
+from app.services.booking_signal_service import (
+    extract_relative_date_token as _extract_relative_date_token,
+)
+from app.services.booking_signal_service import (
+    extract_time_token as _extract_time_token,
+)
+from app.services.booking_signal_service import (
+    has_explicit_date_signal as _has_explicit_date_signal_impl,
+)
+from app.services.booking_signal_service import (
+    strip_daypart_tokens as _strip_daypart_tokens,
+)
 from app.services.calendar_sync_service import enqueue_appointment_sync, get_provider_health
 from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.capability_manifest_service import resolve_tool_protocol_decision
+from app.services.info_signal_service import (
+    looks_like_booking_verification_message as _looks_like_booking_verification_message,
+)
+from app.services.info_signal_service import (
+    looks_like_services_overview_message as _looks_like_services_overview_message,
+)
+from app.services.info_signal_service import (
+    system_any_match as _system_any_match,
+)
 from app.services.pack_runtime_service import (
     _detect_promotion_intent,
     _has_duration_signal,
@@ -36,30 +65,9 @@ from app.services.pack_runtime_service import (
     build_info_combined_reply,
     format_reply_from_truth,
     get_pack_adapter,
-    get_signal_lexicon_list,
-    get_system_lexicon_list,
     load_yaml_truth,
 )
 from app.services.tool_certification_service import resolve_tool_certification_decision
-
-_TIME_TOKEN_RE = re.compile(r"\b([01]?\d|2[0-3])[:.][0-5]\d\b")
-_DAYPART_TOKEN_RE = re.compile(
-    r"\b(утром|утро|на утро|днем|днём|день|на день|после обеда|вечером|вечер|на вечер|к вечеру)\b",
-    re.IGNORECASE,
-)
-_DATE_TOKEN_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bпослезавтраш\w*|\bпослезавтра\b", re.IGNORECASE), "послезавтра"),
-    (re.compile(r"\bзавтраш\w*|\bзавтра\b", re.IGNORECASE), "завтра"),
-    (re.compile(r"\bсегодняш\w*|\bсегодня\b", re.IGNORECASE), "сегодня"),
-    (re.compile(r"\bпонедель\w*", re.IGNORECASE), "в понедельник"),
-    (re.compile(r"\bвторник\w*", re.IGNORECASE), "во вторник"),
-    (re.compile(r"\bсред\w*", re.IGNORECASE), "в среду"),
-    (re.compile(r"\bчетверг\w*", re.IGNORECASE), "в четверг"),
-    (re.compile(r"\bпятниц\w*", re.IGNORECASE), "в пятницу"),
-    (re.compile(r"\bсуббот\w*", re.IGNORECASE), "в субботу"),
-    (re.compile(r"\bвоскрес\w*", re.IGNORECASE), "в воскресенье"),
-    (re.compile(r"\bвыходн\w*", re.IGNORECASE), "в субботу"),
-)
 
 CALENDAR_TOOL_ACTIONS = {
     "calendar.list_slots",
@@ -221,8 +229,7 @@ def _parse_datetime(
     if not parsed:
         daypart = _extract_daypart_token(text)
         if daypart:
-            stripped_text = _DAYPART_TOKEN_RE.sub(" ", text)
-            stripped_text = re.sub(r"\s+", " ", stripped_text).strip()
+            stripped_text = _strip_daypart_tokens(text)
             if stripped_text:
                 try:
                     import dateparser
@@ -249,11 +256,12 @@ def _parse_datetime(
                     microsecond=0,
                 )
     if not parsed:
-        time_only_match = re.fullmatch(r"(?P<hour>\d{1,2})[:.](?P<minute>\d{2})", text)
-        if time_only_match:
+        time_token = _coerce_time_token(text)
+        if time_token:
             try:
-                hour = int(time_only_match.group("hour"))
-                minute = int(time_only_match.group("minute"))
+                hour_raw, _, minute_raw = time_token.partition(":")
+                hour = int(hour_raw)
+                minute = int(minute_raw)
                 if 0 <= hour <= 23 and 0 <= minute <= 59:
                     from zoneinfo import ZoneInfo
 
@@ -288,33 +296,6 @@ def _parse_uuid(value: Any) -> UUID | None:
         return None
 
 
-def _extract_time_token(text: str | None) -> str | None:
-    if not text:
-        return None
-    match = _TIME_TOKEN_RE.search(text)
-    if not match:
-        return None
-    token = match.group(0)
-    return token.replace(".", ":")
-
-
-def _coerce_time_token(value: str | None) -> str | None:
-    if not isinstance(value, str):
-        return None
-    token = value.strip().replace(".", ":")
-    match = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", token)
-    if not match:
-        return None
-    return f"{int(match.group(1)):02d}:{match.group(2)}"
-
-
-def _extract_relative_date_token(text: str | None) -> str | None:
-    if not isinstance(text, str) or not text.strip():
-        return None
-    for pattern, replacement in _DATE_TOKEN_PATTERNS:
-        if pattern.search(text):
-            return replacement
-    return None
 
 
 def _compose_requested_booking_reference(
@@ -340,19 +321,7 @@ def _compose_requested_booking_reference(
 
 
 def _has_explicit_date_signal(value: str | None) -> bool:
-    if not isinstance(value, str):
-        return False
-    token = value.strip()
-    if not token:
-        return False
-    lowered = token.casefold()
-    if _extract_relative_date_token(lowered):
-        return True
-    if re.search(r"\d{4}-\d{2}-\d{2}", token):
-        return True
-    if re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", token):
-        return True
-    return False
+    return _has_explicit_date_signal_impl(value)
 
 
 def _normalize_slot_request_tokens(
@@ -388,32 +357,6 @@ def _normalize_slot_request_tokens(
     return raw_date_token, requested_time_token
 
 
-def _looks_like_booking_verification_message(text: str | None) -> bool:
-    if not text:
-        return False
-    normalized = _normalize_text(text)
-    if not normalized:
-        return False
-    keywords = get_system_lexicon_list("booking_verification_keywords")
-    return bool(keywords and any(keyword in normalized for keyword in keywords))
-
-
-def _extract_daypart_token(text: str | None) -> str | None:
-    if not isinstance(text, str) or not text.strip():
-        return None
-    normalized = _normalize_text(text)
-    if not normalized:
-        return None
-    evening_keywords = get_system_lexicon_list("daypart_evening_keywords")
-    morning_keywords = get_system_lexicon_list("daypart_morning_keywords")
-    day_keywords = get_system_lexicon_list("daypart_day_keywords")
-    if evening_keywords and any(token in normalized for token in evening_keywords):
-        return "evening"
-    if morning_keywords and any(token in normalized for token in morning_keywords):
-        return "morning"
-    if day_keywords and any(token in normalized for token in day_keywords):
-        return "day"
-    return None
 
 
 def _time_token_in_daypart(token: str, daypart: str) -> bool:
@@ -434,22 +377,6 @@ def _time_token_in_daypart(token: str, daypart: str) -> bool:
     if daypart == "evening":
         return 17 <= hour <= 23
     return False
-
-
-def _looks_like_services_overview_message(
-    text: str | None,
-    *,
-    client_slug: str | None = None,
-) -> bool:
-    if not isinstance(text, str) or not text.strip():
-        return False
-    normalized = _normalize_text(text)
-    if not normalized:
-        return False
-    markers = get_signal_lexicon_list(client_slug, "services_overview_phrases")
-    if not markers:
-        markers = get_system_lexicon_list("services_overview_phrases")
-    return bool(markers and any(marker in normalized for marker in markers))
 
 
 def _format_services_overview_reply(
@@ -667,12 +594,9 @@ def _is_photo_offer_message(text: str | None) -> bool:
     if not isinstance(text, str) or not text.strip():
         return False
     normalized = _normalize_text(text)
-    if "фото" not in normalized and "референс" not in normalized:
+    if not _system_any_match(normalized, "style_reference_media_terms"):
         return False
-    return any(
-        token in normalized
-        for token in ("пришл", "отправл", "скин", "могу", "можно", "покаж", "прикреп")
-    )
+    return _system_any_match(normalized, "style_reference_send_terms")
 
 
 def _resolve_branch(db: Session, branch_id: UUID | None) -> Branch | None:
@@ -709,14 +633,7 @@ def _resolve_service_duration(
 
 
 def _clean_specialist_name(value: str | None) -> str | None:
-    if not value or not isinstance(value, str):
-        return None
-    cleaned = value.strip()
-    if not cleaned:
-        return None
-    cleaned = re.sub(r"^(мастер|мастеру|master)\s+", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return cleaned or None
+    return _clean_specialist_name_impl(value)
 
 
 def _resolve_specialist_by_name(

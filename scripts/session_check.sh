@@ -265,6 +265,17 @@ effective_research_subgate_mode() {
   echo "off"
 }
 
+effective_context_integrity_mode() {
+  local mode
+  mode=$(session_meta_value "context_integrity_gate")
+  validate_gate_mode "context_integrity_gate" "$mode"
+  if [[ -z "$mode" ]]; then
+    echo "off"
+    return 0
+  fi
+  echo "$mode"
+}
+
 require_single_web_query_in_tp() {
   local file="$1"
   local query_count
@@ -333,6 +344,21 @@ require_release_safety_section() {
   require_tp_token_in_file "$tp_file" "Post-release monitoring window:"
 }
 
+require_context_integrity_sections() {
+  local tp_file="$1"
+  require_tp_section_in_file "$tp_file" "Residual architecture debt (mandatory)"
+  require_tp_token_in_file "$tp_file" "Current residuals accepted in this block"
+  require_tp_token_in_file "$tp_file" "Why not in this block"
+  require_tp_token_in_file "$tp_file" "Risk if deferred"
+  require_tp_token_in_file "$tp_file" "Linked follow-up Task Package(s)"
+  require_tp_token_in_file "$tp_file" "Expiry/trigger to stop deferral"
+  require_tp_section_in_file "$tp_file" "Next-block contract (mandatory)"
+  require_tp_token_in_file "$tp_file" "Next block objective"
+  require_tp_token_in_file "$tp_file" "First deterministic check command"
+  require_tp_token_in_file "$tp_file" "Blocked-by conditions"
+  require_tp_token_in_file "$tp_file" "Owner role for closure"
+}
+
 enforce_research_driven_tp_gate() {
   local research_mode root_cause_mode reuse_mode release_safety_mode
   research_mode=$(effective_research_mode)
@@ -368,6 +394,22 @@ enforce_research_driven_tp_gate() {
   fi
 
   require_iteration_budget_section "$tp_file"
+}
+
+enforce_context_integrity_tp_gate() {
+  local mode
+  mode=$(effective_context_integrity_mode)
+  if [[ "$mode" != "required" ]]; then
+    return 0
+  fi
+
+  local tp_file="$repo_root/$task_package"
+  if [[ ! -f "$tp_file" ]]; then
+    echo "ERROR: Task Package not found for context integrity gate: ${tp_file}" >&2
+    exit 1
+  fi
+
+  require_context_integrity_sections "$tp_file"
 }
 
 if [[ "$branch" == "HEAD" ]]; then
@@ -485,6 +527,7 @@ if [[ -n "$tp_placeholders" ]]; then
 fi
 
 enforce_research_driven_tp_gate
+enforce_context_integrity_tp_gate
 
 index_file="$repo_root/docs/SESSION_INDEX.md"
 if [[ ! -f "$index_file" ]]; then

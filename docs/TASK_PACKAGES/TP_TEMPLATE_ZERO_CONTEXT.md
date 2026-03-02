@@ -104,6 +104,19 @@
 ## Risks/Blockers
 - <риски и блокеры>
 
+## Residual architecture debt (mandatory)
+- `Current residuals accepted in this block`: <explicit list>
+- `Why not in this block`: <scope boundary + reason>
+- `Risk if deferred`: <explicit risk>
+- `Linked follow-up Task Package(s)`: <TP IDs>
+- `Expiry/trigger to stop deferral`: <gate condition>
+
+## Next-block contract (mandatory)
+- `Next block objective`: <single objective for next block>
+- `First deterministic check command`: `<command>`
+- `Blocked-by conditions`: <what must be true first>
+- `Owner role for closure`: <Brain|Top Architect|Hands>
+
 ## Handoff (for zero-context next agent)
 - `Ready for next agent`: <yes/no>
 - `Start from`: <first file/command>

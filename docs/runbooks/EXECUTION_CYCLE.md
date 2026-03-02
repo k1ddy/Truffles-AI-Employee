@@ -19,6 +19,9 @@
    - `AGENTS.md` -> `STATE.md` (NOW) -> `STRUCTURE.md` -> профильные `SPECS/*`.
 2. Выбрать ровно одну проблему из `STATE.md` (или сначала оформить GAP).
 3. Подготовить `Task Package` (invariant/scope/touch-list/plan/DoD/checks/evidence/rollback/no-go + FACT pre-check + doc sync plan).
+   - Обязательно добавить continuity секции:
+     - `Residual architecture debt (mandatory)`
+     - `Next-block contract (mandatory)`
 4. Выполнить FACT pre-check до первой правки:
    - проверить актуальный код/контракты/тесты по touch-list,
    - запустить baseline команды,
@@ -31,6 +34,7 @@
    - 1 проблема -> 1 правка -> 1 проверка -> 1 запись evidence.
 7. Закрыть сессию:
    - обновить `docs/SESSIONS/*` + `docs/SESSION_INDEX.md` + `STATE.md`,
+   - обновить continuity-контекст в TP (residual debt + linked follow-up TP IDs + stop trigger),
    - `scripts/session_check.sh`,
    - commit.
 
@@ -143,6 +147,9 @@
 5. Session log (`docs/SESSIONS/SESSION-...md` + индекс).
 6. `STATE.md` запись с FACT/GAP.
 7. Doc/code drift closeout (`Canon/doc sync updates` или explicit GAP).
+8. Continuity evidence:
+   - `Residual architecture debt` заполнен в TP.
+   - `Next-block contract` заполнен в TP.
 
 Если любой пункт отсутствует, задача не считается закрытой.
 

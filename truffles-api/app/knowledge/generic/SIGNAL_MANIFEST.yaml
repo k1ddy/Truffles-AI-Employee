@@ -1,0 +1,130 @@
+schema_version: signal_manifest.v1
+booking:
+  regex:
+    phone_pattern:
+      pattern: '\+?\d[\d\s\-\(\)]{8,}\d'
+    booking_hour_fallback_pattern:
+      pattern: '\b(?P<prep>в|к|на)\s*(?P<hour>[01]?\d|2[0-3])(?:[:.](?P<minute>[0-5]\d))?\s*(?:час(?:а|ов)?)?\b'
+      flags:
+        - IGNORECASE
+    time_token_pattern:
+      pattern: '\b([01]?\d|2[0-3])[:.][0-5]\d\b'
+    daypart_token_pattern:
+      pattern: '\b(утром|утро|на утро|днем|днём|день|на день|после обеда|вечером|вечер|на вечер|к вечеру)\b'
+      flags:
+        - IGNORECASE
+    specialist_prefix_pattern:
+      pattern: '^(мастер|мастеру|master)\s+'
+      flags:
+        - IGNORECASE
+  replacement_patterns:
+    relative_day_token_patterns:
+      - pattern: '\bпослезавтраш\w*|\bпослезавтра\b'
+        replacement: 'послезавтра'
+        flags:
+          - IGNORECASE
+      - pattern: '\bзавтраш\w*|\bзавтра\b'
+        replacement: 'завтра'
+        flags:
+          - IGNORECASE
+      - pattern: '\bсегодняш\w*|\bсегодня\b'
+        replacement: 'сегодня'
+        flags:
+          - IGNORECASE
+      - pattern: '\bпонедель\w*'
+        replacement: 'в понедельник'
+        flags:
+          - IGNORECASE
+      - pattern: '\bвторник\w*'
+        replacement: 'во вторник'
+        flags:
+          - IGNORECASE
+      - pattern: '\bсред\w*'
+        replacement: 'в среду'
+        flags:
+          - IGNORECASE
+      - pattern: '\bчетверг\w*'
+        replacement: 'в четверг'
+        flags:
+          - IGNORECASE
+      - pattern: '\bпятниц\w*'
+        replacement: 'в пятницу'
+        flags:
+          - IGNORECASE
+      - pattern: '\bсуббот\w*'
+        replacement: 'в субботу'
+        flags:
+          - IGNORECASE
+      - pattern: '\bвоскрес\w*'
+        replacement: 'в воскресенье'
+        flags:
+          - IGNORECASE
+      - pattern: '\bвыходн\w*'
+        replacement: 'в субботу'
+        flags:
+          - IGNORECASE
+    daypart_token_patterns:
+      - pattern: '\b(вечер\w*|вечером|к вечеру|на вечер|после работы|ближе к вечеру)\b'
+        replacement: 'вечером'
+        flags:
+          - IGNORECASE
+      - pattern: '\b(утро\w*|утром|с утра|на утро)\b'
+        replacement: 'утром'
+        flags:
+          - IGNORECASE
+      - pattern: '\b(днем|днём|день|дневное|дневной|после обеда|ближе к обеду)\b'
+        replacement: 'днем'
+        flags:
+          - IGNORECASE
+  tokens:
+    datetime_duration_context_markers:
+      - сколько
+      - длит
+      - длител
+      - занима
+      - долго
+      - по времени
+      - duration
+    datetime_daypart_stems:
+      - утр
+      - дн
+      - веч
+      - ноч
+      - обед
+  layout_swap_map:
+    q: й
+    w: ц
+    e: у
+    r: к
+    t: е
+    y: н
+    u: г
+    i: ш
+    o: щ
+    p: з
+    '[': х
+    ']': ъ
+    a: ф
+    s: ы
+    d: в
+    f: а
+    g: п
+    h: р
+    j: о
+    k: л
+    l: д
+    ';': ж
+    '''': э
+    z: я
+    x: ч
+    c: с
+    v: м
+    b: и
+    n: т
+    m: ь
+    ',': б
+    '.': ю
+info:
+  regex:
+    tokenize_word_pattern:
+      pattern: '\w+'

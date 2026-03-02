@@ -980,8 +980,36 @@ LLM_QUALITY_HARDCODE_CORE_PREFIXES = (
     "truffles-api/app/routers/webhook/booking.py",
     "truffles-api/app/routers/webhook/info.py",
     "truffles-api/app/services/tool_registry_service.py",
+    "truffles-api/app/services/booking_signal_service.py",
+    "truffles-api/app/services/info_signal_service.py",
+)
+LLM_QUALITY_HARDCODE_SCOPE_WEBHOOK_PREFIX = "truffles-api/app/routers/webhook/"
+LLM_QUALITY_HARDCODE_SCOPE_SERVICE_PREFIX = "truffles-api/app/services/"
+LLM_QUALITY_HARDCODE_SCOPE_SERVICE_FILES = (
+    "truffles-api/app/services/tool_registry_service.py",
+    "truffles-api/app/services/pack_runtime_service.py",
+)
+LLM_QUALITY_HARDCODE_SCOPE_SERVICE_SUFFIXES = (
+    "_signal_service.py",
+    "_runtime_service.py",
+)
+LLM_QUALITY_MATRIX_MIN_NON_SALON_PACKS = 2
+LLM_QUALITY_MATRIX_NON_SALON_EXCLUDED_SLUGS = (
+    "demo_salon",
+    "generic",
 )
 LLM_QUALITY_HARDCODE_ALLOW_MARKER = "hardcode-gate: allow"
+LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS = (
+    're.findall(r"\\w+",',
+    "re.search(r\"[а-яё]\"",
+    "re.search(r\"[a-z]\"",
+    "re.findall(r\"[a-z]\"",
+    "re.match(r\"^(?P<year>\\d{4})-(?P<month>\\d{2})-(?P<day>\\d{2})",
+    "re.search(r\"\\d{4}-\\d{2}-\\d{2}\"",
+    "re.search(r\"\\b\\d{1,2}[./-]\\d{1,2}(?:[./-]\\d{2,4})?\\b\"",
+    "re.fullmatch(r\"([01]?\\d|2[0-3]):([0-5]\\d)\"",
+    "str.maketrans(",
+)
 LLM_QUALITY_REASON_LABELS = {
     "decision_meta_missing": "decision_meta missing for inbound turn",
     "decision_trace_missing": "decision_trace missing for inbound turn",
@@ -1030,7 +1058,7 @@ LLM_QUALITY_REASON_LABELS = {
     "semantic_intent_override_reason_unknown": "semantic intent override used non-whitelist reason-code",
     "semantic_intent_override_count_mismatch": "semantic intent override audit count mismatches recorded events",
     "lexicon_regex_delta_violation": "lexicon/regex delta without resolver + contract test delta",
-    "hardcode_core_violation": "core hardcode gate detected raw keyword/regex branching in core diff",
+    "hardcode_core_violation": "hardcode gate detected raw keyword/regex branching in runtime/core/signal diff",
     "quality_constant_violation": "quality-constant gate detected acceptance-lane downgrade or debug override",
     "oracle_conflict_violation": "oracle conflict gate requires contract-first arbitration before next acceptance run",
     "forensic_sla_violation": "forensic SLA gate detected incomplete manual audit contract fields",
@@ -5493,19 +5521,31 @@ def _llm_quality_is_hardcode_core_file(path):
     normalized = str(path or "").strip().replace("\\", "/")
     if not normalized:
         return False
-    return normalized in LLM_QUALITY_HARDCODE_CORE_PREFIXES
+    if normalized in LLM_QUALITY_HARDCODE_CORE_PREFIXES:
+        return True
+    if normalized.startswith(LLM_QUALITY_HARDCODE_SCOPE_WEBHOOK_PREFIX) and normalized.endswith(".py"):
+        return True
+    if not normalized.startswith(LLM_QUALITY_HARDCODE_SCOPE_SERVICE_PREFIX):
+        return False
+    if normalized in LLM_QUALITY_HARDCODE_SCOPE_SERVICE_FILES:
+        return True
+    return normalized.endswith(LLM_QUALITY_HARDCODE_SCOPE_SERVICE_SUFFIXES)
 
 
-def _llm_quality_line_has_phrase_branching(line):
+def _llm_quality_line_has_phrase_branching(line, *, path=None):
     if not isinstance(line, str):
         return False
     stripped = line.strip()
     if not stripped:
         return False
     lowered = stripped.casefold()
+    normalized_path = str(path or "").strip().replace("\\", "/").casefold()
+    is_signal_file = normalized_path.endswith("_signal_service.py")
     if lowered.startswith("#"):
         return False
     if LLM_QUALITY_HARDCODE_ALLOW_MARKER in lowered:
+        return False
+    if any(token in lowered for token in LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS):
         return False
     if any(
         token in lowered
@@ -5527,7 +5567,8 @@ def _llm_quality_line_has_phrase_branching(line):
         )
     )
     if not has_context_token:
-        return False
+        if not is_signal_file:
+            return False
     has_branch_operator = any(
         token in lowered
         for token in (
@@ -5536,6 +5577,8 @@ def _llm_quality_line_has_phrase_branching(line):
             ".endswith(",
             "re.search(",
             "re.match(",
+            "re.compile(",
+            "=",
         )
     )
     if not has_branch_operator:
@@ -5615,7 +5658,7 @@ def _llm_quality_collect_hardcode_core_violations(
             if not raw_line.startswith("+") or raw_line.startswith("+++"):
                 continue
             content = raw_line[1:]
-            if not _llm_quality_line_has_phrase_branching(content):
+            if not _llm_quality_line_has_phrase_branching(content, path=current_file):
                 continue
             violations.append(
                 {
@@ -7502,7 +7545,7 @@ def _llm_quality_next_step_for_reason(reason):
         "semantic_intent_override_reason_unknown": "replace semantic intent override reason-code with whitelist-approved value",
         "semantic_intent_override_count_mismatch": "align semantic_arbiter.audit.intent_override_count with semantic_intent_overrides events",
         "lexicon_regex_delta_violation": "pair lexicon/regex changes with resolver update and contract regression tests",
-        "hardcode_core_violation": "remove raw phrase/regex branching from core files or move it to resolver/data with explicit allow marker",
+        "hardcode_core_violation": "remove raw phrase/regex branching from runtime/core/signal files or move it to resolver/data with explicit allow marker",
         "wrong_action": "inspect plan/final action routing and tighten intent arbitration for this turn class",
         "handoff_miss": "ensure manager-request/reschedule intents transition to handoff+pending with trace proof",
         "non_actionable_reply": "replace dead-end fallback with actionable FACT/COLLECT continuation",
@@ -10897,12 +10940,12 @@ def _parse_llm_quality_args(argv):
         "--hardcode-core-gate",
         choices=["off", "warn", "block"],
         default=os.environ.get("LLM_QUALITY_HARDCODE_CORE_GATE", "block"),
-        help="Static AST/diff gate for raw phrase/regex branching in webhook core files.",
+        help="Static AST/diff gate for raw phrase/regex branching in runtime/core/signal files.",
     )
     parser.add_argument(
         "--hardcode-core-base-ref",
         default=os.environ.get("LLM_QUALITY_HARDCODE_CORE_BASE_REF", "origin/main"),
-        help="Base ref used to scan changed files for hardcode core gate.",
+        help="Base ref used to scan changed files for hardcode gate scope.",
     )
     parser.add_argument(
         "--run-economy-gate",
@@ -11044,12 +11087,12 @@ def _parse_llm_quality_gates_args(argv):
         "--hardcode-core-gate",
         choices=["off", "warn", "block"],
         default=os.environ.get("LLM_QUALITY_HARDCODE_CORE_GATE", "block"),
-        help="Static guard for phrase/regex branching in webhook core files.",
+        help="Static guard for phrase/regex branching in runtime/core/signal files.",
     )
     parser.add_argument(
         "--hardcode-core-base-ref",
         default=os.environ.get("LLM_QUALITY_HARDCODE_CORE_BASE_REF", "origin/main"),
-        help="Base ref used for hardcode-core scan.",
+        help="Base ref used for hardcode gate scan.",
     )
     parser.add_argument(
         "--run-economy-gate",
@@ -11190,6 +11233,31 @@ def _parse_llm_quality_matrix_args(argv):
     )
     parser.add_argument("--allow-output-overwrite", action="store_true")
     parser.add_argument("--continue-on-error", action="store_true")
+    parser.add_argument(
+        "--cross-domain-contract",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_MATRIX_CROSS_DOMAIN_CONTRACT", "off"),
+        help="Validate non-salon matrix coverage contract.",
+    )
+    parser.add_argument(
+        "--cross-domain-min-non-salon",
+        type=int,
+        default=int(
+            os.environ.get(
+                "LLM_QUALITY_MATRIX_MIN_NON_SALON_PACKS",
+                str(LLM_QUALITY_MATRIX_MIN_NON_SALON_PACKS),
+            )
+        ),
+        help="Minimum number of non-salon slugs required by matrix contract.",
+    )
+    parser.add_argument(
+        "--cross-domain-excluded-slugs",
+        default=os.environ.get(
+            "LLM_QUALITY_MATRIX_NON_SALON_EXCLUDED_SLUGS",
+            ",".join(LLM_QUALITY_MATRIX_NON_SALON_EXCLUDED_SLUGS),
+        ),
+        help="Comma-separated slugs excluded from non-salon count.",
+    )
     args, llm_quality_args = parser.parse_known_args(argv)
     args.llm_quality_args = list(llm_quality_args or [])
     return args
@@ -12038,6 +12106,75 @@ def _parse_csv_values(value):
     if not value:
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _llm_quality_normalize_matrix_client_slugs(value):
+    client_slugs = []
+    seen_slugs = set()
+    for slug in _parse_csv_values(value):
+        normalized = slug.strip()
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen_slugs:
+            continue
+        seen_slugs.add(key)
+        client_slugs.append(normalized)
+    return client_slugs
+
+
+def _llm_quality_build_cross_domain_matrix_contract_status(
+    *,
+    mode,
+    client_slugs,
+    excluded_slugs=None,
+    min_non_salon=None,
+):
+    mode_token = str(mode or "off").strip().lower()
+    if mode_token not in {"off", "warn", "block"}:
+        mode_token = "off"
+    required = mode_token == "block"
+    enforced = mode_token in {"warn", "block"}
+    minimum = min_non_salon
+    if not isinstance(minimum, int) or minimum < 1:
+        minimum = LLM_QUALITY_MATRIX_MIN_NON_SALON_PACKS
+    excluded_source = excluded_slugs
+    if excluded_source is None:
+        excluded_source = LLM_QUALITY_MATRIX_NON_SALON_EXCLUDED_SLUGS
+    if isinstance(excluded_source, (list, tuple, set)):
+        excluded_values = [str(item) for item in excluded_source]
+    else:
+        excluded_values = _parse_csv_values(excluded_source)
+    excluded = {
+        str(item or "").strip().casefold()
+        for item in excluded_values
+        if str(item or "").strip()
+    }
+    if isinstance(client_slugs, (list, tuple, set)):
+        normalized_slugs = _llm_quality_normalize_matrix_client_slugs(
+            ",".join(str(item) for item in client_slugs if str(item).strip())
+        )
+    else:
+        normalized_slugs = _llm_quality_normalize_matrix_client_slugs(client_slugs)
+    non_salon = [
+        slug for slug in normalized_slugs if slug.casefold() not in excluded
+    ]
+    reasons = []
+    if len(non_salon) < minimum:
+        reasons.append(f"cross_domain_non_salon_lt_{minimum}:{len(non_salon)}")
+    return {
+        "mode": mode_token,
+        "required": required,
+        "enforced": enforced,
+        "valid": not reasons,
+        "reasons": reasons,
+        "client_slug_count": len(normalized_slugs),
+        "non_salon_count": len(non_salon),
+        "minimum_non_salon_required": minimum,
+        "non_salon_client_slugs": non_salon,
+        "excluded_client_slugs": sorted(excluded),
+    }
+
 
 def _resolve_allowlist_jids(explicit, container_name):
     for value in (
@@ -17997,17 +18134,43 @@ def _run_llm_quality_gates(args):
 
 
 def _run_llm_quality_matrix(args):
-    raw_client_slugs = _parse_csv_values(getattr(args, "client_slugs", None))
-    client_slugs = []
-    seen_slugs = set()
-    for slug in raw_client_slugs:
-        normalized = slug.strip()
-        if not normalized or normalized in seen_slugs:
-            continue
-        seen_slugs.add(normalized)
-        client_slugs.append(normalized)
+    client_slugs = _llm_quality_normalize_matrix_client_slugs(
+        getattr(args, "client_slugs", None)
+    )
     if not client_slugs:
         raise SystemExit("llm-quality-matrix: provide at least one --client-slugs value")
+    cross_domain_contract = _llm_quality_build_cross_domain_matrix_contract_status(
+        mode=getattr(args, "cross_domain_contract", "off"),
+        client_slugs=client_slugs,
+        excluded_slugs=getattr(args, "cross_domain_excluded_slugs", None),
+        min_non_salon=getattr(args, "cross_domain_min_non_salon", None),
+    )
+    if cross_domain_contract.get("enforced"):
+        print(
+            json.dumps(
+                {
+                    "stage": "llm_quality_matrix_cross_domain_contract",
+                    "mode": cross_domain_contract.get("mode"),
+                    "required": cross_domain_contract.get("required"),
+                    "valid": cross_domain_contract.get("valid"),
+                    "reasons": cross_domain_contract.get("reasons", []),
+                    "non_salon_count": cross_domain_contract.get("non_salon_count"),
+                    "minimum_non_salon_required": cross_domain_contract.get(
+                        "minimum_non_salon_required"
+                    ),
+                    "excluded_client_slugs": cross_domain_contract.get(
+                        "excluded_client_slugs"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        )
+    if cross_domain_contract.get("required") and not cross_domain_contract.get("valid", True):
+        reason_tokens = cross_domain_contract.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality-matrix: cross-domain contract failed "
+            f"({','.join(reason_tokens)})"
+        )
 
     forwarded_args = list(getattr(args, "llm_quality_args", []) or [])
     if forwarded_args and forwarded_args[0] == "--":
@@ -18135,6 +18298,7 @@ def _run_llm_quality_matrix(args):
         "run_id_prefix": run_id_prefix,
         "output_dir": output_dir,
         "client_slugs": client_slugs,
+        "cross_domain_contract": cross_domain_contract,
         "all_ok": all_ok,
         "rows": matrix_rows,
         "forwarded_args": forwarded_args,
