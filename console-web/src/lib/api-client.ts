@@ -1171,6 +1171,20 @@ export type ListTenantsWeeklySnapshotsParams = {
 export type ListFleetAttentionParams = operations["list_fleet_attention_console_v1_admin_fleet_attention_get"]["parameters"]["query"];
 export type ListIntegrationsParams = operations["list_integrations_console_v1_admin_integrations_get"]["parameters"]["query"];
 export type ListProviderLifecycleParams = operations["list_provider_lifecycle_console_v1_admin_provider_lifecycle_get"]["parameters"]["query"];
+export type GetControlTowerOverviewParams =
+    operations["get_admin_control_tower_overview_console_v1_admin_control_tower_overview_get"]["parameters"]["query"];
+export type GetControlTowerReadinessBoardParams =
+    operations["get_admin_control_tower_readiness_board_console_v1_admin_control_tower_readiness_board_get"]["parameters"]["query"];
+export type GetControlTowerDriftBoardParams =
+    operations["get_admin_control_tower_drift_board_console_v1_admin_control_tower_drift_board_get"]["parameters"]["query"];
+export type GetControlTowerActionCenterParams =
+    operations["get_admin_control_tower_action_center_console_v1_admin_control_tower_action_center_get"]["parameters"]["query"];
+export type GetControlTowerMigrationProgramParams =
+    operations["get_admin_control_tower_migration_program_console_v1_admin_control_tower_migration_program_get"]["parameters"]["query"];
+export type GetControlTowerMigrationWaveParams =
+    operations["get_admin_control_tower_migration_wave_detail_console_v1_admin_control_tower_migration_program__wave__get"]["parameters"]["query"];
+export type ControlTowerMigrationWave =
+    operations["get_admin_control_tower_migration_wave_detail_console_v1_admin_control_tower_migration_program__wave__get"]["parameters"]["path"]["wave"];
 export type ListMembershipsParams = operations["list_memberships_console_v1_admin_memberships_get"]["parameters"]["query"];
 export type ListReferencePacksParams = operations["list_reference_packs_console_v1_admin_reference_packs_get"]["parameters"]["query"];
 export type ListOnboardingBlueprintsParams = { domain_slug?: string };
@@ -1193,7 +1207,7 @@ export type OnboardingBlueprint = {
     domain_slug: string;
     label: string;
     summary: string;
-    payload: components["schemas"]["CapabilitiesPayload"];
+    payload: components["schemas"]["CapabilitiesPayload-Output"];
     go_live_blockers_profile: string[];
     question_templates: OnboardingBlueprintQuestionTemplate[];
     required_fields_profile: OnboardingBlueprintRequiredFieldsProfile;
@@ -1361,6 +1375,21 @@ export const adminApi = {
         apiClient.get<components["schemas"]["ConsoleIntegrationsListResponse"]>("/admin/integrations", { params }),
     listProviderLifecycle: (params?: ListProviderLifecycleParams) =>
         apiClient.get<components["schemas"]["ConsoleProviderLifecycleListResponse"]>("/admin/provider-lifecycle", { params }),
+    getControlTowerOverview: (params?: GetControlTowerOverviewParams) =>
+        apiClient.get<components["schemas"]["ConsoleAdminControlTowerOverviewResponse"]>("/admin/control-tower/overview", { params }),
+    getControlTowerReadinessBoard: (params?: GetControlTowerReadinessBoardParams) =>
+        apiClient.get<components["schemas"]["ConsoleAdminControlTowerReadinessBoardResponse"]>("/admin/control-tower/readiness-board", { params }),
+    getControlTowerDriftBoard: (params?: GetControlTowerDriftBoardParams) =>
+        apiClient.get<components["schemas"]["ConsoleAdminControlTowerDriftBoardResponse"]>("/admin/control-tower/drift-board", { params }),
+    getControlTowerActionCenter: (params?: GetControlTowerActionCenterParams) =>
+        apiClient.get<components["schemas"]["ConsoleAdminControlTowerActionCenterResponse"]>("/admin/control-tower/action-center", { params }),
+    getControlTowerMigrationProgram: (params?: GetControlTowerMigrationProgramParams) =>
+        apiClient.get<components["schemas"]["ConsoleAdminControlTowerMigrationProgramResponse"]>("/admin/control-tower/migration-program", { params }),
+    getControlTowerMigrationWave: (wave: ControlTowerMigrationWave, params?: GetControlTowerMigrationWaveParams) =>
+        apiClient.get<components["schemas"]["ConsoleAdminControlTowerMigrationWaveDetailResponse"]>(
+            `/admin/control-tower/migration-program/${wave}`,
+            { params },
+        ),
     getMarketingSegmentsCatalog: () =>
         apiClient.get<MarketingSegmentCatalogResponse>("/admin/marketing/segments"),
     listMarketingCampaigns: (params?: ListMarketingCampaignsParams) =>

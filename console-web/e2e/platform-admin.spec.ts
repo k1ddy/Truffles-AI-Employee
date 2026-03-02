@@ -251,6 +251,154 @@ async function mockTenantsDeterministicApis(
     counters?: { portfolioCalls?: number; cockpitCalls?: number },
 ) {
     const fixture = buildTenantsFixtureBundle();
+    const integrationRow = {
+        branch_id: fixture.branch.id,
+        branch_slug: fixture.branch.slug,
+        branch_name: fixture.branch.name,
+        client_id: fixture.client.id,
+        client_slug: fixture.client.slug,
+        status: 'warn',
+        whatsapp_status: 'warn',
+        telegram_status: 'ok',
+        webhook_url: 'https://hooks.example.com/demo',
+        webhook_url_valid: true,
+        webhook_secret_valid: true,
+        instance_id: fixture.branch.instance_id,
+        last_inbound_at: TENANTS_FIXTURE_NOW,
+        provider_binding_owner: 'provider-owner',
+        provider_binding_paid_until: '2026-12-31',
+        provider_binding_next_renewal_at: '2026-12-20T00:00:00.000Z',
+        provider_binding_instance_id: fixture.branch.instance_id,
+        provider_binding_expiry_status: 'expiring_soon',
+        provider_binding_rebind_required: true,
+        provider_binding_alert_state: 'warn',
+        provider_binding_webhook_status: 'configured',
+    };
+    const controlTowerActionCenter = {
+        generated_at: TENANTS_FIXTURE_NOW,
+        stale_after_minutes: 60,
+        limit: 24,
+        include_p2: true,
+        summary: {
+            total_actions: 2,
+            p0_actions: 1,
+            p1_actions: 1,
+            p2_actions: 0,
+            incident_actions: 0,
+            provider_ops_actions: 1,
+            readiness_actions: 1,
+        },
+        top_reasons: [{ code: 'provider_binding_rebind_required', count: 1 }],
+        items: [
+            {
+                id: `provider:${fixture.branch.id}:provider_start_rebind`,
+                priority: 'p0',
+                source: 'provider_ops',
+                kind: 'provider_action',
+                title: 'Начать перепривязку канала',
+                description: 'Филиал требует перепривязки канала для стабильной отправки.',
+                reasons: ['provider_binding_rebind_required'],
+                href: '/integrations',
+                incident_id: null,
+                client_id: fixture.client.id,
+                client_slug: fixture.client.slug,
+                branch_id: fixture.branch.id,
+                branch_slug: fixture.branch.slug,
+                branch_name: fixture.branch.name,
+                job_type: null,
+                mode: 'execute',
+                params: {
+                    branch_id: fixture.branch.id,
+                    action: 'provider_start_rebind',
+                    mode: 'execute',
+                },
+                provider_action: 'provider_start_rebind',
+                requires_confirmation: false,
+                evidence_links: ['/admin/control-tower/action-center'],
+            },
+            {
+                id: `readiness:${fixture.branch.id}`,
+                priority: 'p1',
+                source: 'readiness',
+                kind: 'navigate',
+                title: 'Закрыть блокеры запуска филиала',
+                description: 'Проверьте onboarding-чеклист перед go-live.',
+                reasons: ['readiness_blocked'],
+                href: '/tenants',
+                incident_id: null,
+                client_id: fixture.client.id,
+                client_slug: fixture.client.slug,
+                branch_id: fixture.branch.id,
+                branch_slug: fixture.branch.slug,
+                branch_name: fixture.branch.name,
+                job_type: null,
+                mode: null,
+                params: null,
+                provider_action: null,
+                requires_confirmation: false,
+                evidence_links: ['/admin/control-tower/readiness-board'],
+            },
+        ],
+    };
+    const controlTowerMigrationProgram = {
+        generated_at: TENANTS_FIXTURE_NOW,
+        stale_after_minutes: 60,
+        limit: 24,
+        include_p2: true,
+        summary: {
+            active_clients_total: 1,
+            total_branches: 1,
+            ready_branches: 0,
+            blocked_branches: 1,
+            p0_actions: 1,
+            p1_actions: 1,
+            p2_actions: 0,
+            waves_go: 0,
+            waves_hold: 1,
+        },
+        waves: [
+            {
+                wave: 'canary',
+                gate: 'hold',
+                reason: 'hard_blockers_present',
+                candidate_clients_total: 1,
+                candidate_branches_total: 1,
+                blockers_total: 1,
+                rollback_triggers: ['hard_blockers_present'],
+                top_blockers: [{ code: 'provider_binding_rebind_required', count: 1 }],
+            },
+            {
+                wave: 'cohort',
+                gate: 'hold',
+                reason: 'hard_blockers_present',
+                candidate_clients_total: 1,
+                candidate_branches_total: 1,
+                blockers_total: 1,
+                rollback_triggers: ['hard_blockers_present'],
+                top_blockers: [{ code: 'provider_binding_rebind_required', count: 1 }],
+            },
+            {
+                wave: 'fleet',
+                gate: 'hold',
+                reason: 'hard_blockers_present',
+                candidate_clients_total: 1,
+                candidate_branches_total: 1,
+                blockers_total: 1,
+                rollback_triggers: ['hard_blockers_present'],
+                top_blockers: [{ code: 'provider_binding_rebind_required', count: 1 }],
+            },
+        ],
+        signals: [
+            {
+                code: 'hard_blockers',
+                status: 'fail',
+                value: 1,
+                threshold: 0,
+                note: 'p0 blockers must be zero',
+            },
+        ],
+        promotion_actions: [],
+    };
     await page.route('**/api/proxy/me', async (route) => {
         if (route.request().method() !== 'GET') {
             await route.fallback();
@@ -361,6 +509,102 @@ async function mockTenantsDeterministicApis(
                 cursor: null,
                 has_more: false,
             },
+        });
+    });
+    await page.route('**/api/proxy/admin/control-tower/action-center**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, controlTowerActionCenter);
+    });
+    await page.route('**/api/proxy/admin/control-tower/migration-program**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, controlTowerMigrationProgram);
+    });
+    await page.route('**/api/proxy/admin/integrations**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            stale_after_minutes: 60,
+            cursor: null,
+            has_more: false,
+            total_in_scope: 1,
+            items: [integrationRow],
+            provider_ops_queue: [
+                {
+                    branch_id: fixture.branch.id,
+                    client_id: fixture.client.id,
+                    client_slug: fixture.client.slug,
+                    branch_slug: fixture.branch.slug,
+                    branch_name: fixture.branch.name,
+                    priority: 'p0',
+                    recommended_action: 'provider_start_rebind',
+                    reasons: ['provider_binding_rebind_required'],
+                    requires_confirmation: false,
+                },
+            ],
+        });
+    });
+    await page.route('**/api/proxy/admin/provider-lifecycle**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            stale_after_minutes: 60,
+            cursor: null,
+            has_more: false,
+            total_in_scope: 1,
+            items: [
+                {
+                    company_id: fixture.company.id,
+                    client_id: fixture.client.id,
+                    client_slug: fixture.client.slug,
+                    branch_id: fixture.branch.id,
+                    branch_slug: fixture.branch.slug,
+                    branch_name: fixture.branch.name,
+                    sla_state: 'due_soon',
+                    next_action: 'provider_start_rebind',
+                    sla_deadline_at: '2026-03-03T12:00:00.000Z',
+                    blockers: ['provider_binding_rebind_required'],
+                    provider_binding_owner: 'provider-owner',
+                    provider_binding_paid_until: '2026-12-31',
+                    instance_id: fixture.branch.instance_id,
+                    provider_binding_instance_id: fixture.branch.instance_id,
+                },
+            ],
+        });
+    });
+    await page.route('**/api/proxy/onboarding/scorecard**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            status: 'warn',
+            ready: false,
+        });
+    });
+    await page.route('**/api/proxy/admin/incidents**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            generated_at: TENANTS_FIXTURE_NOW,
+            summary: {
+                total: 0,
+                critical: 0,
+                warn: 0,
+                info: 0,
+            },
+            items: [],
         });
     });
 }
@@ -814,10 +1058,32 @@ test.describe('Platform Admin Tenants', () => {
     test('should run onboarding action queue intent with visible section focus', async ({ page }) => {
         const actionQueue = page.getByTestId('tenants-action-queue');
         await expect(actionQueue).toBeVisible();
-        const onboardingRun = actionQueue.getByRole('button', { name: 'Открыть Onboarding' }).first();
+        const onboardingRun = actionQueue.getByRole('button', { name: /Открыть Онбординг|Открыть Onboarding|Проверить запуск/i }).first();
         await expect(onboardingRun).toBeVisible();
         await onboardingRun.click();
         await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
+    });
+
+    test('should deep-link from Tenants action queue to Workspace execute @smoke', async ({ page }) => {
+        const actionQueue = page.getByTestId('tenants-action-queue');
+        await expect(actionQueue).toBeVisible();
+
+        const openWorkspaceButton = actionQueue.getByRole('button', { name: 'Открыть Workspace' }).first();
+        await expect(openWorkspaceButton).toBeVisible();
+        await openWorkspaceButton.click();
+
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await expect(page.getByTestId('workspace-recommended-open-execute')).toBeVisible();
+
+        const deepLinkParams = await page.evaluate(() => ({
+            branchId: new URL(window.location.href).searchParams.get('branch_id'),
+            recommendedAction: new URL(window.location.href).searchParams.get('recommended_action'),
+            source: new URL(window.location.href).searchParams.get('action_source'),
+        }));
+        expect(deepLinkParams.branchId).toBeTruthy();
+        expect(deepLinkParams.recommendedAction).toBe('provider_start_rebind');
+        expect(deepLinkParams.source).toBeTruthy();
     });
 
     test('should show explicit field contracts in Tenants branch editor @smoke', async ({ page }) => {
