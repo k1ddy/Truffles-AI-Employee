@@ -84,6 +84,7 @@ def test_execute_lifecycle_preview_creates_candidate_records(monkeypatch):
         id=uuid4(),
         data_class="learned_responses",
         operation="destruction_preview",
+        run_mode="preview",
         client_id=uuid4(),
         branch_id=None,
         policy_snapshot_json={"destruction_mode": "anonymize"},
@@ -97,9 +98,58 @@ def test_execute_lifecycle_preview_creates_candidate_records(monkeypatch):
     )
 
     assert summary["candidate_count"] == 2
+    assert summary["execution_action"] == "destruction_preview"
+    assert summary["run_mode"] == "preview"
     assert len(captured) == 2
     assert captured[0]["result"] == "candidate"
     assert captured[0]["payload"]["planned_destruction_mode"] == "anonymize"
+    assert captured[0]["payload"]["execution_action"] == "destruction_preview"
+
+
+def test_execute_lifecycle_preview_manual_mode_sets_execution_action(monkeypatch):
+    now = datetime.now(timezone.utc)
+    due_items = [
+        SimpleNamespace(
+            id=uuid4(),
+            retention_expires_at=now,
+            consent_status="granted",
+            anonymization_mode="redact",
+            created_at=now,
+        ),
+    ]
+    captured = []
+
+    monkeypatch.setattr(
+        compliance_lifecycle_service,
+        "_due_learned_responses_query",
+        lambda *args, **kwargs: _FakeQuery(due_items),
+    )
+    monkeypatch.setattr(
+        compliance_lifecycle_service,
+        "append_lifecycle_record",
+        lambda *args, **kwargs: captured.append(kwargs),
+    )
+
+    run = SimpleNamespace(
+        id=uuid4(),
+        data_class="learned_responses",
+        operation="destruction_preview",
+        run_mode="manual",
+        client_id=uuid4(),
+        branch_id=None,
+        policy_snapshot_json={"destruction_mode": "anonymize"},
+        scope="client",
+    )
+
+    summary = compliance_lifecycle_service.execute_lifecycle_preview(
+        Mock(),
+        run=run,
+        max_items=10,
+    )
+
+    assert summary["candidate_count"] == 1
+    assert summary["execution_action"] == "anonymize_record"
+    assert captured[0]["payload"]["execution_action"] == "anonymize_record"
 
 
 def test_execute_lifecycle_preview_rejects_unsupported_data_class():

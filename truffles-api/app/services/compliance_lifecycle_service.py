@@ -21,6 +21,11 @@ COMPLIANCE_LIFECYCLE_MODES = ("preview", "manual")
 COMPLIANCE_LIFECYCLE_STATUSES = ("running", "completed", "failed")
 COMPLIANCE_LIFECYCLE_RECORD_RESULTS = ("candidate", "skipped", "error")
 _COMPLIANCE_DATA_CLASS_RE = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
+_DESTRUCTION_EXECUTION_ACTIONS = {
+    "delete": "deactivate_record",
+    "anonymize": "anonymize_record",
+    "archive": "archive_record",
+}
 
 
 def _normalize_scope(scope: str, *, branch_id: UUID | None) -> str:
@@ -253,6 +258,24 @@ def _due_learned_responses_query(
     return query
 
 
+def _resolve_execution_action(
+    *,
+    operation: str,
+    run_mode: str,
+    destruction_mode: str | None,
+) -> str:
+    if operation == "retention_scan":
+        return "retention_scan"
+    if operation == "export_preview":
+        return "export_preview" if run_mode == "preview" else "export_package"
+    if operation == "destruction_preview":
+        if run_mode == "preview":
+            return "destruction_preview"
+        token = str(destruction_mode or "delete").strip().lower()
+        return _DESTRUCTION_EXECUTION_ACTIONS.get(token, "deactivate_record")
+    return operation
+
+
 def execute_lifecycle_preview(
     db: Session,
     *,
@@ -276,8 +299,17 @@ def execute_lifecycle_preview(
         .all()
     )
 
+    run_mode = str(getattr(run, "run_mode", "preview") or "preview").strip().lower()
+    if run_mode not in COMPLIANCE_LIFECYCLE_MODES:
+        run_mode = "preview"
+
     action = run.operation
     policy_mode = (run.policy_snapshot_json or {}).get("destruction_mode")
+    execution_action = _resolve_execution_action(
+        operation=run.operation,
+        run_mode=run_mode,
+        destruction_mode=str(policy_mode) if policy_mode is not None else None,
+    )
     created = 0
     for item in due_items:
         payload = {
@@ -288,6 +320,7 @@ def execute_lifecycle_preview(
             ),
             "consent_status": item.consent_status,
             "anonymization_mode": item.anonymization_mode,
+            "execution_action": execution_action,
         }
         if run.operation == "destruction_preview":
             payload["planned_destruction_mode"] = policy_mode or "delete"
@@ -307,6 +340,8 @@ def execute_lifecycle_preview(
         "max_items": capped_limit,
         "evaluated_at": now.isoformat(),
         "operation": run.operation,
+        "run_mode": run_mode,
+        "execution_action": execution_action,
         "data_class": run.data_class,
         "scope": run.scope,
     }

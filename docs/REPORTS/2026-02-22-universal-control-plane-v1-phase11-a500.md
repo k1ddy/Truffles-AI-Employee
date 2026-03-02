@@ -112,6 +112,15 @@ Date
     - profile/operation mismatch rejected.
   - deterministic tests:
     - `truffles-api/tests/test_console_compliance_lifecycle.py` (auto skip path, due path, invalid profile, mismatch rejection)
+- Slice 5 foundation (`execution-action mapping envelope`):
+  - Added deterministic `execution_action` mapping in lifecycle service:
+    - retention: `retention_scan`,
+    - export: `export_preview` (preview) / `export_package` (manual),
+    - destruction: `destruction_preview` (preview) and mode-specific manual actions (`deactivate_record|anonymize_record|archive_record`).
+  - Lifecycle summary now includes `run_mode` and `execution_action`.
+  - Each lifecycle record payload now includes `execution_action` for audit consistency.
+  - deterministic tests:
+    - `truffles-api/tests/test_compliance_lifecycle_service.py` (preview + manual action mapping coverage).
 
 ## Checks + outcomes
 - `SESSION_AGENT=a700 scripts/session_check.sh` -> `Session OK`.
@@ -125,6 +134,8 @@ Date
 - `cd truffles-api && ruff check app/routers/console.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `All checks passed`.
 - `cd truffles-api && pytest -q tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `28 passed`.
 - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass (no OpenAPI drift after Slice 4).
+- `cd truffles-api && ruff check app/services/compliance_lifecycle_service.py tests/test_compliance_lifecycle_service.py app/routers/console.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `All checks passed`.
+- `cd truffles-api && pytest -q tests/test_compliance_lifecycle_service.py tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` -> `33 passed`.
 
 ## Iteration budget outcomes
 - `Planned max runs` -> 0 expensive realism runs (analysis/doc sync only).
