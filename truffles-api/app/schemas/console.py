@@ -1597,6 +1597,31 @@ class ConsoleOpsJobListResponse(BaseModel):
     has_more: bool
 
 
+class ConsoleAdminControlTowerOverviewSummary(BaseModel):
+    active_clients_total: int
+    clients_with_attention: int
+    high_risk_clients: int
+    incidents_total: int
+    incidents_critical: int
+    incidents_warn: int
+    incidents_info: int
+    ops_jobs_total_24h: int
+    ops_jobs_failed_24h: int
+
+
+class ConsoleAdminControlTowerOverviewResponse(BaseModel):
+    generated_at: str
+    stale_after_minutes: int
+    attention_limit: int
+    incident_limit: int
+    ops_jobs_limit: int
+    summary: ConsoleAdminControlTowerOverviewSummary
+    fleet_attention: ConsoleFleetAttentionResponse
+    incidents: ConsoleIncidentListResponse
+    recent_ops_jobs: list[ConsoleOpsJobRecord]
+    ops_job_catalog: list[ConsoleOpsJobDefinition]
+
+
 ConsoleBranchChangeStatus = Literal["draft", "validated", "publish_failed", "published", "rolled_back"]
 
 
