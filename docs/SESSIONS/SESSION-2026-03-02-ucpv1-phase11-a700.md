@@ -1,6 +1,6 @@
 # SESSION 2026-03-02-ucpv1-phase11-a700 — UCPV1 Phase11 compliance retention lifecycle
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md
 - block_id: UCPV1-PHASE11
@@ -13,6 +13,7 @@
 - base_ref: origin/main
 - scope: UCPV1 phase11 analysis bootstrap: compliance KZ retention/lifecycle TP+report, legal baseline, and canon status sync to in_progress.
 - done:
+  - Phase11 closure checklist completed; block promoted to passed with fresh governance+deterministic evidence.
   - Session created.
   - Phase11 Task Package created with mandatory gates (`One web search`, `Root cause`, `Reuse`, `Release safety`).
   - Phase11 report created with factual baseline and legal anchor.
@@ -30,8 +31,7 @@
   - Slice 5 rollout controls implemented: `approval_token` required for apply-actions and canary cap (`max_items <= 50`) enforced for mutation lane.
   - Slice 6 implemented: external compliance evidence artifacts persisted (`049` migration), auto-published per lifecycle run, and exposed via `GET /console/v1/admin/compliance-lifecycle/runs/{run_id}/artifact` with deterministic digest payload.
 - next:
-  - Prepare pass-gate checklist for phase11 closure (`in_progress` -> `passed`) using artifact publication evidence + rollback signals.
-  - Add evidence for promotion criteria from `in_progress` to `passed` (policy/run/action chain + rollback signals).
+  - Start UCPV1-PHASE12 analysis gate from updated master queue head.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md
   - docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md
@@ -62,4 +62,4 @@
   - pytest -q truffles-api/tests/test_compliance_lifecycle_artifact_service.py truffles-api/tests/test_compliance_lifecycle_service.py truffles-api/tests/test_console_compliance_policy_registry.py truffles-api/tests/test_console_compliance_lifecycle.py truffles-api/tests/test_console_ops_jobs.py (`44 passed`)
   - python3 truffles-api/scripts/generate_openapi.py --check (pass after sync)
   - SESSION_AGENT=a700 scripts/session_check.sh (`Session OK`)
-- last_updated: 2026-03-03
+- last_updated: 2026-03-02

@@ -207,10 +207,18 @@ Date
 - `truffles-api/app/schemas/console.py`
 - `contracts/console_api/openapi.v1.yaml`
 
+## Pass-gate checklist (closure slice 2026-03-03)
+- `Status promotion gate` -> `UCPV1-PHASE11` moved from `in_progress` to `passed` only after fresh deterministic checks on post-merge `main` baseline.
+- `Governance gates` -> `SESSION_AGENT=a700 scripts/session_check.sh` (`Session OK`) and `scripts/zero_context_gate.sh --tp docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md --report docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md --graph docs/BLOCK_GRAPH.yaml` (`zero_context_gate: OK`).
+- `Deterministic quality gate` -> `cd truffles-api && ruff check app/models/compliance_lifecycle_artifact.py app/services/compliance_lifecycle_artifact_service.py app/services/compliance_lifecycle_service.py app/routers/console.py app/schemas/console.py tests/test_compliance_lifecycle_artifact_service.py tests/test_compliance_lifecycle_service.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` (`All checks passed`).
+- `Contract test gate` -> `cd truffles-api && pytest -q tests/test_compliance_lifecycle_artifact_service.py tests/test_compliance_lifecycle_service.py tests/test_console_compliance_policy_registry.py tests/test_console_compliance_lifecycle.py tests/test_console_ops_jobs.py` (`44 passed`).
+- `OpenAPI gate` -> `cd truffles-api && python3 scripts/generate_openapi.py --check` (exit `0`).
+- `Closure decision` -> B11 promoted to `passed`; queue head switched to `UCPV1-PHASE12` planning track.
+
 ## Release safety decision
 - `Strategy used` -> guarded mutation lane with explicit operator intent (`reason`, `approval_token`, `lane=manual`, `max_items<=50`) plus immutable evidence publication per run.
 - `Go/no-go signals observed` -> deterministic tests green + API contract synced + artifact digest/read path available for audit.
-- `Rollback readiness` -> revert Slice 4/5/6 commits and disable apply-actions path while keeping preview evidence lane active; keep B11 status `in_progress` until closure checklist is complete.
+- `Rollback readiness` -> revert phase11 compliance-lifecycle commits and disable apply-actions mutation lane while keeping preview/artifact evidence lane available; rollback runbook remains deterministic and tenant-scoped.
 
 ## Canon/doc sync updates
 - `Updated docs`:
@@ -230,7 +238,7 @@ Date
 - `Start from`: `docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md`
 - `Do not touch`: unrelated tracks.
 - `Open risks`: data-class mapping completeness and destruction safety.
-- `First command to verify`: `rg -n "UCPV1-PHASE11|in_progress|phase11-a500" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md`
+- `First command to verify`: `rg -n "UCPV1-PHASE11|passed|phase11-a500" docs/BLOCK_GRAPH.yaml docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md`
 
 ## Verdict
-- `In Progress`
+- `Passed`

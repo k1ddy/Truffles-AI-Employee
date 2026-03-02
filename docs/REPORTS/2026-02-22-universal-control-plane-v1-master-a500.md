@@ -85,7 +85,7 @@
 | B08 Knowledge Studio + Pack Compiler | `UCPV1-PHASE8` | passed | Контент управляется через Draft->Validate->Publish->Rollback | Publish блокируется при нарушении minimum data contract; rollback one-click |
 | B09 Runtime Pack-Agnostic Decoupling | `UCPV1-PHASE9` | passed (owner-closed) | Runtime независим от demo-пака | Нет прямых demo imports в core runtime; adapter boundaries + neutral fallback |
 | B10 SLA/SLO Engine (Multi-level) | `UCPV1-PHASE10` | passed | SLA/SLO профили реально влияют на runtime и escalation | Policy-driven thresholds + predictable actions + auditability on each violation |
-| B11 Compliance KZ Retention/Lifecycle | `UCPV1-PHASE11` | in_progress (analysis-started) | KZ boundary и lifecycle соблюдаются автоматически | Retention/delete/export jobs с owner+TTL+audit trail по каждому data class |
+| B11 Compliance KZ Retention/Lifecycle | `UCPV1-PHASE11` | passed | KZ boundary и lifecycle соблюдаются автоматически | Retention/delete/export jobs с owner+TTL+audit trail по каждому data class |
 | B12 Control Tower for Platform Admin | `UCPV1-PHASE12` | planned | Fleet управляется через Console без CLI как основного пути | Risk queue + readiness board + drift board + action center с evidence links |
 | B13 Migration Program (Current -> Target) | `UCPV1-PHASE13` | planned | Переход без stop-the-world | Waves (`canary -> cohort -> fleet`) с pass/fail gates и rollback triggers |
 
@@ -105,13 +105,14 @@ Completed in this program chain:
 - `UCPV1-PHASE7` passed.
 - `UCPV1-PHASE8` passed.
 - `UCPV1-PHASE10` passed.
+- `UCPV1-PHASE11` passed.
 
 Current active block:
-- `UCPV1-PHASE11` in progress (analysis-first).
+- none (phase11 closed; next block not started).
 
 Current queue head:
-- `UCPV1-PHASE11` implementation track (`docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase11-a500.md`, `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase11-a500.md`).
-- Latest completed slice (2026-03-01): `UCPV1-PHASE10` provider lifecycle/outbox SLA action mapping with deterministic tests (`67 passed`, `74 passed`, `1 passed`) and green contract check (`python3 scripts/generate_openapi.py --check`).
+- `UCPV1-PHASE12` planning track (`docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase12-a500.md`, `docs/REPORTS/2026-02-22-universal-control-plane-v1-phase12-a500.md`).
+- Latest completed slice (2026-03-03): `UCPV1-PHASE11` closure with deterministic pass-gate evidence (`44 passed`) plus governance/contract checks (`SESSION_AGENT=a700 scripts/session_check.sh`, `scripts/zero_context_gate.sh`, `python3 scripts/generate_openapi.py --check`).
 
 ## 8) Program-level DoD
 
