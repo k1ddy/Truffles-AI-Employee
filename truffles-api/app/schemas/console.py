@@ -1675,6 +1675,42 @@ class ConsoleAdminControlTowerActionCenterResponse(BaseModel):
     items: list[ConsoleAdminControlTowerActionItem]
 
 
+ConsoleAdminControlTowerMigrationWaveId = Literal["canary", "cohort", "fleet"]
+ConsoleAdminControlTowerMigrationWaveGate = Literal["go", "hold"]
+
+
+class ConsoleAdminControlTowerMigrationWave(BaseModel):
+    wave: ConsoleAdminControlTowerMigrationWaveId
+    gate: ConsoleAdminControlTowerMigrationWaveGate
+    reason: str
+    candidate_clients_total: int
+    candidate_branches_total: int
+    blockers_total: int
+    rollback_triggers: list[str] = []
+    top_blockers: list[ConsoleAdminControlTowerIssueCount] = []
+
+
+class ConsoleAdminControlTowerMigrationProgramSummary(BaseModel):
+    active_clients_total: int
+    total_branches: int
+    ready_branches: int
+    blocked_branches: int
+    p0_actions: int
+    p1_actions: int
+    p2_actions: int
+    waves_go: int
+    waves_hold: int
+
+
+class ConsoleAdminControlTowerMigrationProgramResponse(BaseModel):
+    generated_at: str
+    stale_after_minutes: int
+    limit: int
+    include_p2: bool = True
+    summary: ConsoleAdminControlTowerMigrationProgramSummary
+    waves: list[ConsoleAdminControlTowerMigrationWave]
+
+
 class ConsoleAdminControlTowerReadinessItem(BaseModel):
     company_id: Optional[UUID] = None
     company_name: Optional[str] = None
