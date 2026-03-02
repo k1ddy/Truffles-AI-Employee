@@ -1,0 +1,34 @@
+# SESSION 2026-03-02-ucpv1-phase13-slice2-a702 — Session 2026-03-02-ucpv1-phase13-slice2-a702
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md
+- block_id: UCPV1-PHASE13
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- branch: feat/2026-03-02-ucpv1-phase13-slice2-a702
+- worktree: /home/zhan/worktrees/2026-03-02-ucpv1-phase13-slice2-a702
+- base_ref: origin/main
+- scope: Phase13 slice2 contract expansion for migration-program endpoint (`signals` + `promotion_actions`) with deterministic tests and OpenAPI sync.
+- done:
+  - Extended migration schemas with signal and promotion-action models.
+  - Updated migration program builder to emit deterministic rollout signals.
+  - Added action-center to wave projection (`p0->canary`, `p1->cohort`, `p2->fleet`) with gate propagation.
+  - Added empty-scope explicit fail signal for fail-closed behavior.
+  - Updated deterministic tests for signal/action mapping and empty-scope contract.
+  - Synced OpenAPI contract to include new response fields and schemas.
+- next:
+  - Re-run deterministic checks and session gates in this worktree.
+  - Finalize docs evidence in phase13 report and STATE.
+  - Commit, push branch, and open PR for slice2.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md
+  - docs/REPORTS/2026-02-22-universal-control-plane-v1-phase13-a500.md
+  - STATE.md
+  - truffles-api/app/routers/console.py
+  - truffles-api/app/schemas/console.py
+  - truffles-api/tests/test_console_owner_business.py
+  - contracts/console_api/openapi.v1.yaml
+- last_updated: 2026-03-02

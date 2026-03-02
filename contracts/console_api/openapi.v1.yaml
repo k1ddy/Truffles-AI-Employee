@@ -7357,6 +7357,18 @@ components:
             $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationWave'
           type: array
           title: Waves
+        signals:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerMigrationSignal'
+          type: array
+          title: Signals
+          default: []
+        promotion_actions:
+          items:
+            $ref: '#/components/schemas/ConsoleAdminControlTowerPromotionAction'
+          type: array
+          title: Promotion Actions
+          default: []
       type: object
       required:
       - generated_at
@@ -7406,6 +7418,36 @@ components:
       - waves_go
       - waves_hold
       title: ConsoleAdminControlTowerMigrationProgramSummary
+    ConsoleAdminControlTowerMigrationSignal:
+      properties:
+        code:
+          type: string
+          title: Code
+        status:
+          type: string
+          enum:
+          - pass
+          - warn
+          - fail
+          title: Status
+        value:
+          type: integer
+          title: Value
+        threshold:
+          type: integer
+          title: Threshold
+        note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Note
+      type: object
+      required:
+      - code
+      - status
+      - value
+      - threshold
+      title: ConsoleAdminControlTowerMigrationSignal
     ConsoleAdminControlTowerMigrationWave:
       properties:
         wave:
@@ -7541,6 +7583,104 @@ components:
       - ops_jobs_total_24h
       - ops_jobs_failed_24h
       title: ConsoleAdminControlTowerOverviewSummary
+    ConsoleAdminControlTowerPromotionAction:
+      properties:
+        id:
+          type: string
+          title: Id
+        wave:
+          type: string
+          enum:
+          - canary
+          - cohort
+          - fleet
+          title: Wave
+        gate:
+          type: string
+          enum:
+          - go
+          - hold
+          title: Gate
+        priority:
+          type: string
+          enum:
+          - p0
+          - p1
+          - p2
+          title: Priority
+        source:
+          type: string
+          enum:
+          - incident
+          - provider_ops
+          - readiness
+          title: Source
+        kind:
+          type: string
+          enum:
+          - navigate
+          - ops_job
+          - provider_action
+          title: Kind
+        title:
+          type: string
+          title: Title
+        description:
+          type: string
+          title: Description
+        reasons:
+          items:
+            type: string
+          type: array
+          title: Reasons
+          default: []
+        href:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Href
+        job_type:
+          anyOf:
+          - type: string
+            enum:
+            - outbox_process
+            - integration_reconcile
+            - heal
+            - metrics_snapshot
+            - incident_state
+            - compliance_lifecycle
+          - type: 'null'
+          title: Job Type
+        mode:
+          anyOf:
+          - type: string
+            enum:
+            - dry_run
+            - execute
+          - type: 'null'
+          title: Mode
+        params:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Params
+        evidence_links:
+          items:
+            type: string
+          type: array
+          title: Evidence Links
+          default: []
+      type: object
+      required:
+      - id
+      - wave
+      - gate
+      - priority
+      - source
+      - kind
+      - title
+      - description
+      title: ConsoleAdminControlTowerPromotionAction
     ConsoleAdminControlTowerReadinessBoardResponse:
       properties:
         generated_at:
