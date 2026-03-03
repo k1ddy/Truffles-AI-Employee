@@ -771,7 +771,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             return;
         }
         if (isGatewayLikeError(error)) {
-            setGatewayError("Fleet clients временно недоступны (gateway).");
+            setGatewayError("Список клиентов по сети временно недоступен (gateway).");
             return;
         }
         handleError(error);
@@ -787,7 +787,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             return;
         }
         if (isGatewayLikeError(error)) {
-            setGatewayError("Fleet branches временно недоступны (gateway).");
+            setGatewayError("Список филиалов по сети временно недоступен (gateway).");
             return;
         }
         handleError(error);
@@ -803,7 +803,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             return;
         }
         if (isGatewayLikeError(error)) {
-            setFleetAttentionError("Fleet сигналы временно недоступны. Попробуйте обновить позже.");
+            setFleetAttentionError("Сигналы по сети клиентов временно недоступны. Попробуйте обновить позже.");
             return;
         }
         handleError(error);
@@ -1239,7 +1239,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                     | { errors?: string[] }
                     | undefined;
                 const firstError = validationPayload?.errors?.[0];
-                throw new Error(firstError || "Валидация branch change не пройдена");
+                throw new Error(firstError || "Проверка изменения филиала не пройдена");
             }
 
             await adminApi.publishBranchChange(changeId, {});
@@ -1455,7 +1455,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         );
         setDraftText(JSON.stringify(payload, null, 2));
         setValidation((prev) => (prev.ran ? { ...prev, ran: false } : prev));
-        toast.success("Structured draft обновлен");
+        toast.success("Структурированный черновик обновлен");
     };
 
     const renderPlatformAdminFleetPanel = () => {
@@ -1466,7 +1466,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             <div className="card-surface p-5" data-testid="knowledge-fleet-control">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <h2 className="text-lg font-semibold">Fleet Knowledge Control</h2>
+                        <h2 className="text-lg font-semibold">Управление знаниями по сети клиентов</h2>
                         <p className="text-sm text-muted-foreground">
                             Быстрый выбор клиента и филиала для управления знаниями по всей платформе.
                         </p>
@@ -1587,11 +1587,11 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                     Контекст филиала применяется автоматически после выбора в поле `Филиал`.
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                    Переходы в `Интеграции` и `Заявки` сохраняют branch context, если выбран филиал клиента.
+                    Переходы в `Интеграции` и `Заявки` сохраняют контекст филиала, если выбран филиал клиента.
                 </div>
                 {!fleetAttentionEnabled && (
                     <div className="mt-4 text-xs text-muted-foreground">
-                        Fleet-сигналы отключены по умолчанию: включайте при необходимости оперативного контроля рисков и SLA.
+                        Сигналы по сети клиентов отключены по умолчанию: включайте при необходимости оперативного контроля рисков и SLA.
                     </div>
                 )}
 
@@ -1599,7 +1599,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                     <div className="mt-4 space-y-2">
                         {fleetAttentionQuery.isLoading && (
                             <div className="rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground">
-                                Загрузка fleet-сигналов...
+                                Загрузка сигналов по сети клиентов...
                             </div>
                         )}
 
@@ -1637,10 +1637,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                             <span className="font-medium text-foreground">
                                                 {item.client_name ?? item.client_slug}
                                             </span>
-                                            <span>risk {item.attention_level} · score {item.attention_score}</span>
+                                            <span>уровень риска: {item.attention_level} · оценка: {item.attention_score}</span>
                                         </div>
                                         <div className="mt-1">
-                                            сервис {item.service_state} · stale {item.stale_branches} · outbox_failed_24h {item.outbox_failed_24h}
+                                            состояние сервиса: {item.service_state} · устаревшие филиалы: {item.stale_branches} · ошибки отправки за 24ч: {item.outbox_failed_24h}
                                         </div>
                                         <div className="mt-2 flex flex-wrap items-center gap-2">
                                             <button
@@ -1677,7 +1677,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
 
                         {!fleetAttentionError && !fleetAttentionQuery.isLoading && fleetAttentionItems.length === 0 && (
                             <div className="rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground">
-                                Активных проблем во fleet-сигналах не найдено.
+                                Активных проблем в сигналах по сети клиентов не найдено.
                             </div>
                         )}
                     </div>
@@ -1693,7 +1693,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         const hasKnowledgeTag = Boolean((selectedBranchContext.knowledge_tag ?? "").trim());
         const hasBranchWorkingHours = Object.keys(selectedBranchWorkingHours).length > 0;
         const effectiveHoursSummary = formatWorkingHoursSummary(effectiveWorkingHours);
-        const effectiveHoursSource = hasBranchWorkingHours ? "branch override" : "published pack";
+        const effectiveHoursSource = hasBranchWorkingHours ? "переопределение филиала" : "опубликованный пакет";
         const canApplyPatch = canEdit
             && !applyBranchKnowledgePatchMutation.isPending
             && isBranchPatchDirty
@@ -1702,52 +1702,52 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         const branchPatchHint = !isBranchPatchDirty
             ? "Нет несохраненных изменений: измените тег знаний или часы работы."
             : !hasBranchChangeReason
-            ? "Добавьте причину изменения для audit trail."
+            ? "Добавьте причину изменения для журнала аудита."
             : null;
         return (
             <div className="card-surface p-5" data-testid="knowledge-branch-readiness">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <h2 className="text-lg font-semibold">Branch Knowledge Readiness</h2>
+                        <h2 className="text-lg font-semibold">Готовность знаний по филиалу</h2>
                         <p className="text-sm text-muted-foreground">
-                            Оперативные настройки branch knowledge для текущего филиала.
+                            Оперативные настройки базы знаний для текущего филиала.
                         </p>
                     </div>
                     <div className="text-xs text-muted-foreground">
                         <div>{selectedBranchContext.name ?? selectedBranchContext.slug ?? selectedBranchContext.id}</div>
-                        <div className="mt-1 font-mono">branch_id: {selectedBranchContext.id}</div>
-                        <div className="mt-1">status: {selectedBranchContext.is_active ? "active" : "inactive"}</div>
+                        <div className="mt-1 font-mono">ID филиала: {selectedBranchContext.id}</div>
+                        <div className="mt-1">Статус филиала: {selectedBranchContext.is_active ? "активен" : "неактивен"}</div>
                     </div>
                 </div>
 
                 <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        knowledge_tag: {hasKnowledgeTag ? selectedBranchContext.knowledge_tag : "не задан для этого филиала"}
+                        Тег базы знаний: {hasKnowledgeTag ? selectedBranchContext.knowledge_tag : "не задан для этого филиала"}
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        working_hours: {hasBranchWorkingHours ? "заданы для филиала" : "не заданы (используется published pack)"}
+                        Часы работы филиала: {hasBranchWorkingHours ? "заданы для филиала" : "не заданы (используется опубликованный пакет)"}
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        onboarding: {selectedBranchContext.onboarding_state ?? "—"}
+                        Онбординг: {selectedBranchContext.onboarding_state ?? "—"}
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        go_live: {selectedBranchContext.go_live_state ?? "pending"}
+                        Готовность к запуску: {selectedBranchContext.go_live_state ?? "ожидает решения"}
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        effective_hours: {effectiveHoursSummary}
+                        Эффективные часы работы: {effectiveHoursSummary}
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        source: {effectiveHoursSource} · version: {currentQuery.data?.version_id ?? "не опубликована"}
+                        Источник часов: {effectiveHoursSource} · версия публикации: {currentQuery.data?.version_id ?? "не опубликована"}
                     </div>
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
-                    Поля ниже изменяют данные только после кнопки `Сохранить branch change`.
+                    Поля ниже применятся только после кнопки `Сохранить изменение филиала`.
                 </div>
 
                 {canEdit && (
                     <div className="mt-4 grid gap-3">
                         <label className="text-xs text-muted-foreground">
-                            Тег знаний филиала (`knowledge_tag`, опционально)
+                            Тег базы знаний филиала (`knowledge_tag`, опционально)
                             <input
                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                 value={branchKnowledgeTagDraft}
@@ -1757,7 +1757,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             />
                         </label>
                         <label className="text-xs text-muted-foreground">
-                            Часы работы филиала (`working_hours`, JSON override)
+                            Часы работы филиала (`working_hours`, JSON-переопределение)
                             <textarea
                                 className="mt-1 min-h-[140px] w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
                                 value={branchWorkingHoursDraft}
@@ -1777,14 +1777,14 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 className="btn-ghost"
                                 onClick={() => {
                                     if (!effectiveWorkingHours || Object.keys(effectiveWorkingHours).length === 0) {
-                                        toast.error("Нет published часов для подстановки");
+                                        toast.error("Нет опубликованных часов для подстановки");
                                         return;
                                     }
                                     setBranchWorkingHoursDraft(JSON.stringify(effectiveWorkingHours, null, 2));
                                 }}
                                 disabled={applyBranchKnowledgePatchMutation.isPending}
                             >
-                                Подставить effective hours
+                                Подставить опубликованные часы
                             </button>
                             <button
                                 type="button"
@@ -1792,11 +1792,11 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 onClick={() => setBranchWorkingHoursDraft("{}")}
                                 disabled={applyBranchKnowledgePatchMutation.isPending}
                             >
-                                Очистить override
+                                Сбросить переопределение
                             </button>
                         </div>
                         <label className="text-xs text-muted-foreground">
-                            Причина изменения (audit)
+                            Причина изменения (аудит)
                             <input
                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                 value={branchChangeReason}
@@ -1813,7 +1813,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 onClick={() => applyBranchKnowledgePatchMutation.mutate()}
                                 disabled={!canApplyPatch}
                             >
-                                {applyBranchKnowledgePatchMutation.isPending ? "Применение..." : "Сохранить branch change"}
+                                {applyBranchKnowledgePatchMutation.isPending ? "Применение..." : "Сохранить изменение филиала"}
                             </button>
                             <button
                                 type="button"
@@ -1860,9 +1860,9 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                     {renderPlatformAdminFleetPanel()}
                     <div className="card-surface max-w-xl p-8" data-testid="knowledge-branch-gate-platform">
                         <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Требуется контекст</p>
-                        <h2 className="text-2xl font-semibold mt-3 mb-4">Выберите филиал во Fleet Control</h2>
+                        <h2 className="text-2xl font-semibold mt-3 mb-4">Выберите филиал в панели сети клиентов</h2>
                         <p className="text-sm text-muted-foreground mb-4">
-                            Для Platform Admin контекст филиала применяется автоматически после выбора клиента и филиала.
+                            Для роли `platform admin` контекст филиала применяется автоматически после выбора клиента и филиала.
                             Кнопка `Применить контекст` нужна как резервный шаг.
                         </p>
                         <div className="rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground">

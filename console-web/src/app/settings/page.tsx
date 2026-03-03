@@ -738,7 +738,7 @@ export default function SettingsPage() {
                                 📨 Telegram
                             </h2>
                             <p className="text-sm text-muted-foreground mb-3">
-                                Проверка и тест отправки в Telegram (client scope, owner/admin/platform admin).
+                                Проверка и тест отправки в Telegram для уровня компании (доступ: owner/admin/platform admin).
                             </p>
                             <div className="flex items-center gap-2">
                                 <button
@@ -747,14 +747,14 @@ export default function SettingsPage() {
                                     onClick={() =>
                                         verifyMutation.mutate({
                                             targetKey: "client",
-                                            label: "client",
+                                            label: "компания",
                                             payload: { scope: "client" },
                                         })
                                     }
                                     disabled={verifyTarget === "client" || !canWriteSettings}
                                     data-testid="settings-telegram-verify"
                                 >
-                                    {verifyTarget === "client" ? "Отправка..." : "Verify"}
+                                    {verifyTarget === "client" ? "Отправка..." : "Проверить связь"}
                                 </button>
                                 <button
                                     type="button"
@@ -762,14 +762,14 @@ export default function SettingsPage() {
                                     onClick={() =>
                                         testMutation.mutate({
                                             targetKey: "client",
-                                            label: "client",
+                                            label: "компания",
                                             payload: { scope: "client" },
                                         })
                                     }
                                     disabled={testTarget === "client" || !canWriteSettings}
                                     data-testid="settings-telegram-test"
                                 >
-                                    {testTarget === "client" ? "Отправка..." : "Send test"}
+                                    {testTarget === "client" ? "Отправка..." : "Отправить тест"}
                                 </button>
                             </div>
                             {!canWriteSettings && (
@@ -823,7 +823,7 @@ export default function SettingsPage() {
                     {canReadProvisioning && (
                         <>
                             <div className="mb-3 rounded-lg border border-blue-300/60 bg-blue-50 p-3 text-xs text-blue-900" data-testid="settings-onboarding-workspace-hint">
-                                Канонический execution-flow: для remediation/go-live используйте `Company Workspace`.
+                                Канонический рабочий поток: для исправлений и допуска к запуску используйте `Company Workspace`.
                                 <Link href="/company-workspace" className="btn-ghost ml-2">
                                     Открыть Workspace
                                 </Link>
@@ -879,10 +879,10 @@ export default function SettingsPage() {
                                 <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">🧠 Обучение и данные</h2>
                                 {config ? (
                                     <div>
-                                        <ConfigCard label="Consent статус" value={config.learning_consent_status} />
+                                        <ConfigCard label="Статус согласия" value={config.learning_consent_status} />
                                         <ConfigCard label="Анонимизация" value={config.learning_anonymization_mode} />
-                                        <ConfigCard label="Retention (дней)" value={config.learning_retention_days} />
-                                        <ConfigCard label="Data sharing" value={config.data_sharing} />
+                                        <ConfigCard label="Срок хранения (дни)" value={config.learning_retention_days} />
+                                        <ConfigCard label="Обмен данными" value={config.data_sharing} />
                                     </div>
                                 ) : (
                                     <p className="text-muted-foreground text-center py-4">Нет данных</p>
@@ -904,7 +904,7 @@ export default function SettingsPage() {
                                                     <span className="text-sm text-muted-foreground">({branch.slug})</span>
                                                 </div>
                                                 <div className="text-xs text-muted-foreground mt-1">
-                                                    instance_id: {branch.instance_id || "—"}
+                                                    ID канала WhatsApp (instance_id): {branch.instance_id || "—"}
                                                 </div>
                                                 <div className="flex items-center gap-1 mt-1">
                                                     {branch.telegram_chat_id ? (
@@ -941,7 +941,7 @@ export default function SettingsPage() {
                                                     disabled={!branch.telegram_chat_id || verifyTarget === branch.id || !canWriteSettings}
                                                     data-testid="settings-branch-verify"
                                                 >
-                                                    {verifyTarget === branch.id ? "Отправка..." : "Verify"}
+                                                    {verifyTarget === branch.id ? "Отправка..." : "Проверить связь"}
                                                 </button>
                                                 <button
                                                     type="button"
@@ -956,7 +956,7 @@ export default function SettingsPage() {
                                                     disabled={!branch.telegram_chat_id || testTarget === branch.id || !canWriteSettings}
                                                     data-testid="settings-branch-test"
                                                 >
-                                                    {testTarget === branch.id ? "Отправка..." : "Send test"}
+                                                    {testTarget === branch.id ? "Отправка..." : "Отправить тест"}
                                                 </button>
                                             </div>
                                         </div>

@@ -130,7 +130,7 @@ const PREFLIGHT_REASON_HINTS: Record<string, string> = {
     campaign_not_approved: "Кампанию нужно подтвердить перед отправкой.",
     audience_snapshot_missing: "Сначала нажмите «Проверить аудиторию».",
     eligible_recipients_empty: "Нет получателей. Измените сегмент или параметры.",
-    template_not_approved: "Template gate включен: нужен approved template.",
+    template_not_approved: "Шаблон не согласован. Подтвердите шаблон перед отправкой.",
 };
 
 const SEGMENT_FIELD_LABEL_OVERRIDES: Record<string, string> = {
@@ -196,10 +196,10 @@ function preflightReasonHint(reason: string): string {
 function campaignStatusLabel(status: MarketingDisplayStatus): string {
     const labels: Record<MarketingDisplayStatus, string> = {
         draft: "Черновик",
-        ready: "Legacy: ready",
-        executed: "Legacy: executed",
+        ready: "Готова к запуску",
+        executed: "Запуск завершен (исторический статус)",
         paused: "На паузе",
-        in_review: "На ревью",
+        in_review: "На проверке",
         approved: "Подтверждена",
         scheduled: "Запланирована",
         running: "В отправке",
@@ -207,7 +207,7 @@ function campaignStatusLabel(status: MarketingDisplayStatus): string {
         cancelled: "Отменена",
         failed: "Ошибка",
     };
-    return labels[status] ?? status;
+    return labels[status] ?? formatReason(status);
 }
 
 function campaignStatusClass(status: MarketingDisplayStatus): string {
@@ -1303,7 +1303,7 @@ export default function MarketingPage() {
                                         onClick={retryFailed}
                                         disabled={busyAction === "retry"}
                                     >
-                                        {busyAction === "retry" ? "Повтор..." : "Повторить failed"}
+                                        {busyAction === "retry" ? "Повтор..." : "Повторить ошибки"}
                                     </button>
                                 </div>
                             </div>
@@ -1314,7 +1314,7 @@ export default function MarketingPage() {
                                     <p className="mt-2 text-sm text-muted-foreground">Загрузка...</p>
                                 ) : preflightIsError ? (
                                     <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                                        <p>Ошибка preflight: {preflightErrorMessage}</p>
+                                        <p>Ошибка проверки готовности: {preflightErrorMessage}</p>
                                         <button
                                             type="button"
                                             className="mt-2 h-9 rounded-lg border border-red-300 px-3 text-xs font-medium"
@@ -1336,7 +1336,7 @@ export default function MarketingPage() {
                                                     href="/integrations"
                                                     className="mt-2 inline-flex h-8 items-center rounded border border-red-300 bg-white px-3 text-xs font-medium text-red-700"
                                                 >
-                                                    Открыть Integrations
+                                                    Открыть Интеграции
                                                 </a>
                                             </div>
                                         ) : null}
@@ -1349,19 +1349,19 @@ export default function MarketingPage() {
                                                 </div>
                                             </div>
                                             <div className="rounded-lg border bg-background p-3">
-                                                <div className="text-xs text-muted-foreground">Outbox</div>
+                                                <div className="text-xs text-muted-foreground">Очередь отправки</div>
                                                 <div className="mt-1 text-sm font-medium">{preflight.outbox_health_status}</div>
                                             </div>
                                             <div className="rounded-lg border bg-background p-3">
-                                                <div className="text-xs text-muted-foreground">Audience</div>
+                                                <div className="text-xs text-muted-foreground">Аудитория</div>
                                                 <div className="mt-1 text-sm font-medium">{preflight.audience_total}</div>
                                             </div>
                                             <div className="rounded-lg border bg-background p-3">
-                                                <div className="text-xs text-muted-foreground">Eligible</div>
+                                                <div className="text-xs text-muted-foreground">Доступно к отправке</div>
                                                 <div className="mt-1 text-sm font-medium">{preflight.eligible_count}</div>
                                             </div>
                                             <div className="rounded-lg border bg-background p-3">
-                                                <div className="text-xs text-muted-foreground">Suppressed</div>
+                                                <div className="text-xs text-muted-foreground">Исключено</div>
                                                 <div className="mt-1 text-sm font-medium">{preflight.suppressed_count}</div>
                                             </div>
                                         </div>
@@ -1554,7 +1554,7 @@ export default function MarketingPage() {
                                     <p className="mt-2 text-sm text-muted-foreground">Загрузка...</p>
                                 ) : diagnosticsIsError ? (
                                     <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                                        <p>Ошибка diagnostics: {diagnosticsErrorMessage}</p>
+                                        <p>Ошибка диагностики: {diagnosticsErrorMessage}</p>
                                         <button
                                             type="button"
                                             className="mt-2 h-9 rounded-lg border border-red-300 px-3 text-xs font-medium"
@@ -1571,35 +1571,35 @@ export default function MarketingPage() {
                                                 <div className="mt-1 text-lg font-semibold">{diagnostics.total_count}</div>
                                             </div>
                                             <div className="rounded-lg border bg-background p-3">
-                                                <div className="text-xs text-muted-foreground">Queued</div>
+                                                <div className="text-xs text-muted-foreground">В очереди</div>
                                                 <div className="mt-1 text-lg font-semibold">{diagnostics.queued_count}</div>
                                             </div>
                                             <div className="rounded-lg border bg-background p-3">
-                                                <div className="text-xs text-muted-foreground">Sent</div>
+                                                <div className="text-xs text-muted-foreground">Отправлено</div>
                                                 <div className="mt-1 text-lg font-semibold">{diagnostics.sent_count}</div>
                                             </div>
                                             <div className="rounded-lg border bg-background p-3">
-                                                <div className="text-xs text-muted-foreground">Failed</div>
+                                                <div className="text-xs text-muted-foreground">С ошибкой</div>
                                                 <div className="mt-1 text-lg font-semibold text-red-700">{diagnostics.failed_count}</div>
                                             </div>
                                             <div className="rounded-lg border bg-background p-3">
-                                                <div className="text-xs text-muted-foreground">Replied</div>
+                                                <div className="text-xs text-muted-foreground">Есть ответ</div>
                                                 <div className="mt-1 text-lg font-semibold">{diagnostics.replied_count}</div>
                                             </div>
                                         </div>
                                         <div className="mt-3 grid gap-3 sm:grid-cols-2">
                                             <div className="rounded-lg border bg-background p-3">
-                                                <div className="text-xs text-muted-foreground">Retryable failed</div>
+                                                <div className="text-xs text-muted-foreground">Ошибки, доступные для повтора</div>
                                                 <div className="mt-1 text-lg font-semibold">{diagnostics.retryable_failed_count}</div>
                                             </div>
                                             <div className="rounded-lg border bg-background p-3">
-                                                <div className="text-xs text-muted-foreground">Permanent failed</div>
+                                                <div className="text-xs text-muted-foreground">Неустранимые ошибки</div>
                                                 <div className="mt-1 text-lg font-semibold text-red-700">{diagnostics.permanent_failed_count}</div>
                                             </div>
                                         </div>
 
                                         <div className="mt-3 rounded-lg border bg-background p-3">
-                                            <div className="text-sm font-medium">Failure classes</div>
+                                            <div className="text-sm font-medium">Классы ошибок</div>
                                             {failureClassRows.length ? (
                                                 <ul className="mt-2 space-y-1 text-xs">
                                                     {failureClassRows.map(([reason, count]) => (
@@ -1610,12 +1610,12 @@ export default function MarketingPage() {
                                                     ))}
                                                 </ul>
                                             ) : (
-                                                <p className="mt-2 text-xs text-muted-foreground">Нет failure classes.</p>
+                                                <p className="mt-2 text-xs text-muted-foreground">Классы ошибок не обнаружены.</p>
                                             )}
                                         </div>
 
                                         <div className="mt-4 rounded-lg border bg-background p-3">
-                                            <div className="text-sm font-medium">Примеры failed</div>
+                                            <div className="text-sm font-medium">Примеры ошибочных отправок</div>
                                             {diagnostics.sample_failed.length ? (
                                                 <ul className="mt-2 space-y-2">
                                                     {diagnostics.sample_failed.map((item) => (
@@ -1624,18 +1624,18 @@ export default function MarketingPage() {
                                                                 {item.recipient_jid ?? item.conversation_id ?? item.delivery_id}
                                                             </div>
                                                             <div className="mt-1 text-muted-foreground">
-                                                                outbox: {item.outbox_status ?? "-"} | error: {item.last_error ?? "-"}
+                                                                статус отправки: {item.outbox_status ?? "-"} | ошибка: {item.last_error ?? "-"}
                                                             </div>
                                                         </li>
                                                     ))}
                                                 </ul>
                                             ) : (
-                                                <p className="mt-2 text-xs text-muted-foreground">Нет failed записей.</p>
+                                                <p className="mt-2 text-xs text-muted-foreground">Ошибочных отправок нет.</p>
                                             )}
                                         </div>
                                     </>
                                 ) : (
-                                    <p className="mt-2 text-sm text-muted-foreground">Diagnostics недоступен.</p>
+                                    <p className="mt-2 text-sm text-muted-foreground">Диагностика недоступна.</p>
                                 )}
                             </div>
                         </>
@@ -1659,24 +1659,24 @@ export default function MarketingPage() {
                         <p className="mt-2 text-sm text-muted-foreground">{selectedCampaign.name}</p>
                         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                             <div className="rounded-lg border bg-background p-3">
-                                <div className="text-xs text-muted-foreground">Eligible</div>
+                                <div className="text-xs text-muted-foreground">Доступно к отправке</div>
                                 <div className="mt-1 text-lg font-semibold">{preflight?.eligible_count ?? 0}</div>
                             </div>
                             <div className="rounded-lg border bg-background p-3">
-                                <div className="text-xs text-muted-foreground">Suppressed</div>
+                                <div className="text-xs text-muted-foreground">Исключено</div>
                                 <div className="mt-1 text-lg font-semibold">{preflight?.suppressed_count ?? 0}</div>
                             </div>
                             <div className="rounded-lg border bg-background p-3">
-                                <div className="text-xs text-muted-foreground">Max recipients</div>
+                                <div className="text-xs text-muted-foreground">Лимит получателей</div>
                                 <div className="mt-1 text-lg font-semibold">{maxRecipients}</div>
                             </div>
                             <div className="rounded-lg border bg-background p-3">
-                                <div className="text-xs text-muted-foreground">Outbox status</div>
-                                <div className="mt-1 text-sm font-semibold">{preflight?.outbox_health_status ?? "unknown"}</div>
+                                <div className="text-xs text-muted-foreground">Статус очереди отправки</div>
+                                <div className="mt-1 text-sm font-semibold">{preflight?.outbox_health_status ?? "неизвестно"}</div>
                             </div>
                         </div>
                         <div className="mt-3 rounded-lg border bg-background p-3">
-                            <div className="text-xs text-muted-foreground">Blocked reasons</div>
+                            <div className="text-xs text-muted-foreground">Причины блокировки</div>
                             {preflight?.blocked_reasons?.length ? (
                                 <ul className="mt-2 space-y-2 text-xs">
                                     {preflight.blocked_reasons.map((item) => (
