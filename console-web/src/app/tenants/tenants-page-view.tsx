@@ -2,6 +2,7 @@
 
 import type { ComponentProps } from "react";
 import type { Session } from "next-auth";
+import Link from "next/link";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
 import TenantsActionQueuePanel, { type TenantsActionQueueItem } from "@/components/TenantsActionQueuePanel";
@@ -183,6 +184,12 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
                         >
                             Открыть Workspace
                         </button>
+                        <div className="mt-2 text-blue-900/80" data-testid="tenants-onboarding-loop-hint">
+                            После действий в Workspace подтвердите результат в Ops и вернитесь сюда для следующего шага.
+                            <Link href="/ops" className="ml-2 font-semibold underline underline-offset-2" data-testid="tenants-onboarding-open-ops">
+                                Перейти в Ops
+                            </Link>
+                        </div>
                     </div>
                     <ProvisioningWizard session={session} accessSection="tenants" />
                 </div>

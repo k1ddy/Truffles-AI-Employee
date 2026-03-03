@@ -889,6 +889,32 @@ test.describe('Platform Admin Navigation', () => {
         expect(storedContext.branchId).toBeTruthy();
     });
 
+    test('should require explicit scope before opening Workspace from Integrations header @smoke', async ({ page }) => {
+        await openIntegrations(page);
+        await expect(page.getByTestId('integrations-workspace-guidance')).toBeVisible();
+
+        const openWorkspaceFromScope = page.getByTestId('integrations-open-workspace-scope');
+        await expect(openWorkspaceFromScope).toBeVisible();
+        await expect(openWorkspaceFromScope).toBeDisabled();
+
+        const companySelect = page.getByTestId('integrations-scope-company');
+        await expect(companySelect).toBeVisible();
+        await companySelect.selectOption({ index: 1 });
+        await expect(companySelect).not.toHaveValue('');
+        const selectedCompanyId = await companySelect.inputValue();
+
+        await expect(openWorkspaceFromScope).toBeEnabled();
+        await openWorkspaceFromScope.click();
+
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+
+        const storedContext = await page.evaluate(() => ({
+            companyId: window.localStorage.getItem('console:company_id'),
+        }));
+        expect(storedContext.companyId).toBe(selectedCompanyId);
+    });
+
     test('should keep Settings labels plain-language and action-oriented @smoke', async ({ page }) => {
         await page.route('**/api/proxy/settings', async (route) => {
             if (route.request().method() !== 'GET') {
@@ -1399,6 +1425,8 @@ test.describe('Platform Admin Tenants', () => {
         await expect(onboardingRun).toBeVisible();
         await onboardingRun.click();
         await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
+        await expect(page.getByTestId('tenants-onboarding-loop-hint')).toBeVisible();
+        await expect(page.getByTestId('tenants-onboarding-open-ops')).toBeVisible();
     });
 
     test('should deep-link from Tenants action queue to Workspace execute @smoke', async ({ page }) => {
@@ -1421,6 +1449,16 @@ test.describe('Platform Admin Tenants', () => {
         expect(deepLinkParams.branchId).toBeTruthy();
         expect(deepLinkParams.recommendedAction).toBe('provider_start_rebind');
         expect(deepLinkParams.source).toBeTruthy();
+
+        const nextStepOps = page.getByTestId('workspace-next-step-ops');
+        await expect(nextStepOps).toBeVisible();
+        await nextStepOps.click();
+        await expect(page).toHaveURL(urlPathPattern('/ops'));
+        await expect(page.getByTestId('ops-back-workspace')).toBeVisible();
+        const opsBackTenants = page.getByTestId('ops-back-tenants');
+        await expect(opsBackTenants).toBeVisible();
+        await expect(opsBackTenants).toHaveAttribute('href', '/tenants');
+        await openTenants(page);
     });
 
     test('should keep provider copy plain-language in Tenants -> Workspace flow @smoke', async ({ page }) => {
@@ -1498,6 +1536,13 @@ test.describe('Platform Admin Tenants', () => {
         await expect(page.getByTestId('company-workspace-page')).toBeVisible();
         await expect(page.getByTestId('workspace-recommended-open-execute')).toHaveCount(0);
         await expect(page.getByText(/нет активной подсказки/i)).toBeVisible();
+        await expect(page.getByTestId('workspace-empty-next-steps')).toBeVisible();
+        const returnTenants = page.getByTestId('workspace-return-tenants');
+        const returnIntegrations = page.getByTestId('workspace-return-integrations');
+        await expect(returnTenants).toBeVisible();
+        await expect(returnIntegrations).toBeVisible();
+        await expect(returnTenants).toHaveAttribute('href', '/tenants');
+        await expect(returnIntegrations).toHaveAttribute('href', '/integrations');
     });
 
     test('should show explicit field contracts in Tenants branch editor @smoke', async ({ page }) => {

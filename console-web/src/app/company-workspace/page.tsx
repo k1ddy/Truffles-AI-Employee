@@ -1168,10 +1168,28 @@ export default function CompanyWorkspacePage() {
                                 Скрыть подсказку
                             </button>
                         </div>
+                        {canReadOps ? (
+                            <div className="rounded-lg border border-border/60 bg-muted/10 p-3 text-xs text-muted-foreground">
+                                После выполнения проверьте результат в Ops, затем вернитесь к следующей задаче.
+                                <Link href="/ops" className="ml-2 font-semibold text-foreground underline underline-offset-2" data-testid="workspace-next-step-ops">
+                                    Перейти в Ops
+                                </Link>
+                            </div>
+                        ) : null}
                     </div>
                 ) : (
-                    <div className="mt-3 rounded-lg border border-emerald-300/60 bg-emerald-50 p-3 text-xs text-emerald-800">
-                        Для текущего контекста нет активной подсказки. Используйте Tenants очередь задач или матрицу Integrations, чтобы выбрать филиал с проблемой.
+                    <div className="mt-3 rounded-lg border border-emerald-300/60 bg-emerald-50 p-3 text-xs text-emerald-800" data-testid="workspace-empty-next-steps">
+                        <div>
+                            Для текущего контекста нет активной подсказки. Используйте Tenants очередь задач или матрицу Integrations, чтобы выбрать филиал с проблемой.
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                            <Link href="/tenants" className="btn-ghost text-xs" data-testid="workspace-return-tenants">
+                                Вернуться в Tenants
+                            </Link>
+                            <Link href="/integrations" className="btn-ghost text-xs" data-testid="workspace-return-integrations">
+                                Вернуться в Integrations
+                            </Link>
+                        </div>
                     </div>
                 )}
             </section>

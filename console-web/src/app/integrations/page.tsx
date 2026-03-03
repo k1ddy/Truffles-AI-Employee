@@ -960,6 +960,7 @@ export default function IntegrationsPage() {
         persistScopeToStorage();
         toast.success("Контекст сохранен");
     };
+    const hasScopeContext = Boolean(scopeCompanyId || scopeClientId || scopeBranchId);
 
     const persistScopeAndOpenWorkspace = (
         target: ScopeTarget,
@@ -1044,6 +1045,31 @@ export default function IntegrationsPage() {
                 mode: "execute",
             } : undefined,
         );
+    };
+    const openWorkspaceFromScope = () => {
+        if (!hasScopeContext) {
+            return;
+        }
+        const normalizedCompany = scopeCompanyId ? String(scopeCompanyId) : "";
+        const normalizedClient = scopeClientId ? String(scopeClientId) : "";
+        const normalizedBranch = scopeBranchId ? String(scopeBranchId) : "";
+        updateScope({
+            companyId: normalizedCompany,
+            clientId: normalizedClient,
+            branchId: normalizedBranch,
+        });
+        persistScopeToStorage({
+            companyId: normalizedCompany,
+            clientId: normalizedClient,
+            branchId: normalizedBranch,
+        });
+        toast.success("Контекст сохранен, переход в Workspace");
+        const params = new URLSearchParams();
+        if (normalizedBranch) {
+            params.set("branch_id", normalizedBranch);
+        }
+        const query = params.toString();
+        window.location.assign(query ? `/company-workspace?${query}` : "/company-workspace");
     };
 
     const loadMoreIntegrations = async () => {
@@ -1189,9 +1215,16 @@ export default function IntegrationsPage() {
                     >
                         Обновить
                     </button>
-                    <Link href="/company-workspace" className="btn-primary" data-testid="integrations-open-workspace">
-                        Открыть Workspace
-                    </Link>
+                    <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={openWorkspaceFromScope}
+                        disabled={!hasScopeContext}
+                        data-testid="integrations-open-workspace-scope"
+                        title={hasScopeContext ? "Открыть Workspace по выбранному контексту" : "Сначала выберите контекст компании, клиента или филиала"}
+                    >
+                        Открыть Workspace по контексту
+                    </button>
                     <Link href="/tenants" className="btn-ghost">Тенанты</Link>
                     <Link href="/ops" className="btn-ghost">Операции</Link>
                 </div>
@@ -1229,6 +1262,9 @@ export default function IntegrationsPage() {
                         <div className="text-sm font-semibold text-blue-900">Операции выполняются через Workspace</div>
                         <div className="mt-1 text-xs text-blue-800/80">
                             Действия по филиалу (перепривязка, подтверждение оплаты, обновление webhook, сверка) выполняются только в `Company Workspace`.
+                        </div>
+                        <div className="mt-1 text-xs text-blue-800/80" data-testid="integrations-workspace-guidance">
+                            Для действий открывайте Workspace из строки филиала: так контекст и следующий шаг передаются автоматически.
                         </div>
                     </div>
                     <div className="text-xs text-blue-900/80">

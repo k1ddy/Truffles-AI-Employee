@@ -942,8 +942,19 @@ export default function OpsPage() {
 
     return (
         <div className="max-w-4xl mx-auto p-6" data-testid="ops-page">
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold" data-testid="ops-title">Статус системы</h1>
+            <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h1 className="text-2xl font-bold" data-testid="ops-title">Статус системы</h1>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span>После проверки вернитесь в Workspace для действий.</span>
+                        <Link href="/company-workspace" className="font-semibold text-foreground underline underline-offset-2" data-testid="ops-back-workspace">
+                            Открыть Workspace
+                        </Link>
+                        <Link href="/tenants" className="font-semibold text-foreground underline underline-offset-2" data-testid="ops-back-tenants">
+                            Вернуться в Tenants
+                        </Link>
+                    </div>
+                </div>
                 <div className="flex items-center gap-4">
                     <span className="text-sm text-muted-foreground">Авто-обновление: 30с</span>
                     <button
