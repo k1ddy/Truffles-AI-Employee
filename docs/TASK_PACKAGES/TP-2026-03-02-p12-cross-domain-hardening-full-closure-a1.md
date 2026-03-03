@@ -168,8 +168,8 @@
 - `Open risks`: missing runtime non-salon onboarding keeps `P12` open/blocked.
 - `First command to verify`: `pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py`.
 
-## Execution status (2026-03-02)
-- `Status`: `blocked` (business deferral: no runtime onboarding of two non-salon domains in current cycle)
+## Execution status (2026-03-03)
+- `Status`: `de-scoped` (неактуально для текущего release scope; исключено из active open-block list master TP)
 - `Implementation facts`:
   - Added canonical non-salon reference packs:
     - `truffles-api/app/knowledge/clinic_pack/SALON_TRUTH.yaml`
@@ -183,8 +183,8 @@
   - `pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py` (included in packet run; green).
   - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "cross_domain_matrix_contract"` (`3 passed, 74 deselected`).
   - `ruff check truffles-api/tests/test_cross_domain_signal_contract_suite.py` (green inside packet lint run).
-- `Block reason`:
-  - Current execution cycle does not onboard two real runtime non-salon domains; therefore required guarded acceptance artifacts cannot be produced.
+- `De-scope reason`:
+  - Runtime onboarding двух real non-salon domains исключен из текущего релизного цикла по scope-решению; блок не участвует в mandatory next blocks.
 - `Unblock conditions`:
   - Onboard two real runtime non-salon domains (slug + runtime data readiness).
   - Run guarded acceptance artifacts for both domains with valid `infra_valid/semantic_valid/run_integrity_valid/manual_audit`.

@@ -123,8 +123,9 @@ def _guarded_base_cmd(
     pg_checklist: Path,
     *,
     mode: str = "lock",
+    extra_quality_args: list[str] | None = None,
 ) -> list[str]:
-    return [
+    cmd = [
         str(script_path),
         "--mode",
         mode,
@@ -164,6 +165,9 @@ def _guarded_base_cmd(
         "block",
         "--fail-on-thresholds",
     ]
+    if extra_quality_args:
+        cmd.extend(extra_quality_args)
+    return cmd
 
 
 def test_guarded_wrapper_acceptance_injects_chain_tokens(tmp_path):
@@ -276,3 +280,47 @@ def test_guarded_wrapper_supports_canary_mode(tmp_path):
     assert "prepare --mode canary" in controller_text
     assert "finalize --mode canary" in controller_text
     assert "--chain-step canary" in diagnose_text
+
+
+def test_guarded_wrapper_redacts_webhook_secret_in_ledger(tmp_path):
+    repo_root = _repo_root()
+    wrapper = repo_root / "scripts" / "llm_quality_guarded.sh"
+    if not wrapper.exists():
+        pytest.skip("llm_quality_guarded.sh not present")
+
+    controller_log = tmp_path / "controller_secret.log"
+    diagnose_log = tmp_path / "diagnose_secret.log"
+    fake_controller = tmp_path / "fake_controller_secret.sh"
+    fake_diagnose = tmp_path / "fake_diagnose_secret.py"
+    pg_checklist = tmp_path / "pg_checklist_secret.json"
+    ledger_dir = tmp_path / "guard_ledger"
+    _write_fake_controller(fake_controller, controller_log)
+    _write_fake_diagnose(fake_diagnose, diagnose_log)
+    _write_pg_checklist(pg_checklist)
+
+    run_id = f"booking-lock-wrapper-{uuid4().hex[:8]}"
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_CONTROLLER_BIN"] = str(fake_controller)
+    env["LLM_QUALITY_DIAGNOSE_BIN"] = "python3"
+    env["LLM_QUALITY_DIAGNOSE_SCRIPT"] = str(fake_diagnose)
+    env["LLM_QUALITY_GUARD_LEDGER_DIR"] = str(ledger_dir)
+
+    result = subprocess.run(
+        _guarded_base_cmd(
+            wrapper,
+            run_id,
+            pg_checklist,
+            extra_quality_args=["--webhook-secret", "super-secret-token"],
+        ),
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    ledger_file = ledger_dir / "ledger.tsv"
+    assert ledger_file.exists()
+    ledger_text = ledger_file.read_text(encoding="utf-8")
+    assert "super-secret-token" not in ledger_text
+    assert "redacted" in ledger_text
