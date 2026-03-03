@@ -32,11 +32,11 @@ Legend
 ### Owner/Admin
 - [match] Полный доступ к Inbox/Calendar/Knowledge/Team/Settings/Ops/Audit. Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/owner.md`, `docs/CONSOLE_AUDIT/roles/admin.md`.
 - [ahead] Добавлены owner/admin разделы `Business` и `Subscription` (read-only control layer для операционного и коммерческого контроля). Canon пока не фиксирует эти страницы как отдельные IA-элементы.
-- [partial] Integrations страница есть в IA, но RBAC ограничен platform_admin (owner/admin без доступа). Canon: `SPECS/CONTROL_PLANE.md` (IA). Impl: `console-web/src/components/ConsoleShell.tsx`, `console-web/src/lib/api-client.ts`.
+- [partial] (gap:integrations_rbac_scope) Integrations страница есть в IA, но RBAC ограничен platform_admin (owner/admin без доступа). Canon: `SPECS/CONTROL_PLANE.md` (IA). Impl: `console-web/src/components/ConsoleShell.tsx`, `console-web/src/lib/api-client.ts`.
 
 ### Manager
 - [match] Inbox + Calendar (read/write). Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/manager.md`.
-- [partial] Knowledge read-only: реализовано как read, без write. Canon: `SPECS/CONTROL_PLANE.md` (Manager: read‑only Knowledge). Impl: `docs/CONSOLE_AUDIT/pages/knowledge.md`.
+- [match] Knowledge read-only: реализовано как read, без write. Canon: `SPECS/CONTROL_PLANE.md` (Manager: read‑only Knowledge). Impl: `docs/CONSOLE_AUDIT/pages/knowledge.md`.
 - [match] Team directory (read-only). Canon: `SPECS/CONTROL_PLANE.md` (IA: Manager includes Team directory). Impl: `console-web/src/lib/api-client.ts`, `console-web/src/app/team/page.tsx`.
 
 ### Support
@@ -57,7 +57,6 @@ Legend
 
 - [match] Реализованные пункты навигации: Inbox, Calendar, Knowledge, Team, Settings, Ops, Audit, Insights, Tenants, Integrations. Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/components/ConsoleShell.tsx`.
 - [ahead] Реализованы пункты `Business`, `Data Trust`, `Team Performance` и `Subscription` для owner/admin/platform_admin. Canon IA не содержит этих пунктов как самостоятельные страницы.
-- [partial] Integrations доступен только platform_admin (owner/admin не включены в текущий RBAC). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/lib/api-client.ts`.
 - [match] Insights/Analytics (optional). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/app/insights/page.tsx`, `console-web/src/components/ConsoleShell.tsx`.
 
 ---
@@ -86,8 +85,8 @@ Legend
 - [match] Publish gate + warning ack + confirmation for rollback. Canon: `SPECS/CONTROL_PLANE.md` §7 + §5. Impl: `docs/CONSOLE_AUDIT/pages/knowledge.md`.
 
 ### Team
-- [partial] Users list + roles + Telegram linking есть; отсутствуют invite/disable. Canon: `SPECS/CONTROL_PLANE.md` §8. Impl: `docs/CONSOLE_AUDIT/pages/team.md`.
-- [partial] Specialists list есть, но нет управления working_hours/availability. Canon: `SPECS/CONTROL_PLANE.md` §8. Impl: `docs/CONSOLE_AUDIT/pages/team.md`.
+- [partial] (gap:team_users_invite_disable) Users list + roles + Telegram linking есть; отсутствуют invite/disable. Canon: `SPECS/CONTROL_PLANE.md` §8. Impl: `docs/CONSOLE_AUDIT/pages/team.md`.
+- [partial] (gap:team_specialists_availability) Specialists list есть, но нет управления working_hours/availability. Canon: `SPECS/CONTROL_PLANE.md` §8. Impl: `docs/CONSOLE_AUDIT/pages/team.md`.
 - [match] Team directory доступен для manager (read-only). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/lib/api-client.ts`, `console-web/src/app/team/page.tsx`.
 
 ### Settings + Provisioning Wizard

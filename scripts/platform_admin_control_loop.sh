@@ -129,6 +129,7 @@ run_step() {
 
 KPI_STATUS="pass"
 ANTI_DRIFT_STATUS="pass"
+AUDIT_GOVERNANCE_STATUS="pass"
 E2E_STATUS="skipped"
 REMEDIATION_ASSIST_STATUS="skipped"
 
@@ -143,6 +144,13 @@ fi
 
 if ! run_step "anti_drift" npm --prefix console-web run check:uvc-antidrift; then
   ANTI_DRIFT_STATUS="fail"
+fi
+
+if ! run_step "audit_governance" \
+  python3 scripts/check_console_audit_governance.py \
+    --pretty \
+    --output "${RUN_DIR}/governance_audit.json"; then
+  AUDIT_GOVERNANCE_STATUS="fail"
 fi
 
 if [[ "${RUN_E2E}" == "1" ]]; then
@@ -176,7 +184,7 @@ if [[ "${RUN_REMEDIATION_ASSIST}" == "1" ]]; then
 fi
 
 OVERALL_STATUS="pass"
-if [[ "${KPI_STATUS}" == "fail" || "${ANTI_DRIFT_STATUS}" == "fail" || "${E2E_STATUS}" == "fail" || "${REMEDIATION_ASSIST_STATUS}" == "fail" ]]; then
+if [[ "${KPI_STATUS}" == "fail" || "${ANTI_DRIFT_STATUS}" == "fail" || "${AUDIT_GOVERNANCE_STATUS}" == "fail" || "${E2E_STATUS}" == "fail" || "${REMEDIATION_ASSIST_STATUS}" == "fail" ]]; then
   OVERALL_STATUS="fail"
 fi
 
@@ -201,12 +209,14 @@ cat > "${RUN_DIR}/summary.json" <<EOF
   "steps": {
     "kpi_snapshot": "${KPI_STATUS}",
     "anti_drift": "${ANTI_DRIFT_STATUS}",
+    "audit_governance": "${AUDIT_GOVERNANCE_STATUS}",
     "e2e_lane": "${E2E_STATUS}",
     "remediation_assist": "${REMEDIATION_ASSIST_STATUS}"
   },
   "overall_status": "${OVERALL_STATUS}",
   "artifacts": {
     "kpi_snapshot": "${RUN_DIR}/kpi_snapshot.json",
+    "governance_audit": "${RUN_DIR}/governance_audit.json",
     "remediation_plan": "${RUN_DIR}/remediation_plan.json",
     "remediation_brief": "${RUN_DIR}/remediation_brief.md",
     "remediation_commands": "${RUN_DIR}/remediation_commands.sh",

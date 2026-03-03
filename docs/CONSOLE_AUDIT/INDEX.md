@@ -41,6 +41,7 @@ Artifacts
 - `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage5-legacy-removal-a705.md`
 - `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-program-closeout-steady-loop-a705.md`
 - `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-steady-state-operations-a705.md`
+- `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md`
 
 Backlog
 - `docs/CONSOLE_AUDIT/UX_BACKLOG.md`

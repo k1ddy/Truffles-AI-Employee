@@ -604,6 +604,9 @@ jobs:
       - name: UVC anti-drift contract gate
         run: npm --prefix console-web run check:uvc-antidrift
 
+      - name: Console audit governance gate
+        run: python3 scripts/check_console_audit_governance.py --pretty --output /tmp/console_audit_governance.json
+
   console-k6:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_k6 == 'true' }}
     runs-on: ubuntu-latest
