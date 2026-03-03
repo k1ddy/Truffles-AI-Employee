@@ -43,6 +43,7 @@
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
 | `.githooks/` | Обязательные git hooks (session_check + session_gate) | Все роли |
 | `.github/workflows/monitor-prod-version.yml` | Cron CI alert: prod `/admin/version` must match main | OPS |
+| `.github/workflows/platform-admin-control-loop.yml` | Scheduled/dispatch workflow: Platform Admin control-loop (`kpi + anti-drift + optional e2e`) | OPS/Brain/Architect |
 | `.github/workflows/session-gate.yml` | CI gate: session log + doc-only policy | Brain/Architect |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
@@ -63,6 +64,7 @@
 | `scripts/booking_dialog_scenarios.py` | Генератор booking‑диалогов (10–15 ходов, перебивки, медиа‑шаблоны) | QA/OPS |
 | `scripts/booking_quality_matrix_resumable.sh` | Resumable LLM-quality matrix runner (skip completed, retry/backoff, stop-the-line, report/state) | QA/OPS/Brain |
 | `scripts/quality_artifact_report.py` | Отчёт по последним llm‑quality артефактам (по часам/типам) | QA/OPS/Brain |
+| `scripts/platform_admin_control_loop.sh` | Единый wrapper Platform Admin control-loop (`kpi guard + anti-drift + optional e2e`) | OPS/Brain/QA |
 | `scripts/restart_knowledge_gateway.sh` | Перезапуск Knowledge Gateway (shadow) | OPS |
 | `scripts/restart_provider_gateway.sh` | Перезапуск Provider Gateway (shadow) | OPS |
 | `scripts/restart_inbox_service.sh` | Перезапуск Inbox Service (shadow) | OPS |
@@ -189,6 +191,7 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-program-closeout-steady-loop-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-s4-cross-domain-contract-suite-a1.md`

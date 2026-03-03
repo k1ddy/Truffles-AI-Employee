@@ -26,16 +26,18 @@ Source files:
 - `/tmp/uvc_stage5_kpi_snapshot_a705.json`
 - `/tmp/uvc_stage5_kpi_post_a705.json`
 - `/tmp/uvc_stage5_kpi_main_post_a705.json`
+- `/tmp/uvc_stage5_kpi_main_postmerge_c21_a705.json`
 
-| Metric | Baseline (`08:07:01Z`) | Post pre-merge (`08:07:54Z`) | Post main (`09:25:15Z`) |
-|---|---|---|---|
-| Console health | `healthy` | `healthy` | `healthy` |
-| API build commit | `d67ceb7fd59f...` | `d67ceb7fd59f...` | `b0de8fd692ca...` |
-| Outbox pending | `0` | `0` | `0` |
-| Outbox failed | `0` | `0` | `0` |
-| Outbox failed 24h | `0` | `0` | `0` |
-| Outbox guard | `ok` | `ok` | `ok` |
-| Outbox failed total (historical) | `5580` | `5580` | `5580` |
+| Metric | Baseline (`08:07:01Z`) | Post pre-merge (`08:07:54Z`) | Post main (`09:25:15Z`) | Post main recheck (`11:26:41Z`) |
+|---|---|---|---|---|
+| Console health | `healthy` | `healthy` | `healthy` | `healthy` |
+| API build commit | `d67ceb7fd59f...` | `d67ceb7fd59f...` | `b0de8fd692ca...` | `b0de8fd692ca...` |
+| Repo commit | `d67ceb7fd59f...` | `d67ceb7fd59f...` | `b0de8fd692ca...` | `c21ccf60bf29...` |
+| Outbox pending | `0` | `0` | `0` | `0` |
+| Outbox failed | `0` | `0` | `0` | `0` |
+| Outbox failed 24h | `0` | `0` | `0` | `0` |
+| Outbox guard | `ok` | `ok` | `ok` | `ok` |
+| Outbox failed total (historical) | `5580` | `5580` | `5580` | `5580` |
 
 Interpretation:
 - Stage 5 scope changes (UX terminology + anti-flake helper stabilization) не ухудшили runtime signals до и после merge в `main`.
@@ -43,8 +45,11 @@ Interpretation:
 
 ## Fleet decision evidence
 - PR merge: `https://github.com/k1ddy/Truffles-AI-Employee/pull/877` (`merged`).
+- Program closeout merge: `https://github.com/k1ddy/Truffles-AI-Employee/pull/881` (`merged`).
 - Required checks (green): `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22615842004`.
+- Program closeout checks (green): `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22618797720`.
 - Post-merge KPI snapshot: `/tmp/uvc_stage5_kpi_main_post_a705.json`.
+- Post-merge KPI recheck (`main@c21ccf60`): `/tmp/uvc_stage5_kpi_main_postmerge_c21_a705.json`.
 
 ## Executed checks and results
 - `npm --prefix console-web run check:uvc-antidrift` -> `UVC anti-drift check passed`
@@ -53,6 +58,7 @@ Interpretation:
 - `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_snapshot_a705.json` -> success
 - `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_post_a705.json` -> success
 - `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_main_post_a705.json` -> success
+- `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_main_postmerge_c21_a705.json` -> success
 
 ## Rollback drill
 - `git revert <stage5_commit_sha>`
