@@ -28,8 +28,13 @@
   - Wired mandatory CI execution in `console-contract-predeploy` (`npm --prefix console-web run check:uvc-antidrift`).
   - Published Stage 4 anti-drift contract artifact.
   - Stabilized platform-admin smoke contracts and confirmed full lane green (`26 passed`).
+  - Started Stage 5 (wave1/2) without adding new tabs:
+  - Added rollout go/no-go matrix artifact with canary/cohort/fleet decision policy.
+  - Added legacy-removal checklist artifact and completed terminology cleanup (`fallback/live` -> plain-language labels) for Tenants/Integrations.
+  - Captured baseline/post KPI snapshots with no regression in runtime health/outbox guard.
+  - Fixed flaky `openTenants` helper by waiting for stable tenants markers, then reconfirmed UVC lane (`26 passed`).
 - next:
-  - Stage 5: rollout/efficiency proof, KPI cadence, and legacy-path removal under existing IA constraints.
+  - Stage 5 wave3: merge-to-main, fleet go/no-go decision, and final program closeout entry.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -37,14 +42,24 @@
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage5-rollout-efficiency-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage3-flow-matrix-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage4-antidrift-contract-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage5-rollout-report-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage5-legacy-removal-a705.md
   - console-web/scripts/check-uvc-antidrift.mjs
   - .github/workflows/ci.yml
   - console-web/package.json
+  - console-web/src/app/integrations/page.tsx
+  - console-web/src/app/tenants/tenants-page-helpers.ts
   - console-web/e2e/platform-admin.spec.ts
+  - /tmp/uvc_stage5_kpi_snapshot_a705.json
+  - /tmp/uvc_stage5_kpi_post_a705.json
+  - /tmp/uvc_stage5_legacy_scan_a705.txt
   - checks: `cd truffles-api && python3 scripts/generate_openapi.py --check` (`OpenAPI specification generated .../contracts/console_api/openapi.generated.yaml`)
   - checks: `cd console-web && npm run generate:api` (`openapi-typescript ... -> src/types/api.generated.ts`)
   - checks: `cd console-web && npm run check:uvc-antidrift` (`UVC anti-drift check passed`)
   - checks: `cd console-web && npm run lint -- --file scripts/check-uvc-antidrift.mjs --file e2e/platform-admin.spec.ts --file src/lib/api-client.ts` (`No ESLint warnings or errors`)
+  - checks: `cd console-web && npm run lint -- --file e2e/platform-admin.spec.ts --file src/app/integrations/page.tsx --file src/app/tenants/tenants-page-helpers.ts` (`No ESLint warnings or errors`)
+  - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_snapshot_a705.json` (`success`)
+  - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_post_a705.json` (`success`)
   - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants|Platform Admin Integrations"` (`26 passed`)
   - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-03

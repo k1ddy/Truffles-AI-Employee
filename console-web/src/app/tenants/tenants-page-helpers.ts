@@ -11,8 +11,8 @@ const TELEGRAM_CHAT_ID_INPUT_PATTERN = /^-?[0-9]{5,20}$/;
 const KNOWLEDGE_TAG_INPUT_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 const REFERENCE_SCOPE_REASON_LABELS: Record<string, string> = {
-    active_live_signals: "live-сигналы активных филиалов",
-    active_fallback_best_candidate: "fallback на лучший активный филиал",
+    active_live_signals: "сигналы активных филиалов",
+    active_fallback_best_candidate: "резервный выбор активного филиала",
     no_active_branches: "нет активных филиалов",
 };
 

@@ -749,12 +749,21 @@ async function openTenants(page: import('@playwright/test').Page) {
         await page.goto(`${resolvedBaseURL}/tenants`, { waitUntil: 'domcontentloaded' });
     }
     await expect(page).toHaveURL(urlPathPattern('/tenants'));
-    const tenantsRoot = page.getByTestId('tenants-page');
-    if (await tenantsRoot.count()) {
-        await expect(tenantsRoot.first()).toBeVisible();
-        return;
+    const tenantsMarkers = [
+        page.getByTestId('tenants-page').first(),
+        page.getByTestId('tenants-lifecycle-controls').first(),
+        page.getByTestId('tenants-onboarding-section').first(),
+        page.getByRole('heading', { name: /Тенанты/i }).first(),
+    ];
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+        for (const marker of tenantsMarkers) {
+            if (await marker.isVisible().catch(() => false)) {
+                return;
+            }
+        }
+        await page.waitForTimeout(200);
     }
-    await expect(page.getByRole('heading', { name: 'Тенанты' })).toBeVisible();
+    throw new Error("Tenants page markers were not visible after navigation.");
 }
 
 async function openIntegrations(page: import('@playwright/test').Page) {
