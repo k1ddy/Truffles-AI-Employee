@@ -8,6 +8,8 @@ Usage: scripts/platform_admin_control_loop.sh [options]
 Options:
   --run-id <id>                  Deterministic run id (default: UTC timestamp)
   --run-e2e <0|1>                Run platform-admin e2e lane (default: 0)
+  --run-remediation-assist <0|1> Generate remediation assist artifacts (default: 1)
+  --remediation-strict <0|1>     Fail on blocked remediation decision (default: 0)
   --fail-level <warning|critical>  KPI guard fail level (default: critical)
   --output-root <dir>            Artifact root (default: /tmp/platform_admin_control_loop)
   --playwright-base-url <url>    Base URL for optional e2e run
@@ -21,6 +23,8 @@ cd "${REPO_ROOT}"
 
 RUN_ID=""
 RUN_E2E="0"
+RUN_REMEDIATION_ASSIST="1"
+REMEDIATION_STRICT="0"
 FAIL_LEVEL="critical"
 OUTPUT_ROOT="/tmp/platform_admin_control_loop"
 PLAYWRIGHT_BASE_URL_INPUT="${PLAYWRIGHT_BASE_URL:-http://127.0.0.1:3100}"
@@ -33,6 +37,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --run-e2e)
       RUN_E2E="${2:-}"
+      shift 2
+      ;;
+    --run-remediation-assist)
+      RUN_REMEDIATION_ASSIST="${2:-}"
+      shift 2
+      ;;
+    --remediation-strict)
+      REMEDIATION_STRICT="${2:-}"
       shift 2
       ;;
     --fail-level)
@@ -65,6 +77,16 @@ fi
 
 if [[ "${RUN_E2E}" != "0" && "${RUN_E2E}" != "1" ]]; then
   echo "--run-e2e must be 0 or 1" >&2
+  exit 2
+fi
+
+if [[ "${RUN_REMEDIATION_ASSIST}" != "0" && "${RUN_REMEDIATION_ASSIST}" != "1" ]]; then
+  echo "--run-remediation-assist must be 0 or 1" >&2
+  exit 2
+fi
+
+if [[ "${REMEDIATION_STRICT}" != "0" && "${REMEDIATION_STRICT}" != "1" ]]; then
+  echo "--remediation-strict must be 0 or 1" >&2
   exit 2
 fi
 
@@ -108,6 +130,7 @@ run_step() {
 KPI_STATUS="pass"
 ANTI_DRIFT_STATUS="pass"
 E2E_STATUS="skipped"
+REMEDIATION_ASSIST_STATUS="skipped"
 
 if ! run_step "kpi_snapshot" \
   python3 ops/console_platform_admin_kpi_snapshot.py \
@@ -131,8 +154,29 @@ if [[ "${RUN_E2E}" == "1" ]]; then
   fi
 fi
 
+if [[ "${RUN_REMEDIATION_ASSIST}" == "1" ]]; then
+  REMEDIATION_ASSIST_STATUS="pass"
+  if [[ ! -f "${RUN_DIR}/kpi_snapshot.json" ]]; then
+    echo "[platform-admin-control-loop] missing KPI snapshot for remediation assist" >&2
+    REMEDIATION_ASSIST_STATUS="fail"
+  else
+    remediation_args=()
+    if [[ "${REMEDIATION_STRICT}" == "1" ]]; then
+      remediation_args+=(--strict)
+    fi
+    if ! run_step "remediation_assist" \
+      python3 ops/platform_admin_remediation_assist.py \
+        --kpi-snapshot "${RUN_DIR}/kpi_snapshot.json" \
+        --output-dir "${RUN_DIR}" \
+        --run-id "${RUN_ID}" \
+        "${remediation_args[@]}"; then
+      REMEDIATION_ASSIST_STATUS="fail"
+    fi
+  fi
+fi
+
 OVERALL_STATUS="pass"
-if [[ "${KPI_STATUS}" == "fail" || "${ANTI_DRIFT_STATUS}" == "fail" || "${E2E_STATUS}" == "fail" ]]; then
+if [[ "${KPI_STATUS}" == "fail" || "${ANTI_DRIFT_STATUS}" == "fail" || "${E2E_STATUS}" == "fail" || "${REMEDIATION_ASSIST_STATUS}" == "fail" ]]; then
   OVERALL_STATUS="fail"
 fi
 
@@ -149,17 +193,23 @@ cat > "${RUN_DIR}/summary.json" <<EOF
   },
   "parameters": {
     "run_e2e": ${RUN_E2E},
+    "run_remediation_assist": ${RUN_REMEDIATION_ASSIST},
+    "remediation_strict": ${REMEDIATION_STRICT},
     "fail_level": "${FAIL_LEVEL}",
     "playwright_base_url": "${PLAYWRIGHT_BASE_URL_INPUT}"
   },
   "steps": {
     "kpi_snapshot": "${KPI_STATUS}",
     "anti_drift": "${ANTI_DRIFT_STATUS}",
-    "e2e_lane": "${E2E_STATUS}"
+    "e2e_lane": "${E2E_STATUS}",
+    "remediation_assist": "${REMEDIATION_ASSIST_STATUS}"
   },
   "overall_status": "${OVERALL_STATUS}",
   "artifacts": {
     "kpi_snapshot": "${RUN_DIR}/kpi_snapshot.json",
+    "remediation_plan": "${RUN_DIR}/remediation_plan.json",
+    "remediation_brief": "${RUN_DIR}/remediation_brief.md",
+    "remediation_commands": "${RUN_DIR}/remediation_commands.sh",
     "summary": "${RUN_DIR}/summary.json"
   }
 }
@@ -169,4 +219,3 @@ echo "[platform-admin-control-loop] summary=${RUN_DIR}/summary.json"
 if [[ "${OVERALL_STATUS}" != "pass" ]]; then
   exit 1
 fi
-
