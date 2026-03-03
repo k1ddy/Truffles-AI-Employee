@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
-- block_id: UVC-UX-STAGE1-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage5-rollout-efficiency-a705.md
+- block_id: UVC-UX-STAGE5-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: Stage 3 UVC UX cross-tab loop hardening + Stage 3/4/5 full TP split
+- scope: Stage 5 wave3 closeout on merged main + platform-admin e2e flake hardening
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -33,8 +33,11 @@
   - Added legacy-removal checklist artifact and completed terminology cleanup (`fallback/live` -> plain-language labels) for Tenants/Integrations.
   - Captured baseline/post KPI snapshots with no regression in runtime health/outbox guard.
   - Fixed flaky `openTenants` helper by waiting for stable tenants markers, then reconfirmed UVC lane (`26 passed`).
+  - Synced branch with merged `main` (`b0de8fd...`) after PR `#877` merge.
+  - Closed Stage 5 wave3: Fleet rollout decision `GO` with post-merge KPI evidence.
+  - Fixed additional flaky transitions in `platform-admin.spec.ts` (`openIntegrations` + `openWorkspace` retry helpers), reconfirmed UVC lane (`26 passed`).
 - next:
-  - Stage 5 wave3: merge-to-main, fleet go/no-go decision, and final program closeout entry.
+  - Program handoff complete for UVC UX stages 1-5; awaiting next prioritized TP block.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -52,6 +55,7 @@
   - console-web/e2e/platform-admin.spec.ts
   - /tmp/uvc_stage5_kpi_snapshot_a705.json
   - /tmp/uvc_stage5_kpi_post_a705.json
+  - /tmp/uvc_stage5_kpi_main_post_a705.json
   - /tmp/uvc_stage5_legacy_scan_a705.txt
   - checks: `cd truffles-api && python3 scripts/generate_openapi.py --check` (`OpenAPI specification generated .../contracts/console_api/openapi.generated.yaml`)
   - checks: `cd console-web && npm run generate:api` (`openapi-typescript ... -> src/types/api.generated.ts`)
@@ -60,6 +64,7 @@
   - checks: `cd console-web && npm run lint -- --file e2e/platform-admin.spec.ts --file src/app/integrations/page.tsx --file src/app/tenants/tenants-page-helpers.ts` (`No ESLint warnings or errors`)
   - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_snapshot_a705.json` (`success`)
   - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_post_a705.json` (`success`)
+  - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_main_post_a705.json` (`success`)
   - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants|Platform Admin Integrations"` (`26 passed`)
   - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-03
