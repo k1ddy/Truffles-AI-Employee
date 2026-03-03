@@ -44,6 +44,7 @@ def _load_quality_helpers():
         "LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE",
         "LLM_QUALITY_PROGRESS_SKIP_TAGS",
         "LLM_QUALITY_REQUIRED_RUN_ARTIFACTS",
+        "LLM_QUALITY_EVIDENCE_HANDOFF_REQUIRED_ARTIFACTS",
         "LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY",
         "LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION",
         "LLM_QUALITY_SCENARIO_REALISM_POLICY_VERSION",
@@ -94,8 +95,10 @@ def _load_quality_helpers():
         "_llm_quality_collect_workaround_register_ids",
         "_llm_quality_build_workaround_register_status",
         "_llm_quality_build_replay_command",
+        "_llm_quality_manifest_mode",
         "_llm_quality_required_artifact_paths",
         "_llm_quality_collect_artifact_integrity",
+        "_llm_quality_collect_evidence_handoff_status",
         "_llm_quality_load_json_object",
         "_llm_quality_is_iso_timestamp",
         "_llm_quality_extract_chain_id",
@@ -1575,6 +1578,15 @@ def test_collect_blocking_reasons_includes_unobserved_turn():
     assert result["reasons"]["unobserved_turn"] == 2
 
 
+def test_manifest_mode_detects_canary_from_run_id():
+    ns = _load_quality_helpers()
+    resolve_mode = ns["_llm_quality_manifest_mode"]
+
+    mode, source = resolve_mode(None, "booking-canary-contract-a1", {})
+    assert mode == "canary"
+    assert source == "run_id"
+
+
 def test_artifact_integrity_marks_missing_required_run_artifacts(tmp_path):
     ns = _load_quality_helpers()
     collect = ns["_llm_quality_collect_artifact_integrity"]
@@ -1600,6 +1612,125 @@ def test_artifact_integrity_marks_valid_when_required_run_artifacts_exist(tmp_pa
     assert status["valid"] is True
     assert status["missing"] == []
     assert sorted(status["required"]) == sorted(required)
+
+
+def test_evidence_handoff_status_accepts_complete_bundle_with_done_manual_audit(tmp_path):
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_evidence_handoff_status"]
+
+    run_dir = tmp_path / "run-complete"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    for artifact in (
+        "summary.json",
+        "brief.md",
+        "scenarios.json",
+        "responses.jsonl",
+        "trace_bundle.jsonl",
+        "run_manifest.json",
+        "manual_audit.md",
+    ):
+        (run_dir / artifact).write_text("{}", encoding="utf-8")
+    (run_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-complete",
+                "quality_status": {"manual_audit_required": True},
+                "manual_audit": {
+                    "status": "done",
+                    "path": str(run_dir / "manual_audit.md"),
+                    "json_path": str(run_dir / "manual_audit.json"),
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "manual_audit.json").write_text(
+        json.dumps(
+            {
+                "status": "done",
+                "run_id": "run-complete",
+                "analyst": "a1",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "analyst_root_causes": ["contract_validated"],
+                "analyst_next_steps": ["promote_next_chain_step"],
+                "judge_alignment": "not_applicable",
+                "winner": "contract",
+                "resolution_summary": "manual audit completed",
+                "findings": [],
+                "oracle_arbitration": {
+                    "conflict_count": 0,
+                    "judge_alignment": "not_applicable",
+                    "winner": "contract",
+                    "resolution_summary": "manual audit completed",
+                },
+                "finding_count": 0,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    status = collect(output_dir=str(run_dir), summary={"run_id": "run-complete"})
+    assert status["valid"] is True
+    assert status["reasons"] == []
+    assert status["manual_audit_done"] is True
+    assert status["missing"] == []
+
+
+def test_evidence_handoff_status_blocks_on_missing_manifest_and_pending_audit(tmp_path):
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_evidence_handoff_status"]
+
+    run_dir = tmp_path / "run-missing"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    for artifact in (
+        "summary.json",
+        "brief.md",
+        "scenarios.json",
+        "responses.jsonl",
+        "trace_bundle.jsonl",
+        "manual_audit.md",
+    ):
+        (run_dir / artifact).write_text("{}", encoding="utf-8")
+    (run_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-missing",
+                "quality_status": {"manual_audit_required": True},
+                "manual_audit": {
+                    "status": "pending",
+                    "path": str(run_dir / "manual_audit.md"),
+                    "json_path": str(run_dir / "manual_audit.json"),
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "manual_audit.json").write_text(
+        json.dumps(
+            {
+                "status": "pending",
+                "run_id": "run-missing",
+                "audited_at": datetime.now(timezone.utc).isoformat(),
+                "finding_count": 1,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    status = collect(output_dir=str(run_dir), summary={"run_id": "run-missing"})
+    assert status["valid"] is False
+    assert "manual_audit_not_done" in status["reasons"]
+    assert any(
+        reason.startswith("evidence_artifacts_missing:") for reason in status["reasons"]
+    )
 
 
 def test_manual_audit_gate_blocks_when_latest_run_is_pending(tmp_path):

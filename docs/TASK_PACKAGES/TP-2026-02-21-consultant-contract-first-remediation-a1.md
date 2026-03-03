@@ -216,7 +216,7 @@ Evidence:
 ## Execution Addendum (2026-02-26, mandatory)
 
 1. TP precedence
-- Этот TP является главным контрактом исполнения для текущей ветки до закрытия `P13`.
+- Этот TP является главным контрактом исполнения для текущей ветки до закрытия `P14`.
 - Любые локальные решения/фиксы/прогоны, противоречащие TP, считаются `INVALID`.
 
 2. Anti-drift process (all test tooling)
@@ -853,7 +853,7 @@ Forensic only (not acceptance):
 
 ### Что не реализовано (ключевые пробелы)
 
-- Нет новых ключевых пробелов в chain controller после bootstrap; открытые пункты остаются в `P4/P9/P12/P13/P14` по актуальному Execution Status (`P5/P7` закрыты отдельными блоками).
+- Нет новых ключевых пробелов в chain controller после bootstrap; открытые пункты остаются в `P12/P14` по актуальному Execution Status (`P4/P5/P7/P9/P13` закрыты отдельными блоками).
 
 ### Что может сломаться даже после текущих gate (failure map)
 
@@ -1137,7 +1137,7 @@ Forensic only (not acceptance):
   - Exit criteria: bypass/identity drift/resume abandonment блокируются hard.
 - `Stage G: Acceptance Re-enable`
   - Запустить L3 только после прохождения Stage A-F и PG0..PG6.
-  - Exit criteria: `lock -> replay -> full` используется как release confirmation, не как debug loop.
+  - Exit criteria: `lock -> replay -> canary -> full` используется как release confirmation, не как debug loop.
 
 ### Execution Status Update (2026-03-02, code-fact audit refresh)
 
@@ -1155,17 +1155,15 @@ Forensic only (not acceptance):
 - `P10 Canonical Quality Chain` implemented: chain controller + acceptance token gate implemented in `scripts/quality_chain_controller.sh`, `scripts/llm_quality_guarded.sh`, `ops/diagnose.py`, and multi-seed drift enforcement added to PG checklist validation (`multi_seed_evidence` required for acceptance lock).
 - `P11 Budget-Go-To-Full Control` implemented in `scripts/quality_chain_controller.sh` (PG checklist + L1/L2 evidence linkage) and enforced via `scripts/llm_quality_guarded.sh` for acceptance lock.
 - Chain controller bootstrap/import implemented in `scripts/quality_chain_controller.sh` with deterministic coverage in `truffles-api/tests/test_booking_quality_chain_controller.py`.
-- `P12 Cross-domain Hardening` partial: deterministic suite now runs against repository-backed non-salon packs (`truffles-api/app/knowledge/clinic_pack/SALON_TRUTH.yaml`, `truffles-api/app/knowledge/dental_pack/SALON_TRUTH.yaml`) via `truffles-api/tests/test_cross_domain_signal_contract_suite.py`; matrix non-salon contract gate remains in `ops/diagnose.py` (`--cross-domain-contract off|warn|block`), but acceptance artifacts for two non-salon domains are still required for final closure in `docs/TASK_PACKAGES/TP-2026-03-02-p12-cross-domain-hardening-full-closure-a1.md`.
-- `P13 Canary + Rollback` missing: no canary/rollback automation or tests found in repo; closure is tracked in `docs/TASK_PACKAGES/TP-2026-03-02-p13-canary-rollback-full-closure-a1.md`.
-- `P14 Evidence + STATE Handoff` partial: `ops/diagnose.py` writes `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl`, `run_manifest.json`; `STATE.md` handoff remains a process step, not a coded gate; closure is tracked in `docs/TASK_PACKAGES/TP-2026-03-02-p14-evidence-state-handoff-full-closure-a1.md`.
+- `P12 Cross-domain Hardening` blocked (business deferral): deterministic non-salon contract hardening is implemented (`truffles-api/tests/test_cross_domain_signal_contract_suite.py`, matrix gate in `ops/diagnose.py`), but final runtime acceptance closure requires onboarding and guarded acceptance artifacts for two real non-salon runtime domains; this cycle keeps `P12` blocked and tracked in `docs/TASK_PACKAGES/TP-2026-03-02-p12-cross-domain-hardening-full-closure-a1.md`.
+- `P13 Canary + Rollback` done via `docs/TASK_PACKAGES/TP-2026-03-02-p13-canary-rollback-full-closure-a1.md`: acceptance chain now enforces `lock -> replay -> canary -> full`, `scripts/quality_chain_controller.sh` includes explicit `rollback` command and automatic rollback on non-canonical canary step (`blocked_reason=canary_rollback_executed`, rollback artifact persisted), guarded wrapper accepts `--mode canary`; deterministic evidence: `bash -n scripts/quality_chain_controller.sh`, `bash -n scripts/llm_quality_guarded.sh`, `ruff check ops/diagnose.py truffles-api/tests/test_booking_quality_chain_controller.py truffles-api/tests/test_booking_quality_guarded_wrapper.py` (`All checks passed`), `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py` (`18 passed`), `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py` (`3 passed`).
+- `P14 Evidence + STATE Handoff` done via `docs/TASK_PACKAGES/TP-2026-03-02-p14-evidence-state-handoff-full-closure-a1.md`: fail-closed evidence handoff is now coded in `ops/diagnose.py` (`evidence_handoff_valid` + reasons + manifest/summary sync), chain pre-promotion blocks missing prior-step evidence handoff in `scripts/quality_chain_controller.sh`, and `scripts/session_check.sh` enforces full evidence bundle + `manual_audit=done` + `STATE.md` handoff for core behavior merges; deterministic checks green: `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "handoff or artifact or evidence"` (`7 passed, 73 deselected`), `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py -k "handoff or evidence"` (`4 passed, 15 deselected`), `bash -n scripts/session_check.sh`, `bash -n scripts/quality_chain_controller.sh`, `ruff check ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_chain_controller.py`.
 - `P15 Timeout-Degrade Reliability Remediation` implemented: timeout degrade retry limit and clarify/handoff escalation logic exist in `truffles-api/app/routers/webhook/decision.py` with deterministic tests in `truffles-api/tests/test_message_endpoint.py` (booking timeout retry exhaust -> handoff).
 
 ### Open blocks closure contract (strict, no wave slicing)
 
 - `P12` closes only through `docs/TASK_PACKAGES/TP-2026-03-02-p12-cross-domain-hardening-full-closure-a1.md`.
-- `P13` closes only through `docs/TASK_PACKAGES/TP-2026-03-02-p13-canary-rollback-full-closure-a1.md`.
-- `P14` closes only through `docs/TASK_PACKAGES/TP-2026-03-02-p14-evidence-state-handoff-full-closure-a1.md`.
-- Any partial implementation must update the same TP and cannot create a new ad-hoc wave/step TP for the same block.
+- Remaining partial/block implementation must update this same TP and cannot create a new ad-hoc wave/step TP for the same block.
 
 ### Mandatory Continuation for P7 (S0..S4, code-fact status at 2026-03-02)
 
