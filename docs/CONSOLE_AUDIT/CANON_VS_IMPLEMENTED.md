@@ -136,5 +136,5 @@ Legend
 - [match] KPI snapshot для weekly контроля добавлен (`ops/console_platform_admin_kpi_snapshot.py`) с outbox threshold/fail-fast guard (`--fail-on-breach`, `--fail-level`).
 - [match] Validation/операторские ошибки на `tenants` и `company-workspace` больше не toast-only: ошибки фиксируются в inline summary с recovery hints.
 - [match] Stage 4 anti-drift fail-closed gate реализован: OpenAPI validity + OpenAPI->generated type sync + control-tower endpoint presence + selector/suite contract checks enforced in CI (`console-contract-predeploy` -> `npm --prefix console-web run check:uvc-antidrift`).
-- [match] Stage 5 rollout/legacy hardening started with evidence: rollout go/no-go matrix + baseline/post KPI snapshot + legacy cleanup checklist published, and mixed-language `fallback/live` UX labels normalized in `Tenants/Integrations` without changing ownership boundaries.
+- [match] Stage 5 rollout/legacy hardening closed with evidence: rollout go/no-go matrix + baseline/post/post-main KPI snapshots + legacy cleanup checklist published, mixed-language `fallback/live` UX labels normalized in `Tenants/Integrations`, and fleet rollout decision moved to `GO` after merged-main monitoring.
 - [partial] Runbook регулярного контроля добавлен (`docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md`), но remediation jobs остаются частично manual.
