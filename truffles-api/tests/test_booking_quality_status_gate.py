@@ -112,6 +112,7 @@ def _load_quality_helpers():
         "_llm_quality_build_manual_audit_gate_status",
         "_llm_quality_build_forensic_sla_gate_status",
         "_llm_quality_build_oracle_conflict_gate_status",
+        "_llm_quality_build_secret_transport_gate_status",
         "_llm_quality_load_scenario_governance_registry",
         "_llm_quality_save_scenario_governance_registry",
         "_llm_quality_build_scenario_realism_sla",
@@ -196,6 +197,38 @@ def test_webhook_secret_preflight_accepts_expected_branch_secret():
 
     assert result["valid"] is True
     assert result["reasons"] == []
+
+
+def test_secret_transport_gate_blocks_explicit_secret_in_acceptance_lane():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_secret_transport_gate_status"]
+
+    status = build(
+        mode="block",
+        lane_effective="acceptance",
+        webhook_secret_source="explicit",
+    )
+
+    assert status["required"] is True
+    assert status["enforced"] is True
+    assert status["valid"] is False
+    assert "secret_exposure_detected:argv_webhook_secret" in status["reasons"]
+
+
+def test_secret_transport_gate_is_non_blocking_outside_acceptance_lane():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_secret_transport_gate_status"]
+
+    status = build(
+        mode="block",
+        lane_effective="dev",
+        webhook_secret_source="explicit",
+    )
+
+    assert status["required"] is False
+    assert status["enforced"] is False
+    assert status["valid"] is True
+    assert "secret_exposure_detected:argv_webhook_secret" in status["reasons"]
 
 
 def test_baseline_canonical_requires_judge_on():

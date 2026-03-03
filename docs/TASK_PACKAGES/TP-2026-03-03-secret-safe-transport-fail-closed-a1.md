@@ -5,6 +5,17 @@
 - `PARENT_BLOCK_ID`: `TP-2026-02-21-consultant-contract-first-remediation-a1`
 - `UNLOCKS`: `Secret-safe transport gate` (`partial` -> `done`)
 
+## Execution status
+- `status`: `done`
+- `completed_at`: `2026-03-03`
+- `code evidence`:
+  - `ops/diagnose.py`: `secret_exposure_detected` reason taxonomy + `_llm_quality_build_secret_transport_gate_status` + acceptance fail-closed preflight + summary wiring.
+  - `ops/diagnose.py`: `_send_webhook_payload` now uses in-process HTTP transport only (no `curl` subprocess argv path for webhook secret).
+  - `scripts/llm_quality_guarded.sh`: ledger command rendering now redacts sensitive CLI values.
+- `tests evidence`:
+  - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "secret or webhook_secret_preflight"` -> `4 passed`.
+  - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py` -> `4 passed`.
+
 ## Название/цель
 Довести secret-safe transport до fail-closed контракта: автоматическое обнаружение секретов в argv/командах/артефактах и блокировка quality-run с явным reason-code (`secret_exposure_detected`).
 
@@ -131,7 +142,7 @@
 - `Expiry/trigger to stop deferral`: n/a.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: закрыть `P12` после наличия двух runtime non-salon onboardings.
-- `First deterministic check command`: `pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py`
-- `Blocked-by conditions`: no two real runtime non-salon domains.
+- `Next block objective`: for this addendum: none (`Secret-safe transport gate` fully closed).
+- `First deterministic check command`: n/a.
+- `Blocked-by conditions`: n/a.
 - `Owner role for closure`: Brain + Top Architect.

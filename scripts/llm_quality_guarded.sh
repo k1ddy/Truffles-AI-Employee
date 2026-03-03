@@ -54,6 +54,34 @@ trim() {
   printf '%s' "$value"
 }
 
+render_sanitized_command() {
+  local -a redacted=()
+  local redact_next=0
+  local part lower key
+  for part in "$@"; do
+    if [[ "$redact_next" -eq 1 ]]; then
+      redacted+=("<redacted>")
+      redact_next=0
+      continue
+    fi
+    lower="${part,,}"
+    case "$lower" in
+      --webhook-secret|--llm-api-key|--judge-api-key|--api-key|--token|--access-token|--password)
+        redacted+=("$part")
+        redact_next=1
+        continue
+        ;;
+      --webhook-secret=*|--llm-api-key=*|--judge-api-key=*|--api-key=*|--token=*|--access-token=*|--password=*)
+        key="${part%%=*}"
+        redacted+=("${key}=<redacted>")
+        continue
+        ;;
+    esac
+    redacted+=("$part")
+  done
+  printf '%q ' "${redacted[@]}"
+}
+
 owner_match_found() {
   local owner="$1"
   local path
@@ -346,7 +374,7 @@ fi
 if [[ "$CHAIN_CONTROLLER_ACTIVE" -eq 1 ]]; then
   CMD+=(--chain-id "$CHAIN_ID" --chain-step "$CHAIN_STEP" --chain-token "$CHAIN_TOKEN")
 fi
-CMD_STRING="$(printf '%q ' "${CMD[@]}")"
+CMD_STRING="$(render_sanitized_command "${CMD[@]}")"
 
 START_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$START_TS" "$MODE" "$RUN_ID" "$FINGERPRINT" "started" "-" "$OUTPUT_DIR" "$CMD_STRING" >> "$LEDGER_FILE"

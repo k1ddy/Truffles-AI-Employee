@@ -866,6 +866,7 @@ LLM_QUALITY_BLOCKING_REASONS = (
     "forensic_sla_violation",
     "scenario_governance_violation",
     "workaround_register_violation",
+    "secret_exposure_detected",
 )
 LLM_QUALITY_DELIVERY_WAIVER_REASONS = {
     "delivery_waiver_billing",
@@ -6914,6 +6915,36 @@ def _llm_quality_build_oracle_conflict_gate_status(
     return gate_status
 
 
+def _llm_quality_build_secret_transport_gate_status(
+    *,
+    mode,
+    lane_effective,
+    webhook_secret_source,
+):
+    normalized_mode = str(mode or "off").strip().casefold()
+    if normalized_mode not in {"off", "warn", "block"}:
+        normalized_mode = "block"
+    lane_token = str(lane_effective or "").strip().casefold()
+    required = lane_token == "acceptance"
+    gate_status = {
+        "mode": normalized_mode,
+        "valid": True,
+        "enforced": normalized_mode == "block" and required,
+        "required": required,
+        "lane_effective": lane_token or "unknown",
+        "reasons": [],
+        "webhook_secret_source": str(webhook_secret_source or "").strip() or None,
+    }
+    if normalized_mode == "off":
+        return gate_status
+    source = str(webhook_secret_source or "").strip().casefold()
+    if source == "explicit":
+        gate_status["reasons"].append("secret_exposure_detected:argv_webhook_secret")
+    if gate_status["enforced"] and gate_status["reasons"]:
+        gate_status["valid"] = False
+    return gate_status
+
+
 def _llm_quality_load_scenario_governance_registry(path):
     normalized = os.path.abspath(
         os.path.expanduser(
@@ -7992,6 +8023,7 @@ def _llm_quality_build_command_from_args(
     add("--manual-audit-gate", getattr(args, "manual_audit_gate", None))
     add("--forensic-sla-gate", getattr(args, "forensic_sla_gate", None))
     add("--oracle-conflict-gate", getattr(args, "oracle_conflict_gate", None))
+    add("--secret-transport-gate", getattr(args, "secret_transport_gate", None))
     add("--scenario-governance-gate", getattr(args, "scenario_governance_gate", None))
     add(
         "--scenario-governance-registry",
@@ -8839,6 +8871,7 @@ def _llm_quality_write_failure_artifacts(
             "manual_audit_gate": getattr(args, "manual_audit_gate", None),
             "forensic_sla_gate": getattr(args, "forensic_sla_gate", None),
             "oracle_conflict_gate": getattr(args, "oracle_conflict_gate", None),
+            "secret_transport_gate": getattr(args, "secret_transport_gate", None),
             "quality_constant_gate": getattr(args, "quality_constant_gate", None),
             "quality_lane": getattr(args, "quality_lane", None),
             "scenario_governance_gate": getattr(args, "scenario_governance_gate", None),
@@ -9019,6 +9052,7 @@ def _llm_quality_write_checkpoint_summary(
             "manual_audit_gate": getattr(args, "manual_audit_gate", None),
             "forensic_sla_gate": getattr(args, "forensic_sla_gate", None),
             "oracle_conflict_gate": getattr(args, "oracle_conflict_gate", None),
+            "secret_transport_gate": getattr(args, "secret_transport_gate", None),
             "quality_constant_gate": getattr(args, "quality_constant_gate", None),
             "quality_lane": getattr(args, "quality_lane", None),
             "scenario_governance_gate": getattr(args, "scenario_governance_gate", None),
@@ -11328,6 +11362,15 @@ def _parse_llm_quality_args(argv):
         choices=["off", "warn", "block"],
         default=os.environ.get("LLM_QUALITY_ORACLE_CONFLICT_GATE", "block"),
         help="Enforce contract-first oracle arbitration before acceptance lane runs.",
+    )
+    parser.add_argument(
+        "--secret-transport-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_SECRET_TRANSPORT_GATE", "block"),
+        help=(
+            "Block/warn when webhook secrets are passed via explicit CLI args "
+            "(secret exposure risk in process argv)."
+        ),
     )
     parser.add_argument(
         "--quality-constant-gate",
@@ -14121,64 +14164,14 @@ def _logic_jid_for_index(idx):
 
 def _send_webhook_payload(url, payload, secret, timeout):
     payload_json = json.dumps(payload, ensure_ascii=False)
-    connect_timeout = max(1.0, min(float(timeout), 3.0))
-    max_time = max(1.0, float(timeout))
-    marker = "__CURL_STATUS__"
-    curl_cmd = [
-        "curl",
-        "-sS",
-        "-X",
-        "POST",
-        "--connect-timeout",
-        str(connect_timeout),
-        "--max-time",
-        str(max_time),
-        "-H",
-        "Content-Type: application/json",
-    ]
-    if secret:
-        curl_cmd += ["-H", f"X-Webhook-Secret: {secret}"]
-    curl_cmd += [
-        "--data-binary",
-        "@-",
-        "-w",
-        f"\n{marker}%{{http_code}}",
-        url,
-    ]
-    try:
-        result = subprocess.run(
-            curl_cmd,
-            input=payload_json,
-            capture_output=True,
-            text=True,
-            timeout=max_time + 2.0,
-        )
-    except FileNotFoundError:
-        result = None
-    except subprocess.TimeoutExpired as exc:
-        return None, "", f"timeout: {max_time}s ({exc.__class__.__name__})"
-    else:
-        if result.returncode != 0:
-            stderr = (result.stderr or "").strip()
-            return None, "", f"curl_error: rc={result.returncode} err={stderr}"
-        output = result.stdout or ""
-        if marker in output:
-            body, status_raw = output.rsplit(f"\n{marker}", 1)
-            try:
-                status = int(status_raw.strip())
-            except ValueError:
-                status = None
-            if status and status != 0:
-                return status, body, None
-            return None, body, f"curl_http_status:{status_raw.strip() or 'unknown'}"
-
+    request_timeout = max(1.0, float(timeout))
     data = payload_json.encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if secret:
         headers["X-Webhook-Secret"] = secret
     req = urllib.request.Request(url, data=data, method="POST", headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=request_timeout) as resp:
             body = resp.read().decode("utf-8", errors="replace")
             return resp.status, body, None
     except urllib.error.HTTPError as exc:
@@ -14861,6 +14854,37 @@ def _run_llm_quality(args):
         raise SystemExit(
             "llm-quality: INVALID RUN - webhook_secret preflight failed "
             f"({','.join(secret_preflight.get('reasons') or ['unknown'])})"
+        )
+    secret_transport_gate_status = _llm_quality_build_secret_transport_gate_status(
+        mode=getattr(args, "secret_transport_gate", "block"),
+        lane_effective=quality_constant_status.get("lane_effective"),
+        webhook_secret_source=webhook_secret_source,
+    )
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_secret_transport_preflight",
+                "mode": secret_transport_gate_status.get("mode"),
+                "valid": secret_transport_gate_status.get("valid"),
+                "enforced": secret_transport_gate_status.get("enforced"),
+                "required": secret_transport_gate_status.get("required"),
+                "lane_effective": secret_transport_gate_status.get("lane_effective"),
+                "reasons": secret_transport_gate_status.get("reasons"),
+                "webhook_secret_source": secret_transport_gate_status.get(
+                    "webhook_secret_source"
+                ),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if (
+        secret_transport_gate_status.get("enforced")
+        and not secret_transport_gate_status.get("valid", True)
+    ):
+        reason_tokens = secret_transport_gate_status.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - secret transport gate failed "
+            f"({','.join(reason_tokens)})"
         )
 
     admin_token = args.admin_token or os.environ.get("ALERTS_ADMIN_TOKEN")
@@ -17650,6 +17674,14 @@ def _run_llm_quality(args):
             1,
         )
     if (
+        not secret_transport_gate_status.get("valid", True)
+        and secret_transport_gate_status.get("mode") in {"warn", "block"}
+    ):
+        process_blocking_counts["secret_exposure_detected"] = max(
+            len(secret_transport_gate_status.get("reasons") or []),
+            1,
+        )
+    if (
         not scenario_governance_status.get("valid", True)
         and scenario_governance_status.get("mode") in {"warn", "block"}
     ):
@@ -17863,6 +17895,7 @@ def _run_llm_quality(args):
         "manual_audit_gate": args.manual_audit_gate,
         "forensic_sla_gate": args.forensic_sla_gate,
         "oracle_conflict_gate": args.oracle_conflict_gate,
+        "secret_transport_gate": args.secret_transport_gate,
         "quality_constant_gate": args.quality_constant_gate,
         "scenario_governance_gate": args.scenario_governance_gate,
         "scenario_governance_registry": args.scenario_governance_registry,
@@ -17931,6 +17964,7 @@ def _run_llm_quality(args):
         "manual_audit_gate": manual_audit_gate_status,
         "forensic_sla_gate": forensic_sla_gate_status,
         "oracle_conflict_gate": oracle_conflict_gate_status,
+        "secret_transport_gate": secret_transport_gate_status,
         "quality_constant_gate": quality_constant_status,
         "scenario_governance_gate": scenario_governance_status,
         "scenario_governance_registry": scenario_governance_registry_update,
@@ -18018,6 +18052,13 @@ def _run_llm_quality(args):
                 "enforced", False
             ),
             "oracle_conflict_gate_reasons": oracle_conflict_gate_status.get("reasons", []),
+            "secret_transport_gate_valid": secret_transport_gate_status.get("valid", True),
+            "secret_transport_gate_enforced": secret_transport_gate_status.get(
+                "enforced", False
+            ),
+            "secret_transport_gate_reasons": secret_transport_gate_status.get(
+                "reasons", []
+            ),
             "quality_constant_gate_valid": quality_constant_status.get("valid", True),
             "quality_constant_gate_enforced": quality_constant_status.get("enforced", False),
             "quality_constant_gate_reasons": quality_constant_status.get("reasons", []),
