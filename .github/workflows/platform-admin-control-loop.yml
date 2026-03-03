@@ -16,6 +16,10 @@ on:
           - critical
           - warning
         default: critical
+      remediation_strict:
+        description: "Fail workflow when remediation decision is blocked"
+        type: boolean
+        default: false
       playwright_base_url:
         description: "Base URL used for optional e2e lane"
         type: string
@@ -54,16 +58,23 @@ jobs:
         env:
           RUN_E2E_INPUT: ${{ github.event.inputs.run_e2e || 'false' }}
           FAIL_LEVEL_INPUT: ${{ github.event.inputs.fail_level || 'critical' }}
+          REMEDIATION_STRICT_INPUT: ${{ github.event.inputs.remediation_strict || 'false' }}
           PLAYWRIGHT_BASE_URL_INPUT: ${{ github.event.inputs.playwright_base_url || 'http://127.0.0.1:3100' }}
         run: |
           RUN_E2E_FLAG=0
+          REMEDIATION_STRICT_FLAG=0
           if [ "$RUN_E2E_INPUT" = "true" ]; then
             RUN_E2E_FLAG=1
+          fi
+          if [ "$REMEDIATION_STRICT_INPUT" = "true" ]; then
+            REMEDIATION_STRICT_FLAG=1
           fi
 
           scripts/platform_admin_control_loop.sh \
             --run-id "gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --run-e2e "$RUN_E2E_FLAG" \
+            --run-remediation-assist 1 \
+            --remediation-strict "$REMEDIATION_STRICT_FLAG" \
             --fail-level "$FAIL_LEVEL_INPUT" \
             --output-root "/tmp/platform_admin_control_loop" \
             --playwright-base-url "$PLAYWRIGHT_BASE_URL_INPUT"

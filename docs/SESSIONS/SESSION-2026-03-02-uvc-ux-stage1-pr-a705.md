@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-program-closeout-steady-loop-a705.md
-- block_id: UVC-UX-PROGRAM-CLOSEOUT-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-steady-state-operations-a705.md
+- block_id: UVC-UX-STEADY-STATE-OPERATIONS-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: Post-merge closeout handoff to steady-state automation (`platform-admin` control-loop)
+- scope: Steady-state operator-assist operations loop on top of merged platform-admin control-loop
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -42,21 +42,34 @@
   - Added wrapper script `scripts/platform_admin_control_loop.sh` (KPI guard + anti-drift + optional e2e + summary artifact).
   - Added scheduled/dispatch workflow `.github/workflows/platform-admin-control-loop.yml`.
   - Updated runbook/canon/status docs for automation handoff evidence.
+  - Merged PR `#882` for closeout automation on `main`.
+  - Started `UVC-UX-STEADY-STATE-OPERATIONS-A705`.
+  - Added TP `TP-2026-03-03-uvc-ux-steady-state-operations-a705.md` (RCA + one-web-search + release safety + reuse-first).
+  - Implemented deterministic remediation assist layer:
+  - Added `ops/platform_admin_remediation_assist.py` (rollout decision + plan/brief/commands artifacts from KPI guard).
+  - Integrated remediation assist into `scripts/platform_admin_control_loop.sh` (`--run-remediation-assist`, `--remediation-strict`) and summary artifact contract.
+  - Extended `.github/workflows/platform-admin-control-loop.yml` with `remediation_strict` dispatch input.
+  - Added deterministic tests `truffles-api/tests/test_platform_admin_remediation_assist.py` (`3 passed`).
+  - Updated runbook/canon/master/state docs and published steady-state operations artifact report.
 - next:
-  - Open PR with steady-state automation block and close `UVC-UX-PROGRAM-CLOSEOUT-A705`.
+  - Open PR for `UVC-UX-STEADY-STATE-OPERATIONS-A705` and monitor CI.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage4-quality-antidrift-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage5-rollout-efficiency-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-program-closeout-steady-loop-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-steady-state-operations-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-steady-state-operations-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage3-flow-matrix-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage4-antidrift-contract-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage5-rollout-report-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage5-legacy-removal-a705.md
   - docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md
   - .github/workflows/platform-admin-control-loop.yml
+  - ops/platform_admin_remediation_assist.py
   - scripts/platform_admin_control_loop.sh
+  - truffles-api/tests/test_platform_admin_remediation_assist.py
   - console-web/scripts/check-uvc-antidrift.mjs
   - .github/workflows/ci.yml
   - console-web/package.json
@@ -69,6 +82,11 @@
   - /tmp/uvc_stage5_kpi_main_postmerge_c21_a705.json
   - /tmp/platform_admin_control_loop/local-a705/summary.json
   - /tmp/platform_admin_control_loop/local-a705/kpi_snapshot.json
+  - /tmp/platform_admin_control_loop/steady-ops-a705/summary.json
+  - /tmp/platform_admin_control_loop/steady-ops-a705/kpi_snapshot.json
+  - /tmp/platform_admin_control_loop/steady-ops-a705/remediation_plan.json
+  - /tmp/platform_admin_control_loop/steady-ops-a705/remediation_brief.md
+  - /tmp/platform_admin_control_loop/steady-ops-a705/remediation_commands.sh
   - /tmp/uvc_stage5_legacy_scan_a705.txt
   - checks: `cd truffles-api && python3 scripts/generate_openapi.py --check` (`OpenAPI specification generated .../contracts/console_api/openapi.generated.yaml`)
   - checks: `cd console-web && npm run generate:api` (`openapi-typescript ... -> src/types/api.generated.ts`)
@@ -79,7 +97,10 @@
   - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_post_a705.json` (`success`)
   - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_main_post_a705.json` (`success`)
   - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_main_postmerge_c21_a705.json` (`success`)
+  - checks: `python3 -m py_compile ops/platform_admin_remediation_assist.py` (`pass`)
+  - checks: `pytest -q truffles-api/tests/test_platform_admin_remediation_assist.py` (`3 passed`)
   - checks: `bash -n scripts/platform_admin_control_loop.sh` (`pass`)
+  - checks: `scripts/platform_admin_control_loop.sh --run-id steady-ops-a705 --run-e2e 0 --output-root /tmp/platform_admin_control_loop` (`overall_status=pass`)
   - checks: `scripts/platform_admin_control_loop.sh --run-id local-a705 --run-e2e 0 --fail-level critical --output-root /tmp/platform_admin_control_loop` (`overall_status=pass`)
   - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants|Platform Admin Integrations"` (`26 passed`)
   - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)
