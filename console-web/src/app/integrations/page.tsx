@@ -18,6 +18,12 @@ import {
     type ProviderOpsQueueItem,
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
+import {
+    parseProviderOpsAction,
+    providerOpsActionCodeLabel,
+    providerOpsActionHint,
+    providerOpsReasonLabels,
+} from "@/lib/provider-ops-language";
 import { useConsoleContextScope } from "@/lib/use-console-context-scope";
 import type { components } from "@/types/api.generated";
 
@@ -99,6 +105,10 @@ function normalizeText(value?: string | null): string {
     return (value ?? "").trim().toLowerCase();
 }
 
+function humanizeCode(value: string): string {
+    return value.replaceAll("_", " ");
+}
+
 function statusBadgeClass(status: string): string {
     if (status === "error") {
         return "bg-red-100 text-red-800";
@@ -115,23 +125,23 @@ function statusLabel(status: string): string {
         warn: "Предупреждение",
         error: "Ошибка",
         inactive: "Неактивно",
-        missing_instance_id: "Нет instance_id",
-        instance_id_mismatch: "Несовпадение instance_id",
-        invalid_webhook_url: "Невалидный webhook URL",
-        invalid_webhook_secret: "Невалидный webhook secret",
-        webhook_secret_drift: "Webhook secret drift",
-        no_recent_inbound: "Нет недавнего inbound",
-        inbound_without_outbound: "Inbound без outbound",
-        missing_bot_token: "Нет bot token",
-        missing_chat_id: "Нет chat id",
+        missing_instance_id: "Не указан ID канала",
+        instance_id_mismatch: "ID канала не совпадает",
+        invalid_webhook_url: "Некорректный адрес webhook",
+        invalid_webhook_secret: "Некорректный ключ webhook",
+        webhook_secret_drift: "Ключ webhook не совпадает",
+        no_recent_inbound: "Давно нет входящих",
+        inbound_without_outbound: "Есть входящие без исходящих",
+        missing_bot_token: "Не задан токен бота",
+        missing_chat_id: "Не задан ID чата",
         provider_binding_rebind_required: "Нужна перепривязка",
         provider_binding_expired: "Подписка истекла",
         provider_binding_expiring_soon: "Скоро истекает подписка",
-        provider_binding_alert_critical: "Критичный alert provider",
-        provider_binding_alert_warn: "Alert provider (warn)",
-        integration_degraded: "Интеграция degraded",
+        provider_binding_alert_critical: "Критичный сигнал провайдера",
+        provider_binding_alert_warn: "Предупреждение провайдера",
+        integration_degraded: "Интеграция нестабильна",
     };
-    return labels[status] ?? status;
+    return labels[status] ?? humanizeCode(status);
 }
 
 function providerBindingExpiryLabel(status?: string | null): string {
@@ -162,15 +172,15 @@ function providerBindingExpiryBadgeClass(status?: string | null): string {
 
 function providerBindingAlertLabel(status?: string | null): string {
     if (status === "ok") {
-        return "Alert OK";
+        return "Сигналов нет";
     }
     if (status === "warn") {
-        return "Alert WARN";
+        return "Есть предупреждение";
     }
     if (status === "critical") {
-        return "Alert CRITICAL";
+        return "Критичный сигнал";
     }
-    return "Alert UNKNOWN";
+    return "Сигнал неизвестен";
 }
 
 function providerBindingAlertBadgeClass(status?: string | null): string {
@@ -191,24 +201,6 @@ function formatTimestamp(value?: string | null): string {
         return "-";
     }
     return new Date(value).toLocaleString("ru-RU");
-}
-
-function parseProviderAction(value?: string | null): ProviderOpsQueueItem["recommended_action"] | null {
-    if (!value) {
-        return null;
-    }
-    const normalized = value.trim();
-    if (
-        normalized === "integration_reconcile"
-        || normalized === "provider_start_rebind"
-        || normalized === "provider_complete_rebind"
-        || normalized === "provider_renewal_confirmed"
-        || normalized === "provider_webhook_updated"
-        || normalized === "provider_send_reminder"
-    ) {
-        return normalized;
-    }
-    return null;
 }
 
 function providerSlaBadgeClass(value?: string | null): string {
@@ -238,8 +230,8 @@ function providerSlaLabel(value?: string | null): string {
 }
 
 const REFERENCE_SCOPE_REASON_LABELS: Record<string, string> = {
-    active_live_signals: "live-сигналы активных филиалов",
-    active_fallback_best_candidate: "fallback на лучший активный филиал",
+    active_live_signals: "сигналы активных филиалов",
+    active_fallback_best_candidate: "резервный выбор лучшего активного филиала",
     no_active_branches: "нет активных филиалов",
 };
 
@@ -247,7 +239,7 @@ function formatReferenceScopeReason(value?: string | null): string {
     if (!value) {
         return "не задан";
     }
-    return REFERENCE_SCOPE_REASON_LABELS[value] ?? value;
+    return REFERENCE_SCOPE_REASON_LABELS[value] ?? humanizeCode(value);
 }
 
 function providerPriorityBadgeClass(priority?: string | null): string {
@@ -270,42 +262,25 @@ function providerPriorityLabel(priority?: string | null): string {
     return priority.toUpperCase();
 }
 
-function providerLifecycleNextActionLabel(action?: string | null): string {
-    if (!action) {
-        return "Нет действия";
+function providerLifecycleActionHint(action?: string | null): string | null {
+    const parsed = parseProviderOpsAction(action);
+    if (!parsed) {
+        return null;
     }
-    if (action === "provider_start_rebind") {
-        return "Старт перепривязки";
-    }
-    if (action === "provider_complete_rebind") {
-        return "Завершить перепривязку";
-    }
-    if (action === "provider_renewal_confirmed") {
-        return "Подтвердить продление";
-    }
-    if (action === "provider_webhook_updated") {
-        return "Webhook обновлен";
-    }
-    if (action === "provider_send_reminder") {
-        return "Отправить напоминание";
-    }
-    if (action === "integration_reconcile") {
-        return "Сверка интеграции";
-    }
-    return action;
+    return providerOpsActionHint(parsed);
 }
 
 function goLiveStateLabel(value?: string | null): string {
     if (!value) {
-        return "pending";
+        return "ожидает решения";
     }
     if (value === "approved") {
-        return "approved";
+        return "запуск подтвержден";
     }
     if (value === "rejected") {
-        return "rejected";
+        return "запуск отклонен";
     }
-    return value;
+    return humanizeCode(value);
 }
 
 function goLiveBadgeClass(allowed: boolean, state?: string | null): string {
@@ -343,9 +318,21 @@ function teamBadgeClass(issue: string | null): string {
 
 function onboardingStateLabel(value?: string | null): string {
     if (!value) {
-        return "unknown";
+        return "статус не задан";
     }
-    return value;
+    if (value === "approved") {
+        return "готов к запуску";
+    }
+    if (value === "rejected") {
+        return "запуск отклонен";
+    }
+    if (value === "pending") {
+        return "ожидает проверки";
+    }
+    if (value === "blocked") {
+        return "есть блокеры";
+    }
+    return humanizeCode(value);
 }
 
 function rowSeverityWeight(row: EnrichedRow): number {
@@ -1042,7 +1029,7 @@ export default function IntegrationsPage() {
     };
 
     const openWorkspaceForLifecycleItem = (item: ProviderLifecycleItem) => {
-        const lifecycleAction = parseProviderAction(item.next_action);
+        const lifecycleAction = parseProviderOpsAction(item.next_action);
         persistScopeAndOpenWorkspace(
             {
                 companyId: item.company_id,
@@ -1189,7 +1176,7 @@ export default function IntegrationsPage() {
                 <div>
                     <h1 className="text-2xl font-bold" data-testid="integrations-title">Центр управления компаниями</h1>
                     <p className="mt-1 text-sm text-muted-foreground">
-                        Единый факт-слой по компаниям: каналы, provider-подписки, команда, онбординг и go-live.
+                        Единый обзор по компаниям: состояние каналов, оплата, команда и готовность к запуску.
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1213,7 +1200,7 @@ export default function IntegrationsPage() {
             <section className="mb-4 rounded-xl border border-border/60 bg-card p-3" data-testid="integrations-view-mode">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-xs text-muted-foreground">
-                        Режим экрана: {viewMode === "overview" ? "обзор по всем филиалам" : "today: только проблемные филиалы с next action"}
+                        Режим экрана: {viewMode === "overview" ? "обзор по всем филиалам" : "операционный день: только проблемные филиалы и следующий шаг"}
                     </div>
                     <div className="inline-flex rounded-full border border-border/60 bg-muted/20 p-1">
                         <button
@@ -1241,12 +1228,12 @@ export default function IntegrationsPage() {
                     <div>
                         <div className="text-sm font-semibold text-blue-900">Операции выполняются через Workspace</div>
                         <div className="mt-1 text-xs text-blue-800/80">
-                            Действия по филиалу (rebind, renewal, webhook update, reconcile) выполняются только в `Company Workspace`.
+                            Действия по филиалу (перепривязка, подтверждение оплаты, обновление webhook, сверка) выполняются только в `Company Workspace`.
                         </div>
                     </div>
                     <div className="text-xs text-blue-900/80">
-                        stale_after_minutes: <span className="font-mono">{integrationsData?.stale_after_minutes ?? staleAfterMinutes}</span> мин
-                        {" "}· page_limit: <span className="font-mono">{INTEGRATIONS_PAGE_LIMIT}</span>
+                        данные устаревают через <span className="font-mono">{integrationsData?.stale_after_minutes ?? staleAfterMinutes}</span> мин
+                        {" "}· лимит страницы: <span className="font-mono">{INTEGRATIONS_PAGE_LIMIT}</span>
                         {" "}· загружено: <span className="font-mono">{integrationsItems.length}</span>/<span className="font-mono">{integrationsTotalInScope}</span>
                     </div>
                 </div>
@@ -1477,7 +1464,7 @@ export default function IntegrationsPage() {
                 <KpiCard
                     title="Подписка Provider"
                     value={`${kpi.expiredBindings} истекло · ${kpi.expiringSoon} скоро`}
-                    description="риски paid_until / renewal"
+                    description="риски оплаты канала и даты продления"
                     tone={kpi.expiredBindings > 0 ? "critical" : kpi.expiringSoon > 0 ? "warn" : "good"}
                 />
                 <KpiCard
@@ -1488,8 +1475,8 @@ export default function IntegrationsPage() {
                 />
                 <KpiCard
                     title="Команда"
-                    value={`${kpi.teamGaps} gaps · ${kpi.goLiveAllowed} go-live`}
-                    description="пробелы команды + сколько филиалов готовы к go-live"
+                    value={`${kpi.teamGaps} пробелов · ${kpi.goLiveAllowed} готово к запуску`}
+                    description="пробелы команды и число филиалов, готовых к запуску"
                     tone={kpi.teamGaps > 0 ? "warn" : "good"}
                 />
             </section>
@@ -1502,20 +1489,20 @@ export default function IntegrationsPage() {
                         <div className="text-xs text-red-900/80">клиенты высокого риска</div>
                     </div>
                     <div className="rounded-xl border border-amber-300/70 bg-amber-50 p-4">
-                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-800">Stale / Ошибки</div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-800">Неактуальные и ошибки</div>
                         <div className="mt-2 text-2xl font-semibold text-amber-900">{fleetAttentionSummary.stale_branches_total + fleetAttentionSummary.integration_error_branches_total}</div>
-                        <div className="text-xs text-amber-900/80">stale + проблемные филиалы</div>
+                        <div className="text-xs text-amber-900/80">неактуальные + проблемные филиалы</div>
                     </div>
                     <div className="rounded-xl border border-blue-300/70 bg-blue-50 p-4">
                         <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-800">Очереди</div>
                         <div className="mt-2 text-2xl font-semibold text-blue-900">{fleetAttentionSummary.outbox_failed_24h_total + fleetAttentionSummary.pending_handovers_total}</div>
-                        <div className="text-xs text-blue-900/80">outbox failed + pending handovers</div>
+                        <div className="text-xs text-blue-900/80">ошибки отправки + ожидание передачи</div>
                     </div>
                 </section>
             )}
             {fleetAttentionSummary ? (
                 <div className="mt-2 text-xs text-muted-foreground">
-                    scope: reference branches (fleet metrics без тестового branch noise)
+                    опорный контур: расчет по рабочим филиалам без тестового шума
                 </div>
             ) : null}
 
@@ -1532,13 +1519,13 @@ export default function IntegrationsPage() {
                                     </span>
                                 </div>
                                 <div className="mt-1 text-muted-foreground">
-                                    действие: {item.next_action} · причины: {item.reasons.join(", ") || "-"}
+                                    действие: {providerOpsActionCodeLabel(item.next_action)} · причины: {providerOpsReasonLabels(item.reasons, 3).join(", ") || "-"}
                                 </div>
                                 <div className="mt-1 text-muted-foreground">
-                                    филиалы {item.active_branches}/{item.total_branches} · stale {item.stale_branches} · degraded {item.degraded_branches}
+                                    филиалы {item.active_branches}/{item.total_branches} · неактуальные {item.stale_branches} · деградация {item.degraded_branches}
                                 </div>
                                 <div className="mt-1 text-muted-foreground">
-                                    reference scope: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
+                                    опорный контур: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
                                 </div>
                             </div>
                         ))}
@@ -1582,8 +1569,8 @@ export default function IntegrationsPage() {
 
                                         <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
                                             <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Провайдер</div>
-                                            <div className="mt-1 text-muted-foreground">owner: {row.provider_binding_owner ?? "-"}</div>
-                                            <div className="text-muted-foreground">paid_until: {row.provider_binding_paid_until ?? "-"}</div>
+                                            <div className="mt-1 text-muted-foreground">Ответственный: {row.provider_binding_owner ?? "-"}</div>
+                                            <div className="text-muted-foreground">Оплачено до: {row.provider_binding_paid_until ?? "-"}</div>
                                             <div className="mt-1 flex flex-wrap items-center gap-1">
                                                 <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingExpiryBadgeClass(row.provider_binding_expiry_status)}`}>
                                                     {providerBindingExpiryLabel(row.provider_binding_expiry_status)}
@@ -1608,10 +1595,10 @@ export default function IntegrationsPage() {
 
                                         <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
                                             <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Онбординг</div>
-                                            <div className="mt-1 text-muted-foreground">state: {onboardingStateLabel(row.onboarding_state)}</div>
+                                            <div className="mt-1 text-muted-foreground">Статус: {onboardingStateLabel(row.onboarding_state)}</div>
                                             <div className="mt-1">
                                                 <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${goLiveBadgeClass(row.go_live_allowed, row.go_live_state)}`}>
-                                                    go-live: {goLiveStateLabel(row.go_live_state)}{row.go_live_allowed ? " (разрешен)" : ""}
+                                                    Запуск: {goLiveStateLabel(row.go_live_state)}{row.go_live_allowed ? " (разрешен)" : ""}
                                                 </span>
                                             </div>
                                         </div>
@@ -1624,11 +1611,11 @@ export default function IntegrationsPage() {
                                     <details className="mt-2 rounded-lg border border-border/60 bg-muted/10 p-2">
                                         <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">Больше фактов</summary>
                                         <div className="mt-2 space-y-1 text-muted-foreground">
-                                            <div>instance: <span className="font-mono break-all">{row.instance_id ?? "-"}</span></div>
-                                            <div>binding instance: <span className="font-mono break-all">{row.provider_binding_instance_id ?? "-"}</span></div>
-                                            <div>next_renewal: <span className="font-mono break-all">{row.provider_binding_next_renewal_at ?? "-"}</span></div>
-                                            <div>days left: {row.provider_binding_days_until_expiry ?? "-"} · rebind_required: {row.provider_binding_rebind_required ? "yes" : "no"}</div>
-                                            <div>last inbound instance: <span className="font-mono break-all">{row.last_inbound_instance_id ?? "-"}</span></div>
+                                            <div>ID канала филиала: <span className="font-mono break-all">{row.instance_id ?? "-"}</span></div>
+                                            <div>ID канала у провайдера: <span className="font-mono break-all">{row.provider_binding_instance_id ?? "-"}</span></div>
+                                            <div>Следующее продление: <span className="font-mono break-all">{row.provider_binding_next_renewal_at ?? "-"}</span></div>
+                                            <div>Осталось дней оплаты: {row.provider_binding_days_until_expiry ?? "-"} · нужна перепривязка: {row.provider_binding_rebind_required ? "да" : "нет"}</div>
+                                            <div>Последний входящий ID канала: <span className="font-mono break-all">{row.last_inbound_instance_id ?? "-"}</span></div>
                                             <div className="pt-1"><DriftIssues item={row} /></div>
                                         </div>
                                     </details>
@@ -1672,9 +1659,9 @@ export default function IntegrationsPage() {
                 <section className="mt-4 rounded-xl border border-border/60 bg-card p-3 sm:p-4" data-testid="integrations-today-mode">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                         <div>
-                            <div className="text-sm font-semibold">Today mode: проблемные филиалы</div>
+                            <div className="text-sm font-semibold">Текущий день: проблемные филиалы</div>
                             <div className="text-xs text-muted-foreground">
-                                Только actionable-факты: next action, SLA, блокеры и переход в Workspace.
+                                Только факты для действий: следующий шаг, SLA, блокеры и переход в Workspace.
                             </div>
                         </div>
                         <div className="text-xs text-muted-foreground">
@@ -1707,24 +1694,27 @@ export default function IntegrationsPage() {
 
                                 <div className="mt-2 grid gap-2 md:grid-cols-2">
                                     <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Next action</div>
-                                        <div className="mt-1 font-medium text-foreground">{providerLifecycleNextActionLabel(item.next_action)}</div>
+                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Следующий шаг</div>
+                                        <div className="mt-1 font-medium text-foreground">{providerOpsActionCodeLabel(item.next_action)}</div>
+                                        {providerLifecycleActionHint(item.next_action) ? (
+                                            <div className="mt-1 text-muted-foreground">{providerLifecycleActionHint(item.next_action)}</div>
+                                        ) : null}
                                         <div className="mt-1 text-muted-foreground">
                                             дедлайн: {formatTimestamp(item.sla_deadline_at)} · inbound: {formatTimestamp(item.last_inbound_at)}
                                         </div>
                                     </div>
                                     <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Provider facts</div>
-                                        <div className="mt-1 text-muted-foreground">owner: {item.provider_binding_owner ?? "-"}</div>
-                                        <div className="text-muted-foreground">paid_until: {item.provider_binding_paid_until ?? "-"}</div>
+                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Данные канала</div>
+                                        <div className="mt-1 text-muted-foreground">Ответственный: {item.provider_binding_owner ?? "-"}</div>
+                                        <div className="text-muted-foreground">Оплачено до: {item.provider_binding_paid_until ?? "-"}</div>
                                         <div className="text-muted-foreground break-all">
-                                            instance: {item.instance_id ?? "-"} · binding: {item.provider_binding_instance_id ?? "-"}
+                                            ID канала: {item.instance_id ?? "-"} · ID у провайдера: {item.provider_binding_instance_id ?? "-"}
                                         </div>
                                     </div>
                                 </div>
 
                                 <div className="mt-2 text-muted-foreground">
-                                    блокеры: {item.blockers.length ? item.blockers.map((blocker) => statusLabel(blocker)).join(", ") : "нет"}
+                                    блокеры: {item.blockers.length ? providerOpsReasonLabels(item.blockers, item.blockers.length).join(", ") : "нет"}
                                 </div>
 
                                 <div className="mt-3 flex items-center justify-end">

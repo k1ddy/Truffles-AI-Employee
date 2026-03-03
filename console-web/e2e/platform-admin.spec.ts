@@ -848,6 +848,16 @@ test.describe('Platform Admin Navigation', () => {
 
         await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
         await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await expect(page.getByTestId('workspace-recommended-open-execute')).toBeVisible();
+
+        const deepLinkParams = await page.evaluate(() => ({
+            branchId: new URL(window.location.href).searchParams.get('branch_id'),
+            recommendedAction: new URL(window.location.href).searchParams.get('recommended_action'),
+            source: new URL(window.location.href).searchParams.get('action_source'),
+        }));
+        expect(deepLinkParams.branchId).toBeTruthy();
+        expect(deepLinkParams.recommendedAction).toBe('provider_start_rebind');
+        expect(deepLinkParams.source).toBe('matrix');
 
         const storedContext = await page.evaluate(() => ({
             clientId: window.localStorage.getItem('console:client_id'),
@@ -1086,6 +1096,83 @@ test.describe('Platform Admin Tenants', () => {
         expect(deepLinkParams.source).toBeTruthy();
     });
 
+    test('should keep provider copy plain-language in Tenants -> Workspace flow @smoke', async ({ page }) => {
+        const actionQueue = page.getByTestId('tenants-action-queue');
+        await expect(actionQueue).toBeVisible();
+
+        await expect(actionQueue).not.toContainText('provider_start_rebind');
+        await expect(actionQueue).not.toContainText('provider_binding_rebind_required');
+
+        const openWorkspaceButton = actionQueue.getByRole('button', { name: 'Открыть Workspace' }).first();
+        await expect(openWorkspaceButton).toBeVisible();
+        await openWorkspaceButton.click();
+
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        const recommendationSection = page.getByTestId('company-workspace-recommended-action');
+        await expect(recommendationSection).toBeVisible();
+
+        await expect(recommendationSection).toContainText('Рекомендуется:');
+        await expect(recommendationSection).toContainText('Старт перепривязки');
+        await expect(recommendationSection).not.toContainText('provider_start_rebind');
+        await expect(recommendationSection).not.toContainText('provider_binding_rebind_required');
+        await expect(recommendationSection).toContainText('Что это значит:');
+        await expect(recommendationSection).toContainText('Причины');
+        await expect(recommendationSection).toContainText('нужна перепривязка канала');
+        await expect(recommendationSection).toContainText('источник подсказки:');
+        await expect(recommendationSection).not.toContainText('source:');
+    });
+
+    test('should keep Integrations and Workspace labels plain-language @smoke', async ({ page }) => {
+        await openIntegrations(page);
+
+        const integrationsPage = page.getByTestId('integrations-page');
+        await expect(integrationsPage).not.toContainText('owner:');
+        await expect(integrationsPage).not.toContainText('paid_until');
+        await expect(integrationsPage).not.toContainText('next_renewal_at');
+
+        const row = page.getByTestId('integrations-row').first();
+        if (!(await row.isVisible().catch(() => false))) {
+            await expect(page.getByTestId('integrations-empty')).toBeVisible();
+            return;
+        }
+
+        await expect(row).toContainText('Ответственный:');
+        await expect(row).toContainText('Оплачено до:');
+        await expect(row).toContainText('ID канала');
+
+        await page.getByTestId('integrations-row-open-workspace').first().click();
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+
+        const workspacePage = page.getByTestId('company-workspace-page');
+        await expect(workspacePage).toContainText('источник подсказки:');
+        await expect(workspacePage).not.toContainText('source:');
+        await expect(workspacePage).not.toContainText('owner:');
+        await expect(workspacePage).not.toContainText('paid_until');
+        await expect(workspacePage).not.toContainText('next_renewal_at');
+    });
+
+    test('should ignore legacy workspace recommendation storage without query context @smoke', async ({ page }) => {
+        await page.evaluate((branchId) => {
+            window.localStorage.setItem(
+                'console:workspace_recommended_action',
+                JSON.stringify({
+                    branch_id: branchId,
+                    action: 'provider_start_rebind',
+                    reasons: ['provider_binding_rebind_required'],
+                    source: 'legacy-storage',
+                    captured_at: new Date().toISOString(),
+                }),
+            );
+        }, TENANTS_FIXTURE_BRANCH_ID);
+
+        await page.goto(`${resolvedBaseURL}/company-workspace?branch_id=${TENANTS_FIXTURE_BRANCH_ID}`, { waitUntil: 'domcontentloaded' });
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await expect(page.getByTestId('workspace-recommended-open-execute')).toHaveCount(0);
+        await expect(page.getByText(/нет активной подсказки/i)).toBeVisible();
+    });
+
     test('should show explicit field contracts in Tenants branch editor @smoke', async ({ page }) => {
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
@@ -1320,7 +1407,7 @@ test.describe('Platform Admin Tenants', () => {
             await page.getByTestId('tenants-mode-portfolio').click();
         }
 
-        const refreshKpiButton = page.getByRole('button', { name: /Обновить/i });
+        const refreshKpiButton = page.getByRole('button', { name: /Обновить сводку/i });
         if (await refreshKpiButton.isVisible().catch(() => false)) {
             await refreshKpiButton.click();
         }
