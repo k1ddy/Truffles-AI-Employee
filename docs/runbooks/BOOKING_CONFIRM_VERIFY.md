@@ -34,7 +34,10 @@ LLM-quality start here (mandatory for new agents)
    - `/tmp/booking_quality/<run-id>/brief.md`
    - `/tmp/booking_quality/<run-id>/manual_audit.json` and `/tmp/booking_quality/<run-id>/manual_audit.md`
    - scenario governance registry entry in `/tmp/booking_quality/_scenario_governance_registry.json`
-     (schema `>=2`, `realism_sla.valid=true`, lifecycle `candidate -> eligible -> approved`)
+     (schema `>=2`, `realism_sla.valid=true`, `realism_sla.business_valid=true`, non-empty
+     `realism_sla.taxonomy_mapping_version`, all required
+     `realism_sla.business_bucket_presence={production-like,expert-hard,chaos-noise}` = true,
+     lifecycle `candidate -> eligible -> approved`)
 5. Mandatory actions by status
    - `canonical`: continue to chain `next_command`.
    - `incomplete`: resume same `run-id` (`--resume --output-dir ...`), do not start new run-id.

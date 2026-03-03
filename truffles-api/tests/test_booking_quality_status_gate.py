@@ -2324,6 +2324,18 @@ def test_scenario_governance_gate_accepts_registered_replay_scenarios(tmp_path):
                         "realism_sla": {
                             "policy_version": policy_version,
                             "valid": True,
+                            "taxonomy_mapping_version": "2026-03-03.stage-d.v1",
+                            "required_business_buckets": [
+                                "production-like",
+                                "expert-hard",
+                                "chaos-noise",
+                            ],
+                            "business_bucket_presence": {
+                                "production-like": True,
+                                "expert-hard": True,
+                                "chaos-noise": True,
+                            },
+                            "business_valid": True,
                             "bucket_presence": {
                                 "booking": True,
                                 "info": True,
@@ -2357,6 +2369,80 @@ def test_scenario_governance_gate_accepts_registered_replay_scenarios(tmp_path):
     assert gate["reasons"] == []
 
 
+def test_scenario_governance_gate_blocks_missing_business_bucket(tmp_path):
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_scenario_governance_status"]
+    digest_file = ns["_llm_quality_digest_file"]
+    schema_version = ns["LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION"]
+    policy_version = ns["LLM_QUALITY_SCENARIO_REALISM_POLICY_VERSION"]
+
+    scenarios_path = tmp_path / "scenarios.json"
+    scenarios_path.write_text(
+        json.dumps({"dialogs": [{"turns": [{"text": "hi"}]}]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    scenario_fp = digest_file(str(scenarios_path))
+    registry_path = tmp_path / "scenario_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": schema_version,
+                "version": schema_version,
+                "entries": {
+                    scenario_fp: {
+                        "scenario_fingerprint": scenario_fp,
+                        "acceptance_eligible": True,
+                        "coverage_tokens": ["booking", "info", "interrupt", "handoff"],
+                        "promotion": {"status": "eligible"},
+                        "realism_sla": {
+                            "policy_version": policy_version,
+                            "valid": True,
+                            "taxonomy_mapping_version": "2026-03-03.stage-d.v1",
+                            "required_business_buckets": [
+                                "production-like",
+                                "expert-hard",
+                                "chaos-noise",
+                            ],
+                            "business_bucket_presence": {
+                                "production-like": True,
+                                "expert-hard": True,
+                                "chaos-noise": False,
+                            },
+                            "business_valid": False,
+                            "bucket_presence": {
+                                "booking": True,
+                                "info": True,
+                                "interrupt": True,
+                                "handoff": True,
+                            },
+                        },
+                    }
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    gate = build_gate(
+        mode="block",
+        output_dir=str(tmp_path / "run-next"),
+        lane_effective="acceptance",
+        run_mode="llm",
+        run_id="booking-replay-test",
+        scenarios_file=str(scenarios_path),
+        baseline_summary=None,
+        scenario_contract={"valid": True},
+        registry_path=str(registry_path),
+        chain_controller_status={"mode": "replay"},
+    )
+
+    assert gate["valid"] is False
+    assert "scenario_registry_realism_business_sla_failed" in gate["reasons"]
+    assert "scenario_registry_business_bucket_missing:chaos-noise" in gate["reasons"]
+
+
 def test_scenario_governance_registry_update_writes_entry(tmp_path):
     ns = _load_quality_helpers()
     update_registry = ns["_llm_quality_update_scenario_governance_registry"]
@@ -2375,6 +2461,13 @@ def test_scenario_governance_registry_update_writes_entry(tmp_path):
         scenario_contract={
             "valid": True,
             "coverage_tokens": ["booking", "info", "interrupt", "handoff"],
+            "tag_counts": {
+                "check_booking": 5,
+                "confirm": 5,
+                "interrupt": 2,
+                "noise": 1,
+                "policy": 1,
+            },
             "dialog_count": 10,
             "turn_count": 120,
             "weak_expectation_ratio": 0.0,
@@ -2392,6 +2485,8 @@ def test_scenario_governance_registry_update_writes_entry(tmp_path):
     assert result["scenario_fingerprint"] in payload["entries"]
     entry = payload["entries"][result["scenario_fingerprint"]]
     assert entry["realism_sla"]["valid"] is True
+    assert entry["realism_sla"]["business_valid"] is True
+    assert entry["realism_sla"]["taxonomy_mapping_version"] == "2026-03-03.stage-d.v1"
     assert entry["promotion"]["status"] == "eligible"
     assert entry["promotion"]["lifecycle"][-1]["status"] == "eligible"
 
