@@ -5,6 +5,15 @@
 - `PARENT_BLOCK_ID`: `TP-2026-02-21-consultant-contract-first-remediation-a1`
 - `UNLOCKS`: `Stage D Scenario Governance` (`partial` -> `done`)
 
+## Execution status
+- `Status`: `done` (code-fact, deterministic)
+- `Completed at`: `2026-03-03`
+- `Evidence (code/tests/docs)`:
+  - `ops/diagnose.py`: scenario governance now enforces `taxonomy_mapping_version`, `business_bucket_presence`, `business_valid`.
+  - `truffles-api/tests/test_booking_quality_status_gate.py`: positive and fail-closed negative tests for business taxonomy.
+  - `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`: mandatory artifact contract updated with business taxonomy fields.
+  - `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`: Stage D moved to `done` in Open Blocks Matrix.
+
 ## Название/цель
 Синхронизировать бизнес-таксономию сценариев (`production-like`, `expert-hard`, `chaos/noise`) с runtime enforcement в quality-gates, чтобы Stage D закрывался по фактам и без расхождений терминов между ТЗ, кодом и runbook.
 

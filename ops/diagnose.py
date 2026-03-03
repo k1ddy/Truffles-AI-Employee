@@ -6972,16 +6972,61 @@ def _llm_quality_build_scenario_realism_sla(scenario_contract):
         for item in (contract.get("coverage_tokens") or [])
         if str(item).strip()
     }
+    tag_counts_raw = contract.get("tag_counts")
+    tag_counts = tag_counts_raw if isinstance(tag_counts_raw, dict) else {}
+
+    def _tag_count(tag_name):
+        try:
+            return int(tag_counts.get(tag_name) or 0)
+        except Exception:
+            return 0
+
     bucket_presence = {
         bucket: bucket in coverage_tokens
         for bucket in LLM_QUALITY_SCENARIO_REALISM_REQUIRED_BUCKETS
     }
+    policy_law_signal_tokens = {
+        "policy",
+        "hard_law",
+        "law",
+        "legal",
+        "medical",
+        "refund",
+        "payment_info",
+        "complaint",
+        "cancel",
+        "reschedule",
+    }
+    policy_law_signal_present = any(
+        token in coverage_tokens or _tag_count(token) > 0
+        for token in policy_law_signal_tokens
+    )
+    business_bucket_presence = {
+        "production-like": bool(contract.get("valid"))
+        and all(token in coverage_tokens for token in ("booking", "info", "handoff")),
+        "expert-hard": (
+            "interrupt" in coverage_tokens
+            or _tag_count("interrupt") > 0
+        )
+        and _tag_count("check_booking") > 0
+        and _tag_count("confirm") > 0
+        and policy_law_signal_present,
+        "chaos-noise": (
+            _tag_count("noise") > 0
+            and ("interrupt" in coverage_tokens or _tag_count("interrupt") > 0)
+        ),
+    }
+    required_business_buckets = ["production-like", "expert-hard", "chaos-noise"]
     dialog_count = int(contract.get("dialog_count") or 0)
     turn_count = int(contract.get("turn_count") or 0)
     reasons = []
     for bucket, present in bucket_presence.items():
         if not present:
             reasons.append(f"bucket_missing:{bucket}")
+    business_reasons = []
+    for bucket_name in required_business_buckets:
+        if not bool(business_bucket_presence.get(bucket_name)):
+            business_reasons.append(f"business_bucket_missing:{bucket_name}")
     if dialog_count < LLM_QUALITY_SCENARIO_REALISM_MIN_DIALOG_COUNT:
         reasons.append(
             f"dialog_count_lt_{LLM_QUALITY_SCENARIO_REALISM_MIN_DIALOG_COUNT}"
@@ -6994,6 +7039,12 @@ def _llm_quality_build_scenario_realism_sla(scenario_contract):
         "policy_version": LLM_QUALITY_SCENARIO_REALISM_POLICY_VERSION,
         "required_buckets": list(LLM_QUALITY_SCENARIO_REALISM_REQUIRED_BUCKETS),
         "bucket_presence": bucket_presence,
+        "taxonomy_mapping_version": "2026-03-03.stage-d.v1",
+        "required_business_buckets": required_business_buckets,
+        "business_bucket_presence": business_bucket_presence,
+        "business_valid": not business_reasons,
+        "business_reasons": business_reasons,
+        "policy_law_signal_present": policy_law_signal_present,
         "dialog_count": dialog_count,
         "turn_count": turn_count,
         "valid": not reasons,
@@ -7121,9 +7172,36 @@ def _llm_quality_build_scenario_governance_status(
                         gate["reasons"].append(
                             f"scenario_registry_realism_bucket_missing:{required_bucket}"
                         )
+                business_bucket_presence = (
+                    realism_sla.get("business_bucket_presence")
+                    if isinstance(realism_sla.get("business_bucket_presence"), dict)
+                    else {}
+                )
+                required_business_buckets = realism_sla.get("required_business_buckets")
+                if not isinstance(required_business_buckets, list):
+                    required_business_buckets = [
+                        "production-like",
+                        "expert-hard",
+                        "chaos-noise",
+                    ]
+                if not bool(realism_sla.get("business_valid")):
+                    gate["reasons"].append("scenario_registry_realism_business_sla_failed")
+                for business_bucket in required_business_buckets:
+                    bucket_token = str(business_bucket).strip()
+                    if not bucket_token:
+                        continue
+                    if not bool(business_bucket_presence.get(bucket_token)):
+                        gate["reasons"].append(
+                            f"scenario_registry_business_bucket_missing:{bucket_token}"
+                        )
                 policy_version = str(realism_sla.get("policy_version") or "").strip()
                 if not policy_version:
                     gate["reasons"].append("scenario_registry_realism_policy_missing")
+                taxonomy_mapping_version = str(
+                    realism_sla.get("taxonomy_mapping_version") or ""
+                ).strip()
+                if not taxonomy_mapping_version:
+                    gate["reasons"].append("scenario_registry_taxonomy_mapping_missing")
     if gate["enforced"] and gate["reasons"]:
         gate["valid"] = False
     return gate
@@ -7164,7 +7242,8 @@ def _llm_quality_update_scenario_governance_registry(
     promotion_status = _llm_quality_next_scenario_promotion_status(
         current_status=existing_promotion.get("status"),
         lane_effective=lane_effective,
-        realism_valid=realism_sla.get("valid"),
+        realism_valid=bool(realism_sla.get("valid"))
+        and bool(realism_sla.get("business_valid")),
     )
     chain_state_path = (chain_controller_status or {}).get("state_path")
     chain_id = (chain_controller_status or {}).get("chain_id")
@@ -7219,6 +7298,7 @@ def _llm_quality_update_scenario_governance_registry(
         "acceptance_eligible": bool(
             promotion_status in {"eligible", "approved"}
             and bool(realism_sla.get("valid"))
+            and bool(realism_sla.get("business_valid"))
         ),
         "promotion": promotion_payload,
     }

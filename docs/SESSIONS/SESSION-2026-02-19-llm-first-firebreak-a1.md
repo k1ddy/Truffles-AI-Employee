@@ -549,4 +549,15 @@
   - PR sync:
     - opened PR `#878`: `https://github.com/k1ddy/Truffles-AI-Employee/pull/878`.
     - updated PR description and pushed fix commit for `session-gate` doc artifacts.
-- last_updated: 2026-03-03T13:40:00+05:00
+  - Completed `Stage D Scenario Taxonomy Sync` full closure:
+    - runtime fail-closed mapping enforced in `ops/diagnose.py` (`taxonomy_mapping_version`, `business_bucket_presence`, `business_valid`),
+    - deterministic coverage extended in `truffles-api/tests/test_booking_quality_status_gate.py` (positive + missing-business-bucket negative),
+    - runbook + master TP + Stage D TP synced for closure evidence.
+  - Validation (green, Stage D closure packet):
+    - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "scenario_governance or realism"` (`6 passed`)
+    - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` (`83 passed`)
+    - `python3 -m py_compile ops/diagnose.py` (`OK`)
+    - `scripts/session_check.sh` (`Session OK`)
+  - PR sync:
+    - opened PR `#879`: `https://github.com/k1ddy/Truffles-AI-Employee/pull/879`.
+- last_updated: 2026-03-03T14:13:16+05:00
