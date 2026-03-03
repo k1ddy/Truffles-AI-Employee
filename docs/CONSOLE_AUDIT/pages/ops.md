@@ -12,6 +12,7 @@ Roles
 
 Sections
 - Overall health (version + status badge).
+- Loop return hints (`Workspace`/`Tenants`) in header for post-verify continuation.
 - Daily metrics (cases by status, avg resolution hours).
 - Components (database, redis).
 - Telegram health card (webhook, error rate, pending, last success).

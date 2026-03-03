@@ -18,7 +18,7 @@ Main UI sections
 - View mode switch:
   - `Обзор` (matrix + KPI + queue).
   - `Сегодня` (focus on current-day operational list).
-- Workspace CTA (`Manage in Workspace`) with routing to `/company-workspace`.
+- Workspace CTA (context-bound) routes to `/company-workspace` only after explicit scope selection (`company/client/branch`).
 - Scope controls (`company/client/branch`, stale threshold, reset/sync/save).
 - KPI cards (coverage/readiness/risk style metrics).
 - Fleet attention list (priority branches requiring action).
@@ -28,6 +28,7 @@ Main UI sections
 
 Key behavior
 - Page is read-oriented: no direct provider execute actions are performed on this route.
+- Workspace handoff guidance is explicit: primary action entry is row-level `Open in Workspace`, which transfers branch context + recommended action.
 - Context scope is persisted to localStorage:
   - `console:company_id`
   - `console:client_id`

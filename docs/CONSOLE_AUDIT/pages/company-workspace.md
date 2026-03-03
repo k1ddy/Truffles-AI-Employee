@@ -19,6 +19,8 @@ Main UI sections
 - Recommended action card:
   - Opens action in `execute` or `dry_run` mode.
   - Supports clear/reset.
+  - Shows explicit next-step verify link to `Ops` after execute CTA.
+  - Empty recommendation state includes return links to `Tenants` and `Integrations`.
 - Today fact block (current-day operational summary for selected scope).
 - Scope section (`company/client/branch`) with context save.
 - WhatsApp panel:
