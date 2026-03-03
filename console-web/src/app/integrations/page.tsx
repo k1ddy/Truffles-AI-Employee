@@ -231,7 +231,7 @@ function providerSlaLabel(value?: string | null): string {
 
 const REFERENCE_SCOPE_REASON_LABELS: Record<string, string> = {
     active_live_signals: "сигналы активных филиалов",
-    active_fallback_best_candidate: "резервный выбор лучшего активного филиала",
+    active_fallback_best_candidate: "резервный выбор активного филиала",
     no_active_branches: "нет активных филиалов",
 };
 
