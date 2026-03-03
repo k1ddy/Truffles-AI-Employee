@@ -83,6 +83,10 @@ summary_gate_validate_candidate() {
     echo "${candidate}: evidence_handoff_invalid"
     return 1
   fi
+  if ! jq -e '(.quality_status.governance_closure_valid // false) == true and (.quality_status.governance_closure_enforced // false) == true' "$summary_path" >/dev/null 2>&1; then
+    echo "${candidate}: governance_closure_invalid"
+    return 1
+  fi
   local summary_dir
   summary_dir=$(dirname "$summary_path")
   local required_artifacts=(
@@ -158,7 +162,7 @@ enforce_llm_evidence_gate() {
 
   if [[ -z "$valid_summary" ]]; then
     echo "ERROR: Core behavior change requires valid LLM-quality evidence." >&2
-    echo "Expected: infra_valid=true, semantic_valid=true, config.dry_run=false, judge.enabled=true, config.mode=llm, llm openai_preflight valid, manual_audit done, evidence bundle complete." >&2
+    echo "Expected: infra_valid=true, semantic_valid=true, config.dry_run=false, judge.enabled=true, config.mode=llm, llm openai_preflight valid, manual_audit done, evidence bundle complete, governance_closure valid+enforced." >&2
     for item in "${errors[@]}"; do
       echo "  - $item" >&2
     done

@@ -94,12 +94,24 @@
 - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "governance or closure or handoff"`
 - `bash -n scripts/session_check.sh`
 - `python3 ops/diagnose.py llm-quality-gates --help`
-- `rg -n "governance_closure_status|p0_governance" ops/diagnose.py scripts/session_check.sh`
+- `rg -n "governance_closure|p0_governance" ops/diagnose.py scripts/session_check.sh`
 
 ## Evidence
 - test outputs (deterministic)
 - updated gate output snippet with `governance_closure_status`
 - parent TP diff + `STATE.md` entry with exact evidence paths
+
+## Execution update (2026-03-03)
+- `Status`: `done` (code + deterministic checks).
+- `Implemented`:
+  - `ops/diagnose.py`: added `_llm_quality_build_governance_closure_status`, summary wiring (`governance_closure` + `quality_status.governance_closure_*`), brief/manifest exposure.
+  - `scripts/session_check.sh`: summary gate now fail-checks `quality_status.governance_closure_valid=true` and `governance_closure_enforced=true`.
+  - `truffles-api/tests/test_booking_quality_status_gate.py`: added deterministic coverage for valid/invalid governance closure scenarios.
+- `Deterministic evidence`:
+  - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "governance or closure or handoff"` -> `18 passed, 64 deselected`.
+  - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py` -> `82 passed`.
+  - `bash -n scripts/session_check.sh` -> `OK`.
+  - `python3 -m py_compile ops/diagnose.py` -> `OK`.
 
 ## Token / run budget (mandatory for expensive suites)
 - **Max full runs:** `0` (doc+deterministic/process block)

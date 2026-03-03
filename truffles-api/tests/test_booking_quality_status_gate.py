@@ -99,6 +99,7 @@ def _load_quality_helpers():
         "_llm_quality_required_artifact_paths",
         "_llm_quality_collect_artifact_integrity",
         "_llm_quality_collect_evidence_handoff_status",
+        "_llm_quality_build_governance_closure_status",
         "_llm_quality_load_json_object",
         "_llm_quality_is_iso_timestamp",
         "_llm_quality_extract_chain_id",
@@ -1731,6 +1732,136 @@ def test_evidence_handoff_status_blocks_on_missing_manifest_and_pending_audit(tm
     assert any(
         reason.startswith("evidence_artifacts_missing:") for reason in status["reasons"]
     )
+
+
+def test_governance_closure_status_valid_for_complete_runtime_evidence(tmp_path):
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_governance_closure_status"]
+
+    run_dir = tmp_path / "run-governance-ok"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    for artifact in (
+        "summary.json",
+        "brief.md",
+        "scenarios.json",
+        "responses.jsonl",
+        "trace_bundle.jsonl",
+        "run_manifest.json",
+        "manual_audit.md",
+    ):
+        (run_dir / artifact).write_text("{}", encoding="utf-8")
+
+    summary = {
+        "run_id": "run-governance-ok",
+        "infra_valid": True,
+        "semantic_valid": True,
+        "manual_audit": {
+            "status": "done",
+            "path": str(run_dir / "manual_audit.md"),
+            "json_path": str(run_dir / "manual_audit.json"),
+        },
+        "quality_status": {
+            "infra_valid": True,
+            "semantic_valid": True,
+            "run_integrity_valid": True,
+            "manual_audit_required": True,
+            "manual_audit_status": "done",
+        },
+    }
+    (run_dir / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (run_dir / "manual_audit.json").write_text(
+        json.dumps(
+            {
+                "status": "done",
+                "run_id": "run-governance-ok",
+                "analyst": "a1",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "analyst_root_causes": ["contract_validated"],
+                "analyst_next_steps": ["promote_next_chain_step"],
+                "judge_alignment": "not_applicable",
+                "winner": "contract",
+                "resolution_summary": "manual audit completed",
+                "findings": [],
+                "oracle_arbitration": {
+                    "conflict_count": 0,
+                    "judge_alignment": "not_applicable",
+                    "winner": "contract",
+                    "resolution_summary": "manual audit completed",
+                },
+                "finding_count": 0,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    status = build(output_dir=str(run_dir), summary=summary)
+    assert status["valid"] is True
+    assert status["enforced"] is True
+    assert status["reasons"] == []
+    assert status["checks"]["manual_audit_done"] is True
+    assert status["evidence_paths"]["run_manifest"] == str(run_dir / "run_manifest.json")
+
+
+def test_governance_closure_status_invalid_for_incomplete_evidence(tmp_path):
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_governance_closure_status"]
+
+    run_dir = tmp_path / "run-governance-bad"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    for artifact in (
+        "summary.json",
+        "brief.md",
+        "scenarios.json",
+        "responses.jsonl",
+        "manual_audit.md",
+    ):
+        (run_dir / artifact).write_text("{}", encoding="utf-8")
+
+    summary = {
+        "run_id": "run-governance-bad",
+        "infra_valid": True,
+        "semantic_valid": True,
+        "manual_audit": {
+            "status": "pending",
+            "path": str(run_dir / "manual_audit.md"),
+            "json_path": str(run_dir / "manual_audit.json"),
+        },
+        "quality_status": {
+            "infra_valid": True,
+            "semantic_valid": True,
+            "run_integrity_valid": True,
+            "manual_audit_required": True,
+            "manual_audit_status": "pending",
+        },
+    }
+    (run_dir / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (run_dir / "manual_audit.json").write_text(
+        json.dumps(
+            {
+                "status": "pending",
+                "run_id": "run-governance-bad",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    status = build(output_dir=str(run_dir), summary=summary)
+    assert status["valid"] is False
+    assert "manual_audit_not_done" in status["reasons"]
+    assert "artifact_integrity_invalid_or_missing" in status["reasons"]
+    assert "evidence_handoff_invalid_or_missing" in status["reasons"]
+    assert status["checks"]["manual_audit_done"] is False
 
 
 def test_manual_audit_gate_blocks_when_latest_run_is_pending(tmp_path):

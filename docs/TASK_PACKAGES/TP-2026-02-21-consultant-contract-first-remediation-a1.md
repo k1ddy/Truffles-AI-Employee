@@ -1262,13 +1262,12 @@ Forensic only (not acceptance):
 | Block | Status | Evidence (code-fact) | Closure condition |
 |---|---|---|---|
 | `P12 Cross-domain hardening` | `blocked` | `docs/TASK_PACKAGES/TP-2026-03-02-p12-cross-domain-hardening-full-closure-a1.md` (`Status: blocked`) | Два реальных runtime non-salon onboarding + guarded acceptance artifacts |
-| `P0 Governance lock` | `partial` | L0 static gates wired in `.github/workflows/ci.yml` + `ops/diagnose.py`; нет полного runtime closure evidence | Отдельный TP на runtime governance closure и status normalization |
+| `P0 Governance lock` | `done` | `docs/TASK_PACKAGES/TP-2026-03-03-p0-governance-runtime-closure-a1.md`; runtime `governance_closure` added in `ops/diagnose.py`, enforced in `scripts/session_check.sh`, deterministic proof `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "governance or closure or handoff"` (`18 passed`) | Closed (machine-checkable governance closure in summary + fail-closed session gate) |
 | `Scenario taxonomy sync (Stage D)` | `partial` | ТЗ требует `production-like/expert-hard/chaos-noise`; runtime checks пока на `booking/info/interrupt/handoff` | Отдельный TP на taxonomy mapping + deterministic coverage |
 | `Secret-safe transport gate` | `partial` | Есть redaction/sanitize (`ops/diagnose.py`), но нет явного fail-closed класса `secret_exposure_detected` | Отдельный TP на detector + fail-closed reason-code + tests |
 
 ### Mandatory Next Blocks (atomic, no ad-hoc waves)
 
-- `docs/TASK_PACKAGES/TP-2026-03-03-p0-governance-runtime-closure-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-03-stage-d-scenario-taxonomy-sync-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-03-secret-safe-transport-fail-closed-a1.md`
 
