@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-operations-governance-closeout-a705.md
-- block_id: UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-tech-debt-decomposition-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC audit governance closeout (deterministic guard + canonical drift cleanup) on top of merged platform-admin control-loop
+- scope: UVC structural debt decomposition wave1 (`UX-11`/`UX-12`) + merge-red deep-link fix with deterministic checks
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -57,8 +57,14 @@
   - Wired governance checker into control-loop (`audit_governance` step in `scripts/platform_admin_control_loop.sh`) and CI (`console-contract-predeploy` in `.github/workflows/ci.yml`).
   - Closed current audit drift in `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md` and `docs/CONSOLE_AUDIT/UX_BACKLOG.md` (duplicate IDs/partial duplication cleanup + explicit gap tags).
   - Published governance closeout artifact report `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md`.
+  - Started `UVC-UX-TECH-DEBT-DECOMPOSITION-A705`.
+  - Added TP `TP-2026-03-03-uvc-ux-tech-debt-decomposition-a705.md` (RCA + one-web-search + release safety + wave split for `UX-11/UX-12`).
+  - Fixed merge-red Playwright flake in `platform-admin.spec.ts` by restoring deep-link URL after `/login` fallback in `Tenants -> Workspace -> Ops` flow.
+  - Extracted `ProvisioningWizard` pure helpers into `console-web/src/components/provisioning-wizard-utils.ts` and rewired component imports.
+  - Extracted `console.py` shared env/query helpers into `truffles-api/app/services/console_router_utils.py` and rewired router imports.
+  - Added deterministic tests `truffles-api/tests/test_console_router_utils.py` (`5 passed`).
 - next:
-  - Open PR for `UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705` and monitor CI.
+  - Open PR for `UVC-UX-TECH-DEBT-DECOMPOSITION-A705` and monitor CI.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -67,12 +73,14 @@
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-program-closeout-steady-loop-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-steady-state-operations-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-operations-governance-closeout-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-tech-debt-decomposition-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-steady-state-operations-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage3-flow-matrix-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage4-antidrift-contract-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage5-rollout-report-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage5-legacy-removal-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-tech-debt-decomposition-wave1-a705.md
   - docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md
   - .github/workflows/platform-admin-control-loop.yml
   - .github/workflows/ci.yml
@@ -92,6 +100,11 @@
   - console-web/src/app/integrations/page.tsx
   - console-web/src/app/tenants/tenants-page-helpers.ts
   - console-web/e2e/platform-admin.spec.ts
+  - console-web/src/components/ProvisioningWizard.tsx
+  - console-web/src/components/provisioning-wizard-utils.ts
+  - truffles-api/app/routers/console.py
+  - truffles-api/app/services/console_router_utils.py
+  - truffles-api/tests/test_console_router_utils.py
   - /tmp/uvc_stage5_kpi_snapshot_a705.json
   - /tmp/uvc_stage5_kpi_post_a705.json
   - /tmp/uvc_stage5_kpi_main_post_a705.json
@@ -123,5 +136,9 @@
   - checks: `scripts/platform_admin_control_loop.sh --run-id governance-closeout-a705 --run-e2e 0 --output-root /tmp/platform_admin_control_loop` (`overall_status=pass`)
   - checks: `scripts/platform_admin_control_loop.sh --run-id local-a705 --run-e2e 0 --fail-level critical --output-root /tmp/platform_admin_control_loop` (`overall_status=pass`)
   - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants|Platform Admin Integrations"` (`26 passed`)
+  - checks: `cd console-web && npm run lint -- --file src/components/ProvisioningWizard.tsx --file src/components/provisioning-wizard-utils.ts --file e2e/platform-admin.spec.ts` (`No ESLint warnings or errors`)
+  - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:e2e -- --grep "deep-link from Tenants action queue to Workspace execute"` (`1 passed`)
+  - checks: `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/services/console_router_utils.py` (`pass`)
+  - checks: `pytest -q truffles-api/tests/test_console_router_utils.py` (`5 passed`)
   - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-03

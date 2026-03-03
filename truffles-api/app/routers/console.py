@@ -385,6 +385,13 @@ from app.services.console_knowledge_preflight import (
     build_knowledge_validate_payload,
     has_recent_knowledge_preflight,
 )
+from app.services.console_router_utils import (
+    dedupe_list as _dedupe_list,
+    parse_env_bool as _parse_env_bool,
+    parse_env_csv_set as _parse_env_csv_set,
+    parse_env_int as _parse_env_int,
+    request_with_query_params as _request_with_query_params,
+)
 from app.services.console_owner_admin import (
     build_data_trust_actions as _build_data_trust_actions,
 )
@@ -2089,17 +2096,6 @@ def _validate_limit(limit: int) -> None:
         raise ConsoleAPIError(400, "INVALID_PARAM", "limit must be between 1 and 100")
 
 
-def _request_with_query_params(request: Request, params: dict[str, object | None]) -> Request:
-    scope = dict(request.scope)
-    normalized: dict[str, str] = {}
-    for key, value in params.items():
-        if value is None:
-            continue
-        normalized[key] = str(value)
-    scope["query_string"] = urlencode(normalized).encode("utf-8")
-    return Request(scope, receive=request.receive)
-
-
 def _parse_uuid_param(name: str, value: Optional[str]) -> Optional[UUID]:
     if value is None:
         return None
@@ -2120,58 +2116,6 @@ def _parse_bool_param(name: str, value: Optional[str], default: bool = False) ->
     if lowered == "false":
         return False
     raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
-
-
-def _parse_env_bool(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    normalized = raw.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return default
-
-
-def _parse_env_csv_set(name: str, *, default: set[str]) -> set[str]:
-    raw = os.getenv(name)
-    if raw is None:
-        return set(default)
-    values = [item.strip() for item in raw.split(",")]
-    return {value for value in values if value}
-
-
-def _parse_env_int(
-    name: str,
-    *,
-    default: int,
-    min_value: int,
-    max_value: int,
-) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        value = int(raw.strip())
-    except (TypeError, ValueError):
-        return default
-    if value < min_value:
-        return min_value
-    if value > max_value:
-        return max_value
-    return value
-
-
-def _dedupe_list(values: list[str]) -> list[str]:
-    unique: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        unique.append(value)
-    return unique
 
 
 _TENANT_LIFECYCLE_MODES = {"active", "archived", "all"}

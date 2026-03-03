@@ -1532,16 +1532,22 @@ test.describe('Platform Admin Tenants', () => {
 
         const nextStepOps = page.getByTestId('workspace-next-step-ops');
         await expect(nextStepOps).toBeVisible();
+        const opsHref = await nextStepOps.getAttribute('href');
+        expect(opsHref).toBeTruthy();
         await nextStepOps.click();
         await Promise.race([
             page.waitForURL(urlPathPattern('/ops'), { timeout: 15000 }),
             page.waitForURL(urlPathPattern('/login'), { timeout: 15000 }),
         ]);
         if (page.url().includes('/login')) {
-            await loginThroughKeycloak(page);
-            await gotoConsoleRoot(page);
-            await resolveSelectionGate(page);
-            await openOps(page);
+            await ensureLoggedIn(page);
+            if (opsHref) {
+                const restoredOpsUrl = opsHref.startsWith('http') ? opsHref : `${resolvedBaseURL}${opsHref}`;
+                await page.goto(restoredOpsUrl, { waitUntil: 'domcontentloaded' });
+            } else {
+                await openOps(page);
+            }
+            await expect(page).toHaveURL(urlPathPattern('/ops'));
         } else {
             await expect(page).toHaveURL(urlPathPattern('/ops'));
         }
