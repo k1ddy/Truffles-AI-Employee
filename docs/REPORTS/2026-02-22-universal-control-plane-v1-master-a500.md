@@ -125,6 +125,7 @@ Post-UCP UX convergence chain (A705):
 - `UVC-UX-STAGE5-A705`: done (rollout go/no-go matrix + KPI baseline/post + merged-main monitoring evidence delivered; fleet decision `GO`, legacy cleanup checklist completed).
 - `UVC-UX-PROGRAM-CLOSEOUT-A705`: done (steady-state control-loop automation handoff completed: wrapper-script + scheduled/dispatch workflow + runbook/canon sync + local evidence artifact).
 - `UVC-UX-STEADY-STATE-OPERATIONS-A705`: done (operator-assist remediation automation added to control-loop with deterministic plan/brief/commands artifacts, strict decision gate option, and contract tests).
+- `UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705`: done (deterministic audit governance gate added to control-loop + CI, canonical audit/backlog duplicates cleaned, and fail-closed governance artifact evidence delivered).
 
 ## 8) Program-level DoD
 

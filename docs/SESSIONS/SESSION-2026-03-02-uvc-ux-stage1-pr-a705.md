@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-steady-state-operations-a705.md
-- block_id: UVC-UX-STEADY-STATE-OPERATIONS-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-operations-governance-closeout-a705.md
+- block_id: UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: Steady-state operator-assist operations loop on top of merged platform-admin control-loop
+- scope: UVC audit governance closeout (deterministic guard + canonical drift cleanup) on top of merged platform-admin control-loop
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -51,8 +51,14 @@
   - Extended `.github/workflows/platform-admin-control-loop.yml` with `remediation_strict` dispatch input.
   - Added deterministic tests `truffles-api/tests/test_platform_admin_remediation_assist.py` (`3 passed`).
   - Updated runbook/canon/master/state docs and published steady-state operations artifact report.
+  - Started `UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705`.
+  - Added TP `TP-2026-03-03-uvc-ux-operations-governance-closeout-a705.md` (RCA + one-web-search + release safety + reuse-first).
+  - Added deterministic governance checker `scripts/check_console_audit_governance.py` with test coverage `truffles-api/tests/test_check_console_audit_governance.py`.
+  - Wired governance checker into control-loop (`audit_governance` step in `scripts/platform_admin_control_loop.sh`) and CI (`console-contract-predeploy` in `.github/workflows/ci.yml`).
+  - Closed current audit drift in `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md` and `docs/CONSOLE_AUDIT/UX_BACKLOG.md` (duplicate IDs/partial duplication cleanup + explicit gap tags).
+  - Published governance closeout artifact report `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md`.
 - next:
-  - Open PR for `UVC-UX-STEADY-STATE-OPERATIONS-A705` and monitor CI.
+  - Open PR for `UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705` and monitor CI.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -60,6 +66,8 @@
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage5-rollout-efficiency-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-program-closeout-steady-loop-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-steady-state-operations-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-operations-governance-closeout-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-steady-state-operations-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage3-flow-matrix-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage4-antidrift-contract-a705.md
@@ -67,8 +75,16 @@
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage5-legacy-removal-a705.md
   - docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md
   - .github/workflows/platform-admin-control-loop.yml
+  - .github/workflows/ci.yml
+  - scripts/check_console_audit_governance.py
+  - truffles-api/tests/test_check_console_audit_governance.py
   - ops/platform_admin_remediation_assist.py
   - scripts/platform_admin_control_loop.sh
+  - docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md
+  - docs/CONSOLE_AUDIT/UX_BACKLOG.md
+  - /tmp/console_audit_governance_a705.json
+  - /tmp/platform_admin_control_loop/governance-closeout-a705/summary.json
+  - /tmp/platform_admin_control_loop/governance-closeout-a705/governance_audit.json
   - truffles-api/tests/test_platform_admin_remediation_assist.py
   - console-web/scripts/check-uvc-antidrift.mjs
   - .github/workflows/ci.yml
@@ -98,9 +114,13 @@
   - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_main_post_a705.json` (`success`)
   - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_main_postmerge_c21_a705.json` (`success`)
   - checks: `python3 -m py_compile ops/platform_admin_remediation_assist.py` (`pass`)
+  - checks: `python3 -m py_compile scripts/check_console_audit_governance.py` (`pass`)
   - checks: `pytest -q truffles-api/tests/test_platform_admin_remediation_assist.py` (`3 passed`)
+  - checks: `pytest -q truffles-api/tests/test_check_console_audit_governance.py` (`4 passed`)
+  - checks: `python3 scripts/check_console_audit_governance.py --pretty --output /tmp/console_audit_governance_a705.json` (`valid=true`)
   - checks: `bash -n scripts/platform_admin_control_loop.sh` (`pass`)
   - checks: `scripts/platform_admin_control_loop.sh --run-id steady-ops-a705 --run-e2e 0 --output-root /tmp/platform_admin_control_loop` (`overall_status=pass`)
+  - checks: `scripts/platform_admin_control_loop.sh --run-id governance-closeout-a705 --run-e2e 0 --output-root /tmp/platform_admin_control_loop` (`overall_status=pass`)
   - checks: `scripts/platform_admin_control_loop.sh --run-id local-a705 --run-e2e 0 --fail-level critical --output-root /tmp/platform_admin_control_loop` (`overall_status=pass`)
   - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants|Platform Admin Integrations"` (`26 passed`)
   - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)

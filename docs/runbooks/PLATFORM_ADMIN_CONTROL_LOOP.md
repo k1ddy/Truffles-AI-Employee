@@ -10,7 +10,7 @@ Prerequisites
 
 ## Quickstart (single entrypoint)
 
-Local deterministic run (default: KPI + anti-drift):
+Local deterministic run (default: KPI + anti-drift + audit governance):
 
 ```bash
 scripts/platform_admin_control_loop.sh --run-id local-<id> --run-e2e 0
@@ -30,6 +30,7 @@ scripts/platform_admin_control_loop.sh \
 Artifacts:
 - `/tmp/platform_admin_control_loop/<run-id>/summary.json`
 - `/tmp/platform_admin_control_loop/<run-id>/kpi_snapshot.json`
+- `/tmp/platform_admin_control_loop/<run-id>/governance_audit.json`
 - `/tmp/platform_admin_control_loop/<run-id>/remediation_plan.json`
 - `/tmp/platform_admin_control_loop/<run-id>/remediation_brief.md`
 - `/tmp/platform_admin_control_loop/<run-id>/remediation_commands.sh`
