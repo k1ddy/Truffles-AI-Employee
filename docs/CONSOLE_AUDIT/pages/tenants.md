@@ -26,6 +26,7 @@ Sections
 - Branches list with search and inline edit.
 - Provisioning Wizard embedded at the bottom (`accessSection="tenants"`).
 - Header shows current context (company/client/branch IDs).
+- Onboarding workspace hint now includes explicit verify loop: after execute in `Workspace`, operator is prompted to verify in `Ops` and return to `Tenants`.
 
 Company section
 - Search input.

@@ -1,6 +1,10 @@
 "use client";
 
 import type { components } from "@/types/api.generated";
+import {
+    providerOpsActionCodeLabel,
+    providerOpsReasonLabels,
+} from "@/lib/provider-ops-language";
 
 type FleetAttentionLevel = "high" | "medium" | "low";
 
@@ -90,7 +94,7 @@ export default function TenantsFleetAttentionPanel({
                                 </div>
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                                жизненный цикл {formatLifecycleLabel(item.lifecycle_state)} · сервис {formatServiceLabel(item.service_state)} · владелец {item.owner_name ?? "—"} · следующее действие {item.next_action}
+                                жизненный цикл {formatLifecycleLabel(item.lifecycle_state)} · сервис {formatServiceLabel(item.service_state)} · владелец {item.owner_name ?? "—"} · следующее действие {providerOpsActionCodeLabel(item.next_action)}
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
                                 филиалы активные {item.active_branches}/{item.total_branches} · неактуальные {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · ошибок отправки за 24ч {item.outbox_failed_24h} · ожидают передачи {item.pending_handovers}
@@ -99,10 +103,10 @@ export default function TenantsFleetAttentionPanel({
                                 опорные филиалы: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                                причины: {item.reasons?.join(", ") || "—"}
+                                причины: {providerOpsReasonLabels(item.reasons, 3).join(", ") || "—"}
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                                действия: {item.suggested_actions?.join(", ") || "—"}
+                                действия: {item.suggested_actions?.map((action) => providerOpsActionCodeLabel(action)).join(", ") || "—"}
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-2">
                                 <button

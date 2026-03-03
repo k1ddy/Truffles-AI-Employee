@@ -763,6 +763,28 @@ async function openIntegrations(page: import('@playwright/test').Page) {
     await expect(page.getByTestId('integrations-title')).toBeVisible();
 }
 
+async function openSettings(page: import('@playwright/test').Page) {
+    const navSettings = page.getByTestId('nav-settings');
+    if (await navSettings.isVisible().catch(() => false)) {
+        await navSettings.click();
+    } else {
+        await page.goto(`${resolvedBaseURL}/settings`, { waitUntil: 'domcontentloaded' });
+    }
+    await expect(page).toHaveURL(urlPathPattern('/settings'));
+    await expect(page.getByTestId('settings-title')).toBeVisible();
+}
+
+async function openOps(page: import('@playwright/test').Page) {
+    const navOps = page.getByTestId('nav-ops');
+    if (await navOps.isVisible().catch(() => false)) {
+        await navOps.click();
+    } else {
+        await page.goto(`${resolvedBaseURL}/ops`, { waitUntil: 'domcontentloaded' });
+    }
+    await expect(page).toHaveURL(urlPathPattern('/ops'));
+    await expect(page.getByTestId('ops-title')).toBeVisible();
+}
+
 async function mockCriticalHealthIncident(page: import('@playwright/test').Page, backlog = 1656) {
     const payload = {
         status: 'ok',
@@ -848,6 +870,16 @@ test.describe('Platform Admin Navigation', () => {
 
         await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
         await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await expect(page.getByTestId('workspace-recommended-open-execute')).toBeVisible();
+
+        const deepLinkParams = await page.evaluate(() => ({
+            branchId: new URL(window.location.href).searchParams.get('branch_id'),
+            recommendedAction: new URL(window.location.href).searchParams.get('recommended_action'),
+            source: new URL(window.location.href).searchParams.get('action_source'),
+        }));
+        expect(deepLinkParams.branchId).toBeTruthy();
+        expect(deepLinkParams.recommendedAction).toBe('provider_start_rebind');
+        expect(deepLinkParams.source).toBe('matrix');
 
         const storedContext = await page.evaluate(() => ({
             clientId: window.localStorage.getItem('console:client_id'),
@@ -855,6 +887,337 @@ test.describe('Platform Admin Navigation', () => {
         }));
         expect(storedContext.clientId).toBeTruthy();
         expect(storedContext.branchId).toBeTruthy();
+    });
+
+    test('should require explicit scope before opening Workspace from Integrations header @smoke', async ({ page }) => {
+        await openIntegrations(page);
+        await expect(page.getByTestId('integrations-workspace-guidance')).toBeVisible();
+
+        const openWorkspaceFromScope = page.getByTestId('integrations-open-workspace-scope');
+        await expect(openWorkspaceFromScope).toBeVisible();
+        await expect(openWorkspaceFromScope).toBeDisabled();
+
+        const companySelect = page.getByTestId('integrations-scope-company');
+        await expect(companySelect).toBeVisible();
+        await companySelect.selectOption({ index: 1 });
+        await expect(companySelect).not.toHaveValue('');
+        const selectedCompanyId = await companySelect.inputValue();
+
+        await expect(openWorkspaceFromScope).toBeEnabled();
+        await openWorkspaceFromScope.click();
+
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+
+        const storedContext = await page.evaluate(() => ({
+            companyId: window.localStorage.getItem('console:company_id'),
+        }));
+        expect(storedContext.companyId).toBe(selectedCompanyId);
+    });
+
+    test('should keep Settings labels plain-language and action-oriented @smoke', async ({ page }) => {
+        await page.route('**/api/proxy/settings', async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, {
+                branches: [
+                    {
+                        id: TENANTS_FIXTURE_BRANCH_ID,
+                        slug: 'almaty_downtown',
+                        name: 'Almaty Downtown',
+                        is_active: true,
+                        instance_id: 'instance-demo-01',
+                        telegram_chat_id: '-100100200300',
+                    },
+                ],
+                bot_config: {
+                    reminder_timeout_1: 10,
+                    reminder_timeout_2: 45,
+                    auto_close_timeout: 120,
+                    quiet_hours_enabled: false,
+                    quiet_hours_start: null,
+                    quiet_hours_end: null,
+                    tone: 'balanced',
+                    autolearn_enabled: true,
+                    booking_enabled: true,
+                    enable_reminders: true,
+                    enable_owner_escalation: true,
+                    learning_consent_status: 'granted',
+                    learning_anonymization_mode: 'partial',
+                    learning_retention_days: 30,
+                    data_sharing: 'enabled',
+                },
+            });
+        });
+        await page.route('**/api/proxy/subscription/summary', async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, {
+                plan_name: 'Pro',
+                contract_label: 'B2B',
+                billable_messages: 1200,
+                monthly_quota: 5000,
+                next_billing_date: '2026-03-10',
+                quota_alert_message: 'Квота в норме.',
+            });
+        });
+        await page.route('**/api/proxy/telegram/verify', async (route) => {
+            if (route.request().method() !== 'POST') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, { success: true });
+        });
+        await page.route('**/api/proxy/telegram/test', async (route) => {
+            if (route.request().method() !== 'POST') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, { success: true });
+        });
+
+        await openSettings(page);
+
+        const settingsPage = page.getByTestId('settings-page');
+        await expect(settingsPage).toBeVisible();
+        const telegramCard = page.getByTestId('settings-telegram-connector');
+        await expect(telegramCard).toContainText('для уровня компании');
+        await expect(telegramCard).not.toContainText('client scope');
+        await expect(page.getByTestId('settings-telegram-verify')).toContainText('Проверить связь');
+        await expect(page.getByTestId('settings-telegram-test')).toContainText('Отправить тест');
+        await expect(telegramCard).not.toContainText('Verify');
+        await expect(telegramCard).not.toContainText('Send test');
+
+        await page.getByTestId('settings-advanced-toggle').click();
+        const workspaceHint = page.getByTestId('settings-onboarding-workspace-hint');
+        await expect(workspaceHint).toContainText('Канонический рабочий поток');
+        await expect(workspaceHint).not.toContainText('execution-flow');
+
+        const branchRow = page.getByTestId('settings-branch-row').first();
+        await expect(branchRow).toContainText('ID канала WhatsApp (instance_id):');
+        await expect(branchRow).not.toContainText('instance_id: instance');
+    });
+
+    test('should keep Ops labels plain-language for primary operator actions @smoke', async ({ page }) => {
+        const fixtureNow = '2026-03-03T12:00:00.000Z';
+
+        await page.route('**/api/proxy/health', async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, {
+                status: 'ok',
+                version: 'e2e',
+                database: 'ok',
+                redis: 'ok',
+                outbox_backlog: 12,
+            });
+        });
+        await page.route('**/api/proxy/metrics/daily**', async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, {
+                date: '2026-03-03',
+                total_cases: 24,
+                pending_cases: 5,
+                active_cases: 8,
+                resolved_cases: 11,
+                avg_resolution_hours: 1.2,
+            });
+        });
+        await page.route('**/api/proxy/telegram/health', async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, {
+                status: 'ok',
+                webhook_alive: true,
+                last_success_at: fixtureNow,
+                last_error_at: null,
+                last_error_message: null,
+                error_rate_24h: 0.01,
+                pending_messages: 1,
+            });
+        });
+        await page.route('**/api/proxy/ops/outbox**', async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, {
+                items: [
+                    {
+                        id: 'outbox-1',
+                        status: 'failed',
+                        attempts: 2,
+                        next_attempt_at: null,
+                        last_error: 'provider timeout',
+                        created_at: fixtureNow,
+                        updated_at: fixtureNow,
+                        conversation_id: null,
+                        branch_id: TENANTS_FIXTURE_BRANCH_ID,
+                        inbound_message_id: 'inbound-1',
+                        channel: 'whatsapp',
+                        message_type: 'text',
+                        message_preview: 'Напоминание о записи',
+                        remote_jid: '77700011122@s.whatsapp.net',
+                        instance_id: 'instance-demo-01',
+                        forwarded_to_telegram: false,
+                    },
+                ],
+                cursor: null,
+                has_more: false,
+                counts: { pending: 1, processing: 2, failed: 3 },
+            });
+        });
+        await page.route('**/api/proxy/ops/reminders**', async (route) => {
+            if (route.request().method() === 'POST') {
+                await toJsonResponse(route, { success: true, retried: 1, skipped: 0, matched: 1 });
+                return;
+            }
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, {
+                items: [
+                    {
+                        id: 'reminder-1',
+                        appointment_id: 'appt-1',
+                        branch_id: TENANTS_FIXTURE_BRANCH_ID,
+                        channel: 'whatsapp',
+                        template: 'appointment_reminder',
+                        run_at: fixtureNow,
+                        status: 'failed',
+                        attempt: 1,
+                        max_attempts: 3,
+                        next_attempt_at: null,
+                        last_error: 'provider timeout',
+                        dedupe_key: 'dedupe-1',
+                        created_at: fixtureNow,
+                        updated_at: fixtureNow,
+                        outbox_id: 'outbox-1',
+                        outbox_status: 'failed',
+                        outbox_attempts: 2,
+                        outbox_last_error: 'provider timeout',
+                        outbox_updated_at: fixtureNow,
+                    },
+                ],
+                cursor: null,
+                has_more: false,
+                counts: { pending: 2, sent: 10, failed: 1, due_now: 2, overdue_15m: 0 },
+                error_buckets: [{ reason: 'provider_timeout', count: 1 }],
+            });
+        });
+        await page.route('**/api/proxy/ops/jobs**', async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, { items: [], cursor: null, has_more: false });
+        });
+        await page.route('**/api/proxy/ops/jobs/catalog', async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, {
+                items: [
+                    {
+                        job_type: 'outbox_process',
+                        label: 'Обработать очередь',
+                        description: 'Проверка и обработка очереди отправки.',
+                        supports_dry_run: true,
+                    },
+                    {
+                        job_type: 'integration_reconcile',
+                        label: 'Сверка интеграций',
+                        description: 'Проверка связки интеграций по филиалам.',
+                        supports_dry_run: true,
+                    },
+                    {
+                        job_type: 'heal',
+                        label: 'Восстановление',
+                        description: 'Безопасная проверка восстановительных действий.',
+                        supports_dry_run: true,
+                    },
+                ],
+            });
+        });
+        await page.route('**/api/proxy/admin/incidents', async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            await toJsonResponse(route, {
+                generated_at: fixtureNow,
+                scope: 'fleet',
+                summary: { total: 1, critical: 1, warn: 0, info: 0 },
+                items: [
+                    {
+                        id: 'incident-1',
+                        scope: 'branch',
+                        severity: 'critical',
+                        title: 'Задержка доставки',
+                        summary: 'Очередь растет быстрее обычного.',
+                        reason_code: 'outbox_backlog',
+                        reason_label: 'Очередь отправки растет',
+                        source: 'ops',
+                        detected_at: fixtureNow,
+                        client_id: TENANTS_FIXTURE_CLIENT_ID,
+                        client_slug: 'demo_salon',
+                        branch_id: TENANTS_FIXTURE_BRANCH_ID,
+                        incident_state: 'open',
+                        metrics: {
+                            outbox_backlog: 120,
+                            outbox_failed_24h: 5,
+                            integration_degraded_branches: 1,
+                            pending_handovers: 2,
+                        },
+                        actions: [],
+                    },
+                ],
+            });
+        });
+
+        await openOps(page);
+
+        const opsPage = page.getByTestId('ops-page');
+        await expect(opsPage).toBeVisible();
+        await expect(page.getByTestId('ops-telegram-verify')).toContainText('Проверить связь');
+        await expect(page.getByTestId('ops-telegram-test')).toContainText('Отправить тест');
+
+        const queueCard = page.getByTestId('ops-queue-card');
+        await expect(queueCard).toContainText('С ошибкой');
+        await expect(queueCard).toContainText('Ожидает');
+        await expect(queueCard).toContainText('В обработке');
+        await expect(queueCard).toContainText('Повторить ошибки');
+        await expect(queueCard).not.toContainText('Failed');
+        await expect(queueCard).not.toContainText('Pending');
+        await expect(queueCard).not.toContainText('Processing');
+        await expect(queueCard).not.toContainText('Retry failed');
+
+        const remindersCard = page.getByTestId('ops-reminders-card');
+        await expect(remindersCard).toContainText('Очередь напоминаний');
+        await expect(remindersCard).toContainText('Шаблон');
+        await expect(remindersCard).toContainText('Повторить по фильтру');
+        await expect(remindersCard).not.toContainText('Reminder Queue');
+        await expect(remindersCard).not.toContainText('Template');
+
+        const incidentsCard = page.getByTestId('ops-incidents-card');
+        await expect(incidentsCard).toContainText('Критичные');
+        await expect(incidentsCard).toContainText('Предупреждения');
+        await expect(incidentsCard).toContainText('Инфо');
+        await expect(incidentsCard).not.toContainText('Critical');
+        await expect(incidentsCard).not.toContainText('Warn');
     });
 });
 
@@ -1062,6 +1425,8 @@ test.describe('Platform Admin Tenants', () => {
         await expect(onboardingRun).toBeVisible();
         await onboardingRun.click();
         await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
+        await expect(page.getByTestId('tenants-onboarding-loop-hint')).toBeVisible();
+        await expect(page.getByTestId('tenants-onboarding-open-ops')).toBeVisible();
     });
 
     test('should deep-link from Tenants action queue to Workspace execute @smoke', async ({ page }) => {
@@ -1084,6 +1449,100 @@ test.describe('Platform Admin Tenants', () => {
         expect(deepLinkParams.branchId).toBeTruthy();
         expect(deepLinkParams.recommendedAction).toBe('provider_start_rebind');
         expect(deepLinkParams.source).toBeTruthy();
+
+        const nextStepOps = page.getByTestId('workspace-next-step-ops');
+        await expect(nextStepOps).toBeVisible();
+        await nextStepOps.click();
+        await expect(page).toHaveURL(urlPathPattern('/ops'));
+        await expect(page.getByTestId('ops-back-workspace')).toBeVisible();
+        const opsBackTenants = page.getByTestId('ops-back-tenants');
+        await expect(opsBackTenants).toBeVisible();
+        await expect(opsBackTenants).toHaveAttribute('href', '/tenants');
+        await openTenants(page);
+    });
+
+    test('should keep provider copy plain-language in Tenants -> Workspace flow @smoke', async ({ page }) => {
+        const actionQueue = page.getByTestId('tenants-action-queue');
+        await expect(actionQueue).toBeVisible();
+
+        await expect(actionQueue).not.toContainText('provider_start_rebind');
+        await expect(actionQueue).not.toContainText('provider_binding_rebind_required');
+
+        const openWorkspaceButton = actionQueue.getByRole('button', { name: 'Открыть Workspace' }).first();
+        await expect(openWorkspaceButton).toBeVisible();
+        await openWorkspaceButton.click();
+
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        const recommendationSection = page.getByTestId('company-workspace-recommended-action');
+        await expect(recommendationSection).toBeVisible();
+
+        await expect(recommendationSection).toContainText('Рекомендуется:');
+        await expect(recommendationSection).toContainText('Старт перепривязки');
+        await expect(recommendationSection).not.toContainText('provider_start_rebind');
+        await expect(recommendationSection).not.toContainText('provider_binding_rebind_required');
+        await expect(recommendationSection).toContainText('Что это значит:');
+        await expect(recommendationSection).toContainText('Причины');
+        await expect(recommendationSection).toContainText('нужна перепривязка канала');
+        await expect(recommendationSection).toContainText('источник подсказки:');
+        await expect(recommendationSection).not.toContainText('source:');
+    });
+
+    test('should keep Integrations and Workspace labels plain-language @smoke', async ({ page }) => {
+        await openIntegrations(page);
+
+        const integrationsPage = page.getByTestId('integrations-page');
+        await expect(integrationsPage).not.toContainText('owner:');
+        await expect(integrationsPage).not.toContainText('paid_until');
+        await expect(integrationsPage).not.toContainText('next_renewal_at');
+
+        const row = page.getByTestId('integrations-row').first();
+        if (!(await row.isVisible().catch(() => false))) {
+            await expect(page.getByTestId('integrations-empty')).toBeVisible();
+            return;
+        }
+
+        await expect(row).toContainText('Ответственный:');
+        await expect(row).toContainText('Оплачено до:');
+        await expect(row).toContainText('ID канала');
+
+        await page.getByTestId('integrations-row-open-workspace').first().click();
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+
+        const workspacePage = page.getByTestId('company-workspace-page');
+        await expect(workspacePage).toContainText('источник подсказки:');
+        await expect(workspacePage).not.toContainText('source:');
+        await expect(workspacePage).not.toContainText('owner:');
+        await expect(workspacePage).not.toContainText('paid_until');
+        await expect(workspacePage).not.toContainText('next_renewal_at');
+    });
+
+    test('should ignore legacy workspace recommendation storage without query context @smoke', async ({ page }) => {
+        await page.evaluate((branchId) => {
+            window.localStorage.setItem(
+                'console:workspace_recommended_action',
+                JSON.stringify({
+                    branch_id: branchId,
+                    action: 'provider_start_rebind',
+                    reasons: ['provider_binding_rebind_required'],
+                    source: 'legacy-storage',
+                    captured_at: new Date().toISOString(),
+                }),
+            );
+        }, TENANTS_FIXTURE_BRANCH_ID);
+
+        await page.goto(`${resolvedBaseURL}/company-workspace?branch_id=${TENANTS_FIXTURE_BRANCH_ID}`, { waitUntil: 'domcontentloaded' });
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await expect(page.getByTestId('workspace-recommended-open-execute')).toHaveCount(0);
+        await expect(page.getByText(/нет активной подсказки/i)).toBeVisible();
+        await expect(page.getByTestId('workspace-empty-next-steps')).toBeVisible();
+        const returnTenants = page.getByTestId('workspace-return-tenants');
+        const returnIntegrations = page.getByTestId('workspace-return-integrations');
+        await expect(returnTenants).toBeVisible();
+        await expect(returnIntegrations).toBeVisible();
+        await expect(returnTenants).toHaveAttribute('href', '/tenants');
+        await expect(returnIntegrations).toHaveAttribute('href', '/integrations');
     });
 
     test('should show explicit field contracts in Tenants branch editor @smoke', async ({ page }) => {
@@ -1320,7 +1779,7 @@ test.describe('Platform Admin Tenants', () => {
             await page.getByTestId('tenants-mode-portfolio').click();
         }
 
-        const refreshKpiButton = page.getByRole('button', { name: /Обновить/i });
+        const refreshKpiButton = page.getByRole('button', { name: /Обновить сводку/i });
         if (await refreshKpiButton.isVisible().catch(() => false)) {
             await refreshKpiButton.click();
         }

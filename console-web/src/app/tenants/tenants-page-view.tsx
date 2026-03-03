@@ -2,6 +2,7 @@
 
 import type { ComponentProps } from "react";
 import type { Session } from "next-auth";
+import Link from "next/link";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
 import TenantsActionQueuePanel, { type TenantsActionQueueItem } from "@/components/TenantsActionQueuePanel";
@@ -175,7 +176,7 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
             {showOnboarding ? (
                 <div className="mt-10" data-testid="tenants-onboarding-section">
                     <div className="mb-3 rounded-lg border border-blue-300/60 bg-blue-50 p-3 text-xs text-blue-900">
-                        Канонический execution-flow: выполняйте remediation и go-live в `Company Workspace`.
+                        Канонический рабочий поток: действия по исправлению и допуску к запуску выполняйте в `Company Workspace`.
                         <button
                             className="btn-ghost ml-2"
                             onClick={onOpenWorkspaceFromOnboarding}
@@ -183,6 +184,12 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
                         >
                             Открыть Workspace
                         </button>
+                        <div className="mt-2 text-blue-900/80" data-testid="tenants-onboarding-loop-hint">
+                            После действий в Workspace подтвердите результат в Ops и вернитесь сюда для следующего шага.
+                            <Link href="/ops" className="ml-2 font-semibold underline underline-offset-2" data-testid="tenants-onboarding-open-ops">
+                                Перейти в Ops
+                            </Link>
+                        </div>
                     </div>
                     <ProvisioningWizard session={session} accessSection="tenants" />
                 </div>

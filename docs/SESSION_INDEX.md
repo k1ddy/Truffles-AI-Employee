@@ -360,3 +360,5 @@
 | 2026-01-27-consultant-canon-a2 | active | feat/2026-01-27-consultant-canon-a2 | /home/zhan/worktrees/2026-01-27-consultant-canon-a2 | docs/TASK_PACKAGES/TP-2026-01-27-consultant-canon-alignment.md | 2026-01-29 |
 | 2026-01-27-console-ux-selection | done | feat/console-ux-selection | /home/zhan/worktrees/console-ux-selection | docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md | 2026-01-28 |
 | 2026-01-27-admin-login-verify-a2 | done | feat/2026-01-27-admin-login-verify-a2 | /home/zhan/worktrees/2026-01-27-admin-login-verify-a2 | docs/TASK_PACKAGES/TP-2026-01-27-admin-login-verify.md | 2026-01-27 |
+| 2026-03-02-uvc-ux-stage1-pr-a705 | active | feat/2026-03-02-uvc-ux-stage1-pr-a705 | /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705 | docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md | 2026-03-03 |
+| 2026-03-03-uvc-ux-stage2-a705 | done | feat/2026-03-03-uvc-ux-stage2-a705 | /home/zhan/worktrees/2026-03-03-uvc-ux-stage2-a705 | docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage2-language-hints-a705.md | 2026-03-03 |
