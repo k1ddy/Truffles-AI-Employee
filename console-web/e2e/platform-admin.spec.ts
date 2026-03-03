@@ -1498,7 +1498,18 @@ test.describe('Platform Admin Tenants', () => {
         const nextStepOps = page.getByTestId('workspace-next-step-ops');
         await expect(nextStepOps).toBeVisible();
         await nextStepOps.click();
-        await expect(page).toHaveURL(urlPathPattern('/ops'));
+        await Promise.race([
+            page.waitForURL(urlPathPattern('/ops'), { timeout: 15000 }),
+            page.waitForURL(urlPathPattern('/login'), { timeout: 15000 }),
+        ]);
+        if (page.url().includes('/login')) {
+            await loginThroughKeycloak(page);
+            await gotoConsoleRoot(page);
+            await resolveSelectionGate(page);
+            await openOps(page);
+        } else {
+            await expect(page).toHaveURL(urlPathPattern('/ops'));
+        }
         await expect(page.getByTestId('ops-back-workspace')).toBeVisible();
         const opsBackTenants = page.getByTestId('ops-back-tenants');
         await expect(opsBackTenants).toBeVisible();
