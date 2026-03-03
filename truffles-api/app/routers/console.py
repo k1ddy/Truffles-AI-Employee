@@ -385,13 +385,6 @@ from app.services.console_knowledge_preflight import (
     build_knowledge_validate_payload,
     has_recent_knowledge_preflight,
 )
-from app.services.console_router_utils import (
-    dedupe_list as _dedupe_list,
-    parse_env_bool as _parse_env_bool,
-    parse_env_csv_set as _parse_env_csv_set,
-    parse_env_int as _parse_env_int,
-    request_with_query_params as _request_with_query_params,
-)
 from app.services.console_owner_admin import (
     build_data_trust_actions as _build_data_trust_actions,
 )
@@ -427,6 +420,21 @@ from app.services.console_owner_admin import (
 )
 from app.services.console_owner_admin import (
     safe_int as _safe_int,
+)
+from app.services.console_router_utils import (
+    dedupe_list as _dedupe_list,
+)
+from app.services.console_router_utils import (
+    parse_env_bool as _parse_env_bool,
+)
+from app.services.console_router_utils import (
+    parse_env_csv_set as _parse_env_csv_set,
+)
+from app.services.console_router_utils import (
+    parse_env_int as _parse_env_int,
+)
+from app.services.console_router_utils import (
+    request_with_query_params as _request_with_query_params,
 )
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import resolve_telegram_routing
