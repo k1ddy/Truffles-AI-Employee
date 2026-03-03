@@ -18,7 +18,15 @@ cmd="${1:-}"
 shift || true
 echo "$cmd $*" >> "__LOG__"
 if [[ "$cmd" == "prepare" ]]; then
-  echo -e "chain-demo\tlock\ttok-demo"
+  mode="lock"
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "--mode" && $# -gt 1 ]]; then
+      mode="$2"
+      break
+    fi
+    shift
+  done
+  echo -e "chain-demo\t${mode}\ttok-demo"
   exit 0
 fi
 if [[ "$cmd" == "finalize" ]]; then
@@ -109,11 +117,17 @@ def _write_pg_checklist(path: Path) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _guarded_base_cmd(script_path: Path, run_id: str, pg_checklist: Path) -> list[str]:
+def _guarded_base_cmd(
+    script_path: Path,
+    run_id: str,
+    pg_checklist: Path,
+    *,
+    mode: str = "lock",
+) -> list[str]:
     return [
         str(script_path),
         "--mode",
-        "lock",
+        mode,
         "--run-id",
         run_id,
         "--pg-checklist",
@@ -225,3 +239,40 @@ def test_guarded_wrapper_blocks_when_controller_prepare_fails(tmp_path):
     assert "chain controller prepare failed" in result.stderr
     assert controller_log.exists()
     assert not diagnose_log.exists()
+
+
+def test_guarded_wrapper_supports_canary_mode(tmp_path):
+    repo_root = _repo_root()
+    wrapper = repo_root / "scripts" / "llm_quality_guarded.sh"
+    if not wrapper.exists():
+        pytest.skip("llm_quality_guarded.sh not present")
+
+    controller_log = tmp_path / "controller_canary.log"
+    diagnose_log = tmp_path / "diagnose_canary.log"
+    fake_controller = tmp_path / "fake_controller_canary.sh"
+    fake_diagnose = tmp_path / "fake_diagnose_canary.py"
+    pg_checklist = tmp_path / "pg_checklist_canary.json"
+    _write_fake_controller(fake_controller, controller_log)
+    _write_fake_diagnose(fake_diagnose, diagnose_log)
+    _write_pg_checklist(pg_checklist)
+
+    run_id = f"booking-canary-wrapper-{uuid4().hex[:8]}"
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_CONTROLLER_BIN"] = str(fake_controller)
+    env["LLM_QUALITY_DIAGNOSE_BIN"] = "python3"
+    env["LLM_QUALITY_DIAGNOSE_SCRIPT"] = str(fake_diagnose)
+
+    result = subprocess.run(
+        _guarded_base_cmd(wrapper, run_id, pg_checklist, mode="canary"),
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    controller_text = controller_log.read_text(encoding="utf-8")
+    diagnose_text = diagnose_log.read_text(encoding="utf-8")
+    assert "prepare --mode canary" in controller_text
+    assert "finalize --mode canary" in controller_text
+    assert "--chain-step canary" in diagnose_text

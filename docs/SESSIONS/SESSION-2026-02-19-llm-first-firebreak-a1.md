@@ -514,4 +514,26 @@
     - updated `docs/TASK_PACKAGES/TP-2026-03-02-p12-cross-domain-hardening-full-closure-a1.md` (status `in_progress`, deterministic done + acceptance pending),
     - updated parent execution status in `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`,
     - updated `STATE.md` NOW block with packet evidence.
-- last_updated: 2026-03-02T17:53:28+05:00
+  - Implemented `P14` full closure (evidence + STATE handoff fail-closed gates):
+    - `ops/diagnose.py`: added `evidence_handoff` contract (required artifacts, fail reasons, manifest/summary sync).
+    - `scripts/quality_chain_controller.sh`: blocks next canonical step when previous-step evidence handoff is incomplete.
+    - `scripts/session_check.sh`: enforces complete evidence bundle + `manual_audit=done` + `STATE.md` handoff for core behavior merges.
+    - deterministic coverage added/extended in:
+      - `truffles-api/tests/test_booking_quality_status_gate.py`
+      - `truffles-api/tests/test_booking_quality_chain_controller.py`
+  - Validation (green, P14 closure packet):
+    - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "handoff or artifact or evidence"` (`7 passed, 73 deselected`)
+    - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py -k "handoff or evidence"` (`4 passed, 15 deselected`)
+    - `bash -n scripts/session_check.sh`
+    - `bash -n scripts/quality_chain_controller.sh`
+    - `ruff check ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_chain_controller.py` (`All checks passed`)
+    - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+  - Canon/doc sync after packet:
+    - parent TP updated: `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md` (`P14 -> done`, `P12 -> blocked`),
+    - block TP updated: `docs/TASK_PACKAGES/TP-2026-03-02-p14-evidence-state-handoff-full-closure-a1.md` (`Status: done`),
+    - block TP updated: `docs/TASK_PACKAGES/TP-2026-03-02-p12-cross-domain-hardening-full-closure-a1.md` (`Status: blocked`, explicit unblock conditions),
+    - `STATE.md` NOW updated (`P14 done`, `P12 blocked` fact).
+  - PR sync:
+    - pushed to `fix/llm-first-firebreak-2026-02-19` after syncing with remote branch tip (`origin/fix/llm-first-firebreak-2026-02-19`) to satisfy pre-push `session_gate`.
+    - active PR: `https://github.com/k1ddy/Truffles-AI-Employee/pull/873`.
+- last_updated: 2026-03-02T19:38:44+05:00

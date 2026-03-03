@@ -156,20 +156,20 @@
 - `Expiry/trigger to stop deferral`: n/a.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: close `P13` canary+rollback automation.
-- `First deterministic check command`: `rg -n "canary|rollback" scripts ops`
-- `Blocked-by conditions`: red cross-domain matrix checks.
+- `Next block objective`: keep `P12` blocked until two real runtime non-salon domains are explicitly onboarded for guarded acceptance.
+- `First deterministic check command`: `pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py`
+- `Blocked-by conditions`: missing runtime onboarding dataset/slug pair for two non-salon domains.
 - `Owner role for closure`: Brain + Top Architect.
 
 ## Handoff (for zero-context next agent)
 - `Ready for next agent`: yes.
-- `Start from`: non-salon domain inventory + `test_cross_domain_signal_contract_suite.py`.
+- `Start from`: decision on runtime onboarding scope for two non-salon domains, then guarded acceptance plan.
 - `Do not touch`: policy-core behavior logic.
-- `Open risks`: missing production-like non-salon datasets.
+- `Open risks`: missing runtime non-salon onboarding keeps `P12` open/blocked.
 - `First command to verify`: `pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py`.
 
 ## Execution status (2026-03-02)
-- `Status`: `in_progress` (deterministic scope done, acceptance evidence pending)
+- `Status`: `blocked` (business deferral: no runtime onboarding of two non-salon domains in current cycle)
 - `Implementation facts`:
   - Added canonical non-salon reference packs:
     - `truffles-api/app/knowledge/clinic_pack/SALON_TRUTH.yaml`
@@ -183,6 +183,9 @@
   - `pytest -q truffles-api/tests/test_cross_domain_signal_contract_suite.py` (included in packet run; green).
   - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "cross_domain_matrix_contract"` (`3 passed, 74 deselected`).
   - `ruff check truffles-api/tests/test_cross_domain_signal_contract_suite.py` (green inside packet lint run).
-- `Remaining to close P12`:
-  - Guarded acceptance artifacts for minimum two non-salon domains (`lock/replay` or matrix equivalent) with valid `infra_valid/semantic_valid/run_integrity_valid/manual_audit`.
-  - Update parent TP + `STATE.md` with concrete artifact paths after acceptance runs.
+- `Block reason`:
+  - Current execution cycle does not onboard two real runtime non-salon domains; therefore required guarded acceptance artifacts cannot be produced.
+- `Unblock conditions`:
+  - Onboard two real runtime non-salon domains (slug + runtime data readiness).
+  - Run guarded acceptance artifacts for both domains with valid `infra_valid/semantic_valid/run_integrity_valid/manual_audit`.
+  - Update parent TP + `STATE.md` with concrete artifact paths.

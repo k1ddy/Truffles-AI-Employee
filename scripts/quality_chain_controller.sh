@@ -4,12 +4,13 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/quality_chain_controller.sh prepare --mode <lock|replay|full> --run-id <id> [--output-dir <dir>] [--chain-id <id>] [--resume] [--pg-checklist <path>]
-  scripts/quality_chain_controller.sh finalize --mode <lock|replay|full> --run-id <id> [--output-dir <dir>] [--summary-path <path>] [--exit-code <n>] [--chain-id <id>]
-  scripts/quality_chain_controller.sh bootstrap --mode <lock|replay|full> --run-id <id> [--output-dir <dir>] [--summary-path <path>] [--exit-code <n>] [--chain-id <id>]
+  scripts/quality_chain_controller.sh prepare --mode <lock|replay|canary|full> --run-id <id> [--output-dir <dir>] [--chain-id <id>] [--resume] [--pg-checklist <path>]
+  scripts/quality_chain_controller.sh finalize --mode <lock|replay|canary|full> --run-id <id> [--output-dir <dir>] [--summary-path <path>] [--exit-code <n>] [--chain-id <id>]
+  scripts/quality_chain_controller.sh bootstrap --mode <lock|replay|canary|full> --run-id <id> [--output-dir <dir>] [--summary-path <path>] [--exit-code <n>] [--chain-id <id>]
   scripts/quality_chain_controller.sh status --chain-id <id>
   scripts/quality_chain_controller.sh close --chain-id <id>
   scripts/quality_chain_controller.sh abort --chain-id <id> [--reason <text>]
+  scripts/quality_chain_controller.sh rollback --chain-id <id> [--reason <text>]
 
 Aliases:
   start   -> prepare --mode lock
@@ -49,7 +50,7 @@ case "$COMMAND" in
   advance)
     COMMAND="prepare"
     ;;
-  prepare|finalize|bootstrap|status|close|abort)
+  prepare|finalize|bootstrap|status|close|abort|rollback)
     ;;
   --help|-h|help)
     usage
@@ -122,10 +123,10 @@ CHAIN_ROOT="${LLM_QUALITY_CHAIN_ROOT:-/tmp/booking_quality/_chain}"
 
 if [[ "$COMMAND" == "prepare" || "$COMMAND" == "finalize" || "$COMMAND" == "bootstrap" ]]; then
   [[ -n "$MODE" ]] || die "--mode is required for $COMMAND"
-  [[ "$MODE" =~ ^(lock|replay|full)$ ]] || die "--mode must be one of: lock|replay|full"
+  [[ "$MODE" =~ ^(lock|replay|canary|full)$ ]] || die "--mode must be one of: lock|replay|canary|full"
   [[ -n "$RUN_ID" ]] || die "--run-id is required for $COMMAND"
 fi
-if [[ "$COMMAND" == "status" || "$COMMAND" == "close" || "$COMMAND" == "abort" ]]; then
+if [[ "$COMMAND" == "status" || "$COMMAND" == "close" || "$COMMAND" == "abort" || "$COMMAND" == "rollback" ]]; then
   [[ -n "$CHAIN_ID" ]] || die "--chain-id is required for $COMMAND"
 fi
 if [[ "$COMMAND" == "prepare" || "$COMMAND" == "finalize" || "$COMMAND" == "bootstrap" ]]; then
@@ -165,7 +166,7 @@ RESUME_FLAG = str(sys.argv[9] or "0").strip() == "1"
 ABORT_REASON = (sys.argv[10] or "").strip() or "manual_abort"
 PG_CHECKLIST_PATH = (sys.argv[11] or "").strip()
 
-STEPS = ("lock", "replay", "full")
+STEPS = ("lock", "replay", "canary", "full")
 BLOCKERS = ("wrong_action", "handoff_miss", "booking_flow_break", "run_completion_gap")
 GO_TO_FULL_KEYS = ("PG0", "PG1", "PG2", "PG3", "PG4", "PG5", "PG6")
 DEFECT_MAPPING_KEYS = ("defect_class", "target_test", "gate", "owner")
@@ -193,7 +194,7 @@ def sanitize_chain_id(token: str) -> str:
 def derive_chain_id(run_id: str, explicit: str) -> str:
     if explicit:
         return sanitize_chain_id(explicit)
-    matched = re.match(r"^booking-(lock|replay|full)-(.+)$", run_id, flags=re.IGNORECASE)
+    matched = re.match(r"^booking-(lock|replay|canary|full)-(.+)$", run_id, flags=re.IGNORECASE)
     if matched:
         return sanitize_chain_id(matched.group(2))
     return sanitize_chain_id(run_id)
@@ -764,6 +765,55 @@ def _summary_manual_audit_status(summary: dict) -> str:
     ).strip().casefold()
 
 
+def _summary_evidence_handoff_status(summary: dict, output_dir: str):
+    quality_status = (
+        summary.get("quality_status") if isinstance(summary.get("quality_status"), dict) else {}
+    )
+    explicit_valid = parse_status_bool(quality_status.get("evidence_handoff_valid"))
+    if explicit_valid is True:
+        return True, None
+    if explicit_valid is False:
+        reasons = [str(item).strip() for item in (quality_status.get("evidence_handoff_reasons") or []) if str(item).strip()]
+        if reasons:
+            return False, f"summary_evidence_handoff_invalid:{';'.join(reasons)}"
+        return False, "summary_evidence_handoff_invalid"
+
+    # Legacy fallback when explicit evidence_handoff status is absent.
+    artifact_integrity = (
+        summary.get("artifact_integrity") if isinstance(summary.get("artifact_integrity"), dict) else {}
+    )
+    artifact_valid = parse_status_bool(quality_status.get("artifact_integrity_valid"))
+    if artifact_valid is None:
+        artifact_valid = parse_status_bool(artifact_integrity.get("valid"))
+    if artifact_valid is False:
+        missing = list(quality_status.get("artifact_integrity_missing") or artifact_integrity.get("missing") or [])
+        if missing:
+            normalized = ",".join(sorted({str(item).strip() for item in missing if str(item).strip()}))
+            return False, f"summary_artifact_incomplete:{normalized}"
+        return False, "summary_artifact_incomplete"
+
+    required_paths = {
+        "summary.json": os.path.join(output_dir, "summary.json"),
+        "brief.md": os.path.join(output_dir, "brief.md"),
+        "scenarios.json": os.path.join(output_dir, "scenarios.json"),
+        "responses.jsonl": os.path.join(output_dir, "responses.jsonl"),
+        "trace_bundle.jsonl": os.path.join(output_dir, "trace_bundle.jsonl"),
+        "run_manifest.json": os.path.join(output_dir, "run_manifest.json"),
+        "manual_audit.md": os.path.join(output_dir, "manual_audit.md"),
+        "manual_audit.json": os.path.join(output_dir, "manual_audit.json"),
+    }
+    missing_required = [
+        name for name, path in required_paths.items() if not os.path.exists(path)
+    ]
+    if missing_required:
+        return False, f"summary_artifact_incomplete:{','.join(missing_required)}"
+
+    manual_status = _summary_manual_audit_status(summary)
+    if manual_status not in VALID_DONE_AUDIT_STATES:
+        return False, f"summary_manual_audit_incomplete:{manual_status or 'missing'}"
+    return True, None
+
+
 def validate_multi_seed_evidence(payload: dict, source: dict, *, freshness_hours):
     evidence = source.get("multi_seed_evidence")
     if not isinstance(evidence, dict):
@@ -878,6 +928,8 @@ def step_next(mode: str):
     if mode == "lock":
         return "replay"
     if mode == "replay":
+        return "canary"
+    if mode == "canary":
         return "full"
     return None
 
@@ -933,7 +985,7 @@ def derive_target_blocker_total(summary: dict | None) -> tuple[int, int]:
 
 
 def replace_mode_in_run_id(run_id: str, next_mode: str) -> str:
-    match = re.match(r"^booking-(lock|replay|full)-(.+)$", run_id)
+    match = re.match(r"^booking-(lock|replay|canary|full)-(.+)$", run_id)
     if match:
         return f"booking-{next_mode}-{match.group(2)}"
     return f"booking-{next_mode}-{run_id}"
@@ -975,6 +1027,16 @@ def build_next_command(state: dict, *, mode: str, run_id: str, output_dir: str, 
             f"scripts/llm_quality_guarded.sh --mode replay --run-id {next_run_id} -- "
             "--scenarios-file <lock_output_dir>/scenarios.json --baseline-summary <lock_output_dir>/summary.json "
             "--reset-before-dialog --quality-lane acceptance"
+        )
+    if next_mode == "canary":
+        if lock_output_dir:
+            return (
+                f"scripts/llm_quality_guarded.sh --mode canary --run-id {next_run_id} -- "
+                f"--baseline-summary {lock_output_dir}/summary.json --quality-lane acceptance --fail-on-regression"
+            )
+        return (
+            f"scripts/llm_quality_guarded.sh --mode canary --run-id {next_run_id} -- "
+            "--baseline-summary <lock_output_dir>/summary.json --quality-lane acceptance --fail-on-regression"
         )
     if next_mode == "full":
         if lock_output_dir:
@@ -1028,6 +1090,72 @@ def write_brief(state: dict, *, chain_id: str, output_dir: str, mode: str, run_i
             continue
 
 
+def _last_canonical_step(state: dict):
+    steps = state.get("steps") if isinstance(state.get("steps"), dict) else {}
+    for step in reversed(STEPS):
+        entry = steps.get(step) if isinstance(steps.get(step), dict) else {}
+        if str(entry.get("status") or "").strip().lower() == "canonical":
+            return step, str(entry.get("run_id") or "").strip() or None, str(entry.get("output_dir") or "").strip() or None
+    return None, None, None
+
+
+def _write_rollback_artifacts(chain_id: str, output_dir: str, payload: dict):
+    artifact_paths = []
+    if output_dir:
+        artifact_paths.append(os.path.join(output_dir, "rollback.json"))
+    artifact_paths.append(os.path.join(CHAIN_ROOT, f"{chain_id}-rollback.json"))
+    for path in artifact_paths:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+        except Exception:
+            continue
+    return artifact_paths[0] if artifact_paths else None
+
+
+def apply_rollback(
+    state: dict,
+    *,
+    chain_id: str,
+    reason: str,
+    source: str,
+    failed_mode: str | None,
+    failed_run_id: str | None,
+    failed_output_dir: str | None,
+):
+    baseline_step, baseline_run_id, baseline_output_dir = _last_canonical_step(state)
+    rollback_payload = {
+        "status": "executed",
+        "source": source or "manual",
+        "reason": reason or "rollback_requested",
+        "failed_mode": failed_mode or None,
+        "failed_run_id": failed_run_id or None,
+        "failed_output_dir": failed_output_dir or None,
+        "baseline_step": baseline_step,
+        "baseline_run_id": baseline_run_id,
+        "baseline_output_dir": baseline_output_dir,
+        "executed_at": now_iso(),
+    }
+    artifact_path = _write_rollback_artifacts(chain_id, failed_output_dir or "", rollback_payload)
+    if artifact_path:
+        rollback_payload["artifact_path"] = artifact_path
+    state["rollback"] = rollback_payload
+    state["status"] = "blocked"
+    state["blocked_reason"] = "canary_rollback_executed" if source == "auto_canary_no_go" else "rollback_executed"
+    state["active"] = {
+        "step": "",
+        "run_id": "",
+        "token": "",
+        "resume_required": False,
+        "output_dir": "",
+        "updated_at": now_iso(),
+    }
+    state["next_command"] = None
+    state["updated_at"] = now_iso()
+    return rollback_payload
+
+
 def with_lock(path: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     lock_fp = open(lock_path(path), "a+", encoding="utf-8")
@@ -1069,6 +1197,7 @@ def ensure_state_defaults(state: dict, chain_id: str) -> dict:
     state.setdefault("history", [])
     state.setdefault("next_command", None)
     state.setdefault("blocked_reason", None)
+    state.setdefault("rollback", None)
     state["updated_at"] = now_iso()
     return state
 
@@ -1092,7 +1221,12 @@ def expected_step_for_prepare(state: dict):
 def ensure_previous_step_brief(state: dict, mode: str):
     if mode == "lock":
         return True, None
-    prev_mode = "lock" if mode == "replay" else "replay"
+    if mode == "replay":
+        prev_mode = "lock"
+    elif mode == "canary":
+        prev_mode = "replay"
+    else:
+        prev_mode = "canary"
     steps = state.get("steps") if isinstance(state.get("steps"), dict) else {}
     prev_entry = steps.get(prev_mode) if isinstance(steps.get(prev_mode), dict) else {}
     if str(prev_entry.get("status") or "").strip().lower() != "canonical":
@@ -1103,6 +1237,17 @@ def ensure_previous_step_brief(state: dict, mode: str):
     brief_path = os.path.join(output_dir, "brief_for_next_agent.md")
     if not os.path.exists(brief_path):
         return False, f"missing_brief_for_next_agent:{prev_mode}"
+    summary_path = str(prev_entry.get("summary_path") or "").strip() or os.path.join(
+        output_dir, "summary.json"
+    )
+    summary_payload = load_json(summary_path)
+    if not isinstance(summary_payload, dict):
+        return False, f"missing_summary_for_previous_step:{prev_mode}"
+    evidence_ok, evidence_reason = _summary_evidence_handoff_status(
+        summary_payload, output_dir
+    )
+    if not evidence_ok:
+        return False, f"missing_evidence_handoff:{prev_mode}:{evidence_reason}"
     return True, None
 
 
@@ -1280,7 +1425,21 @@ def cmd_finalize():
         else:
             next_step = MODE
 
-        if no_improve >= expensive_limit:
+        rollback_applied = False
+        if MODE == "canary" and step_status in {"invalid", "failed"}:
+            apply_rollback(
+                state,
+                chain_id=chain_id,
+                reason=stop_reason or step_status,
+                source="auto_canary_no_go",
+                failed_mode=MODE,
+                failed_run_id=RUN_ID,
+                failed_output_dir=OUTPUT_DIR,
+            )
+            rollback_applied = True
+            next_step = None
+            resume_required = False
+        elif no_improve >= expensive_limit:
             state["status"] = "blocked"
             state["blocked_reason"] = "root_cause_required"
             next_step = None
@@ -1295,7 +1454,9 @@ def cmd_finalize():
 
         active = state.get("active") if isinstance(state.get("active"), dict) else {}
         token = str(active.get("token") or "").strip()
-        if step_status == "incomplete":
+        if rollback_applied:
+            pass
+        elif step_status == "incomplete":
             state["active"] = {
                 "step": MODE,
                 "run_id": RUN_ID,
@@ -1325,17 +1486,21 @@ def cmd_finalize():
                 "target_blockers_total": target_total,
                 "judge_judged": judged,
                 "exit_code": EXIT_CODE,
+                "rollback_executed": rollback_applied,
             }
         )
         state["history"] = history[-50:]
 
-        next_command = build_next_command(
-            state,
-            mode=MODE,
-            run_id=RUN_ID,
-            output_dir=OUTPUT_DIR,
-            step_status=step_status,
-        )
+        if rollback_applied:
+            next_command = None
+        else:
+            next_command = build_next_command(
+                state,
+                mode=MODE,
+                run_id=RUN_ID,
+                output_dir=OUTPUT_DIR,
+                step_status=step_status,
+            )
         state["next_command"] = next_command
         state["updated_at"] = now_iso()
 
@@ -1451,7 +1616,21 @@ def cmd_bootstrap():
         else:
             next_step = MODE
 
-        if no_improve >= expensive_limit:
+        rollback_applied = False
+        if MODE == "canary" and step_status in {"invalid", "failed"}:
+            apply_rollback(
+                state,
+                chain_id=chain_id,
+                reason=stop_reason or step_status,
+                source="auto_canary_no_go",
+                failed_mode=MODE,
+                failed_run_id=RUN_ID,
+                failed_output_dir=OUTPUT_DIR,
+            )
+            rollback_applied = True
+            next_step = None
+            resume_required = False
+        elif no_improve >= expensive_limit:
             state["status"] = "blocked"
             state["blocked_reason"] = "root_cause_required"
             next_step = None
@@ -1464,7 +1643,9 @@ def cmd_bootstrap():
             state["status"] = "active"
             state["blocked_reason"] = None
 
-        if step_status == "incomplete":
+        if rollback_applied:
+            pass
+        elif step_status == "incomplete":
             state["active"] = {
                 "step": MODE,
                 "run_id": RUN_ID,
@@ -1495,17 +1676,21 @@ def cmd_bootstrap():
                 "judge_judged": judged,
                 "exit_code": EXIT_CODE,
                 "source": "bootstrap",
+                "rollback_executed": rollback_applied,
             }
         )
         state["history"] = history[-50:]
 
-        next_command = build_next_command(
-            state,
-            mode=MODE,
-            run_id=RUN_ID,
-            output_dir=OUTPUT_DIR,
-            step_status=step_status,
-        )
+        if rollback_applied:
+            next_command = None
+        else:
+            next_command = build_next_command(
+                state,
+                mode=MODE,
+                run_id=RUN_ID,
+                output_dir=OUTPUT_DIR,
+                step_status=step_status,
+            )
         state["next_command"] = next_command
         state["updated_at"] = now_iso()
 
@@ -1571,6 +1756,35 @@ def cmd_abort(chain_id: str, reason: str):
         _lock.close()
 
 
+def cmd_rollback(chain_id: str, reason: str):
+    path = state_path(chain_id)
+    _lock = with_lock(path)
+    try:
+        payload = load_json(path)
+        if not isinstance(payload, dict):
+            eprint("chain_state_missing")
+            raise SystemExit(2)
+        state = ensure_state_defaults(payload, chain_id)
+        current_step = str(state.get("current_step") or "").strip().lower() or None
+        active = state.get("active") if isinstance(state.get("active"), dict) else {}
+        active_run_id = str(active.get("run_id") or "").strip() or None
+        active_output_dir = str(active.get("output_dir") or "").strip() or None
+        apply_rollback(
+            state,
+            chain_id=chain_id,
+            reason=reason or "manual_rollback",
+            source="manual",
+            failed_mode=current_step,
+            failed_run_id=active_run_id,
+            failed_output_dir=active_output_dir,
+        )
+        write_json_atomic(path, state)
+    finally:
+        if fcntl is not None:
+            fcntl.flock(_lock.fileno(), fcntl.LOCK_UN)
+        _lock.close()
+
+
 os.makedirs(CHAIN_ROOT, exist_ok=True)
 
 if COMMAND == "prepare":
@@ -1597,6 +1811,12 @@ elif COMMAND == "abort":
         eprint("chain_id_invalid")
         raise SystemExit(2)
     cmd_abort(chain_id, ABORT_REASON)
+elif COMMAND == "rollback":
+    chain_id = derive_chain_id("", CHAIN_ID_ARG)
+    if not chain_id:
+        eprint("chain_id_invalid")
+        raise SystemExit(2)
+    cmd_rollback(chain_id, ABORT_REASON)
 else:
     eprint(f"unsupported_command:{COMMAND}")
     raise SystemExit(2)
