@@ -121,8 +121,9 @@ Post-UCP UX convergence chain (A705):
 - `UVC-UX-STAGE1-A705`: done (IA ownership matrix in existing tabs, no new top-level tab introduced).
 - `UVC-UX-STAGE2-A705`: done (plain-language contract hardening across Tenants/Settings/Knowledge/Ops/Marketing).
 - `UVC-UX-STAGE3-A705`: done (cross-tab loop continuity Integrations -> Workspace -> Ops -> Tenants).
-- `UVC-UX-STAGE4-A705`: done in PR scope (fail-closed anti-drift contract gate, CI wired); final fleet status follows merge.
+- `UVC-UX-STAGE4-A705`: done (fail-closed anti-drift contract gate merged and green in CI).
 - `UVC-UX-STAGE5-A705`: done (rollout go/no-go matrix + KPI baseline/post + merged-main monitoring evidence delivered; fleet decision `GO`, legacy cleanup checklist completed).
+- `UVC-UX-PROGRAM-CLOSEOUT-A705`: done (steady-state control-loop automation handoff completed: wrapper-script + scheduled/dispatch workflow + runbook/canon sync + local evidence artifact).
 
 ## 8) Program-level DoD
 

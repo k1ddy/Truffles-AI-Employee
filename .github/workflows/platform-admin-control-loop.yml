@@ -1,0 +1,77 @@
+name: Platform Admin Control Loop
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      run_e2e:
+        description: "Run platform-admin e2e lane (requires reachable PLAYWRIGHT_BASE_URL)"
+        type: boolean
+        default: false
+      fail_level:
+        description: "KPI guard fail threshold"
+        type: choice
+        options:
+          - critical
+          - warning
+        default: critical
+      playwright_base_url:
+        description: "Base URL used for optional e2e lane"
+        type: string
+        default: "http://127.0.0.1:3100"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-admin-control-loop
+  cancel-in-progress: false
+
+jobs:
+  control-loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: console-web/package-lock.json
+
+      - name: Install console dependencies
+        run: npm --prefix console-web ci
+
+      - name: Run platform admin control loop
+        env:
+          RUN_E2E_INPUT: ${{ github.event.inputs.run_e2e || 'false' }}
+          FAIL_LEVEL_INPUT: ${{ github.event.inputs.fail_level || 'critical' }}
+          PLAYWRIGHT_BASE_URL_INPUT: ${{ github.event.inputs.playwright_base_url || 'http://127.0.0.1:3100' }}
+        run: |
+          RUN_E2E_FLAG=0
+          if [ "$RUN_E2E_INPUT" = "true" ]; then
+            RUN_E2E_FLAG=1
+          fi
+
+          scripts/platform_admin_control_loop.sh \
+            --run-id "gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --run-e2e "$RUN_E2E_FLAG" \
+            --fail-level "$FAIL_LEVEL_INPUT" \
+            --output-root "/tmp/platform_admin_control_loop" \
+            --playwright-base-url "$PLAYWRIGHT_BASE_URL_INPUT"
+
+      - name: Upload control loop artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-admin-control-loop-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/platform_admin_control_loop/gh-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
