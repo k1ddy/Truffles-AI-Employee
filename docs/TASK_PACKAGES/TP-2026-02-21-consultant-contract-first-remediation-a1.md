@@ -1206,3 +1206,73 @@ Forensic only (not acceptance):
 - Нельзя повышать роль judge до primary acceptance oracle.
 - Нельзя заменять root-cause фиксы повтором expensive runs.
 - Нельзя принимать успех по "зелёным общим метрикам" при красных target blockers.
+
+## Execution Addendum (2026-03-03, contract alignment + atomic closure, mandatory)
+
+### Release Scope vs Program Scope (binding)
+
+- `Release Scope` (текущий релизный контур): блоки, закрываемые кодом/тестами/гейтами в этой ветке без внешнего onboarding.
+- `Program Scope` (долгий контур): блоки, требующие внешней готовности runtime/данных/доменных onboardings.
+- Правило фиксации статуса:
+  - `done`: есть deterministic + runtime evidence по контракту блока.
+  - `partial`: есть кодовая реализация, но нет полного evidence closure.
+  - `blocked`: closure зависит от внешнего условия (business/runtime onboarding), не решается локальной правкой в ветке.
+
+### Atomic Closure Rule (mandatory)
+
+- Один открытый блок = один TP = один PR = один closure evidence packet.
+- Разбиение на `step/wave` допустимо только если явно объявлено в TP до начала реализации.
+- Пост-фактум декомпозиция (после частичной реализации) запрещена.
+- Для каждого TP closure обязателен:
+  - deterministic checks,
+  - runtime/quality checks (если блок требует),
+  - exact artifact paths,
+  - обновление parent TP статуса в том же цикле.
+
+### Optimization-First Change Policy (mandatory)
+
+- Порядок изменений: `reuse -> modify -> remove -> add`.
+- Для каждого нового TP обязательна таблица:
+  - `What reused`
+  - `What modified`
+  - `What removed as duplicate`
+  - `What added and why reuse/modify were insufficient`
+- Добавление новых сущностей без аудита дубликатов запрещено.
+
+### UX/Business Coherence Gate (mandatory)
+
+- Любое изменение должно явно маппиться на продуктовый исход `FACT/COLLECT/HANDOFF`.
+- Запрещены функции/кнопки/ветки, не имеющие измеримого бизнес-эффекта или дублирующие существующие флоу.
+- Для каждого нового TP обязательны:
+  - `Business flow impact` (какой исход меняется),
+  - `Operator UX impact` (что упрощается/убирается),
+  - `Duplicate-surface audit` (где исключены пересечения с существующими реализациями).
+
+### Scenario Taxonomy Sync (mandatory)
+
+- Stage D считается закрытым только при явной связке бизнес-терминов и runtime-гейтов.
+- Каноническое соответствие для acceptance governance:
+  - `production-like` -> coverage `booking,info,handoff` + валидный scenario_contract.
+  - `expert-hard` -> наличие hard cases (`interrupt`, `check_booking`, `confirm`, policy/law intents) в corpus.
+  - `chaos/noise` -> noise-слой в сценариях (`tags`/generator) и верификация в L2 micro-chaos.
+- До внедрения явного taxonomy mapping в коде/runbook статус Stage D = `partial`.
+
+### Open Blocks Matrix (code-fact, 2026-03-03)
+
+| Block | Status | Evidence (code-fact) | Closure condition |
+|---|---|---|---|
+| `P12 Cross-domain hardening` | `blocked` | `docs/TASK_PACKAGES/TP-2026-03-02-p12-cross-domain-hardening-full-closure-a1.md` (`Status: blocked`) | Два реальных runtime non-salon onboarding + guarded acceptance artifacts |
+| `P0 Governance lock` | `partial` | L0 static gates wired in `.github/workflows/ci.yml` + `ops/diagnose.py`; нет полного runtime closure evidence | Отдельный TP на runtime governance closure и status normalization |
+| `Scenario taxonomy sync (Stage D)` | `partial` | ТЗ требует `production-like/expert-hard/chaos-noise`; runtime checks пока на `booking/info/interrupt/handoff` | Отдельный TP на taxonomy mapping + deterministic coverage |
+| `Secret-safe transport gate` | `partial` | Есть redaction/sanitize (`ops/diagnose.py`), но нет явного fail-closed класса `secret_exposure_detected` | Отдельный TP на detector + fail-closed reason-code + tests |
+
+### Mandatory Next Blocks (atomic, no ad-hoc waves)
+
+- `docs/TASK_PACKAGES/TP-2026-03-03-p0-governance-runtime-closure-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-03-stage-d-scenario-taxonomy-sync-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-03-secret-safe-transport-fail-closed-a1.md`
+
+### Status Precedence Note
+
+- Для открытых блоков использовать только `Open Blocks Matrix (code-fact, 2026-03-03)` в этом addendum.
+- Более ранние секции со статусами трактуются как исторический срез и не переопределяют матрицу 2026-03-03.
