@@ -7634,6 +7634,7 @@ def _llm_quality_write_brief(path, summary):
     replay_command = (summary or {}).get("replay_command")
     manual_audit = (summary or {}).get("manual_audit") or {}
     artifact_integrity = (summary or {}).get("artifact_integrity") or {}
+    governance_closure = (summary or {}).get("governance_closure") or {}
     lines = [
         "# LLM Quality Brief",
         "",
@@ -7658,6 +7659,8 @@ def _llm_quality_write_brief(path, summary):
         f"- responses_path: `{summary.get('responses_path')}`",
         f"- trace_bundle_path: `{summary.get('trace_bundle_path')}`",
         f"- artifacts_valid: `{artifact_integrity.get('valid')}`",
+        f"- governance_closure_valid: `{governance_closure.get('valid')}`",
+        f"- governance_closure_reasons: `{governance_closure.get('reasons')}`",
     ]
     if scenario_source.get("path"):
         lines.append(f"- scenario_source_path: `{scenario_source.get('path')}`")
@@ -8084,6 +8087,15 @@ def _llm_quality_write_run_manifest(
         "infra_valid": summary.get("infra_valid") or (summary.get("quality_status") or {}).get("infra_valid"),
         "semantic_valid": summary.get("semantic_valid") or (summary.get("quality_status") or {}).get("semantic_valid"),
         "run_integrity_valid": (summary.get("quality_status") or {}).get("run_integrity_valid"),
+        "governance_closure_valid": (
+            (summary.get("quality_status") or {}).get("governance_closure_valid")
+        ),
+        "governance_closure_enforced": (
+            (summary.get("quality_status") or {}).get("governance_closure_enforced")
+        ),
+        "governance_closure_reasons": list(
+            ((summary.get("quality_status") or {}).get("governance_closure_reasons") or [])
+        ),
         "manual_audit_status": manual_audit_status,
         "artifact_integrity_valid": artifact_integrity.get("valid"),
         "artifact_integrity_missing": artifact_integrity.get("missing"),
@@ -8203,6 +8215,131 @@ def _llm_quality_collect_evidence_handoff_status(
         "manual_audit_done": manual_done,
         "manual_audit_forensic_sla_valid": forensic_valid,
         "manual_audit_forensic_sla_reasons": forensic_reasons,
+    }
+
+
+def _llm_quality_build_governance_closure_status(*, output_dir, summary=None):
+    normalized_dir = os.path.abspath(os.path.expanduser(str(output_dir or "").strip() or "."))
+    summary_payload = summary if isinstance(summary, dict) else {}
+    quality_status = (
+        summary_payload.get("quality_status")
+        if isinstance(summary_payload.get("quality_status"), dict)
+        else {}
+    )
+    run_integrity = (
+        summary_payload.get("run_integrity")
+        if isinstance(summary_payload.get("run_integrity"), dict)
+        else {}
+    )
+    infra_valid = summary_payload.get("infra_valid")
+    if infra_valid is None:
+        infra_valid = quality_status.get("infra_valid")
+    semantic_valid = summary_payload.get("semantic_valid")
+    if semantic_valid is None:
+        semantic_valid = quality_status.get("semantic_valid")
+    run_integrity_valid = quality_status.get("run_integrity_valid")
+    if run_integrity_valid is None:
+        run_integrity_valid = run_integrity.get("valid")
+
+    manual_status = _llm_quality_resolve_manual_audit_status(normalized_dir)
+    manual_audit_done = bool(manual_status.get("manual_audit_done"))
+
+    artifact_integrity = (
+        summary_payload.get("artifact_integrity")
+        if isinstance(summary_payload.get("artifact_integrity"), dict)
+        else _llm_quality_collect_artifact_integrity(normalized_dir)
+    )
+    evidence_handoff = (
+        summary_payload.get("evidence_handoff")
+        if isinstance(summary_payload.get("evidence_handoff"), dict)
+        else _llm_quality_collect_evidence_handoff_status(
+            output_dir=normalized_dir,
+            summary=summary_payload,
+            artifact_integrity=artifact_integrity,
+        )
+    )
+
+    gate_specs = (
+        ("run_economy_gate", "run_economy"),
+        ("manual_audit_gate", "manual_audit_gate"),
+        ("quality_constant_gate", "quality_constant_gate"),
+        ("forensic_sla_gate", "forensic_sla_gate"),
+        ("oracle_conflict_gate", "oracle_conflict_gate"),
+        ("scenario_governance_gate", "scenario_governance_gate"),
+        ("chain_controller_gate", "chain_controller_gate"),
+        ("workaround_register_gate", "workaround_register_gate"),
+    )
+    gate_checks = {}
+    for gate_name, summary_key in gate_specs:
+        nested_status = (
+            summary_payload.get(summary_key)
+            if isinstance(summary_payload.get(summary_key), dict)
+            else {}
+        )
+        valid_key = f"{gate_name}_valid"
+        enforced_key = f"{gate_name}_enforced"
+        gate_valid = quality_status.get(valid_key)
+        if gate_valid is None:
+            gate_valid = nested_status.get("valid")
+        gate_enforced = quality_status.get(enforced_key)
+        if gate_enforced is None:
+            gate_enforced = nested_status.get("enforced")
+        gate_checks[gate_name] = {
+            "valid": gate_valid,
+            "enforced": bool(gate_enforced),
+        }
+
+    reasons = []
+    if infra_valid is not True:
+        reasons.append("infra_invalid_or_missing")
+    if semantic_valid is not True:
+        reasons.append("semantic_invalid_or_missing")
+    if run_integrity_valid is not True:
+        reasons.append("run_integrity_invalid_or_missing")
+    if manual_audit_done is not True:
+        reasons.append("manual_audit_not_done")
+    if artifact_integrity.get("valid") is not True:
+        reasons.append("artifact_integrity_invalid_or_missing")
+    if evidence_handoff.get("valid") is not True:
+        reasons.append("evidence_handoff_invalid_or_missing")
+    for gate_name, gate_check in gate_checks.items():
+        if gate_check.get("enforced") and gate_check.get("valid") is not True:
+            reasons.append(f"{gate_name}_invalid_or_missing")
+    reasons = list(dict.fromkeys(str(item) for item in reasons if str(item).strip()))
+
+    evidence_paths = {
+        name: path
+        for name, path in (evidence_handoff.get("paths") or {}).items()
+        if isinstance(name, str) and isinstance(path, str) and path.strip()
+    }
+    summary_path = os.path.join(normalized_dir, "summary.json")
+    if not evidence_paths.get("summary"):
+        evidence_paths["summary"] = summary_path
+    evidence_paths["brief"] = evidence_paths.get("brief") or os.path.join(normalized_dir, "brief.md")
+    evidence_paths["run_manifest"] = evidence_paths.get("run_manifest") or os.path.join(
+        normalized_dir, "run_manifest.json"
+    )
+    evidence_paths["manual_audit"] = evidence_paths.get("manual_audit") or manual_status.get(
+        "manual_audit_path"
+    )
+    evidence_paths["manual_audit_json"] = evidence_paths.get("manual_audit_json") or manual_status.get(
+        "manual_audit_json_path"
+    )
+
+    return {
+        "valid": not reasons,
+        "enforced": True,
+        "reasons": reasons,
+        "checks": {
+            "infra_valid": infra_valid,
+            "semantic_valid": semantic_valid,
+            "run_integrity_valid": run_integrity_valid,
+            "manual_audit_done": manual_audit_done,
+            "artifact_integrity_valid": artifact_integrity.get("valid"),
+            "evidence_handoff_valid": evidence_handoff.get("valid"),
+            "gates": gate_checks,
+        },
+        "evidence_paths": evidence_paths,
     }
 
 
@@ -8693,6 +8830,22 @@ def _llm_quality_write_failure_artifacts(
     summary["quality_status"]["evidence_handoff_valid"] = summary["evidence_handoff"]["valid"]
     summary["quality_status"]["evidence_handoff_reasons"] = list(
         summary["evidence_handoff"]["reasons"]
+    )
+    summary["governance_closure"] = _llm_quality_build_governance_closure_status(
+        output_dir=output_dir,
+        summary=summary,
+    )
+    summary["quality_status"]["governance_closure_valid"] = summary["governance_closure"][
+        "valid"
+    ]
+    summary["quality_status"]["governance_closure_enforced"] = summary["governance_closure"][
+        "enforced"
+    ]
+    summary["quality_status"]["governance_closure_reasons"] = list(
+        summary["governance_closure"].get("reasons") or []
+    )
+    summary["quality_status"]["governance_closure_evidence_paths"] = dict(
+        summary["governance_closure"].get("evidence_paths") or {}
     )
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
