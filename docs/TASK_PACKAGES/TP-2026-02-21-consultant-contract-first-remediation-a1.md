@@ -1259,11 +1259,11 @@ Forensic only (not acceptance):
 |---|---|---|---|
 | `P0 Governance lock` | `done` | `docs/TASK_PACKAGES/TP-2026-03-03-p0-governance-runtime-closure-a1.md`; runtime `governance_closure` added in `ops/diagnose.py`, enforced in `scripts/session_check.sh`, deterministic proof `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "governance or closure or handoff"` (`18 passed`) | Closed (machine-checkable governance closure in summary + fail-closed session gate) |
 | `Scenario taxonomy sync (Stage D)` | `done` | `docs/TASK_PACKAGES/TP-2026-03-03-stage-d-scenario-taxonomy-sync-a1.md`; runtime mapping added in `ops/diagnose.py` (`taxonomy_mapping_version`, `business_bucket_presence`, `business_valid`); deterministic proof `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "scenario_governance or realism"` | Closed (business taxonomy enforced fail-closed in acceptance governance + runbook synced) |
-| `Secret-safe transport gate` | `partial` | Есть redaction/sanitize (`ops/diagnose.py`), но нет явного fail-closed класса `secret_exposure_detected` | Отдельный TP на detector + fail-closed reason-code + tests |
+| `Secret-safe transport gate` | `done` | `ops/diagnose.py`: added `secret_exposure_detected` taxonomy + acceptance fail-closed gate `_llm_quality_build_secret_transport_gate_status`; removed webhook `curl` argv path from `_send_webhook_payload`; `scripts/llm_quality_guarded.sh` sanitizes ledger command args; tests green: `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "secret or webhook_secret_preflight"` and `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py` | Closed (explicit secret in argv blocked for acceptance; command artifacts redacted; deterministic tests green) |
 
 ### Mandatory Next Blocks (atomic, no ad-hoc waves)
 
-- `docs/TASK_PACKAGES/TP-2026-03-03-secret-safe-transport-fail-closed-a1.md`
+- none in `binding-addendum 2026-03-03` (all matrix blocks are `done`).
 
 ### Status Precedence Note
 
