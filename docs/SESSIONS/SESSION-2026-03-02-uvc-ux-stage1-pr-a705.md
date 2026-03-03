@@ -23,15 +23,28 @@
   - `Ops`: explicit return links back to `Workspace` and `Tenants`.
   - Extended deterministic Playwright coverage for loop continuity and return-path contracts.
   - Published Stage 3 flow matrix artifact.
+  - Implemented Stage 4 fail-closed anti-drift gate:
+  - Added deterministic script `console-web/scripts/check-uvc-antidrift.mjs` covering OpenAPI->generated sync, control-tower endpoint presence, selector continuity, suite continuity, and ownership anti-dup guard.
+  - Wired mandatory CI execution in `console-contract-predeploy` (`npm --prefix console-web run check:uvc-antidrift`).
+  - Published Stage 4 anti-drift contract artifact.
+  - Stabilized platform-admin smoke contracts and confirmed full lane green (`26 passed`).
 - next:
-  - Stage 4: anti-drift contract suite expansion and fail-closed gates.
+  - Stage 5: rollout/efficiency proof, KPI cadence, and legacy-path removal under existing IA constraints.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage4-quality-antidrift-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage5-rollout-efficiency-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage3-flow-matrix-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage4-antidrift-contract-a705.md
+  - console-web/scripts/check-uvc-antidrift.mjs
+  - .github/workflows/ci.yml
+  - console-web/package.json
   - console-web/e2e/platform-admin.spec.ts
-  - checks: `cd console-web && npm run lint -- --file src/app/tenants/tenants-page-view.tsx --file src/app/integrations/page.tsx --file src/app/company-workspace/page.tsx --file src/components/OpsPage.tsx --file e2e/platform-admin.spec.ts` (`No ESLint warnings or errors`)
-  - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants|Platform Admin Integrations"` (`25 passed`)
+  - checks: `cd truffles-api && python3 scripts/generate_openapi.py --check` (`OpenAPI specification generated .../contracts/console_api/openapi.generated.yaml`)
+  - checks: `cd console-web && npm run generate:api` (`openapi-typescript ... -> src/types/api.generated.ts`)
+  - checks: `cd console-web && npm run check:uvc-antidrift` (`UVC anti-drift check passed`)
+  - checks: `cd console-web && npm run lint -- --file scripts/check-uvc-antidrift.mjs --file e2e/platform-admin.spec.ts --file src/lib/api-client.ts` (`No ESLint warnings or errors`)
+  - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants|Platform Admin Integrations"` (`26 passed`)
+  - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-03

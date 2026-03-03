@@ -591,6 +591,19 @@ jobs:
           pip install openapi-spec-validator
           python -m openapi_spec_validator contracts/console_api/openapi.v1.yaml
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: console-web/package-lock.json
+
+      - name: Install console-web dependencies
+        run: npm --prefix console-web ci
+
+      - name: UVC anti-drift contract gate
+        run: npm --prefix console-web run check:uvc-antidrift
+
   console-k6:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_k6 == 'true' }}
     runs-on: ubuntu-latest

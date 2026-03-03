@@ -32,6 +32,12 @@ Reports
 - `docs/REPORTS/2026-02-15-owner-admin-wave3-simple-settings-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave4-action-loop-v1.md`
 
+Artifacts
+- `docs/CONSOLE_AUDIT/artifacts/2026-03-02-uvc-stage1-ia-matrix-a705.md`
+- `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage2-language-glossary-a705.md`
+- `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage3-flow-matrix-a705.md`
+- `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage4-antidrift-contract-a705.md`
+
 Backlog
 - `docs/CONSOLE_AUDIT/UX_BACKLOG.md`
 

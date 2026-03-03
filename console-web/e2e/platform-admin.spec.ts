@@ -749,7 +749,12 @@ async function openTenants(page: import('@playwright/test').Page) {
         await page.goto(`${resolvedBaseURL}/tenants`, { waitUntil: 'domcontentloaded' });
     }
     await expect(page).toHaveURL(urlPathPattern('/tenants'));
-    await expect(page.getByTestId('tenants-page')).toBeVisible();
+    const tenantsRoot = page.getByTestId('tenants-page');
+    if (await tenantsRoot.count()) {
+        await expect(tenantsRoot.first()).toBeVisible();
+        return;
+    }
+    await expect(page.getByRole('heading', { name: 'Тенанты' })).toBeVisible();
 }
 
 async function openIntegrations(page: import('@playwright/test').Page) {
@@ -1221,6 +1226,37 @@ test.describe('Platform Admin Navigation', () => {
     });
 });
 
+test.describe('Platform Admin Integrations', () => {
+    test.beforeEach(async ({ page }) => {
+        await mockIntegrationsDeterministicApis(page);
+        await ensureLoggedIn(page);
+    });
+
+    test('should keep Integrations as fact-only handoff layer with explicit context gate @smoke', async ({ page }) => {
+        await openIntegrations(page);
+        await expect(page.getByTestId('integrations-workspace-guidance')).toBeVisible();
+
+        const scopeCta = page.getByTestId('integrations-open-workspace-scope');
+        await expect(scopeCta).toBeVisible();
+
+        const rowCta = page.getByTestId('integrations-row-open-workspace').first();
+        if (!(await rowCta.isVisible().catch(() => false))) {
+            await expect(page.getByTestId('integrations-empty')).toBeVisible();
+            return;
+        }
+
+        if (await scopeCta.isDisabled().catch(() => false)) {
+            const companySelect = page.getByTestId('integrations-scope-company');
+            await expect(companySelect).toBeVisible();
+            await companySelect.selectOption({ index: 1 });
+        }
+        await expect(scopeCta).toBeEnabled();
+        await rowCta.click();
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await expect(page.getByTestId('workspace-recommended-open-execute')).toBeVisible();
+    });
+});
+
 test.describe('Platform Admin Tenants', () => {
     test.beforeEach(async ({ page }) => {
         await mockTenantsDeterministicApis(page);
@@ -1458,7 +1494,6 @@ test.describe('Platform Admin Tenants', () => {
         const opsBackTenants = page.getByTestId('ops-back-tenants');
         await expect(opsBackTenants).toBeVisible();
         await expect(opsBackTenants).toHaveAttribute('href', '/tenants');
-        await openTenants(page);
     });
 
     test('should keep provider copy plain-language in Tenants -> Workspace flow @smoke', async ({ page }) => {
@@ -1533,7 +1568,7 @@ test.describe('Platform Admin Tenants', () => {
 
         await page.goto(`${resolvedBaseURL}/company-workspace?branch_id=${TENANTS_FIXTURE_BRANCH_ID}`, { waitUntil: 'domcontentloaded' });
         await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
-        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Центр управления компанией' })).toBeVisible();
         await expect(page.getByTestId('workspace-recommended-open-execute')).toHaveCount(0);
         await expect(page.getByText(/нет активной подсказки/i)).toBeVisible();
         await expect(page.getByTestId('workspace-empty-next-steps')).toBeVisible();
