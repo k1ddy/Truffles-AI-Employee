@@ -117,6 +117,13 @@ Current queue head:
 - Latest completed block (2026-03-02): `UCPV1-PHASE13` closure pass-gate on fresh `origin/main` with deterministic checks (`108 passed`), governance checks (`SESSION_AGENT=a704 scripts/session_check.sh`, `scripts/zero_context_gate.sh`), and contract check (`python3 scripts/generate_openapi.py --check`).
 - Latest closed slice update (2026-03-02): `UCPV1-PHASE13` slice3 added `GET /console/v1/admin/control-tower/migration-program/{wave}` with per-wave deterministic decision (`promote|hold`) and wave-filtered promotion action queue.
 
+Post-UCP UX convergence chain (A705):
+- `UVC-UX-STAGE1-A705`: done (IA ownership matrix in existing tabs, no new top-level tab introduced).
+- `UVC-UX-STAGE2-A705`: done (plain-language contract hardening across Tenants/Settings/Knowledge/Ops/Marketing).
+- `UVC-UX-STAGE3-A705`: done (cross-tab loop continuity Integrations -> Workspace -> Ops -> Tenants).
+- `UVC-UX-STAGE4-A705`: done in PR scope (fail-closed anti-drift contract gate, CI wired); final fleet status follows merge.
+- `UVC-UX-STAGE5-A705`: in_progress (rollout go/no-go matrix + KPI baseline/post evidence + legacy cleanup checklist delivered; final closeout blocked by merge-to-main and owner fleet decision).
+
 ## 8) Program-level DoD
 
 - Каждый бизнес-блок проходит analysis gate до начала реализации.
