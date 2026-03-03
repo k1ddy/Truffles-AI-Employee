@@ -175,7 +175,7 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
             {showOnboarding ? (
                 <div className="mt-10" data-testid="tenants-onboarding-section">
                     <div className="mb-3 rounded-lg border border-blue-300/60 bg-blue-50 p-3 text-xs text-blue-900">
-                        Канонический execution-flow: выполняйте remediation и go-live в `Company Workspace`.
+                        Канонический рабочий поток: действия по исправлению и допуску к запуску выполняйте в `Company Workspace`.
                         <button
                             className="btn-ghost ml-2"
                             onClick={onOpenWorkspaceFromOnboarding}

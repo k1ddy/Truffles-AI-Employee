@@ -308,12 +308,28 @@ function incidentChipClass(severity: "critical" | "warn" | "info"): string {
 
 function incidentSeverityLabel(severity: "critical" | "warn" | "info"): string {
     if (severity === "critical") {
-        return "critical";
+        return "критичный";
     }
     if (severity === "warn") {
-        return "warn";
+        return "предупреждение";
     }
-    return "info";
+    return "инфо";
+}
+
+function outboxStatusLabel(status: string): string {
+    if (status === "failed") {
+        return "с ошибкой";
+    }
+    if (status === "pending") {
+        return "ожидает";
+    }
+    if (status === "processing") {
+        return "в обработке";
+    }
+    if (status === "sent") {
+        return "отправлено";
+    }
+    return status;
 }
 
 function incidentStateChipClass(state: IncidentItem["incident_state"]): string {
@@ -353,53 +369,53 @@ function formatJsonPreview(payload: Record<string, unknown> | null, limit = 160)
 function incidentFastSteps(item: IncidentItem): string[] {
     if (item.reason_code === "integration_degraded") {
         return [
-            "Проверьте branch из инцидента и запустите dry-run integration_reconcile.",
-            "Если dry-run подтверждает проблему, выполните execute для целевого филиала.",
-            "Перепроверьте failed_24h и последний error через 3-5 минут.",
+            "Проверьте филиал из инцидента и запустите проверку без записи (`integration_reconcile` dry-run).",
+            "Если проверка без записи подтверждает проблему, выполните действие в режиме выполнения.",
+            "Через 3-5 минут перепроверьте ошибки отправки за 24 часа и последние ошибки.",
         ];
     }
     if (item.reason_code === "outbox_backlog") {
         return [
-            "Проверьте pending/processing/failed и тренд за последние минуты.",
-            "Запустите dry-run outbox_process, затем execute при безопасном результате.",
-            "Подтвердите, что backlog снижается, а новые failed не растут.",
+            "Проверьте очередь отправки: ожидает/в обработке/с ошибкой и тренд за последние минуты.",
+            "Запустите `outbox_process` в режиме проверки без записи, затем в режиме выполнения при безопасном результате.",
+            "Подтвердите, что backlog снижается, а новые ошибки не растут.",
         ];
     }
     if (item.reason_code === "provider_auth" || item.reason_code === "provider_unavailable" || item.reason_code === "provider_rate_limited" || item.reason_code === "provider_billing_blocked") {
         return [
-            "Сверьте provider состояние и reason_label по филиалу.",
-            "Перейдите в Workspace/Integrations и выполните dry-run remediation.",
-            "После execute проверьте стабилизацию delivery без роста failed_24h.",
+            "Сверьте состояние провайдера и причину инцидента по филиалу.",
+            "Перейдите в Workspace или Integrations и выполните проверку действия без записи.",
+            "После выполнения проверьте стабилизацию доставки без роста ошибок за 24 часа.",
         ];
     }
     if (item.reason_code === "handover_backlog") {
         return [
-            "Проверьте нагрузку по handoff и oldest unresolved.",
-            "Приоритизируйте входящие handoff и снимите узкие места по SLA.",
-            "Подтвердите снижение pending handoff в следующем цикле обновления.",
+            "Проверьте нагрузку по передаче диалогов и самые старые незакрытые обращения.",
+            "Приоритизируйте входящие передачи и снимите узкие места по SLA.",
+            "Подтвердите снижение ожидающих передач менеджеру в следующем цикле обновления.",
         ];
     }
     return [
-        "Проверьте summary + reason_label и выберите безопасное dry-run действие.",
-        "Если dry-run подтверждает проблему, выполните целевое execute с причиной.",
-        "После выполнения перепроверьте метрики и закройте инцидент evidence-данными.",
+        "Проверьте описание инцидента и причину, затем выберите безопасную проверку без записи.",
+        "Если проверка без записи подтверждает проблему, выполните целевое действие с указанием причины.",
+        "После выполнения перепроверьте метрики и закройте инцидент с подтверждением результата.",
     ];
 }
 
 function incidentFallbackWhereToLook(item: IncidentItem): string {
     if (item.reason_code === "integration_degraded") {
-        return "Если после действий деградация осталась: откройте Workspace -> Панель WhatsApp/ChatFlow -> перепроверьте webhook/instance_id и provider lifecycle.";
+        return "Если после действий деградация осталась: откройте Workspace -> Панель WhatsApp/ChatFlow и перепроверьте webhook, ID канала и состояние провайдера.";
     }
     if (item.reason_code === "outbox_backlog") {
-        return "Если backlog не падает: проверьте Ops Jobs результат outbox_process и ошибки в outbox last_error.";
+        return "Если очередь не снижается: проверьте результат `outbox_process` в Ops Jobs и последние ошибки отправки.";
     }
     if (item.reason_code === "provider_billing_blocked") {
-        return "Если проблема остается: проверьте Subscription + paid_until/renewal в Workspace и зафиксируйте действие в журнале.";
+        return "Если проблема остается: проверьте подписку, дату оплаты и дату продления в Workspace, затем зафиксируйте действие в журнале.";
     }
     if (item.reason_code === "provider_auth" || item.reason_code === "provider_unavailable" || item.reason_code === "provider_rate_limited") {
-        return "Если ошибка повторяется: проверьте Integrations registry и webhook-contract, затем выполните integration_reconcile.";
+        return "Если ошибка повторяется: проверьте реестр интеграций и webhook-контракт, затем выполните `integration_reconcile`.";
     }
-    return "Если причина не снимается: поднимите инцидент в журнале и приложите trace/job evidence.";
+    return "Если причина не снимается: поднимите инцидент в журнале и приложите подтверждение по trace/job.";
 }
 
 export default function OpsPage() {
@@ -660,9 +676,9 @@ export default function OpsPage() {
         },
         onSuccess: (data) => {
             if (data.success) {
-                toast.success(`Ретрай: ${data.retried} сообщений`);
+                toast.success(`Повторено сообщений: ${data.retried}`);
             } else {
-                toast.error("Не удалось ретраить сообщения");
+                toast.error("Не удалось повторить отправку сообщений");
             }
             refetchOutbox();
         },
@@ -683,9 +699,9 @@ export default function OpsPage() {
         },
         onSuccess: (data) => {
             if (data.success) {
-                toast.success(`Retry reminders: ${data.retried}`);
+                toast.success(`Повторено напоминаний: ${data.retried}`);
             } else {
-                toast.error("Не удалось выполнить retry reminders");
+                toast.error("Не удалось выполнить повтор напоминаний");
             }
             refetchReminders();
         },
@@ -701,9 +717,9 @@ export default function OpsPage() {
         },
         onSuccess: (data) => {
             if (data.job.status === "success") {
-                toast.success(`Job ${data.job.job_type} выполнен`);
+                toast.success(`Задание ${data.job.job_type} выполнено`);
             } else {
-                toast.error(data.job.error_message || `Job ${data.job.job_type} завершился с ошибкой`);
+                toast.error(data.job.error_message || `Задание ${data.job.job_type} завершилось с ошибкой`);
             }
             refetchOpsJobs();
         },
@@ -787,7 +803,7 @@ export default function OpsPage() {
             return;
         }
         if (action.mode === "execute") {
-            const confirmed = window.confirm(`Выполнить ${action.job_type} в execute для incident ${incident.id}?`);
+            const confirmed = window.confirm(`Выполнить действие ${action.job_type} для инцидента ${incident.id}?`);
             if (!confirmed) {
                 return;
             }
@@ -838,7 +854,7 @@ export default function OpsPage() {
         ].join(" | ");
 
         if (targetState === "resolved" && !checklistDone) {
-            toast.error("Для закрытия инцидента заполните evidence checklist и note (мин. 12 символов).");
+            toast.error("Для закрытия инцидента заполните чек-лист и комментарий (минимум 12 символов).");
             return;
         }
 
@@ -953,7 +969,7 @@ export default function OpsPage() {
                         <div>
                             <h2 className="text-lg font-semibold">Критичные инциденты</h2>
                             <p className="text-xs text-muted-foreground">
-                                Только факт-основанные причины и безопасные шаги (`dry-run` сначала).
+                                Только факт-основанные причины и безопасные шаги (сначала проверка без записи).
                             </p>
                         </div>
                         <span className="text-xs text-muted-foreground">
@@ -961,9 +977,9 @@ export default function OpsPage() {
                         </span>
                     </div>
                     <div className="mb-4 grid grid-cols-3 gap-3">
-                        <MetricCard label="Critical" value={incidentsData?.summary.critical ?? 0} />
-                        <MetricCard label="Warn" value={incidentsData?.summary.warn ?? 0} />
-                        <MetricCard label="Info" value={incidentsData?.summary.info ?? 0} />
+                        <MetricCard label="Критичные" value={incidentsData?.summary.critical ?? 0} />
+                        <MetricCard label="Предупреждения" value={incidentsData?.summary.warn ?? 0} />
+                        <MetricCard label="Инфо" value={incidentsData?.summary.info ?? 0} />
                     </div>
                     {incidentsLoading ? (
                         <p className="text-sm text-muted-foreground">Загрузка инцидентов...</p>
@@ -1018,29 +1034,29 @@ export default function OpsPage() {
                                         <p className="mt-1 text-xs text-muted-foreground">{item.reason_label}</p>
                                         <p className="mt-1 text-xs text-muted-foreground">{item.summary}</p>
                                         <p className="mt-1 text-[11px] text-muted-foreground">
-                                            client: {item.client_slug || "n/a"} · detected: {new Date(item.detected_at).toLocaleString("ru-RU")}
+                                            клиент: {item.client_slug || "не указан"} · обнаружен: {new Date(item.detected_at).toLocaleString("ru-RU")}
                                         </p>
                                         {(item.incident_state_updated_at || item.incident_state_owner || item.incident_state_due_at || item.incident_state_note) && (
                                             <p className="mt-1 text-[11px] text-muted-foreground">
-                                                updated: {item.incident_state_updated_at ? new Date(item.incident_state_updated_at).toLocaleString("ru-RU") : "—"}
-                                                {item.incident_state_owner ? ` · owner: ${item.incident_state_owner}` : ""}
-                                                {item.incident_state_due_at ? ` · due: ${new Date(item.incident_state_due_at).toLocaleString("ru-RU")}` : ""}
-                                                {item.incident_state_note ? ` · note: ${item.incident_state_note}` : ""}
+                                                обновлен: {item.incident_state_updated_at ? new Date(item.incident_state_updated_at).toLocaleString("ru-RU") : "—"}
+                                                {item.incident_state_owner ? ` · ответственный: ${item.incident_state_owner}` : ""}
+                                                {item.incident_state_due_at ? ` · срок: ${new Date(item.incident_state_due_at).toLocaleString("ru-RU")}` : ""}
+                                                {item.incident_state_note ? ` · заметка: ${item.incident_state_note}` : ""}
                                             </p>
                                         )}
                                         <div className="mt-2 rounded-md border border-border/60 bg-background px-3 py-2 text-[11px]" data-testid={`ops-incident-postcheck-${item.id}`}>
-                                            <p className="font-semibold text-foreground">Post-check evidence</p>
+                                            <p className="font-semibold text-foreground">Проверка после действия</p>
                                             <div className="mt-1 text-muted-foreground">
-                                                baseline: backlog={baseline.outbox_backlog}, failed_24h={baseline.outbox_failed_24h}, degraded={baseline.integration_degraded_branches}, handover={baseline.pending_handovers}
+                                                базовый срез: очередь={baseline.outbox_backlog}, ошибки_24ч={baseline.outbox_failed_24h}, деградации={baseline.integration_degraded_branches}, эскалации={baseline.pending_handovers}
                                             </div>
                                             <div className="text-muted-foreground">
-                                                current: backlog={current.outbox_backlog}, failed_24h={current.outbox_failed_24h}, degraded={current.integration_degraded_branches}, handover={current.pending_handovers}
+                                                текущий срез: очередь={current.outbox_backlog}, ошибки_24ч={current.outbox_failed_24h}, деградации={current.integration_degraded_branches}, эскалации={current.pending_handovers}
                                             </div>
                                             <div className="text-muted-foreground">
-                                                delta: backlog={formatSignedDelta(deltaBacklog)}, failed_24h={formatSignedDelta(deltaFailed24h)}, degraded={formatSignedDelta(deltaDegraded)}, handover={formatSignedDelta(deltaPendingHandovers)}
+                                                изменение: очередь={formatSignedDelta(deltaBacklog)}, ошибки_24ч={formatSignedDelta(deltaFailed24h)}, деградации={formatSignedDelta(deltaDegraded)}, эскалации={formatSignedDelta(deltaPendingHandovers)}
                                             </div>
                                             <div className="mt-1 text-muted-foreground">
-                                                baseline captured: {new Date(baseline.captured_at).toLocaleString("ru-RU")}
+                                                базовый срез зафиксирован: {new Date(baseline.captured_at).toLocaleString("ru-RU")}
                                             </div>
                                             <div className="mt-2 flex flex-wrap gap-2">
                                                 <button
@@ -1051,10 +1067,10 @@ export default function OpsPage() {
                                                             ...prev,
                                                             [item.id]: buildIncidentPostCheckSnapshot(item),
                                                         }));
-                                                        toast.success("Baseline обновлен");
+                                                        toast.success("Базовый срез обновлен");
                                                     }}
                                                 >
-                                                    Обновить baseline
+                                                    Обновить базовый срез
                                                 </button>
                                             </div>
                                             <div className="mt-2 grid gap-1 text-muted-foreground">
@@ -1071,7 +1087,7 @@ export default function OpsPage() {
                                                             }));
                                                         }}
                                                     />
-                                                    remediation action выполнено
+                                                    действие по исправлению выполнено
                                                 </label>
                                                 <label className="inline-flex items-center gap-2">
                                                     <input
@@ -1086,7 +1102,7 @@ export default function OpsPage() {
                                                             }));
                                                         }}
                                                     />
-                                                    post-check зафиксирован (delta проверен)
+                                                    проверка после действия зафиксирована (изменения проверены)
                                                 </label>
                                                 <label className="inline-flex items-center gap-2">
                                                     <input
@@ -1118,7 +1134,7 @@ export default function OpsPage() {
                                                 }}
                                             />
                                             <div className="mt-1 text-muted-foreground">
-                                                checklist: {checklistDone ? "готов к закрытию" : "неполный"}
+                                                чек-лист: {checklistDone ? "готов к закрытию" : "неполный"}
                                             </div>
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-2">
@@ -1144,7 +1160,7 @@ export default function OpsPage() {
                                                         void runIncidentStateTransition(item, "resolved");
                                                     }}
                                                     data-testid={`ops-incident-state-${item.id}-resolved`}
-                                                    title={checklistDone ? undefined : "Заполните post-check checklist и note"}
+                                                    title={checklistDone ? undefined : "Заполните чек-лист проверки и комментарий"}
                                                 >
                                                     {incidentActionRunningId === `state:${item.id}:resolved` ? "Выполняю..." : "Закрыть"}
                                                 </button>
@@ -1330,7 +1346,7 @@ export default function OpsPage() {
                         disabled={telegramAction !== null || !canWriteSettings}
                         data-testid="ops-telegram-verify"
                     >
-                        {telegramAction === "verify" ? "Отправка..." : "Verify"}
+                        {telegramAction === "verify" ? "Отправка..." : "Проверить связь"}
                     </button>
                     <button
                         type="button"
@@ -1339,7 +1355,7 @@ export default function OpsPage() {
                         disabled={telegramAction !== null || !canWriteSettings}
                         data-testid="ops-telegram-test"
                     >
-                        {telegramAction === "test" ? "Отправка..." : "Send test"}
+                        {telegramAction === "test" ? "Отправка..." : "Отправить тест"}
                     </button>
                     {!canWriteSettings && (
                         <span className="text-xs text-muted-foreground">Только owner/admin/platform admin</span>
@@ -1365,10 +1381,10 @@ export default function OpsPage() {
                     </div>
                     <div className="flex flex-wrap gap-2 mb-4">
                         {([
-                            { value: "failed", label: "Failed", count: outboxCounts.failed },
-                            { value: "pending", label: "Pending", count: outboxCounts.pending },
-                            { value: "processing", label: "Processing", count: outboxCounts.processing },
-                            { value: "all", label: "All", count: outboxCounts.total },
+                            { value: "failed", label: "С ошибкой", count: outboxCounts.failed },
+                            { value: "pending", label: "Ожидает", count: outboxCounts.pending },
+                            { value: "processing", label: "В обработке", count: outboxCounts.processing },
+                            { value: "all", label: "Все", count: outboxCounts.total },
                         ] as const).map((item) => (
                             <button
                                 key={item.value}
@@ -1390,7 +1406,7 @@ export default function OpsPage() {
                                 onClick={() => outboxRetry.mutate(undefined)}
                                 disabled={outboxRetry.isPending || !canWriteOps}
                             >
-                                {outboxRetry.isPending ? "Ретрай..." : "Retry failed"}
+                                {outboxRetry.isPending ? "Повтор..." : "Повторить ошибки"}
                             </button>
                         )}
                         {!canWriteOps && (
@@ -1428,7 +1444,7 @@ export default function OpsPage() {
                                                                 : "bg-blue-100 text-blue-800"
                                                     }`}
                                                 >
-                                                    {item.status}
+                                                    {outboxStatusLabel(item.status)}
                                                 </span>
                                             </td>
                                             <td className="py-2 pr-3">{item.attempts}</td>
@@ -1453,7 +1469,7 @@ export default function OpsPage() {
                                                         onClick={() => outboxRetry.mutate([item.id])}
                                                         disabled={outboxRetry.isPending || !canWriteOps}
                                                     >
-                                                        Retry
+                                                        Повторить
                                                     </button>
                                                 )}
                                             </td>
@@ -1471,28 +1487,28 @@ export default function OpsPage() {
             {isFullOps && (
                 <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-reminders-card">
                     <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-semibold">Reminder Queue</h2>
+                        <h2 className="text-lg font-semibold">Очередь напоминаний</h2>
                         <button
                             type="button"
                             className="text-xs text-primary hover:text-primary/80"
                             onClick={() => refetchReminders()}
                         >
-                            Обновить reminders
+                            Обновить очередь
                         </button>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
-                        <MetricCard label="Pending" value={reminderCounts.pending} />
-                        <MetricCard label="Sent" value={reminderCounts.sent} />
-                        <MetricCard label="Failed" value={reminderCounts.failed} />
-                        <MetricCard label="Due now" value={reminderCounts.dueNow} />
-                        <MetricCard label="Overdue 15m+" value={reminderCounts.overdue} />
+                        <MetricCard label="Ожидает" value={reminderCounts.pending} />
+                        <MetricCard label="Отправлено" value={reminderCounts.sent} />
+                        <MetricCard label="С ошибкой" value={reminderCounts.failed} />
+                        <MetricCard label="К исполнению сейчас" value={reminderCounts.dueNow} />
+                        <MetricCard label="Просрочено 15м+" value={reminderCounts.overdue} />
                     </div>
                     <div className="flex flex-wrap items-center gap-2 mb-3">
                         {([
-                            { value: "failed", label: "Failed", count: reminderCounts.failed },
-                            { value: "pending", label: "Pending", count: reminderCounts.pending },
-                            { value: "sent", label: "Sent", count: reminderCounts.sent },
-                            { value: "all", label: "All", count: reminderCounts.pending + reminderCounts.sent + reminderCounts.failed },
+                            { value: "failed", label: "С ошибкой", count: reminderCounts.failed },
+                            { value: "pending", label: "Ожидает", count: reminderCounts.pending },
+                            { value: "sent", label: "Отправлено", count: reminderCounts.sent },
+                            { value: "all", label: "Все", count: reminderCounts.pending + reminderCounts.sent + reminderCounts.failed },
                         ] as const).map((item) => (
                             <button
                                 key={item.value}
@@ -1513,18 +1529,18 @@ export default function OpsPage() {
                                 className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                                 disabled={reminderRetry.isPending || !canWriteOps}
                                 onClick={() => {
-                                    if (!window.confirm("Retry reminders for current filter?")) {
+                                    if (!window.confirm("Повторить отправку напоминаний для текущего фильтра?")) {
                                         return;
                                     }
                                     reminderRetry.mutate({ confirm: true });
                                 }}
                             >
-                                {reminderRetry.isPending ? "Retry..." : "Retry filtered"}
+                                {reminderRetry.isPending ? "Повтор..." : "Повторить по фильтру"}
                             </button>
                         )}
                     </div>
                     <div className="mb-3 flex items-center gap-2">
-                        <label className="text-xs text-muted-foreground">Template:</label>
+                        <label className="text-xs text-muted-foreground">Шаблон:</label>
                         <input
                             type="text"
                             className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm"
@@ -1546,19 +1562,19 @@ export default function OpsPage() {
                         </div>
                     ) : null}
                     {remindersLoading ? (
-                        <div className="text-sm text-muted-foreground">Загрузка reminders...</div>
+                        <div className="text-sm text-muted-foreground">Загрузка напоминаний...</div>
                     ) : remindersData?.items?.length ? (
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead className="text-xs text-muted-foreground">
                                     <tr className="text-left border-b border-border/60">
-                                        <th className="py-2 pr-3">Template</th>
-                                        <th className="py-2 pr-3">Run at</th>
-                                        <th className="py-2 pr-3">Status</th>
-                                        <th className="py-2 pr-3">Attempts</th>
-                                        <th className="py-2 pr-3">Error</th>
-                                        <th className="py-2 pr-3">Outbox</th>
-                                        <th className="py-2 pr-3 text-right">Action</th>
+                                        <th className="py-2 pr-3">Шаблон</th>
+                                        <th className="py-2 pr-3">Когда запускать</th>
+                                        <th className="py-2 pr-3">Статус</th>
+                                        <th className="py-2 pr-3">Попытки</th>
+                                        <th className="py-2 pr-3">Ошибка</th>
+                                        <th className="py-2 pr-3">Очередь</th>
+                                        <th className="py-2 pr-3 text-right">Действие</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1581,7 +1597,7 @@ export default function OpsPage() {
                                                                 : "bg-green-100 text-green-800"
                                                     }`}
                                                 >
-                                                    {item.status}
+                                                    {outboxStatusLabel(item.status)}
                                                 </span>
                                             </td>
                                             <td className="py-2 pr-3 text-xs">
@@ -1600,11 +1616,11 @@ export default function OpsPage() {
                                                                     ? "bg-yellow-100 text-yellow-800"
                                                                     : "bg-blue-100 text-blue-800"
                                                         }`}
-                                                    >
-                                                        {item.outbox_status}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-muted-foreground">no outbox</span>
+                                                        >
+                                                            {outboxStatusLabel(item.outbox_status)}
+                                                        </span>
+                                                    ) : (
+                                                    <span className="text-muted-foreground">нет записи в очереди</span>
                                                 )}
                                             </td>
                                             <td className="py-2 pr-3 text-right">
@@ -1615,7 +1631,7 @@ export default function OpsPage() {
                                                         onClick={() => reminderRetry.mutate({ ids: [item.id], confirm: false })}
                                                         disabled={reminderRetry.isPending || !canWriteOps}
                                                     >
-                                                        Retry
+                                                        Повторить
                                                     </button>
                                                 )}
                                             </td>
@@ -1625,7 +1641,7 @@ export default function OpsPage() {
                             </table>
                         </div>
                     ) : (
-                        <div className="text-sm text-muted-foreground">Reminder jobs не найдены</div>
+                        <div className="text-sm text-muted-foreground">Задания напоминаний не найдены</div>
                     )}
                 </div>
             )}
@@ -1633,7 +1649,7 @@ export default function OpsPage() {
             {isFullOps && (
                 <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-jobs-card">
                     <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-semibold">Console Jobs</h2>
+                        <h2 className="text-lg font-semibold">Операционные задания</h2>
                         <button
                             type="button"
                             className="text-xs text-primary hover:text-primary/80"
@@ -1645,7 +1661,7 @@ export default function OpsPage() {
 
                     <div className="grid gap-3 md:grid-cols-2 mb-4">
                         <div>
-                            <label className="block text-xs text-muted-foreground mb-1">Job type</label>
+                            <label className="block text-xs text-muted-foreground mb-1">Тип задания</label>
                             <select
                                 className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm"
                                 value={jobType}
@@ -1658,14 +1674,14 @@ export default function OpsPage() {
                                 ))}
                             </select>
                             <p className="text-xs text-muted-foreground mt-1">
-                                {selectedJob?.description || "Каталог jobs загружается..."}
+                                {selectedJob?.description || "Каталог заданий загружается..."}
                             </p>
                         </div>
 
                         <div>
                             {jobType === "outbox_process" && (
                                 <>
-                                    <label className="block text-xs text-muted-foreground mb-1">Limit</label>
+                                    <label className="block text-xs text-muted-foreground mb-1">Лимит</label>
                                     <input
                                         type="number"
                                         min={1}
@@ -1679,7 +1695,7 @@ export default function OpsPage() {
                             {jobType === "integration_reconcile" && (
                                 <div className="grid gap-2">
                                     <div>
-                                        <label className="block text-xs text-muted-foreground mb-1">Limit</label>
+                                        <label className="block text-xs text-muted-foreground mb-1">Лимит</label>
                                         <input
                                             type="number"
                                             min={1}
@@ -1691,7 +1707,7 @@ export default function OpsPage() {
                                     </div>
                                     <div>
                                         <label className="block text-xs text-muted-foreground mb-1">
-                                            Branch IDs (optional, comma or newline separated)
+                                            ID филиалов (опционально, через запятую или новую строку)
                                         </label>
                                         <textarea
                                             className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-xs font-mono"
@@ -1706,7 +1722,7 @@ export default function OpsPage() {
                             {jobType === "metrics_snapshot" && (
                                 <div className="grid gap-2">
                                     <div>
-                                        <label className="block text-xs text-muted-foreground mb-1">Days</label>
+                                        <label className="block text-xs text-muted-foreground mb-1">Дни</label>
                                         <input
                                             type="number"
                                             min={1}
@@ -1717,7 +1733,7 @@ export default function OpsPage() {
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-xs text-muted-foreground mb-1">Metric date (optional)</label>
+                                        <label className="block text-xs text-muted-foreground mb-1">Дата метрики (опционально)</label>
                                         <input
                                             type="date"
                                             className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm"
@@ -1729,7 +1745,7 @@ export default function OpsPage() {
                             )}
                             {jobType === "heal" && (
                                 <p className="text-xs text-muted-foreground mt-6">
-                                    Для `heal` в этом срезе доступен только dry-run.
+                                    Для `heal` в этом режиме доступна только проверка без записи.
                                 </p>
                             )}
                         </div>
@@ -1742,7 +1758,7 @@ export default function OpsPage() {
                             onClick={() => runOpsJob.mutate(buildRunJobPayload("dry_run"))}
                             disabled={runOpsJob.isPending || !canWriteOps}
                         >
-                            {runOpsJob.isPending ? "Запуск..." : "Dry-run"}
+                            {runOpsJob.isPending ? "Запуск..." : "Проверка без записи"}
                         </button>
                         <button
                             type="button"
@@ -1750,14 +1766,14 @@ export default function OpsPage() {
                             onClick={() => runOpsJob.mutate(buildRunJobPayload("execute"))}
                             disabled={runOpsJob.isPending || !canWriteOps || jobType === "heal"}
                         >
-                            Execute
+                            Выполнить
                         </button>
                     </div>
 
                     {opsJobsLoading ? (
-                        <div className="text-sm text-muted-foreground">Загрузка истории jobs...</div>
+                        <div className="text-sm text-muted-foreground">Загрузка истории заданий...</div>
                     ) : !opsJobs?.items?.length ? (
-                        <div className="text-sm text-muted-foreground">История jobs пока пуста</div>
+                        <div className="text-sm text-muted-foreground">История заданий пока пуста</div>
                     ) : (
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
