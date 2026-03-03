@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
-- block_id: UVC-UX-STAGE1-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-program-closeout-steady-loop-a705.md
+- block_id: UVC-UX-PROGRAM-CLOSEOUT-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: Stage 3 UVC UX cross-tab loop hardening + Stage 3/4/5 full TP split
+- scope: Post-merge closeout handoff to steady-state automation (`platform-admin` control-loop)
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -33,17 +33,30 @@
   - Added legacy-removal checklist artifact and completed terminology cleanup (`fallback/live` -> plain-language labels) for Tenants/Integrations.
   - Captured baseline/post KPI snapshots with no regression in runtime health/outbox guard.
   - Fixed flaky `openTenants` helper by waiting for stable tenants markers, then reconfirmed UVC lane (`26 passed`).
+  - Synced branch with merged `main` (`b0de8fd...`) after PR `#877` merge.
+  - Closed Stage 5 wave3: Fleet rollout decision `GO` with post-merge KPI evidence.
+  - Fixed additional flaky transitions in `platform-admin.spec.ts` (`openIntegrations` + `openWorkspace` retry helpers), reconfirmed UVC lane (`26 passed`).
+  - Synced branch with merged `main` (`c21ccf60...`) after PR `#881` merge and revalidated post-merge lane (`anti-drift`, `lint`, `e2e 26/26`, KPI snapshot).
+  - Created follow-up TP `TP-2026-03-03-uvc-ux-program-closeout-steady-loop-a705.md` (RCA + one-web-search + release safety) for steady-state handoff.
+  - Implemented automation-first Platform Admin control loop:
+  - Added wrapper script `scripts/platform_admin_control_loop.sh` (KPI guard + anti-drift + optional e2e + summary artifact).
+  - Added scheduled/dispatch workflow `.github/workflows/platform-admin-control-loop.yml`.
+  - Updated runbook/canon/status docs for automation handoff evidence.
 - next:
-  - Stage 5 wave3: merge-to-main, fleet go/no-go decision, and final program closeout entry.
+  - Open PR with steady-state automation block and close `UVC-UX-PROGRAM-CLOSEOUT-A705`.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage4-quality-antidrift-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage5-rollout-efficiency-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-program-closeout-steady-loop-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage3-flow-matrix-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage4-antidrift-contract-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage5-rollout-report-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-stage5-legacy-removal-a705.md
+  - docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md
+  - .github/workflows/platform-admin-control-loop.yml
+  - scripts/platform_admin_control_loop.sh
   - console-web/scripts/check-uvc-antidrift.mjs
   - .github/workflows/ci.yml
   - console-web/package.json
@@ -52,6 +65,10 @@
   - console-web/e2e/platform-admin.spec.ts
   - /tmp/uvc_stage5_kpi_snapshot_a705.json
   - /tmp/uvc_stage5_kpi_post_a705.json
+  - /tmp/uvc_stage5_kpi_main_post_a705.json
+  - /tmp/uvc_stage5_kpi_main_postmerge_c21_a705.json
+  - /tmp/platform_admin_control_loop/local-a705/summary.json
+  - /tmp/platform_admin_control_loop/local-a705/kpi_snapshot.json
   - /tmp/uvc_stage5_legacy_scan_a705.txt
   - checks: `cd truffles-api && python3 scripts/generate_openapi.py --check` (`OpenAPI specification generated .../contracts/console_api/openapi.generated.yaml`)
   - checks: `cd console-web && npm run generate:api` (`openapi-typescript ... -> src/types/api.generated.ts`)
@@ -60,6 +77,10 @@
   - checks: `cd console-web && npm run lint -- --file e2e/platform-admin.spec.ts --file src/app/integrations/page.tsx --file src/app/tenants/tenants-page-helpers.ts` (`No ESLint warnings or errors`)
   - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_snapshot_a705.json` (`success`)
   - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_post_a705.json` (`success`)
+  - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_main_post_a705.json` (`success`)
+  - checks: `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/uvc_stage5_kpi_main_postmerge_c21_a705.json` (`success`)
+  - checks: `bash -n scripts/platform_admin_control_loop.sh` (`pass`)
+  - checks: `scripts/platform_admin_control_loop.sh --run-id local-a705 --run-e2e 0 --fail-level critical --output-root /tmp/platform_admin_control_loop` (`overall_status=pass`)
   - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants|Platform Admin Integrations"` (`26 passed`)
   - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-03

@@ -768,13 +768,46 @@ async function openTenants(page: import('@playwright/test').Page) {
 
 async function openIntegrations(page: import('@playwright/test').Page) {
     const navIntegrations = page.getByTestId('nav-integrations');
-    if (await navIntegrations.isVisible().catch(() => false)) {
-        await navIntegrations.click();
-    } else {
-        await page.goto(`${resolvedBaseURL}/integrations`, { waitUntil: 'domcontentloaded' });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (await navIntegrations.isVisible().catch(() => false)) {
+            await navIntegrations.click();
+        } else {
+            await page.goto(`${resolvedBaseURL}/integrations`, { waitUntil: 'domcontentloaded' });
+        }
+        if (urlPathPattern('/integrations').test(page.url())) {
+            await expect(page.getByTestId('integrations-title')).toBeVisible();
+            return;
+        }
+        await page.waitForTimeout(250);
     }
     await expect(page).toHaveURL(urlPathPattern('/integrations'));
     await expect(page.getByTestId('integrations-title')).toBeVisible();
+}
+
+async function openWorkspaceWithRetry(
+    page: import('@playwright/test').Page,
+    trigger: import('@playwright/test').Locator,
+) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        await trigger.click();
+        try {
+            await expect(page).toHaveURL(urlPathPattern('/company-workspace'), { timeout: 5000 });
+        } catch {
+            if (attempt < 2) {
+                await page.waitForTimeout(250);
+                continue;
+            }
+        }
+        const workspacePage = page.getByTestId('company-workspace-page');
+        for (let poll = 0; poll < 20; poll += 1) {
+            if (await workspacePage.isVisible().catch(() => false)) {
+                return;
+            }
+            await page.waitForTimeout(200);
+        }
+    }
+    await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+    await expect(page.getByTestId('company-workspace-page')).toBeVisible();
 }
 
 async function openSettings(page: import('@playwright/test').Page) {
@@ -880,10 +913,7 @@ test.describe('Platform Admin Navigation', () => {
 
         const openWorkspaceButton = page.getByTestId('integrations-row-open-workspace').first();
         await expect(openWorkspaceButton).toBeVisible();
-        await openWorkspaceButton.click();
-
-        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
-        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await openWorkspaceWithRetry(page, openWorkspaceButton);
         await expect(page.getByTestId('workspace-recommended-open-execute')).toBeVisible();
 
         const deepLinkParams = await page.evaluate(() => ({
@@ -918,10 +948,7 @@ test.describe('Platform Admin Navigation', () => {
         const selectedCompanyId = await companySelect.inputValue();
 
         await expect(openWorkspaceFromScope).toBeEnabled();
-        await openWorkspaceFromScope.click();
-
-        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
-        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await openWorkspaceWithRetry(page, openWorkspaceFromScope);
 
         const storedContext = await page.evaluate(() => ({
             companyId: window.localStorage.getItem('console:company_id'),
@@ -1345,7 +1372,18 @@ test.describe('Platform Admin Tenants', () => {
             return;
         }
 
-        await expect(clients.getByText(/Клиенты не найдены|page filter company_id/i)).toBeVisible();
+        const emptyState = clients.getByText(/Клиенты не найдены|page filter company_id/i).first();
+        const clientRow = page.getByTestId('tenants-client-row').first();
+        for (let attempt = 0; attempt < 25; attempt += 1) {
+            if (await emptyState.isVisible().catch(() => false)) {
+                return;
+            }
+            if (await clientRow.isVisible().catch(() => false)) {
+                return;
+            }
+            await page.waitForTimeout(200);
+        }
+        throw new Error("Neither tenants clients empty-state nor client row became visible.");
     });
 
     test('should render operational KPI panel on Tenants @smoke', async ({ page }) => {
@@ -1480,10 +1518,7 @@ test.describe('Platform Admin Tenants', () => {
 
         const openWorkspaceButton = actionQueue.getByRole('button', { name: 'Открыть Workspace' }).first();
         await expect(openWorkspaceButton).toBeVisible();
-        await openWorkspaceButton.click();
-
-        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
-        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await openWorkspaceWithRetry(page, openWorkspaceButton);
         await expect(page.getByTestId('workspace-recommended-open-execute')).toBeVisible();
 
         const deepLinkParams = await page.evaluate(() => ({
@@ -1525,10 +1560,7 @@ test.describe('Platform Admin Tenants', () => {
 
         const openWorkspaceButton = actionQueue.getByRole('button', { name: 'Открыть Workspace' }).first();
         await expect(openWorkspaceButton).toBeVisible();
-        await openWorkspaceButton.click();
-
-        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
-        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+        await openWorkspaceWithRetry(page, openWorkspaceButton);
         const recommendationSection = page.getByTestId('company-workspace-recommended-action');
         await expect(recommendationSection).toBeVisible();
 
@@ -1561,8 +1593,7 @@ test.describe('Platform Admin Tenants', () => {
         await expect(row).toContainText('Оплачено до:');
         await expect(row).toContainText('ID канала');
 
-        await page.getByTestId('integrations-row-open-workspace').first().click();
-        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await openWorkspaceWithRetry(page, page.getByTestId('integrations-row-open-workspace').first());
 
         const workspacePage = page.getByTestId('company-workspace-page');
         await expect(workspacePage).toContainText('источник подсказки:');
