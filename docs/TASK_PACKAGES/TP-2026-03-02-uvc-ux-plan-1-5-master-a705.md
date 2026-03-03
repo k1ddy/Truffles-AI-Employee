@@ -102,9 +102,9 @@
 - `docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-plan-1-5-master-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage2-language-hints-a705.md`
-- `docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage3-cross-tab-flows-a705.md`
-- `docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage4-quality-antidrift-a705.md`
-- `docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage5-rollout-efficiency-a705.md`
+- `docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md`
+- `docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage4-quality-antidrift-a705.md`
+- `docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage5-rollout-efficiency-a705.md`
 - `console-web/src/app/tenants/**`
 - `console-web/src/app/integrations/page.tsx`
 - `console-web/src/app/company-workspace/page.tsx`

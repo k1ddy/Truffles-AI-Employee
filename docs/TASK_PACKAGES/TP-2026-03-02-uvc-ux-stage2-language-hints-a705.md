@@ -165,7 +165,7 @@
 - `Current residuals accepted in this block`: secondary advanced/debug surfaces могут сохранить технические поля в raw-виде.
 - `Why not in this block`: Stage 2 закрывает primary user-facing flow; deep forensic/debug панели будут нормализованы в Stage 4 anti-drift governance.
 - `Risk if deferred`: отдельные edge-path экраны останутся менее дружелюбными для новых операторов.
-- `Linked follow-up Task Package(s)`: `TP-2026-03-02-uvc-ux-stage4-quality-antidrift-a705.md`.
+- `Linked follow-up Task Package(s)`: `TP-2026-03-03-uvc-ux-stage4-quality-antidrift-a705.md`.
 - `Expiry/trigger to stop deferral`: если raw-термины появятся в primary panels после Stage 2, откладывание запрещено.
 
 ## Next-block contract (mandatory)
