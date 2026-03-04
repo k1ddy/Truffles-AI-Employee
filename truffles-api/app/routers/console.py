@@ -369,19 +369,28 @@ from app.services.compliance_policy_registry_service import (
 )
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_branch_changes import (
-    BRANCH_CHANGE_MANAGED_FIELDS as _BRANCH_CHANGE_MANAGED_FIELDS,
-)
-from app.services.console_branch_changes import (
     BRANCH_CHANGE_MUTABLE_STATUSES as _BRANCH_CHANGE_MUTABLE_STATUSES,
 )
 from app.services.console_branch_changes import (
     build_branch_change_diff as _build_branch_change_diff,
 )
 from app.services.console_branch_changes import (
+    build_branch_change_rollback_patch as _build_branch_change_rollback_patch,
+)
+from app.services.console_branch_changes import (
     build_branch_update_request as _build_branch_update_request,
 )
 from app.services.console_branch_changes import (
+    get_branch_change_for_context as _get_branch_change_for_context_row,
+)
+from app.services.console_branch_changes import (
     normalize_branch_change_patch as _normalize_branch_change_patch_payload,
+)
+from app.services.console_branch_changes import (
+    normalize_branch_change_status_filter as _normalize_branch_change_status_filter,
+)
+from app.services.console_branch_changes import (
+    query_branch_changes_for_context as _query_branch_changes_for_context,
 )
 from app.services.console_branch_changes import (
     serialize_branch_change_record as _serialize_branch_change_record,
@@ -20094,19 +20103,10 @@ def _get_branch_change_for_context(
     context: ConsoleAuthContext,
     change_id: UUID,
 ) -> ConsoleBranchChange:
-    query = db.query(ConsoleBranchChange).filter(
-        ConsoleBranchChange.id == change_id,
-        ConsoleBranchChange.client_id == context.client.id,
-    )
-    allowed_branch_ids = _resolve_branch_scope(context)
-    if allowed_branch_ids is not None:
-        if not allowed_branch_ids:
-            raise ConsoleAPIError(404, "NOT_FOUND", "Branch change not found")
-        query = query.filter(ConsoleBranchChange.branch_id.in_(allowed_branch_ids))
-    change = query.first()
-    if not change:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Branch change not found")
-    return change
+    change = _get_branch_change_for_context_row(db=db, change_id=change_id, client_id=context.client.id, allowed_branch_ids=_resolve_branch_scope(context))
+    if change:
+        return change
+    raise ConsoleAPIError(404, "NOT_FOUND", "Branch change not found")
 
 
 @router.get(
@@ -20132,21 +20132,21 @@ async def list_branch_changes(
     _reject_unknown_query_params(request, {"branch_id", "status", "cursor", "limit"})
     _validate_limit(limit)
 
-    query = db.query(ConsoleBranchChange).filter(ConsoleBranchChange.client_id == context.client.id)
-    if branch_id:
-        query = query.filter(ConsoleBranchChange.branch_id == branch_id)
+    query = _query_branch_changes_for_context(
+        db=db,
+        client_id=context.client.id,
+        branch_id=branch_id,
+        allowed_branch_ids=_resolve_branch_scope(context),
+    )
+    if query is None:
+        return ConsoleBranchChangeListResponse(items=[], cursor=None, has_more=False)
 
-    allowed_branch_ids = _resolve_branch_scope(context)
-    if allowed_branch_ids is not None:
-        if not allowed_branch_ids:
-            return ConsoleBranchChangeListResponse(items=[], cursor=None, has_more=False)
-        query = query.filter(ConsoleBranchChange.branch_id.in_(allowed_branch_ids))
-
-    if status:
-        normalized_status = status.strip().lower()
-        allowed_statuses = {"draft", "validated", "publish_failed", "published", "rolled_back"}
-        if normalized_status not in allowed_statuses:
-            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
+    normalized_status = None
+    try:
+        normalized_status = _normalize_branch_change_status_filter(status)
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+    if normalized_status:
         query = query.filter(ConsoleBranchChange.status == normalized_status)
 
     cursor_date = _parse_cursor_param(cursor)
@@ -20463,11 +20463,10 @@ async def rollback_branch_change(
 
     base_snapshot = change.base_snapshot if isinstance(change.base_snapshot, dict) else {}
     current_snapshot = _snapshot_branch_for_change(branch)
-    rollback_patch = {
-        field: base_snapshot.get(field)
-        for field in _BRANCH_CHANGE_MANAGED_FIELDS
-        if field in base_snapshot and current_snapshot.get(field) != base_snapshot.get(field)
-    }
+    rollback_patch = _build_branch_change_rollback_patch(
+        base_snapshot=base_snapshot,
+        current_snapshot=current_snapshot,
+    )
 
     now = datetime.now(timezone.utc)
     if not rollback_patch:
