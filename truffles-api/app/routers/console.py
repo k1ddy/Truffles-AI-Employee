@@ -384,10 +384,10 @@ from app.services.console_branch_changes import (
     normalize_branch_change_patch as _normalize_branch_change_patch_payload,
 )
 from app.services.console_branch_changes import (
-    prepare_branch_change_payload as _prepare_branch_change_payload_for_context,
+    normalize_branch_change_status_filter as _normalize_branch_change_status_filter,
 )
 from app.services.console_branch_changes import (
-    normalize_branch_change_status_filter as _normalize_branch_change_status_filter,
+    prepare_branch_change_payload as _prepare_branch_change_payload_for_context,
 )
 from app.services.console_branch_changes import (
     query_branch_changes_for_context as _query_branch_changes_for_context,
