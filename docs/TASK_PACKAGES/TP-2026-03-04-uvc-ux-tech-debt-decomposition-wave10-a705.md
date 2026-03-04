@@ -118,7 +118,7 @@
 - Max targeted rerun attempts for same hypothesis: `1`.
 - Stop condition: any regression in deterministic lane -> stop and return to RCA before new edits.
 
-## Release safety (mandatory)
+## Release safety (mandatory for non-doc changes)
 - **Strategy:** bounded canary-by-PR merge with deterministic gate (`session-gate` + required CI jobs).
 - **Go/no-go signals:** all required checks green; no drift in targeted UVC e2e lane.
 - **Rollback:** revert wave10 merge commit.

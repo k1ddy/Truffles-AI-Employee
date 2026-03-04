@@ -65,6 +65,11 @@ import {
     ProvisioningWizardModePanel,
 } from "@/components/provisioning-wizard-shell-panels";
 import {
+    buildCreateAgentPayload,
+    buildCreateClientPayload,
+    buildCreateCompanyPayload,
+} from "@/components/provisioning-wizard-account-actions";
+import {
     buildCreateBranchPayload,
     buildSaveBookingPayload,
     buildSaveInstancePayload,
@@ -1378,57 +1383,32 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     };
 
     const handleCreateCompany = () => {
-        const name = companyName.trim();
-        if (!name) {
-            reportValidationError("Укажите название компании");
-            return;
-        }
-        const builtBilling = buildBillingInfoJsonFromFields({
-            contract: billingContract,
-            currency: billingCurrency,
+        const result = buildCreateCompanyPayload({
+            companyName,
+            billingInfoJson: billingInfo,
+            billingContract,
+            billingCurrency,
         });
-        if (builtBilling.error) {
-            reportValidationError(builtBilling.error);
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для company");
             return;
         }
-        const billing = parseOptionalJson(billingInfo, "billing_info");
-        if (billing.error) {
-            reportValidationError(billing.error);
-            return;
+        if (result.nextBillingInfoJson) {
+            setBillingInfo(result.nextBillingInfoJson);
         }
-        let billingPayload = billing.value;
-        if (!billingPayload && builtBilling.json) {
-            const builtParsed = parseOptionalJson(builtBilling.json, "billing_info");
-            if (builtParsed.error) {
-                reportValidationError(builtParsed.error);
-                return;
-            }
-            billingPayload = builtParsed.value;
-            if (billingPayload) {
-                setBillingInfo(builtBilling.json);
-            }
-        }
-        createCompanyMutation.mutate({
-            name,
-            billing_info: (billingPayload as Record<string, never> | undefined) ?? undefined,
-        });
+        createCompanyMutation.mutate(result.payload);
     };
 
     const handleCreateClient = () => {
-        const slug = clientSlug.trim();
-        if (!slug) {
-            reportValidationError("Укажите slug клиента");
-            return;
-        }
-        if (!companyId.trim()) {
-            reportValidationError("Укажите company_id компании");
-            return;
-        }
-        createClientMutation.mutate({
-            slug,
-            company_id: companyId.trim(),
-            status: null,
+        const result = buildCreateClientPayload({
+            clientSlug,
+            companyId,
         });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для client");
+            return;
+        }
+        createClientMutation.mutate(result.payload);
     };
 
     const handleCreateBranch = () => {
@@ -1536,28 +1516,19 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     };
 
     const handleCreateAgent = () => {
-        if (!clientId) {
-            reportValidationError("Укажите client_id");
+        const result = buildCreateAgentPayload({
+            clientId,
+            role: agentForm.role,
+            name: agentForm.name,
+            oidcSubject: agentForm.oidcSubject,
+            selectedBranchId: agentForm.branchId,
+            fallbackBranchId: branchData?.id,
+        });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для agent");
             return;
         }
-        const roleValue = agentForm.role;
-        const payload: components["schemas"]["ConsoleAgentCreateRequest"] = {
-            client_id: clientId,
-            role: roleValue,
-            name: agentForm.name.trim() || undefined,
-            oidc_subject: agentForm.oidcSubject.trim() || undefined,
-            is_active: true,
-            sso_temp_password: null,
-        };
-        if (roleValue === "manager") {
-            const branchId = agentForm.branchId || branchData?.id;
-            if (!branchId) {
-                reportValidationError("branch_id обязателен для manager");
-                return;
-            }
-            payload.branch_id = branchId;
-        }
-        createAgentMutation.mutate(payload);
+        createAgentMutation.mutate(result.payload);
     };
 
     const handleSaveCapabilities = () => {
