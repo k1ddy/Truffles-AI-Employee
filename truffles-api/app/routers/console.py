@@ -402,6 +402,12 @@ from app.services.console_idempotency import (
     release_idempotency,
     start_idempotency,
 )
+from app.services.console_knowledge_preflight import (
+    DEFAULT_PREFLIGHT_WINDOW_MINUTES,
+    build_knowledge_draft_hash,
+    build_knowledge_validate_payload,
+    has_recent_knowledge_preflight,
+)
 from app.services.console_membership_state import (
     ensure_agent_lifecycle_is_mutable as _ensure_agent_lifecycle_is_mutable,
 )
@@ -419,12 +425,6 @@ from app.services.console_membership_state import (
 )
 from app.services.console_membership_state import (
     is_privileged_access_role as _is_privileged_access_role,
-)
-from app.services.console_knowledge_preflight import (
-    DEFAULT_PREFLIGHT_WINDOW_MINUTES,
-    build_knowledge_draft_hash,
-    build_knowledge_validate_payload,
-    has_recent_knowledge_preflight,
 )
 from app.services.console_onboarding_readiness import (
     is_readiness_hard_gate_enforced_for_branch as _is_readiness_hard_gate_enforced_for_branch,
