@@ -163,6 +163,7 @@
 | `truffles-api/app/services/console_router_utils.py` | Shared pure helpers for Console router env/query normalization (`parse_env_*`, query rebuild, list dedupe) | Backend |
 | `truffles-api/app/services/console_control_tower_utils.py` | Shared pure helper layer for Control Tower action/migration contracts (priority/reasons/wave/detail builders) | Backend |
 | `truffles-api/app/services/console_control_tower_program.py` | Shared orchestration/program composition layer for Control Tower action-center and migration-program responses | Backend |
+| `truffles-api/app/services/console_branch_changes.py` | Shared branch-change snapshot/diff/record/update-request helper layer extracted from Console router | Backend |
 | `truffles-api/app/services/console_fleet_state.py` | Shared fleet lifecycle/payment/service state resolver layer extracted from Console router | Backend |
 | `truffles-api/app/services/console_membership_state.py` | Shared membership/role assignment lifecycle guard layer extracted from Console router | Backend |
 | `docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md` | Weekly control-loop runbook для Platform Admin (snapshot -> backlog -> checks) | Brain/Architect |
@@ -179,6 +180,7 @@
 | `console-web/src/components/provisioning-wizard-shell-panels.tsx` | Extracted controlled shell panels for `ProvisioningWizard` (error summary, mode switch, execution hub) | Frontend |
 | `console-web/src/components/provisioning-wizard-json-payloads.ts` | Extracted JSON payload builders/loaders for `ProvisioningWizard` (`billing_info`, `working_hours`, `booking_settings`) | Frontend |
 | `console-web/src/components/provisioning-wizard-state.ts` | Extracted state lifecycle/bootstrap/hydration helpers for `ProvisioningWizard` | Frontend |
+| `console-web/src/components/provisioning-wizard-branch-actions.ts` | Extracted branch action payload builders for `ProvisioningWizard` (`create/update/save instance/telegram/knowledge/booking`) | Frontend |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md` | Artifact report: UVC audit governance closeout (`UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705`) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-tech-debt-decomposition-wave1-a705.md` | Artifact report: wave1 structural decomposition for `UX-11`/`UX-12` + merge-red fix | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave2-a705.md` | Artifact report: wave2 structural decomposition for `UX-11`/`UX-12` (control-tower + provisioning domain extraction) | Brain/Architect |
@@ -194,6 +196,8 @@
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-review3-a705.md` | Artifact report: final-review3 merged-main decision after wave7 (`Open (Mitigated wave7; wave8 required)`) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave8-a705.md` | Artifact report: wave8 structural decomposition for `UX-11`/`UX-12` (go-live backend governance extraction + wizard JSON sync extraction) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review4-a705.md` | Artifact report: closure-review4 merged-main decision after wave8 (`Open (Mitigated wave8; wave9 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave9-a705.md` | Artifact report: wave9 structural decomposition for `UX-11`/`UX-12` (branch-change backend extraction + provisioning branch-action extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review5-a705.md` | Artifact report: closure-review5 merged-main decision after wave9 (`Open (Mitigated wave9; wave10 required)`) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave4-a705.md` | Follow-up Task Package for next decomposition wave after closeout residual confirmation | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-close-a705.md` | Final-close Task Package for post-wave4 deterministic status decision and residual contract | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md` | Next bounded wave Task Package for residual `UX-11/UX-12` decomposition after final-close merge | Brain/Architect |
@@ -205,6 +209,8 @@
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave8-a705.md` | Next bounded decomposition Task Package after final-review3 residual decision for `UX-11`/`UX-12` | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review4-a705.md` | Closure-review Task Package after wave8 merge to decide `Fixed` vs `Open + wave9` for `UX-11/UX-12` | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave9-a705.md` | Next bounded decomposition Task Package after closure-review4 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review5-a705.md` | Closure-review Task Package after wave9 merge to decide `Fixed` vs `Open + wave10` for `UX-11/UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave10-a705.md` | Next bounded decomposition Task Package after closure-review5 residual decision for `UX-11`/`UX-12` | Brain/Architect |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
 | `SPECS/INBOX_HUMAN_LOCK.md` | ТЗ: manual messaging + human lock в «Заявках» | Архитектор/Backend/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
