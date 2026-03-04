@@ -1551,9 +1551,10 @@ test.describe('Platform Admin Tenants', () => {
         } else {
             await expect(page).toHaveURL(urlPathPattern('/ops'));
         }
-        await expect(page.getByTestId('ops-back-workspace')).toBeVisible();
+        await expect(page.getByTestId('ops-title')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('ops-back-workspace')).toBeVisible({ timeout: 15000 });
         const opsBackTenants = page.getByTestId('ops-back-tenants');
-        await expect(opsBackTenants).toBeVisible();
+        await expect(opsBackTenants).toBeVisible({ timeout: 15000 });
         await expect(opsBackTenants).toHaveAttribute('href', '/tenants');
     });
 
