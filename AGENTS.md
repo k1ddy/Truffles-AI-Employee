@@ -270,6 +270,23 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Продвижение rollout без фактических сигналов запрещено.
 - При устойчивой деградации надежности (SLO/error-budget breach) feature rollout останавливается до восстановления baseline.
 
+### 6.5 Runtime Hygiene Gate (обязательно)
+- Цель: исключить накопление runtime-дублей/мусора, которые приводят к OOM, swap pressure и disk pressure.
+- Перед cleanup обязателен baseline-срез evidence:
+  - `date`
+  - `free -h`
+  - `df -h /`
+  - `docker ps --format '{{.Names}}' | wc -l`
+  - `docker system df`
+- Разрешено удалять без отдельного эскалационного решения только stale runtime clones по шаблонам `^truffles-api-` и `^firebreak-hq1-runtime` (по умолчанию старше 48 часов), если это не противоречит активному TP.
+- Удаление core-контейнеров (`truffles-api`, `truffles-postgres`, `truffles-redis`, `truffles-console-keycloak`, `truffles-prometheus`, `truffles-grafana`, `truffles-traefik`) без явного TP/owner-решения запрещено.
+- Любой долгий prune (`docker image prune`, `docker builder prune`) запускается с `timeout` и логированием в файл; если операция зависла/нет прогресса более 10 минут — stop-the-line, зафиксировать как infra GAP.
+- После cleanup обязателен post-state evidence тем же набором метрик + `docker image ls -f dangling=true -q | wc -l`.
+- Профилактика обязательна:
+  - ежедневный runtime hygiene job (stale clones + dangling images + journal vacuum),
+  - еженедельный deep cleanup build cache.
+- Канонический entrypoint: `/usr/local/bin/truffles-runtime-hygiene.sh`; cron-манифест: `/etc/cron.d/truffles-runtime-hygiene`.
+
 ### 6.1 Local-first validation law (обязательно)
 - Любая правка core‑поведения сначала проходит локальный реалистичный контур; без этого PR/приёмка = BLOCKED.
 - Порядок неизменный: `local realism` -> `local contract checks (deterministic boundaries)` -> `CI deterministic smoke`.
