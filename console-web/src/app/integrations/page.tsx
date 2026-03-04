@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import toast from "react-hot-toast";
 
 import AccessDenied from "@/components/AccessDenied";
@@ -1215,18 +1214,9 @@ export default function IntegrationsPage() {
                     >
                         Обновить
                     </button>
-                    <button
-                        type="button"
-                        className="btn-primary"
-                        onClick={openWorkspaceFromScope}
-                        disabled={!hasScopeContext}
-                        data-testid="integrations-open-workspace-scope"
-                        title={hasScopeContext ? "Открыть Workspace по выбранному контексту" : "Сначала выберите контекст компании, клиента или филиала"}
-                    >
-                        Открыть Workspace по контексту
-                    </button>
-                    <Link href="/tenants" className="btn-ghost">Тенанты</Link>
-                    <Link href="/ops" className="btn-ghost">Операции</Link>
+                    <span className="text-xs text-muted-foreground">
+                        Выполняемые действия находятся в блоке «Операции через Workspace».
+                    </span>
                 </div>
             </div>
 
@@ -1257,7 +1247,7 @@ export default function IntegrationsPage() {
             </section>
 
             <section className="mb-4 rounded-xl border border-blue-300/50 bg-blue-50/60 p-4" data-testid="integrations-workspace-cta">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                         <div className="text-sm font-semibold text-blue-900">Операции выполняются через Workspace</div>
                         <div className="mt-1 text-xs text-blue-800/80">
@@ -1266,11 +1256,26 @@ export default function IntegrationsPage() {
                         <div className="mt-1 text-xs text-blue-800/80" data-testid="integrations-workspace-guidance">
                             Для действий открывайте Workspace из строки филиала: так контекст и следующий шаг передаются автоматически.
                         </div>
+                        <div className="mt-2 rounded-lg border border-blue-300/60 bg-white/70 p-2 text-xs text-blue-900" data-testid="integrations-intent-map">
+                            Роль вкладки: <span className="font-semibold">Факт</span> (видим состояние) → <span className="font-semibold">Действие</span> (открываем Workspace) → <span className="font-semibold">Проверка</span> (после выполнения сверяем в Ops).
+                        </div>
                     </div>
-                    <div className="text-xs text-blue-900/80">
-                        данные устаревают через <span className="font-mono">{integrationsData?.stale_after_minutes ?? staleAfterMinutes}</span> мин
-                        {" "}· лимит страницы: <span className="font-mono">{INTEGRATIONS_PAGE_LIMIT}</span>
-                        {" "}· загружено: <span className="font-mono">{integrationsItems.length}</span>/<span className="font-mono">{integrationsTotalInScope}</span>
+                    <div className="space-y-2">
+                        <button
+                            type="button"
+                            className="btn-primary"
+                            onClick={openWorkspaceFromScope}
+                            disabled={!hasScopeContext}
+                            data-testid="integrations-open-workspace-scope"
+                            title={hasScopeContext ? "Открыть Workspace по выбранному контексту" : "Сначала выберите контекст компании, клиента или филиала"}
+                        >
+                            Открыть Workspace по контексту
+                        </button>
+                        <div className="text-xs text-blue-900/80">
+                            данные устаревают через <span className="font-mono">{integrationsData?.stale_after_minutes ?? staleAfterMinutes}</span> мин
+                            {" "}· лимит страницы: <span className="font-mono">{INTEGRATIONS_PAGE_LIMIT}</span>
+                            {" "}· загружено: <span className="font-mono">{integrationsItems.length}</span>/<span className="font-mono">{integrationsTotalInScope}</span>
+                        </div>
                     </div>
                 </div>
             </section>

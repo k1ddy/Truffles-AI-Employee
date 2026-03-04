@@ -1350,6 +1350,8 @@ test.describe('Platform Admin Navigation', () => {
 
         const opsPage = page.getByTestId('ops-page');
         await expect(opsPage).toBeVisible();
+        await expect(page.getByTestId('ops-intent-map')).toBeVisible();
+        await expect(page.getByTestId('ops-intent-map')).toContainText('проверка');
         await expect(page.getByTestId('ops-telegram-verify')).toContainText('Проверить связь');
         await expect(page.getByTestId('ops-telegram-test')).toContainText('Отправить тест');
 
@@ -1388,6 +1390,8 @@ test.describe('Platform Admin Integrations', () => {
     test('should keep Integrations as fact-only handoff layer with explicit context gate @smoke', async ({ page }) => {
         await openIntegrations(page);
         await expect(page.getByTestId('integrations-workspace-guidance')).toBeVisible();
+        await expect(page.getByTestId('integrations-intent-map')).toBeVisible();
+        await expect(page.getByTestId('integrations-intent-map')).toContainText('Факт');
 
         const scopeCta = page.getByTestId('integrations-open-workspace-scope');
         await expect(scopeCta).toBeVisible();
@@ -1572,6 +1576,7 @@ test.describe('Platform Admin Tenants', () => {
     test('should switch Tenants workspace modes @smoke', async ({ page }) => {
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
+            await expect(page.getByTestId('tenants-intent-map')).toBeVisible();
             await expect(page.getByTestId('tenants-context-lens')).toBeVisible();
             await expect(
                 page.getByTestId('tenants-lifecycle-controls').getByRole('button', { name: /^Все$/ }),
@@ -1626,7 +1631,7 @@ test.describe('Platform Admin Tenants', () => {
         await onboardingRun.click();
         await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
         await expect(page.getByTestId('tenants-onboarding-loop-hint')).toBeVisible();
-        await expect(page.getByTestId('tenants-onboarding-open-ops')).toBeVisible();
+        await expect(page.getByTestId('tenants-onboarding-loop-hint')).toContainText('откройте Workspace');
     });
 
     test('should deep-link from Tenants action queue to Workspace execute @smoke', async ({ page }) => {
@@ -1637,6 +1642,7 @@ test.describe('Platform Admin Tenants', () => {
         await expect(openWorkspaceButton).toBeVisible();
         await openWorkspaceWithRetry(page, openWorkspaceButton);
         await expect(page.getByTestId('workspace-recommended-open-execute')).toBeVisible();
+        await expect(page.getByTestId('workspace-intent-map')).toBeVisible();
         await mockOpsDeterministicApis(page);
 
         const deepLinkParams = await page.evaluate(() => ({
@@ -1670,6 +1676,7 @@ test.describe('Platform Admin Tenants', () => {
             await expect(page).toHaveURL(urlPathPattern('/ops'));
         }
         await expect(page.getByTestId('ops-title')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('ops-intent-map')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('ops-back-workspace')).toBeVisible({ timeout: 15000 });
         const opsBackTenants = page.getByTestId('ops-back-tenants');
         await expect(opsBackTenants).toBeVisible({ timeout: 15000 });
@@ -1697,6 +1704,7 @@ test.describe('Platform Admin Tenants', () => {
         await expect(recommendationSection).toContainText('Причины');
         await expect(recommendationSection).toContainText('нужна перепривязка канала');
         await expect(recommendationSection).toContainText('источник подсказки:');
+        await expect(recommendationSection).not.toContainText('Открыть OPS');
         await expect(recommendationSection).not.toContainText('source:');
     });
 

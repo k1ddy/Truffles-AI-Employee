@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-tech-debt-decomposition-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-dedup-intent-map-a705.md
+- block_id: UVC-UX-DEDUP-INTENT-MAP-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC structural debt decomposition wave1 (`UX-11`/`UX-12`) + merge-red deep-link fix with deterministic checks
+- scope: UVC UX de-dup + unified intent-map in existing tabs (`Tenants/Integrations/Workspace/Ops`) without new top-level tabs
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -63,8 +63,11 @@
   - Extracted `ProvisioningWizard` pure helpers into `console-web/src/components/provisioning-wizard-utils.ts` and rewired component imports.
   - Extracted `console.py` shared env/query helpers into `truffles-api/app/services/console_router_utils.py` and rewired router imports.
   - Added deterministic tests `truffles-api/tests/test_console_router_utils.py` (`5 passed`).
+  - Started `UVC-UX-DEDUP-INTENT-MAP-A705` (step `1+2` from master plan).
+  - De-duplicated `Integrations` primary CTA placement and normalized plain-language operator wording (`Ops`) across action-loop copy.
+  - Added unified intent-map hints in `Tenants/Integrations/Workspace/Ops` and aligned targeted Playwright coverage (`26 passed`).
 - next:
-  - Open PR for `UVC-UX-TECH-DEBT-DECOMPOSITION-A705` and monitor CI.
+  - Open PR for `UVC-UX-DEDUP-INTENT-MAP-A705` and monitor CI.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md

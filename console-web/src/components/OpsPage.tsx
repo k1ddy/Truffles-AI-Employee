@@ -954,6 +954,9 @@ export default function OpsPage() {
                             Вернуться в Tenants
                         </Link>
                     </div>
+                    <div className="mt-2 rounded-lg border border-violet-300/60 bg-violet-50 p-2 text-xs text-violet-900" data-testid="ops-intent-map">
+                        Роль вкладки: <span className="font-semibold">проверка</span>. Здесь подтверждаем результат после изменений и принимаем решение о следующем шаге.
+                    </div>
                 </div>
                 <div className="flex items-center gap-4">
                     <span className="text-sm text-muted-foreground">Авто-обновление: 30с</span>

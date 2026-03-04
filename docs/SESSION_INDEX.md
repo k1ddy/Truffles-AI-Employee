@@ -4,6 +4,8 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-03-03-uvc-ux-stage2-a705 | done | feat/2026-03-03-uvc-ux-stage2-a705 | /home/zhan/worktrees/2026-03-03-uvc-ux-stage2-a705 | docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage2-language-hints-a705.md | 2026-03-03 |
+| 2026-03-02-uvc-ux-stage1-pr-a705 | active | feat/2026-03-02-uvc-ux-stage1-pr-a705 | /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705 | docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-dedup-intent-map-a705.md | 2026-03-03 |
 | 2026-03-02-uvc-ux-convergence-a705 | done | feat/2026-03-02-uvc-ux-convergence-a705 | /home/zhan/worktrees/2026-03-02-uvc-ux-convergence-a705 | docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-convergence-a705.md | 2026-03-02 |
 | 2026-03-02-ucpv1-phase13-slice3-a703 | done | feat/2026-03-02-ucpv1-phase13-slice3-a703 | /home/zhan/worktrees/2026-03-02-ucpv1-phase13-slice3-a703 | docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md | 2026-03-02 |
 | 2026-03-02-ucpv1-phase13-slice2-a702 | done | feat/2026-03-02-ucpv1-phase13-slice2-a702 | /home/zhan/worktrees/2026-03-02-ucpv1-phase13-slice2-a702 | docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md | 2026-03-02 |
@@ -360,5 +362,3 @@
 | 2026-01-27-consultant-canon-a2 | active | feat/2026-01-27-consultant-canon-a2 | /home/zhan/worktrees/2026-01-27-consultant-canon-a2 | docs/TASK_PACKAGES/TP-2026-01-27-consultant-canon-alignment.md | 2026-01-29 |
 | 2026-01-27-console-ux-selection | done | feat/console-ux-selection | /home/zhan/worktrees/console-ux-selection | docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md | 2026-01-28 |
 | 2026-01-27-admin-login-verify-a2 | done | feat/2026-01-27-admin-login-verify-a2 | /home/zhan/worktrees/2026-01-27-admin-login-verify-a2 | docs/TASK_PACKAGES/TP-2026-01-27-admin-login-verify.md | 2026-01-27 |
-| 2026-03-02-uvc-ux-stage1-pr-a705 | active | feat/2026-03-02-uvc-ux-stage1-pr-a705 | /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705 | docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-tech-debt-decomposition-a705.md | 2026-03-03T18:19:00+05:00 |
-| 2026-03-03-uvc-ux-stage2-a705 | done | feat/2026-03-03-uvc-ux-stage2-a705 | /home/zhan/worktrees/2026-03-03-uvc-ux-stage2-a705 | docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage2-language-hints-a705.md | 2026-03-03 |
