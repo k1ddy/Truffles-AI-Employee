@@ -430,7 +430,28 @@ from app.services.console_membership_state import (
     is_privileged_access_role as _is_privileged_access_role,
 )
 from app.services.console_onboarding_readiness import (
+    BRANCH_GO_LIVE_DEFAULT_STATE as _BRANCH_GO_LIVE_DEFAULT_STATE,
+)
+from app.services.console_onboarding_readiness import (
+    coerce_utc_datetime as _coerce_utc,
+)
+from app.services.console_onboarding_readiness import (
+    ensure_branch_go_live_gate as _require_branch_go_live_gate,
+)
+from app.services.console_onboarding_readiness import (
+    is_branch_go_live_allowed as _is_branch_go_live_allowed,
+)
+from app.services.console_onboarding_readiness import (
+    is_branch_go_live_waiver_active as _is_branch_go_live_waiver_active,
+)
+from app.services.console_onboarding_readiness import (
     is_readiness_hard_gate_enforced_for_branch as _is_readiness_hard_gate_enforced_for_branch,
+)
+from app.services.console_onboarding_readiness import (
+    normalize_branch_go_live_state as _normalize_branch_go_live_state,
+)
+from app.services.console_onboarding_readiness import (
+    normalize_go_live_waiver_ttl_hours as _normalize_go_live_waiver_ttl_hours,
 )
 from app.services.console_onboarding_readiness import (
     resolve_readiness_hard_gate_blockers as _resolve_readiness_hard_gate_blockers,
@@ -2144,10 +2165,6 @@ _CLIENT_LIFECYCLE_REASON_MAX_LEN = 500
 _ACCESS_REASON_MAX_LEN = 500
 _CLIENT_ARCHIVE_SAMPLE_LIMIT = 20
 _BRANCH_BOOTSTRAP_ACCOUNTS_MAX = 20
-_BRANCH_GO_LIVE_STATES = {"pending", "approved", "rejected"}
-_BRANCH_GO_LIVE_DEFAULT_STATE = "pending"
-_GO_LIVE_WAIVER_MIN_HOURS = 1
-_GO_LIVE_WAIVER_MAX_HOURS = 24 * 30
 _ONBOARDING_READINESS_HARD_GATE_DEFAULT_CODES = {
     "delivery:backlog_critical",
     "delivery:failed_24h_critical",
@@ -4253,75 +4270,6 @@ def _normalize_access_reason(
     if value and len(value) > _ACCESS_REASON_MAX_LEN:
         raise ConsoleAPIError(400, "INVALID_PARAM", "reason too long")
     return value or None
-
-
-def _normalize_branch_go_live_state(value: Optional[str]) -> str:
-    normalized = (value or "").strip().lower()
-    if normalized in _BRANCH_GO_LIVE_STATES:
-        return normalized
-    return _BRANCH_GO_LIVE_DEFAULT_STATE
-
-
-def _normalize_go_live_waiver_ttl_hours(value: int) -> int:
-    if value < _GO_LIVE_WAIVER_MIN_HOURS or value > _GO_LIVE_WAIVER_MAX_HOURS:
-        raise ConsoleAPIError(
-            400,
-            "INVALID_PARAM",
-            f"ttl_hours must be between {_GO_LIVE_WAIVER_MIN_HOURS} and {_GO_LIVE_WAIVER_MAX_HOURS}",
-        )
-    return value
-
-
-def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value
-
-
-def _is_branch_go_live_waiver_active(
-    branch: Branch,
-    *,
-    now: Optional[datetime] = None,
-) -> bool:
-    waiver_until = _coerce_utc(getattr(branch, "go_live_waiver_until", None))
-    if waiver_until is None:
-        return False
-    current = now or datetime.now(timezone.utc)
-    return waiver_until > current
-
-
-def _is_branch_go_live_allowed(
-    branch: Branch,
-    *,
-    now: Optional[datetime] = None,
-) -> bool:
-    go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
-    if go_live_state == "approved":
-        return True
-    return _is_branch_go_live_waiver_active(branch, now=now)
-
-
-def _require_branch_go_live_gate(branch: Branch, *, operation: str) -> None:
-    now = datetime.now(timezone.utc)
-    go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
-    waiver_active = _is_branch_go_live_waiver_active(branch, now=now)
-    if go_live_state == "approved" or waiver_active:
-        return
-    waiver_until = _coerce_utc(getattr(branch, "go_live_waiver_until", None))
-    raise ConsoleAPIError(
-        409,
-        "GO_LIVE_GATE_REQUIRED",
-        "Go-live approval required before branch activation",
-        {
-            "operation": operation,
-            "go_live_state": go_live_state,
-            "go_live_reason": getattr(branch, "go_live_reason", None),
-            "go_live_waiver_active": waiver_active,
-            "go_live_waiver_until": waiver_until.isoformat() if waiver_until else None,
-        },
-    )
 
 
 def _require_branch_scorecard_ready(

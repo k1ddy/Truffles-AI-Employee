@@ -65,21 +65,19 @@ import {
     ProvisioningWizardModePanel,
 } from "@/components/provisioning-wizard-shell-panels";
 import {
-    buildBillingInfoPayload as buildBillingInfoPayloadDraft,
-    buildBookingSettingsPayload as buildBookingSettingsPayloadDraft,
-    buildWorkingHoursPayload as buildWorkingHoursPayloadDraft,
-    readBillingInfoPayload,
-    readBookingSettingsPayload,
-    readWorkingHoursPayload,
-} from "@/components/provisioning-wizard-json-payloads";
-import {
+    buildBillingInfoJsonFromFields,
+    buildBookingSettingsJsonFromFields,
     buildBranchFormFromBranchData,
+    buildWorkingHoursJsonFromFields,
     createInitialAutopilotForm,
     createInitialBranchBootstrapState,
     createInitialBranchForm,
     hydrateBillingFieldsFromJson,
     hydrateBookingSettingsFieldsFromJson,
     hydrateWorkingHoursFieldsFromJson,
+    loadBillingInfoFieldsFromJson,
+    loadBookingSettingsFieldsFromJson,
+    loadWorkingHoursFieldsFromJson,
     resolveNextAgentBranchId,
 } from "@/components/provisioning-wizard-state";
 
@@ -318,94 +316,79 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setReferencePackTitle("");
     }, [branchData?.id]);
 
-    const buildBillingInfoPayload = (): { value?: Record<string, unknown>; error?: string } => {
-        return buildBillingInfoPayloadDraft({
+    const applyBillingToJson = () => {
+        const result = buildBillingInfoJsonFromFields({
             contract: billingContract,
             currency: billingCurrency,
         });
-    };
-
-    const applyBillingToJson = () => {
-        const built = buildBillingInfoPayload();
-        if (built.error) {
-            reportValidationError(built.error);
+        if (result.error) {
+            reportValidationError(result.error);
             return;
         }
-        setBillingInfo(built.value ? JSON.stringify(built.value, null, 2) : "");
+        setBillingInfo(result.json);
     };
 
     const loadBillingFromJson = () => {
-        const parsed = parseOptionalJson(billingInfo, "billing_info");
-        if (parsed.error) {
-            reportValidationError(parsed.error);
+        const result = loadBillingInfoFieldsFromJson({
+            billingInfo,
+        });
+        if (result.error) {
+            reportValidationError(result.error);
             return;
         }
-        const payload = (parsed.value ?? {}) as Record<string, unknown>;
-        const next = readBillingInfoPayload(payload);
-        setBillingContract(next.contract);
-        setBillingCurrency(next.currency);
+        setBillingContract(result.contract);
+        setBillingCurrency(result.currency);
     };
 
-    const buildWorkingHoursPayload = (): { value?: Record<string, unknown>; error?: string } => {
-        return buildWorkingHoursPayloadDraft({
+    const applyWorkingHoursToJson = () => {
+        const result = buildWorkingHoursJsonFromFields({
             selectedDays: workingHoursDays,
             start: workingHoursStart,
             end: workingHoursEnd,
         });
-    };
-
-    const applyWorkingHoursToJson = () => {
-        const built = buildWorkingHoursPayload();
-        if (built.error) {
-            reportValidationError(built.error);
+        if (result.error) {
+            reportValidationError(result.error);
             return;
         }
-        const nextValue = built.value ? JSON.stringify(built.value, null, 2) : "";
-        setBranchForm((prev) => ({ ...prev, workingHours: nextValue }));
+        setBranchForm((prev) => ({ ...prev, workingHours: result.json }));
     };
 
     const loadWorkingHoursFromJson = () => {
-        const parsed = parseOptionalJson(branchForm.workingHours, "working_hours");
-        if (parsed.error) {
-            reportValidationError(parsed.error);
-            return;
-        }
-        const payload = (parsed.value ?? {}) as Record<string, unknown>;
-        const next = readWorkingHoursPayload(payload, {
+        const result = loadWorkingHoursFieldsFromJson({
+            workingHoursJson: branchForm.workingHours,
             orderedDays: WORKING_DAYS.map((day) => day.id),
         });
-        setWorkingHoursDays(next.days);
-        setWorkingHoursStart(next.start);
-        setWorkingHoursEnd(next.end);
-    };
-
-    const buildBookingSettingsPayload = (): { value?: Record<string, unknown>; error?: string } => {
-        return buildBookingSettingsPayloadDraft({
-            defaultDuration: bookingDefaultDuration,
-            bufferMin: bookingBufferMin,
-        });
+        if (result.error) {
+            reportValidationError(result.error);
+            return;
+        }
+        setWorkingHoursDays(result.days);
+        setWorkingHoursStart(result.start);
+        setWorkingHoursEnd(result.end);
     };
 
     const applyBookingSettingsToJson = () => {
-        const built = buildBookingSettingsPayload();
-        if (built.error) {
-            reportValidationError(built.error);
+        const result = buildBookingSettingsJsonFromFields({
+            defaultDuration: bookingDefaultDuration,
+            bufferMin: bookingBufferMin,
+        });
+        if (result.error) {
+            reportValidationError(result.error);
             return;
         }
-        const nextValue = built.value ? JSON.stringify(built.value, null, 2) : "";
-        setBranchForm((prev) => ({ ...prev, bookingSettings: nextValue }));
+        setBranchForm((prev) => ({ ...prev, bookingSettings: result.json }));
     };
 
     const loadBookingSettingsFromJson = () => {
-        const parsed = parseOptionalJson(branchForm.bookingSettings, "booking_settings");
-        if (parsed.error) {
-            reportValidationError(parsed.error);
+        const result = loadBookingSettingsFieldsFromJson({
+            bookingSettingsJson: branchForm.bookingSettings,
+        });
+        if (result.error) {
+            reportValidationError(result.error);
             return;
         }
-        const payload = (parsed.value ?? {}) as Record<string, unknown>;
-        const next = readBookingSettingsPayload(payload);
-        setBookingDefaultDuration(next.defaultDuration);
-        setBookingBufferMin(next.bufferMin);
+        setBookingDefaultDuration(result.defaultDuration);
+        setBookingBufferMin(result.bufferMin);
     };
 
     const validatePurchasedPayload = (payload: CapabilitiesPayload): string | null => {
@@ -1392,7 +1375,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             reportValidationError("Укажите название компании");
             return;
         }
-        const builtBilling = buildBillingInfoPayload();
+        const builtBilling = buildBillingInfoJsonFromFields({
+            contract: billingContract,
+            currency: billingCurrency,
+        });
         if (builtBilling.error) {
             reportValidationError(builtBilling.error);
             return;
@@ -1403,10 +1389,15 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return;
         }
         let billingPayload = billing.value;
-        if (!billingPayload) {
-            billingPayload = builtBilling.value;
+        if (!billingPayload && builtBilling.json) {
+            const builtParsed = parseOptionalJson(builtBilling.json, "billing_info");
+            if (builtParsed.error) {
+                reportValidationError(builtParsed.error);
+                return;
+            }
+            billingPayload = builtParsed.value;
             if (billingPayload) {
-                setBillingInfo(JSON.stringify(billingPayload, null, 2));
+                setBillingInfo(builtBilling.json);
             }
         }
         createCompanyMutation.mutate({
@@ -1589,25 +1580,42 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         let nextWorkingJson: string | null = null;
         let nextBookingJson: string | null = null;
         if (!workingPayload) {
-            const built = buildWorkingHoursPayload();
+            const built = buildWorkingHoursJsonFromFields({
+                selectedDays: workingHoursDays,
+                start: workingHoursStart,
+                end: workingHoursEnd,
+            });
             if (built.error) {
                 reportValidationError(built.error);
                 return;
             }
-            workingPayload = built.value;
-            if (built.value) {
-                nextWorkingJson = JSON.stringify(built.value, null, 2);
+            if (built.json) {
+                const builtParsed = parseOptionalJson(built.json, "working_hours");
+                if (builtParsed.error) {
+                    reportValidationError(builtParsed.error);
+                    return;
+                }
+                workingPayload = builtParsed.value;
+                nextWorkingJson = built.json;
             }
         }
         if (!bookingPayload) {
-            const built = buildBookingSettingsPayload();
+            const built = buildBookingSettingsJsonFromFields({
+                defaultDuration: bookingDefaultDuration,
+                bufferMin: bookingBufferMin,
+            });
             if (built.error) {
                 reportValidationError(built.error);
                 return;
             }
-            bookingPayload = built.value;
-            if (built.value) {
-                nextBookingJson = JSON.stringify(built.value, null, 2);
+            if (built.json) {
+                const builtParsed = parseOptionalJson(built.json, "booking_settings");
+                if (builtParsed.error) {
+                    reportValidationError(builtParsed.error);
+                    return;
+                }
+                bookingPayload = builtParsed.value;
+                nextBookingJson = built.json;
             }
         }
         if (!workingPayload && !bookingPayload) {
