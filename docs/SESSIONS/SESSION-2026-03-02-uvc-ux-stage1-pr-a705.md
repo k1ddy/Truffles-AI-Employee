@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE5-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC structural decomposition wave5 for `UX-11/UX-12` (bounded backend/frontend extraction + deterministic validation + canon sync) without runtime behavior changes
+- scope: UVC structural decomposition closure-review for `UX-11/UX-12` (merged-main evidence decision + wave6 contract sync) without runtime behavior changes
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -101,8 +101,15 @@
   - Started wave5 bounded extraction:
   - Backend: moved query/limit/uuid/bool param validation logic into `truffles-api/app/services/console_router_utils.py` and rewired router wrappers.
   - Frontend: extracted wizard shell panels into `console-web/src/components/provisioning-wizard-shell-panels.tsx` and rewired `ProvisioningWizard.tsx`.
+  - Merged wave5 PR `#893` (`94ee1152`) into `main`.
+  - Started `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW-A705`.
+  - Added closure-review TP `TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review-a705.md`.
+  - Added linked follow-up TP `TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave6-a705.md`.
+  - Captured post-merge deterministic evidence for closure review (`wc`, `py_compile`, `pytest 16 passed`).
+  - Published closure-review artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review-a705.md` with explicit decision: `UX-11/UX-12` remain `Open (Mitigated wave5; wave6 required)`.
+  - Synced closure-review canon pointers in `STATE.md`, `docs/CONSOLE_AUDIT/UX_BACKLOG.md`, `docs/CONSOLE_AUDIT/INDEX.md`, `STRUCTURE.md`, `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`, and `docs/SESSION_INDEX.md`.
 - next:
-  - Sync wave5 canon docs, open wave5 PR, and proceed to closure-review block after merge.
+  - Run `SESSION_AGENT=a705 scripts/session_check.sh`, open closure-review PR, then execute wave6 after merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -117,7 +124,9 @@
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closeout-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave4-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-close-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave6-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closeout-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-close-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave5-a705.md
@@ -165,6 +174,7 @@
   - truffles-api/tests/test_console_control_tower_program.py
   - truffles-api/tests/test_console_onboarding_readiness.py
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave4-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review-a705.md
   - /tmp/uvc_stage5_kpi_snapshot_a705.json
   - /tmp/uvc_stage5_kpi_post_a705.json
   - /tmp/uvc_stage5_kpi_main_post_a705.json
@@ -215,5 +225,6 @@
   - checks: `pytest -q truffles-api/tests/test_console_router_utils.py truffles-api/tests/test_console_control_tower_program.py truffles-api/tests/test_console_onboarding_readiness.py` (`16 passed`)
   - checks: `cd console-web && npm run lint -- --file src/components/ProvisioningWizard.tsx --file src/components/provisioning-wizard-shell-panels.tsx --file src/components/provisioning-wizard-readiness-panel.tsx --file src/components/provisioning-wizard-derived.ts --file src/components/provisioning-wizard-utils.ts` (`No ESLint warnings or errors`)
   - checks: `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` (`24881`, `4679`)
+  - checks: `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` (`24897`, `4679`)
   - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-04
