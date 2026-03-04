@@ -65,6 +65,14 @@ import {
     ProvisioningWizardModePanel,
 } from "@/components/provisioning-wizard-shell-panels";
 import {
+    buildCreateBranchPayload,
+    buildSaveBookingPayload,
+    buildSaveInstancePayload,
+    buildSaveKnowledgePayload,
+    buildSaveTelegramPayload,
+    buildUpdateBranchDraftPayload,
+} from "@/components/provisioning-wizard-branch-actions";
+import {
     buildBillingInfoJsonFromFields,
     buildBookingSettingsJsonFromFields,
     buildBranchFormFromBranchData,
@@ -1423,102 +1431,50 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         });
     };
 
-    const buildBranchBootstrapAccounts = (): components["schemas"]["ConsoleBranchBootstrapAccountTemplate"][] => {
-        if (!branchBootstrap.enabled) {
-            return [];
-        }
-        const branchLabel = branchForm.name.trim() || "Branch";
-        const accounts: components["schemas"]["ConsoleBranchBootstrapAccountTemplate"][] = [];
-        if (branchBootstrap.createOwner) {
-            accounts.push({
-                role: "owner",
-                name: branchBootstrap.ownerName.trim() || `${branchLabel} Owner`,
-                oidc_subject: branchBootstrap.ownerOidcSubject.trim() || undefined,
-                is_active: true,
-            });
-        }
-        if (branchBootstrap.createAdmin) {
-            accounts.push({
-                role: "admin",
-                name: branchBootstrap.adminName.trim() || `${branchLabel} Admin`,
-                oidc_subject: branchBootstrap.adminOidcSubject.trim() || undefined,
-                is_active: true,
-            });
-        }
-        if (branchBootstrap.createManager) {
-            accounts.push({
-                role: "manager",
-                name: branchBootstrap.managerName.trim() || `${branchLabel} Manager`,
-                oidc_subject: branchBootstrap.managerOidcSubject.trim() || undefined,
-                is_active: true,
-            });
-        }
-        return accounts;
-    };
-
     const handleCreateBranch = () => {
-        if (!clientId) {
-            reportValidationError("Укажите client_id");
-            return;
-        }
-        const name = branchForm.name.trim();
-        const slug = branchForm.slug.trim();
-        if (!name || !slug) {
-            reportValidationError("Заполните название и slug");
-            return;
-        }
-        const bootstrapAccounts = buildBranchBootstrapAccounts();
-        createBranchMutation.mutate({
-            client_id: clientId,
-            name,
-            slug,
-            timezone: branchForm.timezone.trim() || undefined,
-            phone: branchForm.phone.trim() || undefined,
-            is_active: false,
-            bootstrap_accounts: bootstrapAccounts,
+        const result = buildCreateBranchPayload({
+            clientId,
+            branchName: branchForm.name,
+            branchSlug: branchForm.slug,
+            timezone: branchForm.timezone,
+            phone: branchForm.phone,
+            bootstrap: branchBootstrap,
         });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для branch");
+            return;
+        }
+        createBranchMutation.mutate(result.payload);
     };
 
     const handleUpdateBranchDraft = () => {
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        const name = branchForm.name.trim();
-        const slug = branchForm.slug.trim();
-        if (!name || !slug) {
-            reportValidationError("Заполните название и slug");
-            return;
-        }
-        patchBranchMutation.mutate({
-            name,
-            slug,
-            timezone: branchForm.timezone.trim() || undefined,
-            phone: branchForm.phone.trim() || undefined,
+        const result = buildUpdateBranchDraftPayload({
+            branchId: branchData?.id,
+            branchName: branchForm.name,
+            branchSlug: branchForm.slug,
+            timezone: branchForm.timezone,
+            phone: branchForm.phone,
         });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для branch draft");
+            return;
+        }
+        patchBranchMutation.mutate(result.payload);
     };
 
     const handleSaveInstance = () => {
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        const instanceId = branchForm.instanceId.trim();
-        if (!instanceId) {
-            reportValidationError("Укажите instance_id");
-            return;
-        }
-        const phone = branchForm.phone.trim();
-        if (!phone) {
-            reportValidationError("Укажите phone филиала");
+        const result = buildSaveInstancePayload({
+            branchId: branchData?.id,
+            instanceId: branchForm.instanceId,
+            phone: branchForm.phone,
+            activateOnSave,
+        });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для instance");
             return;
         }
         patchBranchMutation.mutate(
-            {
-                phone,
-                instance_id: instanceId,
-                is_active: activateOnSave,
-            },
+            result.payload,
             {
                 onSuccess: (data) => {
                     const typed = data as ProvisioningBranch;
@@ -1531,108 +1487,52 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     };
 
     const handleSaveTelegram = () => {
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        const chatId = branchForm.telegramChatId.trim();
-        if (!chatId) {
-            reportValidationError("Укажите telegram_chat_id");
-            return;
-        }
-        patchBranchMutation.mutate({
-            telegram_chat_id: chatId,
+        const result = buildSaveTelegramPayload({
+            branchId: branchData?.id,
+            chatId: branchForm.telegramChatId,
         });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для telegram");
+            return;
+        }
+        patchBranchMutation.mutate(result.payload);
     };
 
     const handleSaveKnowledge = () => {
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        const tag = branchForm.knowledgeTag.trim();
-        if (!tag) {
-            reportValidationError("Укажите knowledge_tag");
-            return;
-        }
-        patchBranchMutation.mutate({
-            knowledge_tag: tag,
+        const result = buildSaveKnowledgePayload({
+            branchId: branchData?.id,
+            knowledgeTag: branchForm.knowledgeTag,
         });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для knowledge");
+            return;
+        }
+        patchBranchMutation.mutate(result.payload);
     };
 
     const handleSaveBooking = () => {
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
+        const result = buildSaveBookingPayload({
+            branchId: branchData?.id,
+            workingHoursJson: branchForm.workingHours,
+            bookingSettingsJson: branchForm.bookingSettings,
+            workingHoursDays,
+            workingHoursStart,
+            workingHoursEnd,
+            bookingDefaultDuration,
+            bookingBufferMin,
+        });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для booking");
             return;
         }
-        const workingHours = parseOptionalJson(branchForm.workingHours, "working_hours");
-        if (workingHours.error) {
-            reportValidationError(workingHours.error);
-            return;
-        }
-        const bookingSettings = parseOptionalJson(branchForm.bookingSettings, "booking_settings");
-        if (bookingSettings.error) {
-            reportValidationError(bookingSettings.error);
-            return;
-        }
-        let workingPayload = workingHours.value;
-        let bookingPayload = bookingSettings.value;
-        let nextWorkingJson: string | null = null;
-        let nextBookingJson: string | null = null;
-        if (!workingPayload) {
-            const built = buildWorkingHoursJsonFromFields({
-                selectedDays: workingHoursDays,
-                start: workingHoursStart,
-                end: workingHoursEnd,
-            });
-            if (built.error) {
-                reportValidationError(built.error);
-                return;
-            }
-            if (built.json) {
-                const builtParsed = parseOptionalJson(built.json, "working_hours");
-                if (builtParsed.error) {
-                    reportValidationError(builtParsed.error);
-                    return;
-                }
-                workingPayload = builtParsed.value;
-                nextWorkingJson = built.json;
-            }
-        }
-        if (!bookingPayload) {
-            const built = buildBookingSettingsJsonFromFields({
-                defaultDuration: bookingDefaultDuration,
-                bufferMin: bookingBufferMin,
-            });
-            if (built.error) {
-                reportValidationError(built.error);
-                return;
-            }
-            if (built.json) {
-                const builtParsed = parseOptionalJson(built.json, "booking_settings");
-                if (builtParsed.error) {
-                    reportValidationError(builtParsed.error);
-                    return;
-                }
-                bookingPayload = builtParsed.value;
-                nextBookingJson = built.json;
-            }
-        }
-        if (!workingPayload && !bookingPayload) {
-            reportValidationError("Заполните working_hours или booking_settings");
-            return;
-        }
-        if (nextWorkingJson || nextBookingJson) {
+        if (result.nextWorkingHoursJson || result.nextBookingSettingsJson) {
             setBranchForm((prev) => ({
                 ...prev,
-                workingHours: nextWorkingJson ?? prev.workingHours,
-                bookingSettings: nextBookingJson ?? prev.bookingSettings,
+                workingHours: result.nextWorkingHoursJson ?? prev.workingHours,
+                bookingSettings: result.nextBookingSettingsJson ?? prev.bookingSettings,
             }));
         }
-        patchBranchMutation.mutate({
-            working_hours: (workingPayload as Record<string, never> | undefined) ?? undefined,
-            booking_settings: (bookingPayload as Record<string, never> | undefined) ?? undefined,
-        });
+        patchBranchMutation.mutate(result.payload);
     };
 
     const handleCreateAgent = () => {
