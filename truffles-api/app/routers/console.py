@@ -424,6 +424,9 @@ from app.services.console_membership_state import (
     ensure_role_not_deprecated_for_assignment as _ensure_role_not_deprecated_for_assignment,
 )
 from app.services.console_membership_state import (
+    has_other_privileged_access_for_client as _has_other_privileged_access_for_client,
+)
+from app.services.console_membership_state import (
     is_privileged_access_role as _is_privileged_access_role,
 )
 from app.services.console_onboarding_readiness import (
