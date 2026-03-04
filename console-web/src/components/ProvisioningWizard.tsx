@@ -50,7 +50,6 @@ import {
     parseOptionalJson,
     qualityStatusClass,
     qualityStatusLabel,
-    stringifyOptionalJson,
     toTriState,
 } from "@/components/provisioning-wizard-utils";
 import {
@@ -73,6 +72,16 @@ import {
     readBookingSettingsPayload,
     readWorkingHoursPayload,
 } from "@/components/provisioning-wizard-json-payloads";
+import {
+    buildBranchFormFromBranchData,
+    createInitialAutopilotForm,
+    createInitialBranchBootstrapState,
+    createInitialBranchForm,
+    hydrateBillingFieldsFromJson,
+    hydrateBookingSettingsFieldsFromJson,
+    hydrateWorkingHoursFieldsFromJson,
+    resolveNextAgentBranchId,
+} from "@/components/provisioning-wizard-state";
 
 type SessionData = ReturnType<typeof useSession>["data"];
 type ProvisioningBranch = components["schemas"]["ConsoleBranch"];
@@ -197,29 +206,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const [clientSlug, setClientSlug] = useState("");
     const [clientId, setClientId] = useState("");
     const [branchData, setBranchData] = useState<ProvisioningBranch | null>(null);
-    const [branchForm, setBranchForm] = useState({
-        name: "",
-        slug: "",
-        timezone: DEFAULT_TIMEZONE,
-        phone: "",
-        instanceId: "",
-        telegramChatId: "",
-        knowledgeTag: "",
-        workingHours: "",
-        bookingSettings: "",
-    });
-    const [branchBootstrap, setBranchBootstrap] = useState({
-        enabled: true,
-        createOwner: true,
-        createAdmin: true,
-        createManager: true,
-        ownerName: "",
-        ownerOidcSubject: "",
-        adminName: "",
-        adminOidcSubject: "",
-        managerName: "",
-        managerOidcSubject: "",
-    });
+    const [branchForm, setBranchForm] = useState(() => createInitialBranchForm(DEFAULT_TIMEZONE));
+    const [branchBootstrap, setBranchBootstrap] = useState(createInitialBranchBootstrapState);
     const [workingHoursDays, setWorkingHoursDays] = useState<string[]>([]);
     const [workingHoursStart, setWorkingHoursStart] = useState("");
     const [workingHoursEnd, setWorkingHoursEnd] = useState("");
@@ -250,27 +238,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const [specialistsConfirmed, setSpecialistsConfirmed] = useState(false);
     const [integrationWebhookSecret, setIntegrationWebhookSecret] = useState("");
     const [integrationWebhookUrl, setIntegrationWebhookUrl] = useState("");
-    const [autopilotForm, setAutopilotForm] = useState({
-        companyName: "",
-        clientSlug: "",
-        branchName: "",
-        branchSlug: "",
-        timezone: DEFAULT_TIMEZONE,
-        phone: "",
-        instanceId: "",
-        domainSlug: "beauty",
-        paymentStatus: "pending" as "pending" | "confirmed" | "rejected",
-        providerBindingProvider: "chatflow",
-        providerBindingWebhookStatus: "pending" as "configured" | "pending" | "rebind_required",
-        providerBindingPaidUntil: "",
-        providerBindingOwner: "",
-        providerBindingNextRenewalAt: "",
-        providerBindingLastRebindAt: "",
-        providerBindingRebindRequired: false,
-        providerBindingAlertState: "warn" as "ok" | "warn" | "critical",
-        providerBindingNotes: "",
-        clientDataText: "",
-    });
+    const [autopilotForm, setAutopilotForm] = useState(() => createInitialAutopilotForm(DEFAULT_TIMEZONE));
     const [autopilotServices, setAutopilotServices] = useState<OnboardingPurchasedService[]>(["whatsapp"]);
     const [autopilotResult, setAutopilotResult] = useState<OnboardingAutopilotResponse | null>(null);
     const [goLiveDecisionReason, setGoLiveDecisionReason] = useState("");
@@ -294,94 +262,53 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setWorkingHoursEnd("");
         setBookingDefaultDuration("");
         setBookingBufferMin("");
-        setBranchForm({
-            name: branchData.name ?? "",
-            slug: branchData.slug ?? "",
-            timezone: branchData.timezone ?? DEFAULT_TIMEZONE,
-            phone: branchData.phone ?? "",
-            instanceId: branchData.instance_id ?? "",
-            telegramChatId: branchData.telegram_chat_id ?? "",
-            knowledgeTag: branchData.knowledge_tag ?? "",
-            workingHours: stringifyOptionalJson(branchData.working_hours),
-            bookingSettings: stringifyOptionalJson(branchData.booking_settings),
-        });
+        setBranchForm(buildBranchFormFromBranchData(branchData, DEFAULT_TIMEZONE));
         setAgentForm((prev) => ({
             ...prev,
-            branchId: prev.branchId || branchData.id || "",
+            branchId: resolveNextAgentBranchId(prev.branchId, branchData.id),
         }));
     }, [branchData]);
 
     useEffect(() => {
-        if (!billingInfo.trim()) {
+        const hydrated = hydrateBillingFieldsFromJson({
+            billingInfo,
+            billingContract,
+            billingCurrency,
+        });
+        if (!hydrated) {
             return;
         }
-        if (billingContract || billingCurrency) {
-            return;
-        }
-        const parsed = parseOptionalJson(billingInfo, "billing_info");
-        if (!parsed.value) {
-            return;
-        }
-        const contract = parsed.value.contract;
-        const currency = parsed.value.currency;
-        if (typeof contract === "string") {
-            setBillingContract(contract);
-        }
-        if (typeof currency === "string") {
-            setBillingCurrency(currency);
-        }
+        setBillingContract(hydrated.contract);
+        setBillingCurrency(hydrated.currency);
     }, [billingInfo, billingContract, billingCurrency]);
 
     useEffect(() => {
-        if (!branchForm.workingHours.trim()) {
+        const hydrated = hydrateWorkingHoursFieldsFromJson({
+            workingHoursJson: branchForm.workingHours,
+            currentDaysCount: workingHoursDays.length,
+            currentStart: workingHoursStart,
+            currentEnd: workingHoursEnd,
+            orderedDays: WORKING_DAYS.map((day) => day.id),
+        });
+        if (!hydrated) {
             return;
         }
-        if (workingHoursDays.length || workingHoursStart || workingHoursEnd) {
-            return;
-        }
-        const parsed = parseOptionalJson(branchForm.workingHours, "working_hours");
-        if (!parsed.value) {
-            return;
-        }
-        const availableDays = new Set<string>(WORKING_DAYS.map((day) => day.id));
-        const dayKeys = Object.keys(parsed.value).filter((day) => availableDays.has(day));
-        if (dayKeys.length) {
-            setWorkingHoursDays(dayKeys);
-        }
-        const firstDay = dayKeys[0];
-        if (firstDay) {
-            const slots = parsed.value[firstDay];
-            if (Array.isArray(slots) && slots[0] && typeof slots[0] === "object") {
-                const slot = slots[0] as { start?: unknown; end?: unknown };
-                if (typeof slot.start === "string") {
-                    setWorkingHoursStart(slot.start);
-                }
-                if (typeof slot.end === "string") {
-                    setWorkingHoursEnd(slot.end);
-                }
-            }
-        }
+        setWorkingHoursDays(hydrated.days);
+        setWorkingHoursStart(hydrated.start);
+        setWorkingHoursEnd(hydrated.end);
     }, [branchForm.workingHours, workingHoursDays.length, workingHoursStart, workingHoursEnd]);
 
     useEffect(() => {
-        if (!branchForm.bookingSettings.trim()) {
+        const hydrated = hydrateBookingSettingsFieldsFromJson({
+            bookingSettingsJson: branchForm.bookingSettings,
+            currentDefaultDuration: bookingDefaultDuration,
+            currentBufferMin: bookingBufferMin,
+        });
+        if (!hydrated) {
             return;
         }
-        if (bookingDefaultDuration || bookingBufferMin) {
-            return;
-        }
-        const parsed = parseOptionalJson(branchForm.bookingSettings, "booking_settings");
-        if (!parsed.value) {
-            return;
-        }
-        const defaultDuration = parsed.value.default_duration_min;
-        const bufferMin = parsed.value.buffer_min;
-        if (typeof defaultDuration === "number" || typeof defaultDuration === "string") {
-            setBookingDefaultDuration(String(defaultDuration));
-        }
-        if (typeof bufferMin === "number" || typeof bufferMin === "string") {
-            setBookingBufferMin(String(bufferMin));
-        }
+        setBookingDefaultDuration(hydrated.defaultDuration);
+        setBookingBufferMin(hydrated.bufferMin);
     }, [branchForm.bookingSettings, bookingDefaultDuration, bookingBufferMin]);
 
     useEffect(() => {

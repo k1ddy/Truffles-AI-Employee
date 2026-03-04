@@ -20,6 +20,7 @@ from app.schemas.onboarding_contract import (
     OnboardingProviderBindingPayload,
     OnboardingProviderBindingWhatsApp,
 )
+from app.services import console_membership_state as membership_state_service
 from app.services.console_errors import ConsoleAPIError
 
 
@@ -1247,8 +1248,8 @@ def test_membership_guard_blocks_last_privileged_membership(monkeypatch):
     db.query.return_value.filter.return_value.first.return_value = client
 
     monkeypatch.setattr(
-        console_router,
-        "_has_other_privileged_access_for_client",
+        membership_state_service,
+        "has_other_privileged_access_for_client",
         lambda *_args, **_kwargs: False,
     )
 
@@ -1307,8 +1308,8 @@ def test_agent_lifecycle_guard_blocks_last_privileged_agent(monkeypatch):
     db.query.return_value.filter.return_value.first.return_value = client
 
     monkeypatch.setattr(
-        console_router,
-        "_has_other_privileged_access_for_client",
+        membership_state_service,
+        "has_other_privileged_access_for_client",
         lambda *_args, **_kwargs: False,
     )
 

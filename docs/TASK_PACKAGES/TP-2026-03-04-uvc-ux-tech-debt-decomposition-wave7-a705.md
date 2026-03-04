@@ -117,6 +117,7 @@
 
 ## Token / run budget (mandatory for expensive suites)
 - Keep e2e lane to targeted platform-admin contract only.
+- Max full runs: `1` per change iteration (run full lane once after local deterministic green).
 - Stop condition: if deterministic checks fail twice without new RCA evidence, block and return to root cause.
 
 ## Release safety (mandatory for non-doc changes)
