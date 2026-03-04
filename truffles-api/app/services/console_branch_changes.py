@@ -1,5 +1,6 @@
 import json
 from collections.abc import Callable, Mapping
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -21,6 +22,7 @@ BRANCH_CHANGE_MANAGED_FIELDS: tuple[str, ...] = (
 )
 
 BRANCH_CHANGE_MUTABLE_STATUSES = {"draft", "validated", "publish_failed"}
+BRANCH_CHANGE_ALLOWED_STATUSES = {"draft", "validated", "publish_failed", "published", "rolled_back"}
 
 
 def _jsonable_payload(value: object) -> dict:
@@ -84,6 +86,61 @@ def serialize_branch_change_record(change: ConsoleBranchChange) -> ConsoleBranch
         published_at=change.published_at.isoformat() if change.published_at else None,
         rolled_back_at=change.rolled_back_at.isoformat() if change.rolled_back_at else None,
     )
+
+
+def query_branch_changes_for_context(
+    *,
+    db: Session,
+    client_id: UUID,
+    branch_id: UUID | None = None,
+    allowed_branch_ids: list[UUID] | None = None,
+) -> Any:
+    query = db.query(ConsoleBranchChange).filter(ConsoleBranchChange.client_id == client_id)
+    if branch_id is not None:
+        query = query.filter(ConsoleBranchChange.branch_id == branch_id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            return None
+        query = query.filter(ConsoleBranchChange.branch_id.in_(allowed_branch_ids))
+    return query
+
+
+def get_branch_change_for_context(
+    *,
+    db: Session,
+    change_id: UUID,
+    client_id: UUID,
+    allowed_branch_ids: list[UUID] | None = None,
+) -> ConsoleBranchChange | None:
+    query = query_branch_changes_for_context(
+        db=db,
+        client_id=client_id,
+        allowed_branch_ids=allowed_branch_ids,
+    )
+    if query is None:
+        return None
+    return query.filter(ConsoleBranchChange.id == change_id).first()
+
+
+def build_branch_change_rollback_patch(
+    *,
+    base_snapshot: Mapping[str, object],
+    current_snapshot: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        field: base_snapshot.get(field)
+        for field in BRANCH_CHANGE_MANAGED_FIELDS
+        if field in base_snapshot and current_snapshot.get(field) != base_snapshot.get(field)
+    }
+
+
+def normalize_branch_change_status_filter(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized not in BRANCH_CHANGE_ALLOWED_STATUSES:
+        raise ValueError("Invalid status")
+    return normalized
 
 
 def build_branch_update_request(

@@ -26,6 +26,38 @@ def test_build_branch_change_diff_skips_unchanged_fields():
     assert diff["is_active"] == {"before": True, "after": False}
 
 
+def test_build_branch_change_rollback_patch_only_includes_changed_fields():
+    base_snapshot = {
+        "slug": "branch-a",
+        "name": "Branch A",
+        "instance_id": "inst-a",
+        "is_active": True,
+    }
+    current_snapshot = {
+        "slug": "branch-a",
+        "name": "Branch B",
+        "instance_id": "inst-a",
+        "is_active": False,
+    }
+
+    rollback_patch = console_router._build_branch_change_rollback_patch(
+        base_snapshot=base_snapshot,
+        current_snapshot=current_snapshot,
+    )
+
+    assert rollback_patch == {
+        "name": "Branch A",
+        "is_active": True,
+    }
+
+
+def test_normalize_branch_change_status_filter():
+    assert console_router._normalize_branch_change_status_filter(" validated ") == "validated"
+    assert console_router._normalize_branch_change_status_filter(None) is None
+    with pytest.raises(ValueError, match="Invalid status"):
+        console_router._normalize_branch_change_status_filter("unknown")
+
+
 def test_normalize_branch_change_patch_requires_instance_for_activation(monkeypatch):
     branch = SimpleNamespace(
         id=uuid4(),

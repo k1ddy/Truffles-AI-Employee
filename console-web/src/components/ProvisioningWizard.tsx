@@ -78,6 +78,10 @@ import {
     buildUpdateBranchDraftPayload,
 } from "@/components/provisioning-wizard-branch-actions";
 import {
+    buildRunAutopilotPayload,
+    deriveAutopilotState,
+} from "@/components/provisioning-wizard-autopilot";
+import {
     buildBillingInfoJsonFromFields,
     buildBookingSettingsJsonFromFields,
     buildBranchFormFromBranchData,
@@ -1195,54 +1199,18 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const branchGoLiveWaiverUntil = typeof branchGoLiveWaiverUntilRaw === "string" && branchGoLiveWaiverUntilRaw.length > 0
         ? branchGoLiveWaiverUntilRaw
         : null;
-    const autopilotPhone = autopilotForm.phone.trim();
-    const autopilotInstanceId = autopilotForm.instanceId.trim();
-    const autopilotCompanyRef = companyId.trim() || autopilotForm.companyName.trim();
-    const autopilotClientRef = clientId.trim() || autopilotForm.clientSlug.trim();
-    const autopilotNeedsBranchName = !branchData?.id;
-    const autopilotBranchName = autopilotForm.branchName.trim();
-    const autopilotClientDataText = autopilotForm.clientDataText.trim();
-    const autopilotProviderBindingProvider = autopilotForm.providerBindingProvider.trim();
-    const autopilotProviderBindingPaidUntil = autopilotForm.providerBindingPaidUntil.trim();
-    const autopilotProviderBindingOwner = autopilotForm.providerBindingOwner.trim();
-    const autopilotProviderBindingNextRenewalAt = autopilotForm.providerBindingNextRenewalAt.trim();
-    const autopilotProviderBindingLastRebindAt = autopilotForm.providerBindingLastRebindAt.trim();
-    const autopilotMissingInputs: string[] = [];
-    if (!autopilotPhone) {
-        autopilotMissingInputs.push("phone");
-    }
-    if (!autopilotInstanceId) {
-        autopilotMissingInputs.push("instance_id");
-    }
-    if (!autopilotCompanyRef) {
-        autopilotMissingInputs.push("company_id или company_name");
-    }
-    if (!autopilotClientRef) {
-        autopilotMissingInputs.push("client_id или client_slug");
-    }
-    if (autopilotNeedsBranchName && !autopilotBranchName) {
-        autopilotMissingInputs.push("branch_name (для нового branch)");
-    }
-    if (!autopilotServices.length) {
-        autopilotMissingInputs.push("минимум 1 подключённая услуга");
-    }
-    if (!autopilotClientDataText) {
-        autopilotMissingInputs.push("client_data_text");
-    }
-    if (autopilotServices.includes("whatsapp")) {
-        if (!autopilotProviderBindingProvider) {
-            autopilotMissingInputs.push("provider_binding.provider");
-        }
-        if (!autopilotForm.providerBindingWebhookStatus) {
-            autopilotMissingInputs.push("provider_binding.webhook_status");
-        }
-        if (!autopilotProviderBindingOwner) {
-            autopilotMissingInputs.push("provider_binding.owner");
-        }
-        if (!autopilotProviderBindingPaidUntil && !autopilotProviderBindingNextRenewalAt) {
-            autopilotMissingInputs.push("provider_binding.next_renewal_at | paid_until");
-        }
-    }
+    const autopilotDerived = useMemo(
+        () => deriveAutopilotState({
+            form: autopilotForm,
+            companyId,
+            clientId,
+            branchId: branchData?.id,
+            purchasedServices: autopilotServices,
+        }),
+        [autopilotForm, companyId, clientId, branchData?.id, autopilotServices],
+    );
+    const autopilotNeedsBranchName = autopilotDerived.needsBranchName;
+    const autopilotMissingInputs = autopilotDerived.missingInputs;
     const autopilotBlockedByScorecard = Boolean(branchData?.id && scorecardFailed);
     const canRunAutopilot = (
         canEdit
@@ -1344,41 +1312,15 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             reportValidationError(`Автопроцесс заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
             return;
         }
-        const payload: OnboardingAutopilotRequest = {
-            company_id: companyId.trim() || undefined,
-            company_name: autopilotForm.companyName.trim() || undefined,
-            client_id: clientId.trim() || undefined,
-            client_slug: autopilotForm.clientSlug.trim() || undefined,
-            branch_id: branchData?.id || undefined,
-            branch_slug: autopilotForm.branchSlug.trim() || undefined,
-            branch_name: autopilotForm.branchName.trim() || undefined,
-            timezone: autopilotForm.timezone.trim() || undefined,
-            phone: autopilotPhone,
-            instance_id: autopilotInstanceId,
-            payment_status: canManagePayment ? autopilotForm.paymentStatus : "pending",
-            domain_slug: autopilotForm.domainSlug.trim() || undefined,
-            purchased_services: autopilotServices.length ? autopilotServices : undefined,
-            provider_binding: autopilotServices.includes("whatsapp")
-                ? {
-                    whatsapp: {
-                        provider: autopilotProviderBindingProvider || null,
-                        instance_id: autopilotInstanceId,
-                        webhook_status: autopilotForm.providerBindingWebhookStatus || null,
-                        paid_until: autopilotProviderBindingPaidUntil || null,
-                        owner: autopilotProviderBindingOwner || null,
-                        next_renewal_at: autopilotProviderBindingNextRenewalAt || null,
-                        last_rebind_at: autopilotProviderBindingLastRebindAt || null,
-                        rebind_required: autopilotForm.providerBindingRebindRequired,
-                        alert_state: autopilotForm.providerBindingAlertState || null,
-                        notes: autopilotForm.providerBindingNotes.trim() || null,
-                    },
-                }
-                : undefined,
-            client_data_text: autopilotClientDataText || undefined,
-            activate_branch: false,
-            auto_create_reference_pack: true,
-            auto_publish_knowledge: false,
-        };
+        const payload: OnboardingAutopilotRequest = buildRunAutopilotPayload({
+            form: autopilotForm,
+            companyId,
+            clientId,
+            branchId: branchData?.id,
+            canManagePayment,
+            purchasedServices: autopilotServices,
+            derived: autopilotDerived,
+        });
         runAutopilotMutation.mutate(payload);
     };
 
