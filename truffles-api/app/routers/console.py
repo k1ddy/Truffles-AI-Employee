@@ -243,10 +243,6 @@ from app.schemas.console import (
     ConsoleOnboardingIntakeQualityMatrix,
     ConsoleOnboardingOperationalPipeline,
     ConsoleOnboardingOperationalStage,
-    ConsoleOnboardingReadinessDimension,
-    ConsoleOnboardingReadinessHardGate,
-    ConsoleOnboardingReadinessKernel,
-    ConsoleOnboardingReadinessQuestion,
     ConsoleOnboardingScorecardCheck,
     ConsoleOnboardingScorecardResponse,
     ConsoleOnboardingSlaControlLoop,
@@ -396,6 +392,15 @@ from app.services.console_knowledge_preflight import (
     build_knowledge_draft_hash,
     build_knowledge_validate_payload,
     has_recent_knowledge_preflight,
+)
+from app.services.console_onboarding_readiness import (
+    is_readiness_hard_gate_enforced_for_branch as _is_readiness_hard_gate_enforced_for_branch,
+)
+from app.services.console_onboarding_readiness import (
+    resolve_readiness_hard_gate_blockers as _resolve_readiness_hard_gate_blockers,
+)
+from app.services.console_onboarding_readiness import (
+    serialize_onboarding_readiness_kernel as _serialize_onboarding_readiness_kernel,
 )
 from app.services.console_owner_admin import (
     build_data_trust_actions as _build_data_trust_actions,
@@ -1187,61 +1192,6 @@ def _serialize_onboarding_status(
     )
 
 
-def _resolve_readiness_hard_gate_blockers(readiness_kernel) -> list[str]:
-    if readiness_kernel is None:
-        return []
-    candidates = list(getattr(readiness_kernel, "shadow_hard_gate_blockers", []) or [])
-    selected = [
-        code
-        for code in candidates
-        if code.startswith("go_no_go:") or code in _ONBOARDING_READINESS_HARD_GATE_CODES
-    ]
-    return _dedupe_list(selected)
-
-
-def _is_readiness_hard_gate_enforced_for_branch(branch: Branch) -> bool:
-    if _ONBOARDING_READINESS_HARD_GATE_ENABLED:
-        return True
-    branch_id = getattr(branch, "id", None)
-    if branch_id is None:
-        return False
-    normalized_branch_id = str(branch_id).strip().lower()
-    return normalized_branch_id in _ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS
-
-
-def _serialize_onboarding_readiness_kernel(readiness_kernel, *, hard_gate_enforced: bool):
-    if readiness_kernel is None:
-        return None
-    hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
-    return ConsoleOnboardingReadinessKernel(
-        status=readiness_kernel.status,
-        blocker_codes=list(readiness_kernel.blocker_codes),
-        next_action_codes=list(readiness_kernel.next_action_codes),
-        auto_questions=[
-            ConsoleOnboardingReadinessQuestion(
-                code=item.code,
-                question=item.question,
-                blocking_go_live=item.blocking_go_live,
-            )
-            for item in readiness_kernel.auto_questions
-        ],
-        dimensions=[
-            ConsoleOnboardingReadinessDimension(
-                id=item.id,
-                status=item.status,
-                blocker_codes=list(item.blocker_codes),
-                next_action_codes=list(item.next_action_codes),
-            )
-            for item in readiness_kernel.dimensions
-        ],
-        shadow_hard_gate=ConsoleOnboardingReadinessHardGate(
-            enforced=hard_gate_enforced,
-            status="fail" if hard_gate_blockers else "pass",
-            blocker_codes=hard_gate_blockers,
-        ),
-    )
-
-
 def _serialize_onboarding_scorecard(
     branch: Branch,
     scorecard,
@@ -1250,7 +1200,11 @@ def _serialize_onboarding_scorecard(
     sla_control_loop = getattr(scorecard, "sla_control_loop", None)
     operational_pipeline = getattr(scorecard, "operational_pipeline", None)
     readiness_kernel = getattr(scorecard, "readiness_kernel", None)
-    hard_gate_enforced = _is_readiness_hard_gate_enforced_for_branch(branch)
+    hard_gate_enforced = _is_readiness_hard_gate_enforced_for_branch(
+        branch,
+        hard_gate_enabled=_ONBOARDING_READINESS_HARD_GATE_ENABLED,
+        canary_branch_ids=_ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS,
+    )
     document_ingestion_payload = None
     if document_ingestion is not None:
         document_ingestion_payload = ConsoleOnboardingDocumentIngestion(
@@ -1318,6 +1272,7 @@ def _serialize_onboarding_scorecard(
         readiness_kernel=_serialize_onboarding_readiness_kernel(
             readiness_kernel,
             hard_gate_enforced=hard_gate_enforced,
+            hard_gate_codes=_ONBOARDING_READINESS_HARD_GATE_CODES,
         ),
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
@@ -4363,18 +4318,28 @@ def _require_branch_scorecard_ready(
     operation: str,
 ) -> None:
     scorecard = build_onboarding_scorecard(db, branch)
-    hard_gate_enforced = _is_readiness_hard_gate_enforced_for_branch(branch)
+    hard_gate_enforced = _is_readiness_hard_gate_enforced_for_branch(
+        branch,
+        hard_gate_enabled=_ONBOARDING_READINESS_HARD_GATE_ENABLED,
+        canary_branch_ids=_ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS,
+    )
     readiness_kernel = getattr(scorecard, "readiness_kernel", None)
     hard_gate_blockers: list[str] = []
     if readiness_kernel is not None:
-        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
+        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(
+            readiness_kernel,
+            hard_gate_codes=_ONBOARDING_READINESS_HARD_GATE_CODES,
+        )
     if hard_gate_enforced and readiness_kernel is None:
         readiness_kernel = build_onboarding_readiness_kernel(
             db,
             branch,
             scorecard=scorecard,
         )
-        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
+        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(
+            readiness_kernel,
+            hard_gate_codes=_ONBOARDING_READINESS_HARD_GATE_CODES,
+        )
     readiness_details = None
     if readiness_kernel is not None:
         hard_gate_status = "fail" if hard_gate_blockers else "pass"
@@ -8792,7 +8757,10 @@ def _build_admin_control_tower_readiness_board(
         )
         if readiness_status not in {"pass", "warn", "fail"}:
             readiness_status = "pass" if getattr(scorecard, "ready", False) else "fail"
-        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
+        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(
+            readiness_kernel,
+            hard_gate_codes=_ONBOARDING_READINESS_HARD_GATE_CODES,
+        )
         hard_gate_status = "fail" if hard_gate_blockers else "pass"
 
         if getattr(scorecard, "ready", False):
