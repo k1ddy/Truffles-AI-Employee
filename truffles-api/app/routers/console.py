@@ -393,6 +393,15 @@ from app.services.console_knowledge_preflight import (
     build_knowledge_validate_payload,
     has_recent_knowledge_preflight,
 )
+from app.services.console_onboarding_readiness import (
+    is_readiness_hard_gate_enforced_for_branch as _is_readiness_hard_gate_enforced_for_branch,
+)
+from app.services.console_onboarding_readiness import (
+    resolve_readiness_hard_gate_blockers as _resolve_readiness_hard_gate_blockers,
+)
+from app.services.console_onboarding_readiness import (
+    serialize_onboarding_readiness_kernel as _serialize_onboarding_readiness_kernel,
+)
 from app.services.console_owner_admin import (
     build_data_trust_actions as _build_data_trust_actions,
 )
@@ -428,15 +437,6 @@ from app.services.console_owner_admin import (
 )
 from app.services.console_owner_admin import (
     safe_int as _safe_int,
-)
-from app.services.console_onboarding_readiness import (
-    is_readiness_hard_gate_enforced_for_branch as _is_readiness_hard_gate_enforced_for_branch,
-)
-from app.services.console_onboarding_readiness import (
-    resolve_readiness_hard_gate_blockers as _resolve_readiness_hard_gate_blockers,
-)
-from app.services.console_onboarding_readiness import (
-    serialize_onboarding_readiness_kernel as _serialize_onboarding_readiness_kernel,
 )
 from app.services.console_router_utils import (
     dedupe_list as _dedupe_list,
