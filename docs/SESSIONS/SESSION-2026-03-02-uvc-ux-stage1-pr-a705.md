@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave12-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE12-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review8-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW8-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC wave12 bounded decomposition for UX-11/UX-12 and follow-up closure-review8 contract lock
+- scope: UVC closure-review8 fail-closed decision for UX-11/UX-12 on merged-main wave12 evidence and wave13 contract lock
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -173,9 +173,13 @@
   - Revalidated deterministic lane: `py_compile`, `pytest (35 passed + branch_change 13 passed)`, `console-web lint`, `console-web build`, targeted Playwright (`2 passed`).
   - Published wave12 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave12-a705.md`.
   - Added follow-up closure contract `TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review8-a705.md`.
+  - Wave12 merged via PR `#906` (`96b487a4`) and worktree fast-forwarded to merged `origin/main`.
+  - Executed `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW8-A705` on merged-main wave12 evidence (`console.py=24365`, `ProvisioningWizard.tsx=4365`, retained deterministic suite `35 passed` + `branch_change 13 passed`) with fail-closed decision: `UX-11/UX-12` remain `Open (Mitigated wave12; wave13 required)`.
+  - Published closure-review8 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review8-a705.md`.
+  - Added follow-up implementation contract `TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave13-a705.md`.
 - next:
-  - Open wave12 PR with artifact/canon/session sync and linked closure-review8 TP.
-  - After wave12 merge, execute `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW8-A705`.
+  - Open closure-review8 PR with artifact/canon/session sync and linked wave13 TP.
+  - After closure-review8 merge, execute `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE13-A705`.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -210,6 +214,8 @@
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave12-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave12-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review8-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review8-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave13-a705.md
   - console-web/src/components/provisioning-wizard-autopilot.ts
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closeout-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-close-a705.md
