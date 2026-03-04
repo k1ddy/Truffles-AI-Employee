@@ -1632,6 +1632,7 @@ test.describe('Platform Admin Tenants', () => {
         await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
         await expect(page.getByTestId('tenants-onboarding-loop-hint')).toBeVisible();
         await expect(page.getByTestId('tenants-onboarding-loop-hint')).toContainText('откройте Workspace');
+        await expect(page.getByTestId('tenants-onboarding-open-ops')).toBeVisible();
     });
 
     test('should deep-link from Tenants action queue to Workspace execute @smoke', async ({ page }) => {

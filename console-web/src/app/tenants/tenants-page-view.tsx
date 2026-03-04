@@ -63,6 +63,7 @@ type TenantsPageViewProps<TActionItem extends TenantsActionQueueItem> = {
     lifecycleModalProps: ComponentProps<typeof TenantsClientLifecycleModal>;
     showOnboarding: boolean;
     onOpenWorkspaceFromOnboarding: () => void;
+    onOpenOpsFromOnboarding: () => void;
 };
 
 export default function TenantsPageView<TActionItem extends TenantsActionQueueItem>({
@@ -85,6 +86,7 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
     lifecycleModalProps,
     showOnboarding,
     onOpenWorkspaceFromOnboarding,
+    onOpenOpsFromOnboarding,
 }: TenantsPageViewProps<TActionItem>) {
     if (!session) {
         return (
@@ -185,6 +187,13 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
                             data-testid="tenants-open-workspace-from-onboarding"
                         >
                             Открыть Workspace
+                        </button>
+                        <button
+                            className="btn-ghost ml-2"
+                            onClick={onOpenOpsFromOnboarding}
+                            data-testid="tenants-onboarding-open-ops"
+                        >
+                            Открыть Ops
                         </button>
                         <div className="mt-2 text-blue-900/80" data-testid="tenants-onboarding-loop-hint">
                             Последовательность: откройте Workspace, выполните действие по филиалу, затем проверьте результат в Ops через подсказку в Workspace.

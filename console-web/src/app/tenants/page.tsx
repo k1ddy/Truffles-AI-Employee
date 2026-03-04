@@ -951,6 +951,7 @@ export default function TenantsPage() {
             }}
             showOnboarding={showOnboarding}
             onOpenWorkspaceFromOnboarding={() => router.push("/company-workspace")}
+            onOpenOpsFromOnboarding={() => router.push("/ops")}
         />
     );
 }
