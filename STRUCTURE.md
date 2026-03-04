@@ -172,6 +172,7 @@
 | `console-web/src/components/provisioning-wizard-utils.ts` | Extracted pure helper functions for `ProvisioningWizard` (JSON parse, status labels/classes, capability normalization) | Frontend |
 | `console-web/src/components/provisioning-wizard-domain.ts` | Extracted provisioning domain lexicon (`WIZARD_STEPS`, field guides, formatters, fallback presets) for `ProvisioningWizard` | Frontend |
 | `console-web/src/components/provisioning-wizard-derived.ts` | Extracted derived-state builders for `ProvisioningWizard` (step status/timeline/readiness items) | Frontend |
+| `console-web/src/components/provisioning-wizard-shell-panels.tsx` | Extracted controlled shell panels for `ProvisioningWizard` (error summary, mode switch, execution hub) | Frontend |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md` | Artifact report: UVC audit governance closeout (`UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705`) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-tech-debt-decomposition-wave1-a705.md` | Artifact report: wave1 structural decomposition for `UX-11`/`UX-12` + merge-red fix | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave2-a705.md` | Artifact report: wave2 structural decomposition for `UX-11`/`UX-12` (control-tower + provisioning domain extraction) | Brain/Architect |
@@ -179,6 +180,7 @@
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closeout-a705.md` | Artifact report: closeout decision for `UX-11`/`UX-12` after merged wave1/2/3 (`Open (Mitigated wave3)` + Wave4 contract) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave4-a705.md` | Artifact report: wave4 structural decomposition for `UX-11`/`UX-12` (onboarding readiness backend slice + provisioning readiness panel extraction) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-close-a705.md` | Artifact report: final-close decision after wave4 merge (`Open (Mitigated wave4; residual accepted, wave5 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave5-a705.md` | Artifact report: wave5 structural decomposition for `UX-11`/`UX-12` (router param-validation extraction + wizard shell panel extraction) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave4-a705.md` | Follow-up Task Package for next decomposition wave after closeout residual confirmation | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-close-a705.md` | Final-close Task Package for post-wave4 deterministic status decision and residual contract | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md` | Next bounded wave Task Package for residual `UX-11/UX-12` decomposition after final-close merge | Brain/Architect |
@@ -213,7 +215,6 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
-- `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-close-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-dedup-intent-map-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-tech-debt-decomposition-a705.md`

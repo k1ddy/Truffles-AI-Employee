@@ -1,5 +1,7 @@
 import os
+from collections.abc import Callable
 from urllib.parse import urlencode
+from uuid import UUID
 
 from fastapi import Request
 
@@ -65,3 +67,60 @@ def dedupe_list(values: list[str]) -> list[str]:
         seen.add(value)
         unique.append(value)
     return unique
+
+
+def reject_unknown_query_params(
+    request: Request,
+    allowed: set[str],
+    *,
+    error_factory: Callable[[str], Exception],
+) -> None:
+    unknown = sorted(set(request.query_params.keys()) - allowed)
+    if not unknown:
+        return
+    raise error_factory(f"Unknown query parameter(s): {', '.join(unknown)}")
+
+
+def validate_limit(
+    limit: int,
+    *,
+    error_factory: Callable[[str], Exception],
+    min_value: int = 1,
+    max_value: int = 100,
+) -> None:
+    if min_value <= limit <= max_value:
+        return
+    raise error_factory(f"limit must be between {min_value} and {max_value}")
+
+
+def parse_uuid_param(
+    name: str,
+    value: str | None,
+    *,
+    error_factory: Callable[[str], Exception],
+) -> UUID | None:
+    if value is None:
+        return None
+    if value == "":
+        raise error_factory(f"Invalid {name}")
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise error_factory(f"Invalid {name}") from exc
+
+
+def parse_bool_param(
+    name: str,
+    value: str | None,
+    *,
+    error_factory: Callable[[str], Exception],
+    default: bool = False,
+) -> bool:
+    if value is None:
+        return default
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    raise error_factory(f"Invalid {name}")

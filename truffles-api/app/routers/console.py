@@ -442,6 +442,9 @@ from app.services.console_router_utils import (
     dedupe_list as _dedupe_list,
 )
 from app.services.console_router_utils import (
+    parse_bool_param as _parse_bool_param_util,
+)
+from app.services.console_router_utils import (
     parse_env_bool as _parse_env_bool,
 )
 from app.services.console_router_utils import (
@@ -451,7 +454,16 @@ from app.services.console_router_utils import (
     parse_env_int as _parse_env_int,
 )
 from app.services.console_router_utils import (
+    parse_uuid_param as _parse_uuid_param_util,
+)
+from app.services.console_router_utils import (
+    reject_unknown_query_params as _reject_unknown_query_params_util,
+)
+from app.services.console_router_utils import (
     request_with_query_params as _request_with_query_params,
+)
+from app.services.console_router_utils import (
+    validate_limit as _validate_limit_util,
 )
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import resolve_telegram_routing
@@ -2057,40 +2069,37 @@ def _resolve_telegram_action_target(
 
 
 def _reject_unknown_query_params(request: Request, allowed: set[str]) -> None:
-    unknown = sorted(set(request.query_params.keys()) - allowed)
-    if unknown:
-        raise ConsoleAPIError(
-            400,
-            "INVALID_PARAM",
-            f"Unknown query parameter(s): {', '.join(unknown)}",
-        )
+    _reject_unknown_query_params_util(
+        request,
+        allowed,
+        error_factory=lambda message: ConsoleAPIError(400, "INVALID_PARAM", message),
+    )
 
 
 def _validate_limit(limit: int) -> None:
-    if limit < 1 or limit > 100:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "limit must be between 1 and 100")
+    _validate_limit_util(
+        limit,
+        min_value=1,
+        max_value=100,
+        error_factory=lambda message: ConsoleAPIError(400, "INVALID_PARAM", message),
+    )
 
 
 def _parse_uuid_param(name: str, value: Optional[str]) -> Optional[UUID]:
-    if value is None:
-        return None
-    if value == "":
-        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
-    try:
-        return UUID(value)
-    except ValueError as exc:
-        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}") from exc
+    return _parse_uuid_param_util(
+        name,
+        value,
+        error_factory=lambda message: ConsoleAPIError(400, "INVALID_PARAM", message),
+    )
 
 
 def _parse_bool_param(name: str, value: Optional[str], default: bool = False) -> bool:
-    if value is None:
-        return default
-    lowered = value.lower()
-    if lowered == "true":
-        return True
-    if lowered == "false":
-        return False
-    raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
+    return _parse_bool_param_util(
+        name,
+        value,
+        default=default,
+        error_factory=lambda message: ConsoleAPIError(400, "INVALID_PARAM", message),
+    )
 
 
 _TENANT_LIFECYCLE_MODES = {"active", "archived", "all"}
