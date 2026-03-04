@@ -368,6 +368,24 @@ from app.services.compliance_policy_registry_service import (
     rollback_compliance_policy_version,
 )
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
+from app.services.console_branch_changes import (
+    BRANCH_CHANGE_MANAGED_FIELDS as _BRANCH_CHANGE_MANAGED_FIELDS,
+)
+from app.services.console_branch_changes import (
+    BRANCH_CHANGE_MUTABLE_STATUSES as _BRANCH_CHANGE_MUTABLE_STATUSES,
+)
+from app.services.console_branch_changes import (
+    build_branch_change_diff as _build_branch_change_diff,
+)
+from app.services.console_branch_changes import (
+    build_branch_update_request as _build_branch_update_request,
+)
+from app.services.console_branch_changes import (
+    serialize_branch_change_record as _serialize_branch_change_record,
+)
+from app.services.console_branch_changes import (
+    snapshot_branch_for_change as _snapshot_branch_for_change,
+)
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
 from app.services.console_control_tower_program import (
     build_admin_control_tower_action_center_response as _build_admin_control_tower_action_center_response,
@@ -992,74 +1010,6 @@ def _serialize_branch(branch: Branch) -> ConsoleBranch:
     )
 
 
-_BRANCH_CHANGE_MANAGED_FIELDS = (
-    "slug",
-    "name",
-    "timezone",
-    "instance_id",
-    "phone",
-    "telegram_chat_id",
-    "knowledge_tag",
-    "working_hours",
-    "booking_settings",
-    "is_active",
-)
-_BRANCH_CHANGE_MUTABLE_STATUSES = {"draft", "validated", "publish_failed"}
-
-
-def _snapshot_branch_for_change(branch: Branch) -> dict:
-    return {
-        "slug": branch.slug,
-        "name": branch.name,
-        "timezone": branch.timezone,
-        "instance_id": branch.instance_id,
-        "phone": branch.phone,
-        "telegram_chat_id": branch.telegram_chat_id,
-        "knowledge_tag": branch.knowledge_tag,
-        "working_hours": _jsonable_payload(branch.working_hours if isinstance(branch.working_hours, dict) else {}),
-        "booking_settings": _jsonable_payload(branch.booking_settings if isinstance(branch.booking_settings, dict) else {}),
-        "is_active": bool(branch.is_active),
-    }
-
-
-def _build_branch_change_diff(base_snapshot: dict, patch_payload: dict) -> dict:
-    diff: dict[str, dict[str, object]] = {}
-    for field in _BRANCH_CHANGE_MANAGED_FIELDS:
-        if field not in patch_payload:
-            continue
-        before = base_snapshot.get(field)
-        after = patch_payload.get(field)
-        if before == after:
-            continue
-        diff[field] = {
-            "before": before,
-            "after": after,
-        }
-    return diff
-
-
-def _serialize_branch_change_record(change: ConsoleBranchChange) -> ConsoleBranchChangeRecord:
-    return ConsoleBranchChangeRecord(
-        id=change.id,
-        branch_id=change.branch_id,
-        status=change.status,
-        reason=change.reason,
-        draft_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
-        diff_payload=change.diff_payload if isinstance(change.diff_payload, dict) else {},
-        validation_payload=change.validation_payload if isinstance(change.validation_payload, dict) else None,
-        base_snapshot=change.base_snapshot if isinstance(change.base_snapshot, dict) else {},
-        published_snapshot=change.published_snapshot if isinstance(change.published_snapshot, dict) else None,
-        rollback_snapshot=change.rollback_snapshot if isinstance(change.rollback_snapshot, dict) else None,
-        publish_error=change.publish_error,
-        rollback_error=change.rollback_error,
-        created_at=change.created_at.isoformat() if change.created_at else "",
-        updated_at=change.updated_at.isoformat() if change.updated_at else None,
-        validated_at=change.validated_at.isoformat() if change.validated_at else None,
-        published_at=change.published_at.isoformat() if change.published_at else None,
-        rolled_back_at=change.rolled_back_at.isoformat() if change.rolled_back_at else None,
-    )
-
-
 def _normalize_branch_change_patch(*, db: Session, branch: Branch, patch_payload: dict) -> tuple[dict, list[str]]:
     errors: list[str] = []
     normalized: dict[str, object] = {}
@@ -1214,17 +1164,6 @@ def _normalize_branch_change_patch(*, db: Session, branch: Branch, patch_payload
             errors.append(exc.message)
 
     return normalized, errors
-
-
-def _build_branch_update_request(
-    *,
-    normalized_patch: dict,
-    confirmation_id: Optional[UUID] = None,
-) -> ConsoleBranchUpdateRequest:
-    payload = dict(normalized_patch)
-    if confirmation_id:
-        payload["confirmation_id"] = confirmation_id
-    return ConsoleBranchUpdateRequest.model_validate(payload)
 
 
 def _serialize_macro(macro: ConsoleMacroModel) -> ConsoleMacroSchema:
