@@ -181,6 +181,7 @@
 | `console-web/src/components/provisioning-wizard-json-payloads.ts` | Extracted JSON payload builders/loaders for `ProvisioningWizard` (`billing_info`, `working_hours`, `booking_settings`) | Frontend |
 | `console-web/src/components/provisioning-wizard-state.ts` | Extracted state lifecycle/bootstrap/hydration helpers for `ProvisioningWizard` | Frontend |
 | `console-web/src/components/provisioning-wizard-branch-actions.ts` | Extracted branch action payload builders for `ProvisioningWizard` (`create/update/save instance/telegram/knowledge/booking`) | Frontend |
+| `console-web/src/components/provisioning-wizard-account-actions.ts` | Extracted account action payload builders for `ProvisioningWizard` (`create company/client/agent`) | Frontend |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md` | Artifact report: UVC audit governance closeout (`UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705`) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-tech-debt-decomposition-wave1-a705.md` | Artifact report: wave1 structural decomposition for `UX-11`/`UX-12` + merge-red fix | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave2-a705.md` | Artifact report: wave2 structural decomposition for `UX-11`/`UX-12` (control-tower + provisioning domain extraction) | Brain/Architect |
@@ -198,6 +199,7 @@
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review4-a705.md` | Artifact report: closure-review4 merged-main decision after wave8 (`Open (Mitigated wave8; wave9 required)`) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave9-a705.md` | Artifact report: wave9 structural decomposition for `UX-11`/`UX-12` (branch-change backend extraction + provisioning branch-action extraction) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review5-a705.md` | Artifact report: closure-review5 merged-main decision after wave9 (`Open (Mitigated wave9; wave10 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave10-a705.md` | Artifact report: wave10 structural decomposition for `UX-11`/`UX-12` (branch-change normalization extraction + provisioning account-action extraction) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave4-a705.md` | Follow-up Task Package for next decomposition wave after closeout residual confirmation | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-close-a705.md` | Final-close Task Package for post-wave4 deterministic status decision and residual contract | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md` | Next bounded wave Task Package for residual `UX-11/UX-12` decomposition after final-close merge | Brain/Architect |
@@ -211,6 +213,7 @@
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave9-a705.md` | Next bounded decomposition Task Package after closure-review4 residual decision for `UX-11`/`UX-12` | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review5-a705.md` | Closure-review Task Package after wave9 merge to decide `Fixed` vs `Open + wave10` for `UX-11/UX-12` | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave10-a705.md` | Next bounded decomposition Task Package after closure-review5 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review6-a705.md` | Closure-review Task Package after wave10 merge to decide `Fixed` vs `Open + wave11` for `UX-11/UX-12` | Brain/Architect |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
 | `SPECS/INBOX_HUMAN_LOCK.md` | ТЗ: manual messaging + human lock в «Заявках» | Архитектор/Backend/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |

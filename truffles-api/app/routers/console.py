@@ -381,6 +381,9 @@ from app.services.console_branch_changes import (
     build_branch_update_request as _build_branch_update_request,
 )
 from app.services.console_branch_changes import (
+    normalize_branch_change_patch as _normalize_branch_change_patch_payload,
+)
+from app.services.console_branch_changes import (
     serialize_branch_change_record as _serialize_branch_change_record,
 )
 from app.services.console_branch_changes import (
@@ -1011,159 +1014,29 @@ def _serialize_branch(branch: Branch) -> ConsoleBranch:
 
 
 def _normalize_branch_change_patch(*, db: Session, branch: Branch, patch_payload: dict) -> tuple[dict, list[str]]:
-    errors: list[str] = []
-    normalized: dict[str, object] = {}
-
-    if not isinstance(patch_payload, dict):
-        return {}, ["patch must be an object"]
-
-    if not any(field in patch_payload for field in _BRANCH_CHANGE_MANAGED_FIELDS):
-        return {}, ["patch has no supported fields"]
-
-    if "slug" in patch_payload:
-        raw_slug = patch_payload.get("slug")
-        if raw_slug is None:
-            errors.append("slug cannot be null")
-        elif not isinstance(raw_slug, str):
-            errors.append("slug must be string")
-        else:
-            try:
-                slug = _normalize_slug(raw_slug, "branch_slug")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-            else:
-                _ensure_unique_branch_field(
-                    db,
-                    client_id=branch.client_id,
-                    field_name="slug",
-                    value=slug,
-                    exclude_branch_id=branch.id,
-                )
-                normalized["slug"] = slug
-
-    if "name" in patch_payload:
-        raw_name = patch_payload.get("name")
-        if raw_name is None:
-            errors.append("name cannot be null")
-        elif not isinstance(raw_name, str):
-            errors.append("name must be string")
-        else:
-            try:
-                normalized["name"] = _normalize_required_text(raw_name, "name")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-
-    if "timezone" in patch_payload:
-        raw_timezone = patch_payload.get("timezone")
-        if raw_timezone is not None and not isinstance(raw_timezone, str):
-            errors.append("timezone must be string")
-        else:
-            try:
-                normalized["timezone"] = _normalize_timezone_name(raw_timezone, "timezone")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-
-    if "instance_id" in patch_payload:
-        raw_instance_id = patch_payload.get("instance_id")
-        if raw_instance_id is not None and not isinstance(raw_instance_id, str):
-            errors.append("instance_id must be string")
-        else:
-            instance_id = _normalize_optional_text(raw_instance_id)
-            _ensure_unique_branch_field(
-                db,
-                client_id=branch.client_id,
-                field_name="instance_id",
-                value=instance_id,
-                exclude_branch_id=branch.id,
-            )
-            normalized["instance_id"] = instance_id
-
-    if "phone" in patch_payload:
-        raw_phone = patch_payload.get("phone")
-        if raw_phone is not None and not isinstance(raw_phone, str):
-            errors.append("phone must be string")
-        else:
-            try:
-                phone = _normalize_branch_phone(raw_phone, "phone")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-            else:
-                _ensure_unique_branch_field(
-                    db,
-                    client_id=branch.client_id,
-                    field_name="phone",
-                    value=phone,
-                    exclude_branch_id=branch.id,
-                )
-                normalized["phone"] = phone
-
-    if "telegram_chat_id" in patch_payload:
-        raw_chat_id = patch_payload.get("telegram_chat_id")
-        if raw_chat_id is not None and not isinstance(raw_chat_id, str):
-            errors.append("telegram_chat_id must be string")
-        else:
-            try:
-                normalized["telegram_chat_id"] = _normalize_telegram_chat_id(raw_chat_id, "telegram_chat_id")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-
-    if "knowledge_tag" in patch_payload:
-        raw_knowledge_tag = patch_payload.get("knowledge_tag")
-        if raw_knowledge_tag is not None and not isinstance(raw_knowledge_tag, str):
-            errors.append("knowledge_tag must be string")
-        else:
-            try:
-                normalized["knowledge_tag"] = _normalize_knowledge_tag(raw_knowledge_tag, "knowledge_tag")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-
-    if "working_hours" in patch_payload:
-        value = patch_payload.get("working_hours")
-        if value is None:
-            normalized["working_hours"] = {}
-        elif isinstance(value, dict):
-            normalized["working_hours"] = value
-        else:
-            errors.append("working_hours must be an object")
-
-    if "booking_settings" in patch_payload:
-        value = patch_payload.get("booking_settings")
-        if value is None:
-            normalized["booking_settings"] = {}
-        elif isinstance(value, dict):
-            normalized["booking_settings"] = value
-        else:
-            errors.append("booking_settings must be an object")
-
-    if "is_active" in patch_payload:
-        value = patch_payload.get("is_active")
-        if value is None:
-            errors.append("is_active cannot be null")
-        elif isinstance(value, bool):
-            normalized["is_active"] = value
-        else:
-            errors.append("is_active must be boolean")
-
-    final_instance_id = (
-        normalized.get("instance_id")
-        if "instance_id" in normalized
-        else branch.instance_id
+    return _normalize_branch_change_patch_payload(
+        db=db,
+        branch=branch,
+        patch_payload=patch_payload,
+        validation_error_type=ConsoleAPIError,
+        ensure_unique_branch_field=_ensure_unique_branch_field,
+        normalize_slug=_normalize_slug,
+        normalize_required_text=_normalize_required_text,
+        normalize_timezone_name=_normalize_timezone_name,
+        normalize_optional_text=_normalize_optional_text,
+        normalize_branch_phone=_normalize_branch_phone,
+        normalize_telegram_chat_id=_normalize_telegram_chat_id,
+        normalize_knowledge_tag=_normalize_knowledge_tag,
+        require_branch_go_live_gate=lambda current_branch: _require_branch_go_live_gate(
+            current_branch,
+            operation="branch_activate",
+        ),
+        require_branch_scorecard_ready=lambda current_db, current_branch: _require_branch_scorecard_ready(
+            current_db,
+            current_branch,
+            operation="branch_activate",
+        ),
     )
-    final_is_active = (
-        normalized.get("is_active")
-        if "is_active" in normalized
-        else bool(branch.is_active)
-    )
-    if final_is_active and not final_instance_id:
-        errors.append("instance_id required to activate branch")
-    if final_is_active and not branch.is_active:
-        try:
-            _require_branch_go_live_gate(branch, operation="branch_activate")
-            _require_branch_scorecard_ready(db, branch, operation="branch_activate")
-        except ConsoleAPIError as exc:
-            errors.append(exc.message)
-
-    return normalized, errors
 
 
 def _serialize_macro(macro: ConsoleMacroModel) -> ConsoleMacroSchema:
