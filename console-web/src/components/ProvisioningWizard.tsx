@@ -65,6 +65,14 @@ import {
     ProvisioningWizardExecutionHub,
     ProvisioningWizardModePanel,
 } from "@/components/provisioning-wizard-shell-panels";
+import {
+    buildBillingInfoPayload as buildBillingInfoPayloadDraft,
+    buildBookingSettingsPayload as buildBookingSettingsPayloadDraft,
+    buildWorkingHoursPayload as buildWorkingHoursPayloadDraft,
+    readBillingInfoPayload,
+    readBookingSettingsPayload,
+    readWorkingHoursPayload,
+} from "@/components/provisioning-wizard-json-payloads";
 
 type SessionData = ReturnType<typeof useSession>["data"];
 type ProvisioningBranch = components["schemas"]["ConsoleBranch"];
@@ -136,7 +144,6 @@ type OnboardingMode = "autopilot" | "manual";
 const DEFAULT_TIMEZONE = "Asia/Almaty";
 const PROVISIONING_ASSIGNABLE_AGENT_ROLES: AgentRole[] = ["owner", "admin", "manager", "viewer"];
 const DOMAIN_SLUG_RE = /^[a-z0-9_]+$/;
-const ISO_CURRENCY_RE = /^[A-Z]{3}$/;
 
 type ProvisioningWizardProps = {
     session: SessionData;
@@ -385,22 +392,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     }, [branchData?.id]);
 
     const buildBillingInfoPayload = (): { value?: Record<string, unknown>; error?: string } => {
-        const payload: Record<string, unknown> = {};
-        const contract = billingContract.trim();
-        const currency = billingCurrency.trim().toUpperCase();
-        if (contract && contract.length < 2) {
-            return { error: "billing_info.contract: минимум 2 символа" };
-        }
-        if (currency && !ISO_CURRENCY_RE.test(currency)) {
-            return { error: "billing_info.currency: используйте ISO-код (например KZT)" };
-        }
-        if (contract) {
-            payload.contract = contract;
-        }
-        if (currency) {
-            payload.currency = currency;
-        }
-        return { value: Object.keys(payload).length ? payload : undefined };
+        return buildBillingInfoPayloadDraft({
+            contract: billingContract,
+            currency: billingCurrency,
+        });
     };
 
     const applyBillingToJson = () => {
@@ -419,33 +414,17 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return;
         }
         const payload = (parsed.value ?? {}) as Record<string, unknown>;
-        const contract = payload.contract;
-        const currency = payload.currency;
-        setBillingContract(typeof contract === "string" ? contract : "");
-        setBillingCurrency(typeof currency === "string" ? currency.toUpperCase() : "");
+        const next = readBillingInfoPayload(payload);
+        setBillingContract(next.contract);
+        setBillingCurrency(next.currency);
     };
 
     const buildWorkingHoursPayload = (): { value?: Record<string, unknown>; error?: string } => {
-        const selectedDays = workingHoursDays;
-        const start = workingHoursStart.trim();
-        const end = workingHoursEnd.trim();
-        if (!selectedDays.length && !start && !end) {
-            return {};
-        }
-        if (!selectedDays.length) {
-            return { error: "Укажите рабочие дни" };
-        }
-        if (!start || !end) {
-            return { error: "Укажите время открытия и закрытия" };
-        }
-        if (start >= end) {
-            return { error: "working_hours: время закрытия должно быть позже открытия" };
-        }
-        const payload: Record<string, unknown> = {};
-        selectedDays.forEach((day) => {
-            payload[day] = [{ start, end }];
+        return buildWorkingHoursPayloadDraft({
+            selectedDays: workingHoursDays,
+            start: workingHoursStart,
+            end: workingHoursEnd,
         });
-        return { value: payload };
     };
 
     const applyWorkingHoursToJson = () => {
@@ -465,55 +444,19 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return;
         }
         const payload = (parsed.value ?? {}) as Record<string, unknown>;
-        const orderedDays = WORKING_DAYS.map((day) => day.id);
-        const dayKeys = orderedDays.filter((day) => Array.isArray(payload[day]));
-        setWorkingHoursDays(dayKeys);
-        setWorkingHoursStart("");
-        setWorkingHoursEnd("");
-        const firstDay = dayKeys[0];
-        if (!firstDay) {
-            return;
-        }
-        const slots = payload[firstDay];
-        if (Array.isArray(slots) && slots[0] && typeof slots[0] === "object") {
-            const slot = slots[0] as { start?: unknown; end?: unknown };
-            if (typeof slot.start === "string") {
-                setWorkingHoursStart(slot.start);
-            }
-            if (typeof slot.end === "string") {
-                setWorkingHoursEnd(slot.end);
-            }
-        }
+        const next = readWorkingHoursPayload(payload, {
+            orderedDays: WORKING_DAYS.map((day) => day.id),
+        });
+        setWorkingHoursDays(next.days);
+        setWorkingHoursStart(next.start);
+        setWorkingHoursEnd(next.end);
     };
 
     const buildBookingSettingsPayload = (): { value?: Record<string, unknown>; error?: string } => {
-        const defaultDurationRaw = bookingDefaultDuration.trim();
-        const bufferMinRaw = bookingBufferMin.trim();
-        if (!defaultDurationRaw && !bufferMinRaw) {
-            return {};
-        }
-        const payload: Record<string, unknown> = {};
-        if (defaultDurationRaw) {
-            const parsed = Number(defaultDurationRaw);
-            if (!Number.isInteger(parsed)) {
-                return { error: "default_duration_min: укажите целое число" };
-            }
-            if (parsed < 5 || parsed > 480) {
-                return { error: "default_duration_min: допустимо от 5 до 480" };
-            }
-            payload.default_duration_min = parsed;
-        }
-        if (bufferMinRaw) {
-            const parsed = Number(bufferMinRaw);
-            if (!Number.isInteger(parsed)) {
-                return { error: "buffer_min: укажите целое число" };
-            }
-            if (parsed < 0 || parsed > 240) {
-                return { error: "buffer_min: допустимо от 0 до 240" };
-            }
-            payload.buffer_min = parsed;
-        }
-        return { value: payload };
+        return buildBookingSettingsPayloadDraft({
+            defaultDuration: bookingDefaultDuration,
+            bufferMin: bookingBufferMin,
+        });
     };
 
     const applyBookingSettingsToJson = () => {
@@ -533,14 +476,9 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return;
         }
         const payload = (parsed.value ?? {}) as Record<string, unknown>;
-        const defaultDuration = payload.default_duration_min;
-        const bufferMin = payload.buffer_min;
-        setBookingDefaultDuration((typeof defaultDuration === "number" || typeof defaultDuration === "string")
-            ? String(defaultDuration)
-            : "");
-        setBookingBufferMin((typeof bufferMin === "number" || typeof bufferMin === "string")
-            ? String(bufferMin)
-            : "");
+        const next = readBookingSettingsPayload(payload);
+        setBookingDefaultDuration(next.defaultDuration);
+        setBookingBufferMin(next.bufferMin);
     };
 
     const validatePurchasedPayload = (payload: CapabilitiesPayload): string | null => {

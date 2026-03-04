@@ -19,13 +19,38 @@
 - `docs/CONSOLE_AUDIT/UX_BACKLOG.md` (`UX-11`, `UX-12`)
 
 ## One web search (mandatory before implementation)
-- **Status:** pending for wave6 start.
-- **Requirement:** perform exactly one query and record source/reuse decision before code changes.
+- **Query (exact):** `fastapi bigger applications multiple files apirouter`
+- **Date/time (local):** `2026-03-04 13:11 +0500`
+- **Sources opened (from this query):**
+  - `https://fastapi.tiangolo.com/tutorial/bigger-applications/`
+- **Found reusable solution:** split large routers into focused modules while keeping the same APIRouter contract and endpoint behavior.
+- **Decision:** `reuse/integrate` existing extraction pattern (`console_*` service modules + router aliases) for a bounded wave6 slice.
+- **Rejected options:** big-bang rewrite of `console.py` and mixed runtime+UI redesign in one block.
+
+## FACT pre-check (before implementation)
+- `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` -> `24897`, `4679`
+- Baseline deterministic checks (closure-review): `py_compile` pass, `pytest 16 passed`.
 
 ## Root cause (mandatory)
 - **Symptom:** `UX-11/UX-12` remain open after wave5 closure-review.
+- **Minimal reproduction:**
+  1. run `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx`;
+  2. verify deterministic checks are green (`py_compile`, `pytest`);
+  3. compare residual blast-radius against closure threshold.
+- **Evidence:** closure-review merged-main baseline (`24897/4679`, `pytest 16 passed`) and wave6 branch baseline/validation in this TP.
+- **Five Whys:**
+  1. Why open? monolith concentration remains high in both files.
+  2. Why after wave5? prior extraction covered helpers/shell slices, not fleet-state and JSON editor slices.
+  3. Why risky? unrelated changes still require touching large files.
+  4. Why not mark fixed? objective residual risk remains without additional bounded extraction.
+  5. Why wave6 shape? selected slices are pure/deterministic and minimize behavior-change risk.
 - **Root cause statement:** monolith residual still above closure threshold.
 - **Fix mechanism:** one more bounded extraction with deterministic contract checks.
+
+## Reuse-first plan (mandatory)
+- **Internal reuse:** continue existing extraction pattern (`console_*` service modules and `provisioning-wizard-*` component modules) instead of introducing new runtime paths.
+- **External reuse:** FastAPI official "Bigger Applications" modularization guidance for APIRouter-compatible service decomposition.
+- **Why not build from scratch:** big-bang rewrite would violate bounded-risk invariant and increase regression probability.
 
 ## Invariant
 - No runtime behavior changes.

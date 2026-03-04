@@ -382,6 +382,21 @@ from app.services.console_control_tower_utils import (
     build_control_tower_issue_counts as _build_control_tower_issue_counts,
 )
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
+from app.services.console_fleet_state import CLIENT_STATUS_ACTIVE as _CLIENT_STATUS_ACTIVE
+from app.services.console_fleet_state import FLEET_COMMERCIAL_STATES as _FLEET_COMMERCIAL_STATES
+from app.services.console_fleet_state import FLEET_LIFECYCLE_STATES as _FLEET_LIFECYCLE_STATES
+from app.services.console_fleet_state import FLEET_NEXT_ACTION_STATES as _FLEET_NEXT_ACTION_STATES
+from app.services.console_fleet_state import FLEET_PAYMENT_STATES as _FLEET_PAYMENT_STATES
+from app.services.console_fleet_state import FLEET_SERVICE_STATES as _FLEET_SERVICE_STATES
+from app.services.console_fleet_state import is_client_active_status as _is_client_active_status
+from app.services.console_fleet_state import normalize_fleet_payment_status as _normalize_fleet_payment_status
+from app.services.console_fleet_state import parse_fleet_lifecycle_param as _parse_fleet_lifecycle_param
+from app.services.console_fleet_state import parse_fleet_payment_param as _parse_fleet_payment_param
+from app.services.console_fleet_state import parse_fleet_service_param as _parse_fleet_service_param
+from app.services.console_fleet_state import resolve_fleet_commercial_state as _resolve_fleet_commercial_state
+from app.services.console_fleet_state import resolve_fleet_lifecycle_state as _resolve_fleet_lifecycle_state
+from app.services.console_fleet_state import resolve_fleet_next_action as _resolve_fleet_next_action
+from app.services.console_fleet_state import resolve_fleet_service_state as _resolve_fleet_service_state
 from app.services.console_idempotency import (
     finalize_idempotency,
     release_idempotency,
@@ -2103,7 +2118,6 @@ def _parse_bool_param(name: str, value: Optional[str], default: bool = False) ->
 
 
 _TENANT_LIFECYCLE_MODES = {"active", "archived", "all"}
-_CLIENT_STATUS_ACTIVE = "active"
 _CLIENT_STATUS_ARCHIVED = "deleted"
 _CLIENT_LIFECYCLE_REASON_MAX_LEN = 500
 _ACCESS_REASON_MAX_LEN = 500
@@ -2186,35 +2200,6 @@ _INTEGRATION_ALERT_ISSUES = {
 }
 _INTEGRATION_DRIFT_STATE: dict[str, str] = {}
 _INTEGRATION_DRIFT_LOCK = Lock()
-_FLEET_LIFECYCLE_STATES = {
-    "lead",
-    "contracting",
-    "onboarding",
-    "go_live_ready",
-    "active",
-    "paused",
-    "archived",
-}
-_FLEET_PAYMENT_STATES = {"pending", "confirmed", "rejected", "unknown"}
-_FLEET_SERVICE_STATES = {"ok", "degraded", "attention"}
-_FLEET_COMMERCIAL_STATES = {
-    "payment_confirmed",
-    "payment_pending",
-    "payment_rejected",
-    "contract_missing",
-}
-_FLEET_NEXT_ACTION_STATES = {
-    "qualify_and_collect_contract",
-    "collect_signed_contract_and_payment",
-    "complete_onboarding_steps",
-    "confirm_payment_and_approve_go_live",
-    "approve_go_live",
-    "resolve_payment_or_service_blocker",
-    "archived_no_action",
-    "run_integration_recovery",
-    "resolve_attention_items",
-    "monitor_sla_and_quality",
-}
 _FLEET_LIFECYCLE_ORDER = [
     "lead",
     "contracting",
@@ -5353,146 +5338,6 @@ def _apply_membership_target_filters(
     return query
 
 
-def _parse_fleet_lifecycle_param(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    normalized = value.strip().lower()
-    if normalized == "all":
-        return None
-    if normalized not in _FLEET_LIFECYCLE_STATES:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid fleet_lifecycle")
-    return normalized
-
-
-def _parse_fleet_payment_param(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    normalized = value.strip().lower()
-    if normalized == "all":
-        return None
-    if normalized not in _FLEET_PAYMENT_STATES:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid payment_status")
-    return normalized
-
-
-def _parse_fleet_service_param(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    normalized = value.strip().lower()
-    if normalized == "all":
-        return None
-    if normalized not in _FLEET_SERVICE_STATES:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid service_state")
-    return normalized
-
-
-def _is_client_active_status(status: Optional[str]) -> bool:
-    return (status or "").strip().lower() == _CLIENT_STATUS_ACTIVE
-
-
-def _normalize_fleet_payment_status(value: Optional[str]) -> str:
-    normalized = (value or "").strip().lower()
-    if normalized in {"pending", "confirmed", "rejected"}:
-        return normalized
-    return "unknown"
-
-
-def _resolve_fleet_commercial_state(payment_status: str) -> str:
-    if payment_status == "confirmed":
-        return "payment_confirmed"
-    if payment_status == "pending":
-        return "payment_pending"
-    if payment_status == "rejected":
-        return "payment_rejected"
-    return "contract_missing"
-
-
-def _resolve_fleet_service_state(
-    *,
-    client_active: bool,
-    active_branches: int,
-    degraded_branches: int,
-    go_live_ready_branches: int,
-) -> str:
-    if not client_active:
-        return "attention"
-    if active_branches <= 0:
-        return "attention"
-    if degraded_branches > 0:
-        return "degraded"
-    if go_live_ready_branches < active_branches:
-        return "attention"
-    return "ok"
-
-
-def _resolve_fleet_lifecycle_override(client: Client, company: Optional[Company]) -> Optional[str]:
-    candidates: list[Optional[str]] = []
-    if company and isinstance(company.billing_info, dict):
-        candidates.append(company.billing_info.get("lifecycle_state"))
-        candidates.append(company.billing_info.get("service_lifecycle_state"))
-    if isinstance(client.config, dict):
-        candidates.append(client.config.get("lifecycle_state"))
-        candidates.append(client.config.get("service_lifecycle_state"))
-    for raw in candidates:
-        normalized = (raw or "").strip().lower() if isinstance(raw, str) else ""
-        if normalized in _FLEET_LIFECYCLE_STATES:
-            return normalized
-    return None
-
-
-def _resolve_fleet_lifecycle_state(
-    *,
-    client: Client,
-    company: Optional[Company],
-    payment_status: str,
-    active_branches: int,
-    go_live_ready_branches: int,
-) -> str:
-    override = _resolve_fleet_lifecycle_override(client, company)
-    if override:
-        return override
-    if not _is_client_active_status(client.status):
-        return "archived"
-    if payment_status == "rejected":
-        return "paused"
-    if active_branches <= 0:
-        if payment_status == "confirmed":
-            return "onboarding"
-        return "contracting"
-    if go_live_ready_branches < active_branches:
-        return "onboarding"
-    if payment_status != "confirmed":
-        return "go_live_ready"
-    return "active"
-
-
-def _resolve_fleet_next_action(
-    *,
-    lifecycle_state: str,
-    service_state: str,
-    payment_status: str,
-) -> str:
-    if lifecycle_state == "lead":
-        return "qualify_and_collect_contract"
-    if lifecycle_state == "contracting":
-        return "collect_signed_contract_and_payment"
-    if lifecycle_state == "onboarding":
-        return "complete_onboarding_steps"
-    if lifecycle_state == "go_live_ready":
-        if payment_status != "confirmed":
-            return "confirm_payment_and_approve_go_live"
-        return "approve_go_live"
-    if lifecycle_state == "paused":
-        return "resolve_payment_or_service_blocker"
-    if lifecycle_state == "archived":
-        return "archived_no_action"
-    if service_state == "degraded":
-        return "run_integration_recovery"
-    if service_state == "attention":
-        return "resolve_attention_items"
-    return "monitor_sla_and_quality"
-
-
 def _build_reference_branch_decisions(
     *,
     branches: list[Branch],
@@ -5672,8 +5517,9 @@ def _build_fleet_client_details_map(
             go_live_ready_branches=stats["go_live_ready_branches"],
         )
         lifecycle_state = _resolve_fleet_lifecycle_state(
-            client=client,
-            company=company,
+            client_status=client.status,
+            client_config=client.config,
+            company_billing_info=company.billing_info if company else None,
             payment_status=payment_status,
             active_branches=stats["active_branches"],
             go_live_ready_branches=stats["go_live_ready_branches"],
