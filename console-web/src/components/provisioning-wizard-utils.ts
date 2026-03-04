@@ -8,7 +8,7 @@ type CapabilitiesPayload = RawCapabilitiesPayload & {
 };
 type OnboardingContractPayload = components["schemas"]["OnboardingContractPayload-Input"];
 
-type OnboardingStepStatusValue = "complete" | "available" | "locked" | "skipped";
+export type OnboardingStepStatusValue = "complete" | "available" | "locked" | "skipped";
 
 export function stringifyOptionalJson(value: unknown): string {
     if (!value || typeof value !== "object") {
