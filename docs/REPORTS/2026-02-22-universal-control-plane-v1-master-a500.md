@@ -126,7 +126,7 @@ Post-UCP UX convergence chain (A705):
 - `UVC-UX-PROGRAM-CLOSEOUT-A705`: done (steady-state control-loop automation handoff completed: wrapper-script + scheduled/dispatch workflow + runbook/canon sync + local evidence artifact).
 - `UVC-UX-STEADY-STATE-OPERATIONS-A705`: done (operator-assist remediation automation added to control-loop with deterministic plan/brief/commands artifacts, strict decision gate option, and contract tests).
 - `UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705`: done (deterministic audit governance gate added to control-loop + CI, canonical audit/backlog duplicates cleaned, and fail-closed governance artifact evidence delivered).
-- `UVC-UX-TECH-DEBT-DECOMPOSITION-A705`: in_progress (wave1 merged via PR `#885`; wave2 delivered locally: extracted control-tower helper module from `console.py` and provisioning domain lexicon module from `ProvisioningWizard.tsx` with deterministic tests/e2e evidence; pending PR merge for canonical closeout).
+- `UVC-UX-TECH-DEBT-DECOMPOSITION-A705`: in_progress (wave1 merged via PR `#885`; wave2 merged via PR `#888`; wave3 delivered locally with orchestration/derived-state extraction (`console_control_tower_program.py`, `provisioning-wizard-derived.ts`) plus deterministic checks/e2e evidence; closeout block pending).
 
 ## 8) Program-level DoD
 
