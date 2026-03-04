@@ -1,5 +1,12 @@
 import { parseOptionalJson, stringifyOptionalJson } from "@/components/provisioning-wizard-utils";
-import { readBillingInfoPayload, readBookingSettingsPayload, readWorkingHoursPayload } from "@/components/provisioning-wizard-json-payloads";
+import {
+    buildBillingInfoPayload as buildBillingInfoPayloadDraft,
+    buildBookingSettingsPayload as buildBookingSettingsPayloadDraft,
+    buildWorkingHoursPayload as buildWorkingHoursPayloadDraft,
+    readBillingInfoPayload,
+    readBookingSettingsPayload,
+    readWorkingHoursPayload,
+} from "@/components/provisioning-wizard-json-payloads";
 
 export type ProvisioningBranchFormState = {
     name: string;
@@ -194,4 +201,87 @@ export function hydrateBookingSettingsFieldsFromJson(input: {
         return null;
     }
     return readBookingSettingsPayload(parsed.value as Record<string, unknown>);
+}
+
+export function buildBillingInfoJsonFromFields(input: {
+    contract: string;
+    currency: string;
+}): { json: string; error?: string } {
+    const built = buildBillingInfoPayloadDraft({
+        contract: input.contract,
+        currency: input.currency,
+    });
+    if (built.error) {
+        return { json: "", error: built.error };
+    }
+    return { json: built.value ? JSON.stringify(built.value, null, 2) : "" };
+}
+
+export function loadBillingInfoFieldsFromJson(input: {
+    billingInfo: string;
+}): { contract: string; currency: string; error?: string } {
+    const parsed = parseOptionalJson(input.billingInfo, "billing_info");
+    if (parsed.error) {
+        return { contract: "", currency: "", error: parsed.error };
+    }
+    const payload = (parsed.value ?? {}) as Record<string, unknown>;
+    const next = readBillingInfoPayload(payload);
+    return { contract: next.contract, currency: next.currency };
+}
+
+export function buildWorkingHoursJsonFromFields(input: {
+    selectedDays: string[];
+    start: string;
+    end: string;
+}): { json: string; error?: string } {
+    const built = buildWorkingHoursPayloadDraft({
+        selectedDays: input.selectedDays,
+        start: input.start,
+        end: input.end,
+    });
+    if (built.error) {
+        return { json: "", error: built.error };
+    }
+    return { json: built.value ? JSON.stringify(built.value, null, 2) : "" };
+}
+
+export function loadWorkingHoursFieldsFromJson(input: {
+    workingHoursJson: string;
+    orderedDays: string[];
+}): { days: string[]; start: string; end: string; error?: string } {
+    const parsed = parseOptionalJson(input.workingHoursJson, "working_hours");
+    if (parsed.error) {
+        return { days: [], start: "", end: "", error: parsed.error };
+    }
+    const payload = (parsed.value ?? {}) as Record<string, unknown>;
+    const next = readWorkingHoursPayload(payload, {
+        orderedDays: input.orderedDays,
+    });
+    return { days: next.days, start: next.start, end: next.end };
+}
+
+export function buildBookingSettingsJsonFromFields(input: {
+    defaultDuration: string;
+    bufferMin: string;
+}): { json: string; error?: string } {
+    const built = buildBookingSettingsPayloadDraft({
+        defaultDuration: input.defaultDuration,
+        bufferMin: input.bufferMin,
+    });
+    if (built.error) {
+        return { json: "", error: built.error };
+    }
+    return { json: built.value ? JSON.stringify(built.value, null, 2) : "" };
+}
+
+export function loadBookingSettingsFieldsFromJson(input: {
+    bookingSettingsJson: string;
+}): { defaultDuration: string; bufferMin: string; error?: string } {
+    const parsed = parseOptionalJson(input.bookingSettingsJson, "booking_settings");
+    if (parsed.error) {
+        return { defaultDuration: "", bufferMin: "", error: parsed.error };
+    }
+    const payload = (parsed.value ?? {}) as Record<string, unknown>;
+    const next = readBookingSettingsPayload(payload);
+    return { defaultDuration: next.defaultDuration, bufferMin: next.bufferMin };
 }

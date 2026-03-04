@@ -128,10 +128,11 @@
 - E2E policy: one targeted platform-admin lane run after frontend extraction; rerun only if deterministic check fails with a new hypothesis.
 - Stop condition: two repeated failures without new RCA evidence -> stop-the-line and return to root-cause section.
 
-## Release safety (mandatory)
+## Release safety (mandatory for non-doc changes)
 - Strategy: `canary` at code-review level via targeted deterministic suite and existing platform-admin e2e lane before merge.
 - Go/no-go signals: all checks in `Checks` section green; no API type drift; no e2e deep-link regressions.
 - Rollback: immediate revert of wave8 commits with deterministic rerun.
+- Post-release monitoring window: closure-review4 must revalidate merged-main baseline before any next-wave promotion.
 
 ## Риски/блокеры
 - Large-file extraction can create hidden import coupling.
@@ -141,7 +142,7 @@
 - `Current residuals accepted in this block`: will be reassessed after wave8 results.
 - `Why not in this block`: full monolith breakup exceeds bounded wave scope.
 - `Risk if deferred`: high-context edits continue to slow safe delivery.
-- `Linked follow-up Task Package(s)`: `TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review4-a705.md` (to be created after wave8 evidence).
+- `Linked follow-up Task Package(s)`: `TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review4-a705.md`.
 - `Expiry/trigger to stop deferral`: if wave8 closes neither `UX-11` nor `UX-12`, closure-review4 must open next bounded wave immediately.
 
 ## Next-block contract (mandatory)
