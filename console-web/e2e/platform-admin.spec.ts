@@ -609,6 +609,123 @@ async function mockTenantsDeterministicApis(
     });
 }
 
+async function mockOpsDeterministicApis(
+    page: import('@playwright/test').Page,
+    fixtureNow = TENANTS_FIXTURE_NOW,
+) {
+    await page.route('**/api/proxy/health**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            status: 'ok',
+            version: 'e2e',
+            database: 'ok',
+            redis: 'ok',
+            outbox_backlog: 12,
+        });
+    });
+    await page.route('**/api/proxy/metrics/daily**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            date: '2026-03-03',
+            total_cases: 24,
+            pending_cases: 5,
+            active_cases: 8,
+            resolved_cases: 11,
+            avg_resolution_hours: 1.2,
+        });
+    });
+    await page.route('**/api/proxy/telegram/health**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            status: 'ok',
+            webhook_alive: true,
+            last_success_at: fixtureNow,
+            last_error_at: null,
+            last_error_message: null,
+            error_rate_24h: 0.01,
+            pending_messages: 1,
+        });
+    });
+    await page.route('**/api/proxy/ops/outbox**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [],
+            cursor: null,
+            has_more: false,
+            counts: { pending: 1, processing: 2, failed: 3 },
+        });
+    });
+    await page.route('**/api/proxy/ops/reminders**', async (route) => {
+        if (route.request().method() === 'POST') {
+            await toJsonResponse(route, { success: true, retried: 0, skipped: 0, matched: 0 });
+            return;
+        }
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [],
+            cursor: null,
+            has_more: false,
+            counts: { pending: 2, sent: 10, failed: 1, due_now: 2, overdue_15m: 0 },
+            error_buckets: [],
+        });
+    });
+    await page.route('**/api/proxy/ops/jobs**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        const requestPath = new URL(route.request().url()).pathname;
+        if (requestPath.endsWith('/ops/jobs/catalog')) {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, { items: [], cursor: null, has_more: false });
+    });
+    await page.route('**/api/proxy/ops/jobs/catalog**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [
+                {
+                    job_type: 'outbox_process',
+                    label: 'Обработать очередь',
+                    description: 'Проверка и обработка очереди отправки.',
+                    supports_dry_run: true,
+                },
+            ],
+        });
+    });
+    await page.route('**/api/proxy/admin/incidents**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            generated_at: fixtureNow,
+            scope: 'fleet',
+            summary: { total: 0, critical: 0, warn: 0, info: 0 },
+            items: [],
+        });
+    });
+}
+
 function tenantsSection(page: import('@playwright/test').Page, title: string) {
     return page.locator('section').filter({ has: page.getByRole('heading', { name: title }) }).first();
 }
@@ -1520,6 +1637,7 @@ test.describe('Platform Admin Tenants', () => {
         await expect(openWorkspaceButton).toBeVisible();
         await openWorkspaceWithRetry(page, openWorkspaceButton);
         await expect(page.getByTestId('workspace-recommended-open-execute')).toBeVisible();
+        await mockOpsDeterministicApis(page);
 
         const deepLinkParams = await page.evaluate(() => ({
             branchId: new URL(window.location.href).searchParams.get('branch_id'),
@@ -1532,22 +1650,29 @@ test.describe('Platform Admin Tenants', () => {
 
         const nextStepOps = page.getByTestId('workspace-next-step-ops');
         await expect(nextStepOps).toBeVisible();
+        const opsHref = await nextStepOps.getAttribute('href');
+        expect(opsHref).toBeTruthy();
         await nextStepOps.click();
         await Promise.race([
             page.waitForURL(urlPathPattern('/ops'), { timeout: 15000 }),
             page.waitForURL(urlPathPattern('/login'), { timeout: 15000 }),
         ]);
         if (page.url().includes('/login')) {
-            await loginThroughKeycloak(page);
-            await gotoConsoleRoot(page);
-            await resolveSelectionGate(page);
-            await openOps(page);
+            await ensureLoggedIn(page);
+            if (opsHref) {
+                const restoredOpsUrl = opsHref.startsWith('http') ? opsHref : `${resolvedBaseURL}${opsHref}`;
+                await page.goto(restoredOpsUrl, { waitUntil: 'domcontentloaded' });
+            } else {
+                await openOps(page);
+            }
+            await expect(page).toHaveURL(urlPathPattern('/ops'));
         } else {
             await expect(page).toHaveURL(urlPathPattern('/ops'));
         }
-        await expect(page.getByTestId('ops-back-workspace')).toBeVisible();
+        await expect(page.getByTestId('ops-title')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('ops-back-workspace')).toBeVisible({ timeout: 15000 });
         const opsBackTenants = page.getByTestId('ops-back-tenants');
-        await expect(opsBackTenants).toBeVisible();
+        await expect(opsBackTenants).toBeVisible({ timeout: 15000 });
         await expect(opsBackTenants).toHaveAttribute('href', '/tenants');
     });
 
