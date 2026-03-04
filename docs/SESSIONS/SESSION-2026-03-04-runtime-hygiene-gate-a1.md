@@ -1,0 +1,21 @@
+# SESSION 2026-03-04-runtime-hygiene-gate-a1 — Runtime hygiene gate for AGENTS canon
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-30-agents-sync.md
+- branch: rr-runtime-hygiene-20260304-a1
+- worktree: /home/zhan/worktrees/rr-runtime-hygiene-20260304-a1
+- base_ref: origin/main
+- scope: Add Runtime Hygiene Gate to AGENTS canon and open RR.
+- research_gate: off
+- root_cause_gate: off
+- reuse_gate: off
+- release_safety_gate: off
+- context_integrity_gate: off
+- done:
+  - Added Runtime Hygiene Gate section in AGENTS canon.
+- next:
+  - Open RR.
+- evidence:
+  - AGENTS.md
+- last_updated: 2026-03-04
