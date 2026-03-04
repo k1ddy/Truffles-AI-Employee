@@ -54,8 +54,9 @@
 - **Fix mechanism:** evidence-based final decision + wave8 contract only if needed.
 
 ## Reuse-first plan (mandatory)
-- Reuse existing wave artifacts, deterministic suites, and canon sync pattern.
-- No new runtime implementation in review block.
+- **Internal reuse:** reuse existing wave artifacts, deterministic suites, and canon sync pattern.
+- **External reuse:** Sonar metric definitions as objective maintainability reference.
+- **Why not build from scratch:** final-review3 is governance/evidence-only and does not introduce runtime logic.
 
 ## Invariant
 - No runtime code changes.
@@ -100,6 +101,17 @@
 - wave7 merged PR URL + commit SHA.
 - merged-main deterministic outputs.
 - final-review3 artifact + canon sync diff.
+
+## Token / run budget (mandatory for expensive suites)
+- Max full runs: `0` (docs/evidence decision block).
+- E2E policy: reuse green wave7 acceptance evidence because runtime is unchanged in this block.
+- Stop condition: if runtime edits appear, stop and switch to wave8 implementation block.
+
+## Release safety (mandatory for non-doc changes)
+- **Strategy:** documentation/evidence-only closure decision.
+- **Go/no-go signals:** deterministic checks green + session gate green.
+- **Rollback:** revert final-review3 commit.
+- **Post-release monitoring window:** wave8 block must rerun targeted acceptance lane when started.
 
 ## Rollback
 - `git revert COMMIT_SHA` + rerun `SESSION_AGENT=a705 scripts/session_check.sh`.
