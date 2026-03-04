@@ -321,3 +321,47 @@ def normalize_branch_change_patch(
             errors.append(_error_message(exc))
 
     return normalized, errors
+
+
+def prepare_branch_change_payload(
+    *,
+    db: Session,
+    branch: Branch,
+    patch_payload: Mapping[str, object],
+    validation_error_type: type[Exception],
+    ensure_unique_branch_field: Callable[..., None],
+    normalize_slug: Callable[[str, str], str],
+    normalize_required_text: Callable[[str, str], str],
+    normalize_timezone_name: Callable[[str | None, str], str | None],
+    normalize_optional_text: Callable[[str | None], str | None],
+    normalize_branch_phone: Callable[[str | None, str], str | None],
+    normalize_telegram_chat_id: Callable[[str | None, str], str | None],
+    normalize_knowledge_tag: Callable[[str | None, str], str | None],
+    require_branch_go_live_gate: Callable[[Branch], None],
+    require_branch_scorecard_ready: Callable[[Session, Branch], None],
+) -> tuple[dict[str, object], list[str], dict[str, dict[str, object]], dict[str, object]]:
+    try:
+        normalized_patch, errors = normalize_branch_change_patch(
+            db=db,
+            branch=branch,
+            patch_payload=patch_payload,
+            validation_error_type=validation_error_type,
+            ensure_unique_branch_field=ensure_unique_branch_field,
+            normalize_slug=normalize_slug,
+            normalize_required_text=normalize_required_text,
+            normalize_timezone_name=normalize_timezone_name,
+            normalize_optional_text=normalize_optional_text,
+            normalize_branch_phone=normalize_branch_phone,
+            normalize_telegram_chat_id=normalize_telegram_chat_id,
+            normalize_knowledge_tag=normalize_knowledge_tag,
+            require_branch_go_live_gate=require_branch_go_live_gate,
+            require_branch_scorecard_ready=require_branch_scorecard_ready,
+        )
+    except validation_error_type as exc:
+        normalized_patch, errors = {}, [_error_message(exc)]
+
+    base_snapshot = snapshot_branch_for_change(branch)
+    diff_payload = build_branch_change_diff(base_snapshot, normalized_patch)
+    if not diff_payload:
+        errors.append("No effective branch changes detected")
+    return normalized_patch, errors, diff_payload, base_snapshot
