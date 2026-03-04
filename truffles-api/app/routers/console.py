@@ -402,6 +402,24 @@ from app.services.console_idempotency import (
     release_idempotency,
     start_idempotency,
 )
+from app.services.console_membership_state import (
+    ensure_agent_lifecycle_is_mutable as _ensure_agent_lifecycle_is_mutable,
+)
+from app.services.console_membership_state import (
+    ensure_membership_agent_is_mutable as _ensure_membership_agent_is_mutable,
+)
+from app.services.console_membership_state import (
+    ensure_membership_change_keeps_privileged_access as _ensure_membership_change_keeps_privileged_access,
+)
+from app.services.console_membership_state import (
+    ensure_membership_role_is_assignable as _ensure_membership_role_is_assignable,
+)
+from app.services.console_membership_state import (
+    ensure_role_not_deprecated_for_assignment as _ensure_role_not_deprecated_for_assignment,
+)
+from app.services.console_membership_state import (
+    is_privileged_access_role as _is_privileged_access_role,
+)
 from app.services.console_knowledge_preflight import (
     DEFAULT_PREFLIGHT_WINDOW_MINUTES,
     build_knowledge_draft_hash,
@@ -2121,8 +2139,6 @@ _TENANT_LIFECYCLE_MODES = {"active", "archived", "all"}
 _CLIENT_STATUS_ARCHIVED = "deleted"
 _CLIENT_LIFECYCLE_REASON_MAX_LEN = 500
 _ACCESS_REASON_MAX_LEN = 500
-_PRIVILEGED_ACCESS_ROLES = {"platform_admin", "owner", "admin"}
-_DEPRECATED_CONSOLE_ASSIGNMENT_ROLES = {"support", "specialist"}
 _CLIENT_ARCHIVE_SAMPLE_LIMIT = 20
 _BRANCH_BOOTSTRAP_ACCOUNTS_MAX = 20
 _BRANCH_GO_LIVE_STATES = {"pending", "approved", "rejected"}
@@ -5097,162 +5113,6 @@ def _assert_agent_matches_membership_target(
             raise ConsoleAPIError(404, "NOT_FOUND", "Agent client not found")
         if agent_client.company_id != target.company_id:
             raise ConsoleAPIError(400, "INVALID_PARAM", "Agent belongs to another company")
-
-
-def _ensure_role_not_deprecated_for_assignment(role: Optional[str]) -> None:
-    normalized_role = (role or "").strip().lower()
-    if normalized_role in _DEPRECATED_CONSOLE_ASSIGNMENT_ROLES:
-        raise ConsoleAPIError(
-            400,
-            "INVALID_PARAM",
-            f"{normalized_role} role is deprecated for assignment; use owner/admin/manager/viewer",
-        )
-
-
-def _ensure_membership_role_is_assignable(role: Optional[str]) -> None:
-    _ensure_role_not_deprecated_for_assignment(role)
-    if role == "platform_admin":
-        raise ConsoleAPIError(
-            400,
-            "INVALID_PARAM",
-            "platform_admin role cannot be assigned via membership",
-        )
-
-
-def _ensure_membership_agent_is_mutable(agent: Agent) -> None:
-    if agent.role == "platform_admin":
-        raise ConsoleAPIError(
-            409,
-            "INVALID_STATE",
-            "platform_admin membership is managed automatically",
-        )
-
-
-def _is_privileged_access_role(role: Optional[str]) -> bool:
-    return (role or "").strip().lower() in _PRIVILEGED_ACCESS_ROLES
-
-
-def _has_other_privileged_access_for_client(
-    db: Session,
-    *,
-    client: Client,
-    excluded_agent_ids: Optional[set[UUID]] = None,
-    excluded_membership_ids: Optional[set[UUID]] = None,
-) -> bool:
-    excluded_agent_ids = excluded_agent_ids or set()
-    excluded_membership_ids = excluded_membership_ids or set()
-
-    platform_admin_query = db.query(Agent.id).filter(
-        Agent.is_active.is_(True),
-        Agent.role == "platform_admin",
-    )
-    if excluded_agent_ids:
-        platform_admin_query = platform_admin_query.filter(~Agent.id.in_(excluded_agent_ids))
-    if platform_admin_query.first():
-        return True
-
-    branch_ids = [row[0] for row in db.query(Branch.id).filter(Branch.client_id == client.id).all()]
-    scope_filters = [and_(AgentMembership.scope == "client", AgentMembership.client_id == client.id)]
-    if branch_ids:
-        scope_filters.append(and_(AgentMembership.scope == "branch", AgentMembership.branch_id.in_(branch_ids)))
-    if client.company_id:
-        scope_filters.append(and_(AgentMembership.scope == "company", AgentMembership.company_id == client.company_id))
-
-    membership_query = (
-        db.query(AgentMembership.id)
-        .join(Agent, Agent.id == AgentMembership.agent_id)
-        .filter(
-            Agent.is_active.is_(True),
-            AgentMembership.is_active.is_(True),
-            AgentMembership.role.in_(tuple(_PRIVILEGED_ACCESS_ROLES)),
-            or_(*scope_filters),
-        )
-    )
-    if excluded_agent_ids:
-        membership_query = membership_query.filter(~AgentMembership.agent_id.in_(excluded_agent_ids))
-    if excluded_membership_ids:
-        membership_query = membership_query.filter(~AgentMembership.id.in_(excluded_membership_ids))
-    if membership_query.first():
-        return True
-
-    legacy_agent_query = db.query(Agent).filter(
-        Agent.is_active.is_(True),
-        Agent.client_id == client.id,
-        Agent.role.in_(tuple(_PRIVILEGED_ACCESS_ROLES)),
-    )
-    if excluded_agent_ids:
-        legacy_agent_query = legacy_agent_query.filter(~Agent.id.in_(excluded_agent_ids))
-    legacy_candidates = legacy_agent_query.all()
-    if not legacy_candidates:
-        return False
-
-    candidate_ids = [agent.id for agent in legacy_candidates]
-    membership_agent_ids = set()
-    if candidate_ids:
-        membership_agent_ids = {
-            row[0]
-            for row in db.query(AgentMembership.agent_id)
-            .filter(AgentMembership.agent_id.in_(candidate_ids))
-            .distinct()
-            .all()
-        }
-    return any(agent.id not in membership_agent_ids for agent in legacy_candidates)
-
-
-def _ensure_membership_change_keeps_privileged_access(
-    db: Session,
-    *,
-    context: ConsoleAuthContext,
-    membership: AgentMembership,
-    agent: Agent,
-    next_role: str,
-    next_is_active: bool,
-) -> None:
-    current_privileged = membership.is_active and _is_privileged_access_role(membership.role)
-    next_privileged = next_is_active and _is_privileged_access_role(next_role)
-    if not current_privileged or next_privileged:
-        return
-    if membership.agent_id == context.agent.id:
-        raise ConsoleAPIError(409, "INVALID_STATE", "Cannot disable or downgrade your own privileged membership")
-
-    client = db.query(Client).filter(Client.id == agent.client_id).first()
-    if not client:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
-    if not _has_other_privileged_access_for_client(
-        db,
-        client=client,
-        excluded_membership_ids={membership.id},
-    ):
-        raise ConsoleAPIError(
-            409,
-            "INVALID_STATE",
-            "Cannot remove last active privileged membership for this client",
-        )
-
-
-def _ensure_agent_lifecycle_is_mutable(
-    db: Session,
-    *,
-    context: ConsoleAuthContext,
-    agent: Agent,
-    enabling: bool,
-) -> None:
-    if agent.role == "platform_admin":
-        raise ConsoleAPIError(409, "INVALID_STATE", "platform_admin account is protected")
-    if not enabling and agent.id == context.agent.id:
-        raise ConsoleAPIError(409, "INVALID_STATE", "Cannot disable your own account")
-    if enabling or not _is_privileged_access_role(agent.role):
-        return
-
-    client = db.query(Client).filter(Client.id == agent.client_id).first()
-    if not client:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
-    if not _has_other_privileged_access_for_client(
-        db,
-        client=client,
-        excluded_agent_ids={agent.id},
-    ):
-        raise ConsoleAPIError(409, "INVALID_STATE", "Cannot disable the last active privileged account for this client")
 
 
 def _create_agent_with_membership(
