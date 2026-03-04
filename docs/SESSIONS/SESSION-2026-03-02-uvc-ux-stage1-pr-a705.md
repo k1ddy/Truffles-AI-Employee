@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review4-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW4-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave9-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE9-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC closure-review4 fail-closed decision for `UX-11/UX-12` on merged-main wave8 evidence + next-wave (`wave9`) contract lock
+- scope: UVC wave9 bounded extraction to continue `UX-11/UX-12` debt decomposition after closure-review4 merge
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -136,9 +136,14 @@
   - Executed `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW4-A705` on merged-main evidence (`console.py=24554`, `ProvisioningWizard.tsx=4552`, retained deterministic suite `35 passed`) with fail-closed decision: `UX-11/UX-12` remain `Open (Mitigated wave8; wave9 required)`.
   - Published closure-review4 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review4-a705.md`.
   - Added follow-up implementation contract `TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave9-a705.md`.
+  - Executed `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE9-A705` bounded extraction:
+  - Backend: moved branch-change snapshot/diff/record/update-request helpers from `truffles-api/app/routers/console.py` to `truffles-api/app/services/console_branch_changes.py`.
+  - Frontend: moved Provisioning Wizard branch mutation payload builders from `console-web/src/components/ProvisioningWizard.tsx` to `console-web/src/components/provisioning-wizard-branch-actions.ts`.
+  - Revalidated deterministic lane: `py_compile`, `ruff`, `pytest (35 passed + 10 passed)`, `console-web lint`, `console-web build`, targeted Playwright (`2 passed`), `scripts/session_check.sh`.
+  - Opened wave9 PR `#901`: `https://github.com/k1ddy/Truffles-AI-Employee/pull/901`.
 - next:
-  - Open closure-review4 PR with canon/session sync + linked wave9 TP.
-  - After closure-review4 merge, execute `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE9-A705`.
+  - Merge wave9 PR `#901` after required CI checks green.
+  - Execute follow-up closeout decision block `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW5-A705` on merged-main evidence.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
