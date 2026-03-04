@@ -18,6 +18,18 @@
 - `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closeout-a705.md`
 - `docs/CONSOLE_AUDIT/UX_BACKLOG.md` (`UX-11`, `UX-12`)
 
+## One web search (mandatory before implementation)
+- `Query`: `FastAPI bigger applications multiple files APIRouter best practices`
+- `Date/time`: `2026-03-04 06:49:25 UTC`
+- `Opened sources`:
+  - `https://fastapi.tiangolo.com/tutorial/bigger-applications/`
+- `Source quality`: official FastAPI documentation (primary vendor source, high-signal).
+- `Found reusable solution`: split router logic into dedicated modules and keep route handlers thin; keep behavior contracts unchanged while moving domain helpers to service modules.
+- `Decision`: `integrate` (reuse this modularization pattern in existing `console.py`/service split, avoid rewrite).
+- `Rejected options`:
+  - `build-from-scratch rewrite`: too risky for contract stability.
+  - `no extraction`: does not reduce `UX-11/UX-12` blast-radius.
+
 ## Invariant
 - No runtime behavior changes.
 - No new top-level tabs/routes.

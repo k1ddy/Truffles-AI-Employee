@@ -84,8 +84,14 @@
   - Revalidated closeout deterministic checks on merged main (`py_compile`, `pytest`, `lint`, targeted platform-admin e2e `26 passed`, `session_check`).
   - Published closeout artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closeout-a705.md` with explicit status decision: `UX-11/UX-12` remain `Open (Mitigated wave3)`.
   - Created follow-up TP `TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave4-a705.md` for residual-debt continuation contract.
+  - Fixed merge-red in closeout PR lane (run `22657616858` / `deploy` typecheck) by enforcing typed onboarding timeline status in `provisioning-wizard-derived.ts` and exporting `OnboardingStepStatusValue` from utils.
+  - Merged closeout PR `#890` (`9fe7e8bd`) after green CI (`deploy` included).
+  - Executed `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE4-A705` bounded extraction:
+  - Backend: moved onboarding readiness hard-gate helpers from `console.py` to `truffles-api/app/services/console_onboarding_readiness.py` and added deterministic tests `truffles-api/tests/test_console_onboarding_readiness.py`.
+  - Frontend: moved readiness timeline/scorecard view block from `ProvisioningWizard.tsx` to `console-web/src/components/provisioning-wizard-readiness-panel.tsx`.
+  - Published wave4 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave4-a705.md` and synced canon pointers (`STATE`, backlog, master report, audit index).
 - next:
-  - Open closeout PR and proceed to Wave4 implementation block after merge.
+  - Open wave4 PR and proceed to `UVC-UX-TECH-DEBT-DECOMPOSITION-FINAL-CLOSE-A705` after merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -132,13 +138,17 @@
   - console-web/src/components/provisioning-wizard-utils.ts
   - console-web/src/components/provisioning-wizard-domain.ts
   - console-web/src/components/provisioning-wizard-derived.ts
+  - console-web/src/components/provisioning-wizard-readiness-panel.tsx
   - truffles-api/app/routers/console.py
   - truffles-api/app/services/console_router_utils.py
   - truffles-api/app/services/console_control_tower_utils.py
   - truffles-api/app/services/console_control_tower_program.py
+  - truffles-api/app/services/console_onboarding_readiness.py
   - truffles-api/tests/test_console_router_utils.py
   - truffles-api/tests/test_console_control_tower_utils.py
   - truffles-api/tests/test_console_control_tower_program.py
+  - truffles-api/tests/test_console_onboarding_readiness.py
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave4-a705.md
   - /tmp/uvc_stage5_kpi_snapshot_a705.json
   - /tmp/uvc_stage5_kpi_post_a705.json
   - /tmp/uvc_stage5_kpi_main_post_a705.json
@@ -175,10 +185,15 @@
   - checks: `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/services/console_router_utils.py` (`pass`)
   - checks: `pytest -q truffles-api/tests/test_console_router_utils.py` (`5 passed`)
   - checks: `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/services/console_control_tower_program.py truffles-api/tests/test_console_control_tower_program.py` (`pass`)
+  - checks: `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/services/console_onboarding_readiness.py` (`pass`)
   - checks: `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` (`24920`, `4819`)
+  - checks: `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` (`24888`, `4742`)
   - checks: `pytest -q truffles-api/tests/test_console_control_tower_program.py` (`3 passed`)
+  - checks: `pytest -q truffles-api/tests/test_console_onboarding_readiness.py truffles-api/tests/test_console_control_tower_program.py` (`7 passed`)
   - checks: `pytest -q truffles-api/tests/test_console_owner_business.py -k "control_tower_issue_counts or migration_wave_detail_filters_actions_and_counts or migration_program_aggregates_wave_gates"` (`3 passed, 56 deselected`)
   - checks: `cd console-web && npm run lint -- --file src/components/ProvisioningWizard.tsx --file src/components/provisioning-wizard-derived.ts --file e2e/platform-admin.spec.ts` (`No ESLint warnings or errors`)
+  - checks: `cd console-web && npm run lint -- --file src/components/ProvisioningWizard.tsx --file src/components/provisioning-wizard-readiness-panel.tsx --file src/components/provisioning-wizard-derived.ts --file src/components/provisioning-wizard-utils.ts` (`No ESLint warnings or errors`)
+  - checks: `cd console-web && npm run build` (`pass`)
   - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 E2E_USE_STORAGE_STATE=0 E2E_DETERMINISTIC_AUTH=1 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants|Platform Admin Integrations|deep-link from Tenants action queue to Workspace execute"` (`26 passed`)
   - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-04
