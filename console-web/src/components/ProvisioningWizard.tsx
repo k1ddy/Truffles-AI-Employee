@@ -37,13 +37,13 @@ import {
 } from "@/components/provisioning-wizard-domain";
 import {
     formatEffectiveValue,
+    isNonEmptyRecord,
     fromTriState,
     hasPurchasedSignal,
     intakePriorityClass,
     intakePriorityLabel,
     intakeStatusClass,
     intakeStatusLabel,
-    isNonEmptyRecord,
     mergeCapabilities,
     normalizeCapabilities,
     normalizeOnboardingContractPayload,
@@ -55,6 +55,12 @@ import {
     stringifyOptionalJson,
     toTriState,
 } from "@/components/provisioning-wizard-utils";
+import {
+    buildOnboardingTimeline,
+    buildReadinessItems,
+    buildStepStateById,
+    buildStepStatus,
+} from "@/components/provisioning-wizard-derived";
 
 type SessionData = ReturnType<typeof useSession>["data"];
 type ProvisioningBranch = components["schemas"]["ConsoleBranch"];
@@ -73,7 +79,6 @@ type OnboardingAutopilotResponse = components["schemas"]["ConsoleOnboardingAutop
 type OnboardingPurchasedService = NonNullable<OnboardingAutopilotRequest["purchased_services"]>[number];
 type ReferencePackListResponse = components["schemas"]["ConsoleReferencePackListResponse"];
 type OnboardingStatus = components["schemas"]["ConsoleOnboardingStatusResponse"];
-type OnboardingStepStatus = components["schemas"]["ConsoleOnboardingStepStatus"];
 type OnboardingScorecard = components["schemas"]["ConsoleOnboardingScorecardResponse"];
 type OnboardingScorecardCheck = components["schemas"]["ConsoleOnboardingScorecardCheck"];
 type OnboardingDocumentIngestion = components["schemas"]["ConsoleOnboardingDocumentIngestion"];
@@ -1156,60 +1161,19 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         },
     });
 
-    const stepStateById = useMemo(() => {
-        const map: Partial<Record<WizardStepId, OnboardingStepStatus>> = {};
-        if (onboardingStatus?.steps?.length) {
-            onboardingStatus.steps.forEach((step) => {
-                map[step.id as WizardStepId] = step;
-            });
-        }
-        return map;
-    }, [onboardingStatus]);
+    const stepStateById = useMemo(() => buildStepStateById(onboardingStatus), [onboardingStatus]);
 
-    const stepStatus = useMemo(() => {
-        if (onboardingStatus?.steps?.length) {
-            const status: Record<WizardStepId, boolean> = {
-                branch_draft: false,
-                integrations: false,
-                team: false,
-                telegram: false,
-                knowledge: false,
-                booking: false,
-                go_no_go: false,
-            };
-            onboardingStatus.steps.forEach((step) => {
-                status[step.id as WizardStepId] = step.status === "complete" || step.status === "skipped";
-            });
-            return status;
-        }
-        const hasWorkingHours = isNonEmptyRecord(branchData?.working_hours);
-        const hasBookingSettings = isNonEmptyRecord(branchData?.booking_settings);
-        return {
-            branch_draft: !!branchData?.id,
-            integrations: !!branchData?.instance_id && !!branchData?.phone,
-            team: createdAgents.length > 0,
-            telegram: !!branchData?.telegram_chat_id,
-            knowledge: !!branchData?.knowledge_tag,
-            booking: hasWorkingHours && hasBookingSettings,
-            go_no_go: !!capabilitiesSavedAt || !!onboardingContractSavedAt,
-        };
-    }, [onboardingStatus, branchData, createdAgents.length, capabilitiesSavedAt, onboardingContractSavedAt]);
-    const onboardingTimeline = useMemo(() => {
-        return WIZARD_STEPS.map((step, index) => {
-            const stepState = stepStateById[step.id];
-            const status = stepState?.status
-                ?? (stepStatus[step.id] ? "complete" : "locked");
-            return {
-                id: step.id,
-                index: index + 1,
-                label: step.label,
-                hint: step.hint,
-                status,
-                required: stepState?.required ?? true,
-                missing: stepState?.missing ?? [],
-            };
-        });
-    }, [stepStateById, stepStatus]);
+    const stepStatus = useMemo(() => buildStepStatus({
+        onboardingStatus,
+        branchData,
+        createdAgentsCount: createdAgents.length,
+        capabilitiesSavedAt,
+        onboardingContractSavedAt,
+    }), [onboardingStatus, branchData, createdAgents.length, capabilitiesSavedAt, onboardingContractSavedAt]);
+    const onboardingTimeline = useMemo(
+        () => buildOnboardingTimeline(stepStateById, stepStatus),
+        [stepStateById, stepStatus],
+    );
 
     const capabilitiesPreview = useMemo(() => {
         const clientPayload = capabilitiesData?.client_capabilities?.payload ?? null;
@@ -1237,76 +1201,20 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const onboardingSlaControlLoop: OnboardingSlaControlLoop | null = onboardingScorecardEnterprise?.sla_control_loop ?? null;
     const onboardingOperationalPipeline: OnboardingOperationalPipeline | null = onboardingScorecardEnterprise?.operational_pipeline ?? null;
 
-    const readinessItems = useMemo(() => {
-        return [
-            {
-                id: "wa_instance",
-                label: "WhatsApp instance_id",
-                required: capabilitiesPreview.channels?.whatsapp === true,
-                ok: !!branchData?.instance_id,
-            },
-            {
-                id: "wa_active",
-                label: "Филиал активен",
-                required: capabilitiesPreview.channels?.whatsapp === true,
-                ok: !!branchData?.is_active,
-            },
-            {
-                id: "tg_chat",
-                label: "Telegram chat_id",
-                required: capabilitiesPreview.channels?.telegram === true,
-                ok: !!branchData?.telegram_chat_id,
-            },
-            {
-                id: "knowledge_tag",
-                label: "Knowledge tag",
-                required: knowledgeUploadEnabled,
-                ok: !!branchData?.knowledge_tag,
-            },
-            {
-                id: "document_ingestion",
-                label: "Document ingestion gate",
-                required: knowledgeUploadEnabled,
-                ok: knowledgeUploadEnabled ? Boolean(documentIngestionGate?.valid) : true,
-            },
-            {
-                id: "booking_hours",
-                label: "Working hours",
-                required: bookingEnabled,
-                ok: hasWorkingHours,
-            },
-            {
-                id: "booking_settings",
-                label: "Booking settings",
-                required: bookingEnabled,
-                ok: hasBookingSettings,
-            },
-            {
-                id: "booking_specialists",
-                label: "Specialists подтверждены",
-                required: bookingEnabled,
-                ok: specialistsConfirmed,
-            },
-            {
-                id: "onboarding_contract",
-                label: "Onboarding contract",
-                required: true,
-                ok: hasOnboardingContractRecord,
-            },
-            {
-                id: "payment_confirmed",
-                label: "Payment confirmed",
-                required: true,
-                ok: paymentStatusEffective === "confirmed",
-            },
-            {
-                id: "reference_pack",
-                label: "Reference pack active",
-                required: true,
-                ok: referencePackDomainSlug.length > 0 && hasActiveReferencePack,
-            },
-        ];
-    }, [
+    const readinessItems = useMemo(() => buildReadinessItems({
+        branchData,
+        capabilitiesPreview,
+        bookingEnabled,
+        knowledgeUploadEnabled,
+        documentIngestionValid: Boolean(documentIngestionGate?.valid),
+        hasWorkingHours,
+        hasBookingSettings,
+        specialistsConfirmed,
+        hasOnboardingContractRecord,
+        paymentStatusEffective,
+        referencePackDomainSlug,
+        hasActiveReferencePack,
+    }), [
         branchData,
         capabilitiesPreview,
         bookingEnabled,

@@ -162,16 +162,20 @@
 | `scripts/check_console_audit_governance.py` | Deterministic fail-closed checker for `CANON_VS_IMPLEMENTED` + `UX_BACKLOG` consistency (duplicate IDs/gap tags) | QA/OPS/Brain |
 | `truffles-api/app/services/console_router_utils.py` | Shared pure helpers for Console router env/query normalization (`parse_env_*`, query rebuild, list dedupe) | Backend |
 | `truffles-api/app/services/console_control_tower_utils.py` | Shared pure helper layer for Control Tower action/migration contracts (priority/reasons/wave/detail builders) | Backend |
+| `truffles-api/app/services/console_control_tower_program.py` | Shared orchestration/program composition layer for Control Tower action-center and migration-program responses | Backend |
 | `docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md` | Weekly control-loop runbook для Platform Admin (snapshot -> backlog -> checks) | Brain/Architect |
 | `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md` | Post-merge control-loop runbook для Owner/Admin (`T+0/T+24`) | Brain/Architect |
 | `truffles-api/tests/test_check_console_audit_governance.py` | Deterministic tests for console audit governance checker | QA/Backend |
 | `truffles-api/tests/test_console_router_utils.py` | Deterministic tests for extracted Console router helper module | QA/Backend |
 | `truffles-api/tests/test_console_control_tower_utils.py` | Deterministic tests for extracted Control Tower helper module | QA/Backend |
+| `truffles-api/tests/test_console_control_tower_program.py` | Deterministic tests for extracted Control Tower orchestration/program module | QA/Backend |
 | `console-web/src/components/provisioning-wizard-utils.ts` | Extracted pure helper functions for `ProvisioningWizard` (JSON parse, status labels/classes, capability normalization) | Frontend |
 | `console-web/src/components/provisioning-wizard-domain.ts` | Extracted provisioning domain lexicon (`WIZARD_STEPS`, field guides, formatters, fallback presets) for `ProvisioningWizard` | Frontend |
+| `console-web/src/components/provisioning-wizard-derived.ts` | Extracted derived-state builders for `ProvisioningWizard` (step status/timeline/readiness items) | Frontend |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md` | Artifact report: UVC audit governance closeout (`UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705`) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-tech-debt-decomposition-wave1-a705.md` | Artifact report: wave1 structural decomposition for `UX-11`/`UX-12` + merge-red fix | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave2-a705.md` | Artifact report: wave2 structural decomposition for `UX-11`/`UX-12` (control-tower + provisioning domain extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave3-a705.md` | Artifact report: wave3 structural decomposition for `UX-11`/`UX-12` (control-tower orchestration + provisioning derived-state extraction) | Brain/Architect |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
 | `SPECS/INBOX_HUMAN_LOCK.md` | ТЗ: manual messaging + human lock в «Заявках» | Архитектор/Backend/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
@@ -203,7 +207,7 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
-- `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave2-a705.md`
+- `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave3-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-dedup-intent-map-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-tech-debt-decomposition-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md`

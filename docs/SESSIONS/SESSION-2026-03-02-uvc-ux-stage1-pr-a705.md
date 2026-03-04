@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave2-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE2-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave3-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE3-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC structural decomposition Wave2 for `UX-11/UX-12` (control-tower helper extraction + provisioning domain lexicon extraction) without contract changes
+- scope: UVC structural decomposition Wave3 for `UX-11/UX-12` (control-tower orchestration extraction + provisioning derived-state extraction) without contract changes
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -72,8 +72,14 @@
   - Added deterministic tests for extracted backend module: `truffles-api/tests/test_console_control_tower_utils.py` (`5 passed`).
   - Extracted provisioning domain lexicon/field-guide/formatter layer from `console-web/src/components/ProvisioningWizard.tsx` into `console-web/src/components/provisioning-wizard-domain.ts`.
   - Revalidated targeted platform-admin lane and deep-link continuity (`26 passed`) after Wave2 extraction.
+  - Started `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE3-A705`.
+  - Added TP `TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave3-a705.md` (RCA + one-web-search + release safety + bounded Wave3 scope).
+  - Extracted Control Tower orchestration/program composition from `truffles-api/app/routers/console.py` into `truffles-api/app/services/console_control_tower_program.py` and rewired router handlers.
+  - Added deterministic tests for extracted backend orchestration module: `truffles-api/tests/test_console_control_tower_program.py` (`3 passed`).
+  - Extracted provisioning derived-state builders from `console-web/src/components/ProvisioningWizard.tsx` into `console-web/src/components/provisioning-wizard-derived.ts`.
+  - Revalidated targeted platform-admin lane and deep-link continuity (`26 passed`) after Wave3 extraction.
 - next:
-  - Open PR for `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE2-A705`, monitor CI, then execute Wave3 deep split.
+  - Open Wave3 PR and execute closeout block for `UX-11/UX-12` final status decision (`Open -> Fixed` vs explicit deferred residual).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -84,6 +90,8 @@
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-operations-governance-closeout-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-tech-debt-decomposition-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave2-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave3-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave3-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave2-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-steady-state-operations-a705.md
@@ -114,11 +122,14 @@
   - console-web/src/components/ProvisioningWizard.tsx
   - console-web/src/components/provisioning-wizard-utils.ts
   - console-web/src/components/provisioning-wizard-domain.ts
+  - console-web/src/components/provisioning-wizard-derived.ts
   - truffles-api/app/routers/console.py
   - truffles-api/app/services/console_router_utils.py
   - truffles-api/app/services/console_control_tower_utils.py
+  - truffles-api/app/services/console_control_tower_program.py
   - truffles-api/tests/test_console_router_utils.py
   - truffles-api/tests/test_console_control_tower_utils.py
+  - truffles-api/tests/test_console_control_tower_program.py
   - /tmp/uvc_stage5_kpi_snapshot_a705.json
   - /tmp/uvc_stage5_kpi_post_a705.json
   - /tmp/uvc_stage5_kpi_main_post_a705.json
@@ -154,5 +165,10 @@
   - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:e2e -- --grep "deep-link from Tenants action queue to Workspace execute"` (`1 passed`)
   - checks: `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/services/console_router_utils.py` (`pass`)
   - checks: `pytest -q truffles-api/tests/test_console_router_utils.py` (`5 passed`)
+  - checks: `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/services/console_control_tower_program.py truffles-api/tests/test_console_control_tower_program.py` (`pass`)
+  - checks: `pytest -q truffles-api/tests/test_console_control_tower_program.py` (`3 passed`)
+  - checks: `pytest -q truffles-api/tests/test_console_owner_business.py -k "control_tower_issue_counts or migration_wave_detail_filters_actions_and_counts or migration_program_aggregates_wave_gates"` (`3 passed, 56 deselected`)
+  - checks: `cd console-web && npm run lint -- --file src/components/ProvisioningWizard.tsx --file src/components/provisioning-wizard-derived.ts --file e2e/platform-admin.spec.ts` (`No ESLint warnings or errors`)
+  - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 E2E_USE_STORAGE_STATE=0 E2E_DETERMINISTIC_AUTH=1 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants|Platform Admin Integrations|deep-link from Tenants action queue to Workspace execute"` (`26 passed`)
   - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-04
