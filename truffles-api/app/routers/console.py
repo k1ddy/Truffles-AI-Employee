@@ -1044,6 +1044,20 @@ _BRANCH_CHANGE_NORMALIZATION_KWARGS: dict[str, Any] = {
     "require_branch_scorecard_ready": _require_branch_activate_scorecard,
 }
 
+def _normalize_branch_change_patch(
+    *,
+    db: Session,
+    branch: Branch,
+    patch_payload: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    # Keep the legacy router-level signature stable while delegating to the service helper.
+    return _normalize_branch_change_patch_payload(
+        db=db,
+        branch=branch,
+        patch_payload=patch_payload,
+        **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+    )
+
 
 def _serialize_macro(macro: ConsoleMacroModel) -> ConsoleMacroSchema:
     return ConsoleMacroSchema(
