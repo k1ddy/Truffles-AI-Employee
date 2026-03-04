@@ -4,7 +4,10 @@ import {
     type CapabilitiesPayload,
     type WizardStepId,
 } from "@/components/provisioning-wizard-domain";
-import { isNonEmptyRecord } from "@/components/provisioning-wizard-utils";
+import {
+    isNonEmptyRecord,
+    type OnboardingStepStatusValue,
+} from "@/components/provisioning-wizard-utils";
 
 type ProvisioningBranch = components["schemas"]["ConsoleBranch"];
 type OnboardingStatus = components["schemas"]["ConsoleOnboardingStatusResponse"];
@@ -42,7 +45,7 @@ export type OnboardingTimelineItem = {
     index: number;
     label: string;
     hint: string;
-    status: string;
+    status: OnboardingStepStatusValue;
     required: boolean;
     missing: string[];
 };
@@ -105,7 +108,7 @@ export function buildOnboardingTimeline(
 ): OnboardingTimelineItem[] {
     return WIZARD_STEPS.map((step, index) => {
         const stepState = stepStateById[step.id];
-        const status = stepState?.status ?? (stepStatus[step.id] ? "complete" : "locked");
+        const status = normalizeTimelineStatus(stepState?.status, stepStatus[step.id] ? "complete" : "locked");
         return {
             id: step.id,
             index: index + 1,
@@ -116,6 +119,16 @@ export function buildOnboardingTimeline(
             missing: stepState?.missing ?? [],
         };
     });
+}
+
+function normalizeTimelineStatus(
+    status?: string,
+    fallback: OnboardingStepStatusValue = "locked",
+): OnboardingStepStatusValue {
+    if (status === "complete" || status === "available" || status === "locked" || status === "skipped") {
+        return status;
+    }
+    return fallback;
 }
 
 export function buildReadinessItems({
