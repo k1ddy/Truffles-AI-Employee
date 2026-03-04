@@ -60,6 +60,11 @@ import {
     buildStepStatus,
 } from "@/components/provisioning-wizard-derived";
 import { ProvisioningWizardReadinessPanel } from "@/components/provisioning-wizard-readiness-panel";
+import {
+    ProvisioningWizardErrorSummary,
+    ProvisioningWizardExecutionHub,
+    ProvisioningWizardModePanel,
+} from "@/components/provisioning-wizard-shell-panels";
 
 type SessionData = ReturnType<typeof useSession>["data"];
 type ProvisioningBranch = components["schemas"]["ConsoleBranch"];
@@ -1995,83 +2000,15 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 </div>
             )}
 
-            {inlineErrors.length > 0 && (
-                <section className="mt-6 rounded-xl border border-red-300/60 bg-red-50 p-4" data-testid="provisioning-error-summary">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                        <h3 className="text-sm font-semibold text-red-900">Ошибки последних операций</h3>
-                        <button type="button" className="btn-ghost" onClick={clearErrors}>
-                            Очистить
-                        </button>
-                    </div>
-                    <div className="mt-2 space-y-2">
-                        {inlineErrors.map((error) => (
-                            <div key={error.id} className="rounded-lg border border-red-200/80 bg-background/90 p-3 text-xs">
-                                <div className="font-mono text-red-900">{error.code}</div>
-                                <div className="mt-1 text-foreground">{error.message}</div>
-                                <div className="mt-1 text-muted-foreground">
-                                    {new Date(error.capturedAt).toLocaleString("ru-RU")}
-                                    {error.traceId ? ` · trace: ${error.traceId}` : ""}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </section>
-            )}
+            <ProvisioningWizardErrorSummary errors={inlineErrors} onClear={clearErrors} />
 
-            <div className="mt-6 rounded-xl border border-border/60 bg-card p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Режим онбординга</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                        type="button"
-                        className={`rounded-lg border px-3 py-2 text-sm ${
-                            onboardingMode === "autopilot"
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-border/60 bg-background"
-                        }`}
-                        onClick={() => setOnboardingMode("autopilot")}
-                    >
-                        Автопроцесс (Recommended)
-                    </button>
-                    <button
-                        type="button"
-                        className={`rounded-lg border px-3 py-2 text-sm ${
-                            onboardingMode === "manual"
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-border/60 bg-background"
-                        }`}
-                        onClick={() => setOnboardingMode("manual")}
-                    >
-                        Ручной по шагам
-                    </button>
-                </div>
-                <p className="mt-3 text-xs text-muted-foreground">
-                    Автопроцесс: минимальные входы и авто-связка сущностей. Ручной режим: детальная настройка шага за шагом.
-                </p>
-            </div>
+            <ProvisioningWizardModePanel mode={onboardingMode} onChange={setOnboardingMode} />
 
-            <div className="mt-4 rounded-xl border border-blue-300/60 bg-blue-50 p-4" data-testid="onboarding-execution-hub">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-900">
-                            Execution Hub
-                        </div>
-                        <div className="mt-1 text-sm text-blue-900">
-                            Рабочий поток выполнения: используйте Company Workspace для remediation/go-live.
-                        </div>
-                        <div className="mt-1 text-xs text-blue-900/80">
-                            scope: company={workspaceScope.companyId || "—"} · client={workspaceScope.clientId || "—"} · branch={workspaceScope.branchId || "—"}
-                        </div>
-                    </div>
-                    <button
-                        type="button"
-                        className="btn-primary"
-                        onClick={openExecutionHub}
-                        data-testid="onboarding-open-workspace"
-                    >
-                        Продолжить в Workspace
-                    </button>
-                </div>
-            </div>
+            <ProvisioningWizardExecutionHub
+                scope={workspaceScope}
+                scopeReady={workspaceScopeReady}
+                onOpen={openExecutionHub}
+            />
 
             {onboardingMode === "autopilot" && (
             <div className="mt-6 rounded-xl border border-border/60 bg-muted/10 p-4 space-y-4" data-testid="onboarding-autopilot">

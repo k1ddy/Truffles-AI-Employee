@@ -2,10 +2,14 @@ from fastapi import Request
 
 from app.services.console_router_utils import (
     dedupe_list,
+    parse_bool_param,
     parse_env_bool,
     parse_env_csv_set,
     parse_env_int,
+    parse_uuid_param,
+    reject_unknown_query_params,
     request_with_query_params,
+    validate_limit,
 )
 
 
@@ -68,3 +72,69 @@ def test_parse_env_int_clamps_to_bounds(monkeypatch) -> None:
 
 def test_dedupe_list_preserves_order() -> None:
     assert dedupe_list(["a", "b", "a", "c", "b"]) == ["a", "b", "c"]
+
+
+def test_reject_unknown_query_params_raises_for_unexpected_key() -> None:
+    async def receive() -> dict[str, str]:
+        return {"type": "http.request"}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/console/v1/test",
+            "headers": [],
+            "query_string": b"known=1&extra=2",
+            "scheme": "http",
+            "client": ("127.0.0.1", 12345),
+            "server": ("test", 80),
+            "root_path": "",
+            "http_version": "1.1",
+        },
+        receive=receive,
+    )
+
+    try:
+        reject_unknown_query_params(request, {"known"}, error_factory=ValueError)
+    except ValueError as exc:
+        assert str(exc) == "Unknown query parameter(s): extra"
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_validate_limit_uses_configurable_bounds() -> None:
+    validate_limit(5, min_value=1, max_value=10, error_factory=ValueError)
+
+    try:
+        validate_limit(0, min_value=1, max_value=10, error_factory=ValueError)
+    except ValueError as exc:
+        assert str(exc) == "limit must be between 1 and 10"
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_parse_uuid_param_handles_none_and_invalid() -> None:
+    assert parse_uuid_param("branch_id", None, error_factory=ValueError) is None
+    value = parse_uuid_param("branch_id", "123e4567-e89b-12d3-a456-426614174000", error_factory=ValueError)
+    assert str(value) == "123e4567-e89b-12d3-a456-426614174000"
+
+    for raw in ("", "not-a-uuid"):
+        try:
+            parse_uuid_param("branch_id", raw, error_factory=ValueError)
+        except ValueError as exc:
+            assert str(exc) == "Invalid branch_id"
+        else:
+            raise AssertionError("Expected ValueError")
+
+
+def test_parse_bool_param_parses_true_false_and_default() -> None:
+    assert parse_bool_param("include_ready", None, default=True, error_factory=ValueError) is True
+    assert parse_bool_param("include_ready", "true", error_factory=ValueError) is True
+    assert parse_bool_param("include_ready", "false", error_factory=ValueError) is False
+
+    try:
+        parse_bool_param("include_ready", "yes", error_factory=ValueError)
+    except ValueError as exc:
+        assert str(exc) == "Invalid include_ready"
+    else:
+        raise AssertionError("Expected ValueError")
