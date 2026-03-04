@@ -19,16 +19,43 @@
 - `docs/CONSOLE_AUDIT/UX_BACKLOG.md` (`UX-11`, `UX-12`)
 
 ## One web search (mandatory before implementation)
-- `Query`: `FastAPI bigger applications multiple files APIRouter best practices`
-- `Date/time`: `2026-03-04 06:49:25 UTC`
-- `Opened sources`:
+- **Query (exact):** `FastAPI bigger applications multiple files APIRouter best practices`
+- **Date/time (local):** `2026-03-04 06:49:25 UTC`
+- **Sources opened (from this query):**
   - `https://fastapi.tiangolo.com/tutorial/bigger-applications/`
-- `Source quality`: official FastAPI documentation (primary vendor source, high-signal).
-- `Found reusable solution`: split router logic into dedicated modules and keep route handlers thin; keep behavior contracts unchanged while moving domain helpers to service modules.
-- `Decision`: `integrate` (reuse this modularization pattern in existing `console.py`/service split, avoid rewrite).
-- `Rejected options`:
-  - `build-from-scratch rewrite`: too risky for contract stability.
-  - `no extraction`: does not reduce `UX-11/UX-12` blast-radius.
+- **Decision:** `integrate` (reuse FastAPI modular router pattern for bounded extraction; no rewrite).
+- **Rejected options:**
+  - `build`: full rewrite from scratch was rejected due contract-risk and blast-radius.
+  - `no-op`: keeping extraction deferred was rejected because it would not reduce `UX-11/UX-12` maintainability debt.
+
+## Root cause (mandatory)
+- **Symptom:** `UX-11`/`UX-12` remained `Open (Mitigated wave3)` even after previous decomposition waves; merge-red also confirmed coupling risk in provisioning status types.
+- **Minimal reproduction:** inspect monolith hotspots (`console.py`, `ProvisioningWizard.tsx`) and run production build; pre-wave4 baseline still had large concentrated readiness/go-no-go logic inside both files.
+- **Evidence:** `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` (`24920`, `4819`) before wave4; merge-red type failure in `ProvisioningWizard.tsx:3660`.
+- **Five Whys:**
+  1. Why still open? Readiness-specific logic remained embedded in router/component monoliths.
+  2. Why embedded? Prior waves targeted other slices (helpers/domain/derived/orchestration), not readiness rendering + hard-gate helpers.
+  3. Why problematic? Any change in readiness semantics or UI contract required touching large files with mixed concerns.
+  4. Why high risk? Mixed concerns increase accidental regressions and make type-contract mismatches harder to isolate.
+  5. Why now? Wave4 is the next explicit residual-debt contract after closeout and is required before final-close decision.
+- **Root cause statement:** unresolved readiness-specific coupling in backend/router and frontend/wizard monoliths keeps `UX-11/UX-12` above closure threshold.
+- **Fix mechanism:** extract readiness hard-gate helper slice to backend service module and readiness timeline/scorecard UI slice to frontend component module, then revalidate contracts.
+
+## Reuse-first plan (mandatory)
+- **Internal reuse:** reuse existing extracted modules (`console_control_tower_utils`, `console_control_tower_program`, `provisioning-wizard-domain`, `provisioning-wizard-derived`, `provisioning-wizard-utils`) and keep existing route/component contracts.
+- **External reuse:** reuse official FastAPI modularization guidance (`bigger-applications`) as extraction pattern; no new third-party libs.
+
+## Token / run budget (mandatory for expensive suites)
+- **Max full runs:** `1` full frontend e2e lane (`26` tests) for acceptance in this wave.
+- **Max replay/rerun policy:** allow one targeted rerun only if failure is infra/flaky and not deterministic regression.
+- **Stop condition:** if two consecutive runs fail without new evidence, stop and return to RCA before additional runs.
+
+## Release safety (mandatory for non-doc changes)
+- **Strategy:** bounded behavior-preserving extraction only; no API shape changes and no new top-level UX routes.
+- **Go/no-go signals:** `py_compile` pass, targeted backend pytest pass, `console-web` lint/build pass, targeted platform-admin e2e pass (`26 passed`), `SESSION_AGENT=a705 scripts/session_check.sh` pass.
+- **Rollback:** `git revert 9f0efc02`.
+- **Rollback procedure:** `git revert 9f0efc02` and rerun deterministic checks from this TP before reattempt.
+- **Post-release monitoring window:** monitor required PR CI lanes (`session-gate`, `lint`, `unit-tests`, `console-e2e`, `deploy`) until green before merge and capture run URL in evidence.
 
 ## Invariant
 - No runtime behavior changes.

@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closeout-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSEOUT-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave4-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE4-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC structural decomposition closeout for `UX-11/UX-12` (merged-main evidence revalidation + final status decision + canon sync) without runtime behavior changes
+- scope: UVC structural decomposition wave4 for `UX-11/UX-12` (bounded backend/frontend extraction + deterministic validation + canon sync) without runtime behavior changes
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
