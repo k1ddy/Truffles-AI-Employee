@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave4-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE4-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-close-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-FINAL-CLOSE-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC structural decomposition wave4 for `UX-11/UX-12` (bounded backend/frontend extraction + deterministic validation + canon sync) without runtime behavior changes
+- scope: UVC structural decomposition final-close for `UX-11/UX-12` (merged-main evidence decision + residual contract sync) without runtime behavior changes
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -90,8 +90,13 @@
   - Backend: moved onboarding readiness hard-gate helpers from `console.py` to `truffles-api/app/services/console_onboarding_readiness.py` and added deterministic tests `truffles-api/tests/test_console_onboarding_readiness.py`.
   - Frontend: moved readiness timeline/scorecard view block from `ProvisioningWizard.tsx` to `console-web/src/components/provisioning-wizard-readiness-panel.tsx`.
   - Published wave4 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave4-a705.md` and synced canon pointers (`STATE`, backlog, master report, audit index).
+  - Merged wave4 PR `#891` (`7ad5dc3d`) into `main`.
+  - Started `UVC-UX-TECH-DEBT-DECOMPOSITION-FINAL-CLOSE-A705`.
+  - Added TP `TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-close-a705.md` and linked follow-up TP `TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md`.
+  - Revalidated deterministic merged-main baseline for final-close (`wc`, `py_compile`, `pytest 7 passed`, targeted lint clean).
+  - Published final-close artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-close-a705.md` with explicit decision: `UX-11/UX-12` remain `Open (Mitigated wave4; wave5 required)`.
 - next:
-  - Open wave4 PR and proceed to `UVC-UX-TECH-DEBT-DECOMPOSITION-FINAL-CLOSE-A705` after merge.
+  - Open final-close PR and proceed to `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE5-A705` after merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -105,7 +110,10 @@
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave3-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closeout-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave4-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-close-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closeout-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-close-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave3-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave2-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md
