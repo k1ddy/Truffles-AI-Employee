@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave6-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE6-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC structural decomposition closure-review for `UX-11/UX-12` (merged-main evidence decision + wave6 contract sync) without runtime behavior changes
+- scope: UVC structural decomposition wave6 for `UX-11/UX-12` (bounded backend/frontend extraction + deterministic validation + canon sync) without runtime behavior changes
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -108,8 +108,14 @@
   - Captured post-merge deterministic evidence for closure review (`wc`, `py_compile`, `pytest 16 passed`).
   - Published closure-review artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review-a705.md` with explicit decision: `UX-11/UX-12` remain `Open (Mitigated wave5; wave6 required)`.
   - Synced closure-review canon pointers in `STATE.md`, `docs/CONSOLE_AUDIT/UX_BACKLOG.md`, `docs/CONSOLE_AUDIT/INDEX.md`, `STRUCTURE.md`, `docs/REPORTS/2026-02-22-universal-control-plane-v1-master-a500.md`, and `docs/SESSION_INDEX.md`.
+  - Merged closure-review PR `#894` (`7c1634a5`) into `main`.
+  - Started `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE6-A705`.
+  - Completed wave6 pre-check and mandatory one-web-search entry in TP (`fastapi bigger applications multiple files apirouter`).
+  - Backend wave6 extraction: moved fleet lifecycle/payment/service resolver layer from `console.py` to `truffles-api/app/services/console_fleet_state.py` and added deterministic tests `truffles-api/tests/test_console_fleet_state.py`.
+  - Frontend wave6 extraction: moved provisioning JSON payload handlers (`billing_info`, `working_hours`, `booking_settings`) from `ProvisioningWizard.tsx` to `console-web/src/components/provisioning-wizard-json-payloads.ts`.
+  - Published wave6 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave6-a705.md` and added follow-up TP `TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review2-a705.md`.
 - next:
-  - Run `SESSION_AGENT=a705 scripts/session_check.sh`, open closure-review PR, then execute wave6 after merge.
+  - Sync wave6 canon docs, open wave6 PR, then execute closure-review2 after merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -127,6 +133,7 @@
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave6-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review2-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closeout-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-close-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave5-a705.md
@@ -164,17 +171,21 @@
   - console-web/src/components/provisioning-wizard-derived.ts
   - console-web/src/components/provisioning-wizard-readiness-panel.tsx
   - console-web/src/components/provisioning-wizard-shell-panels.tsx
+  - console-web/src/components/provisioning-wizard-json-payloads.ts
   - truffles-api/app/routers/console.py
   - truffles-api/app/services/console_router_utils.py
   - truffles-api/app/services/console_control_tower_utils.py
   - truffles-api/app/services/console_control_tower_program.py
   - truffles-api/app/services/console_onboarding_readiness.py
+  - truffles-api/app/services/console_fleet_state.py
   - truffles-api/tests/test_console_router_utils.py
   - truffles-api/tests/test_console_control_tower_utils.py
   - truffles-api/tests/test_console_control_tower_program.py
   - truffles-api/tests/test_console_onboarding_readiness.py
+  - truffles-api/tests/test_console_fleet_state.py
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave4-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave6-a705.md
   - /tmp/uvc_stage5_kpi_snapshot_a705.json
   - /tmp/uvc_stage5_kpi_post_a705.json
   - /tmp/uvc_stage5_kpi_main_post_a705.json
@@ -226,5 +237,11 @@
   - checks: `cd console-web && npm run lint -- --file src/components/ProvisioningWizard.tsx --file src/components/provisioning-wizard-shell-panels.tsx --file src/components/provisioning-wizard-readiness-panel.tsx --file src/components/provisioning-wizard-derived.ts --file src/components/provisioning-wizard-utils.ts` (`No ESLint warnings or errors`)
   - checks: `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` (`24881`, `4679`)
   - checks: `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` (`24897`, `4679`)
+  - checks: `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/services/console_fleet_state.py truffles-api/tests/test_console_fleet_state.py` (`pass`)
+  - checks: `pytest -q truffles-api/tests/test_console_fleet_state.py truffles-api/tests/test_console_router_utils.py truffles-api/tests/test_console_control_tower_program.py truffles-api/tests/test_console_onboarding_readiness.py` (`24 passed`)
+  - checks: `cd console-web && npm run lint -- --file src/components/ProvisioningWizard.tsx --file src/components/provisioning-wizard-json-payloads.ts --file src/components/provisioning-wizard-shell-panels.tsx --file src/components/provisioning-wizard-readiness-panel.tsx --file src/components/provisioning-wizard-derived.ts --file src/components/provisioning-wizard-utils.ts` (`No ESLint warnings or errors`)
+  - checks: `cd console-web && npm run build` (`pass`)
+  - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 E2E_USE_STORAGE_STATE=0 E2E_DETERMINISTIC_AUTH=1 npm run test:e2e -- --grep "Platform Admin Navigation|Platform Admin Tenants|Platform Admin Integrations|deep-link from Tenants action queue to Workspace execute"` (`26 passed`)
+  - checks: `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` (`24743`, `4617`)
   - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-04
