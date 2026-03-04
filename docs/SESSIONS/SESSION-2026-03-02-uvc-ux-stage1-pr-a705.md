@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave7-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE7-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-review3-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-FINAL-REVIEW3-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC wave7 bounded decomposition for `UX-11/UX-12` (membership-state backend slice + provisioning wizard state-lifecycle slice) with deterministic contract checks
+- scope: UVC final-review3 merged-main closure decision for `UX-11/UX-12` and follow-up wave8 contract lock with deterministic evidence
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -123,9 +123,12 @@
   - Frontend: moved provisioning wizard state lifecycle/bootstrap/hydration helpers from `ProvisioningWizard.tsx` to `console-web/src/components/provisioning-wizard-state.ts`.
   - Published wave7 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave7-a705.md`.
   - Added follow-up closure contract `TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-review3-a705.md`.
+  - Wave7 merged via PR `#897` (`4269e31a`) after merge-red fix (`unit-tests`) and green required checks.
+  - Executed `UVC-UX-TECH-DEBT-DECOMPOSITION-FINAL-REVIEW3-A705` on merged-main evidence (`console.py=24606`, `ProvisioningWizard.tsx=4544`, retained deterministic suite `30 passed`) with fail-closed decision: `UX-11/UX-12` remain `Open (Mitigated wave7; wave8 required)`.
+  - Added follow-up implementation contract `TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave8-a705.md`.
 - next:
-  - Open wave7 PR with canon/session sync.
-  - After wave7 merge, execute `UVC-UX-TECH-DEBT-DECOMPOSITION-FINAL-REVIEW3-A705` on merged-main evidence.
+  - Open final-review3 PR with canon/session sync.
+  - After final-review3 merge, execute `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE8-A705`.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -146,6 +149,7 @@
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review2-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave7-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-review3-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave8-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closeout-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-close-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave5-a705.md
@@ -200,6 +204,7 @@
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave6-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review2-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave7-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-review3-a705.md
   - /tmp/uvc_stage5_kpi_snapshot_a705.json
   - /tmp/uvc_stage5_kpi_post_a705.json
   - /tmp/uvc_stage5_kpi_main_post_a705.json
