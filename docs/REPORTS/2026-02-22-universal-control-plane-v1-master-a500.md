@@ -126,7 +126,7 @@ Post-UCP UX convergence chain (A705):
 - `UVC-UX-PROGRAM-CLOSEOUT-A705`: done (steady-state control-loop automation handoff completed: wrapper-script + scheduled/dispatch workflow + runbook/canon sync + local evidence artifact).
 - `UVC-UX-STEADY-STATE-OPERATIONS-A705`: done (operator-assist remediation automation added to control-loop with deterministic plan/brief/commands artifacts, strict decision gate option, and contract tests).
 - `UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705`: done (deterministic audit governance gate added to control-loop + CI, canonical audit/backlog duplicates cleaned, and fail-closed governance artifact evidence delivered).
-- `UVC-UX-TECH-DEBT-DECOMPOSITION-A705`: in_progress (wave1 merged via PR `#885`; wave2 merged via PR `#888`; wave3 merged via PR `#889`; closeout merged via PR `#890`; wave4 merged via PR `#891`; final-close merged via PR `#892`; wave5 delivered on branch with deterministic checks (`py_compile`, `pytest 16 passed`, frontend lint/build, `session_check`) and further bounded extraction (`console_router_utils` param-validation helpers + `provisioning-wizard-shell-panels`), pending merge and closure review).
+- `UVC-UX-TECH-DEBT-DECOMPOSITION-A705`: in_progress (wave1 merged via PR `#885`; wave2 merged via PR `#888`; wave3 merged via PR `#889`; closeout merged via PR `#890`; wave4 merged via PR `#891`; final-close merged via PR `#892`; wave5 merged via PR `#893`; closure-review deterministic evidence captured on merged main (`console.py=24897`, `ProvisioningWizard.tsx=4679`, `pytest 16 passed`) with explicit fail-closed decision `UX-11/UX-12 = Open (Mitigated wave5; wave6 required)` and linked follow-up TP `TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave6-a705.md`).
 
 ## 8) Program-level DoD
 
