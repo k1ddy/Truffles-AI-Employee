@@ -38,6 +38,26 @@ type BuildRunAutopilotPayloadInput = {
     derived?: DerivedAutopilotState;
 };
 
+type BuildAutopilotRunStateInput = {
+    canEdit: boolean;
+    isPending: boolean;
+    branchId?: string;
+    scorecardFailed: boolean;
+    missingInputs: string[];
+};
+
+type BuildAutopilotRunValidationErrorInput = {
+    missingInputs: string[];
+    blockedByScorecard: boolean;
+    scorecardMissingLabels: string[];
+};
+
+export type AutopilotRunState = {
+    missingInputs: string[];
+    blockedByScorecard: boolean;
+    canRun: boolean;
+};
+
 export function deriveAutopilotState(input: DeriveAutopilotStateInput): DerivedAutopilotState {
     const phone = input.form.phone.trim();
     const instanceId = input.form.instanceId.trim();
@@ -104,6 +124,38 @@ export function deriveAutopilotState(input: DeriveAutopilotStateInput): DerivedA
         needsBranchName,
         missingInputs,
     };
+}
+
+export function toggleAutopilotServiceSelection(
+    selected: OnboardingPurchasedService[],
+    serviceId: OnboardingPurchasedService,
+): OnboardingPurchasedService[] {
+    return selected.includes(serviceId)
+        ? selected.filter((item) => item !== serviceId)
+        : [...selected, serviceId];
+}
+
+export function buildAutopilotRunState(input: BuildAutopilotRunStateInput): AutopilotRunState {
+    const blockedByScorecard = Boolean(input.branchId && input.scorecardFailed);
+    const canRun = input.canEdit
+        && !input.isPending
+        && input.missingInputs.length === 0
+        && !blockedByScorecard;
+    return {
+        missingInputs: input.missingInputs,
+        blockedByScorecard,
+        canRun,
+    };
+}
+
+export function buildAutopilotRunValidationError(input: BuildAutopilotRunValidationErrorInput): string | null {
+    if (input.missingInputs.length > 0) {
+        return `Не хватает данных: ${input.missingInputs.join(", ")}`;
+    }
+    if (input.blockedByScorecard) {
+        return `Автопроцесс заблокирован scorecard: ${input.scorecardMissingLabels.join(", ") || "есть незавершенные проверки"}`;
+    }
+    return null;
 }
 
 export function buildRunAutopilotPayload(input: BuildRunAutopilotPayloadInput): OnboardingAutopilotRequest {

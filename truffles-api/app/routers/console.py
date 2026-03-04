@@ -372,9 +372,6 @@ from app.services.console_branch_changes import (
     BRANCH_CHANGE_MUTABLE_STATUSES as _BRANCH_CHANGE_MUTABLE_STATUSES,
 )
 from app.services.console_branch_changes import (
-    build_branch_change_diff as _build_branch_change_diff,
-)
-from app.services.console_branch_changes import (
     build_branch_change_rollback_patch as _build_branch_change_rollback_patch,
 )
 from app.services.console_branch_changes import (
@@ -385,6 +382,9 @@ from app.services.console_branch_changes import (
 )
 from app.services.console_branch_changes import (
     normalize_branch_change_patch as _normalize_branch_change_patch_payload,
+)
+from app.services.console_branch_changes import (
+    prepare_branch_change_payload as _prepare_branch_change_payload_for_context,
 )
 from app.services.console_branch_changes import (
     normalize_branch_change_status_filter as _normalize_branch_change_status_filter,
@@ -1022,30 +1022,27 @@ def _serialize_branch(branch: Branch) -> ConsoleBranch:
     )
 
 
-def _normalize_branch_change_patch(*, db: Session, branch: Branch, patch_payload: dict) -> tuple[dict, list[str]]:
-    return _normalize_branch_change_patch_payload(
-        db=db,
-        branch=branch,
-        patch_payload=patch_payload,
-        validation_error_type=ConsoleAPIError,
-        ensure_unique_branch_field=_ensure_unique_branch_field,
-        normalize_slug=_normalize_slug,
-        normalize_required_text=_normalize_required_text,
-        normalize_timezone_name=_normalize_timezone_name,
-        normalize_optional_text=_normalize_optional_text,
-        normalize_branch_phone=_normalize_branch_phone,
-        normalize_telegram_chat_id=_normalize_telegram_chat_id,
-        normalize_knowledge_tag=_normalize_knowledge_tag,
-        require_branch_go_live_gate=lambda current_branch: _require_branch_go_live_gate(
-            current_branch,
-            operation="branch_activate",
-        ),
-        require_branch_scorecard_ready=lambda current_db, current_branch: _require_branch_scorecard_ready(
-            current_db,
-            current_branch,
-            operation="branch_activate",
-        ),
-    )
+def _require_branch_activate_go_live(current_branch: Branch) -> None:
+    _require_branch_go_live_gate(current_branch, operation="branch_activate")
+
+
+def _require_branch_activate_scorecard(current_db: Session, current_branch: Branch) -> None:
+    _require_branch_scorecard_ready(current_db, current_branch, operation="branch_activate")
+
+
+_BRANCH_CHANGE_NORMALIZATION_KWARGS: dict[str, Any] = {
+    "validation_error_type": ConsoleAPIError,
+    "ensure_unique_branch_field": _ensure_unique_branch_field,
+    "normalize_slug": _normalize_slug,
+    "normalize_required_text": _normalize_required_text,
+    "normalize_timezone_name": _normalize_timezone_name,
+    "normalize_optional_text": _normalize_optional_text,
+    "normalize_branch_phone": _normalize_branch_phone,
+    "normalize_telegram_chat_id": _normalize_telegram_chat_id,
+    "normalize_knowledge_tag": _normalize_knowledge_tag,
+    "require_branch_go_live_gate": _require_branch_activate_go_live,
+    "require_branch_scorecard_ready": _require_branch_activate_scorecard,
+}
 
 
 def _serialize_macro(macro: ConsoleMacroModel) -> ConsoleMacroSchema:
@@ -20218,14 +20215,12 @@ async def draft_branch_change(
 
     reason = _normalize_access_reason(body.reason, required=True)
     patch_payload = body.patch.model_dump(exclude_unset=True)
-    try:
-        normalized_patch, errors = _normalize_branch_change_patch(db=db, branch=branch, patch_payload=patch_payload)
-    except ConsoleAPIError as exc:
-        normalized_patch, errors = {}, [exc.message]
-    base_snapshot = _snapshot_branch_for_change(branch)
-    diff_payload = _build_branch_change_diff(base_snapshot, normalized_patch)
-    if not diff_payload:
-        errors.append("No effective branch changes detected")
+    normalized_patch, errors, diff_payload, base_snapshot = _prepare_branch_change_payload_for_context(
+        db=db,
+        branch=branch,
+        patch_payload=patch_payload,
+        **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+    )
 
     now = datetime.now(timezone.utc)
     change = ConsoleBranchChange(
@@ -20295,20 +20290,12 @@ async def validate_branch_change(
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
     _require_client_access(context, branch.client_id)
 
-    errors: list[str] = []
-    try:
-        normalized_patch, errors = _normalize_branch_change_patch(
-            db=db,
-            branch=branch,
-            patch_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
-        )
-    except ConsoleAPIError as exc:
-        normalized_patch, errors = {}, [exc.message]
-
-    base_snapshot = _snapshot_branch_for_change(branch)
-    diff_payload = _build_branch_change_diff(base_snapshot, normalized_patch)
-    if not diff_payload:
-        errors.append("No effective branch changes detected")
+    normalized_patch, errors, diff_payload, base_snapshot = _prepare_branch_change_payload_for_context(
+        db=db,
+        branch=branch,
+        patch_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
+        **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+    )
 
     now = datetime.now(timezone.utc)
     change.draft_payload = _jsonable_payload(normalized_patch)
@@ -20364,18 +20351,12 @@ async def publish_branch_change(
             "Branch changed since draft creation; revalidate before publish",
         )
 
-    errors: list[str] = []
-    try:
-        normalized_patch, errors = _normalize_branch_change_patch(
-            db=db,
-            branch=branch,
-            patch_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
-        )
-    except ConsoleAPIError as exc:
-        normalized_patch, errors = {}, [exc.message]
-    diff_payload = _build_branch_change_diff(_snapshot_branch_for_change(branch), normalized_patch)
-    if not diff_payload:
-        errors.append("No effective branch changes detected")
+    normalized_patch, errors, diff_payload, _base_snapshot = _prepare_branch_change_payload_for_context(
+        db=db,
+        branch=branch,
+        patch_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
+        **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+    )
 
     now = datetime.now(timezone.utc)
     if errors:
@@ -20485,7 +20466,12 @@ async def rollback_branch_change(
 
     errors: list[str] = []
     try:
-        normalized_patch, errors = _normalize_branch_change_patch(db=db, branch=branch, patch_payload=rollback_patch)
+        normalized_patch, errors = _normalize_branch_change_patch_payload(
+            db=db,
+            branch=branch,
+            patch_payload=rollback_patch,
+            **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+        )
     except ConsoleAPIError as exc:
         normalized_patch, errors = {}, [exc.message]
     if errors:

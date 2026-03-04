@@ -78,8 +78,11 @@ import {
     buildUpdateBranchDraftPayload,
 } from "@/components/provisioning-wizard-branch-actions";
 import {
+    buildAutopilotRunState,
+    buildAutopilotRunValidationError,
     buildRunAutopilotPayload,
     deriveAutopilotState,
+    toggleAutopilotServiceSelection,
 } from "@/components/provisioning-wizard-autopilot";
 import {
     buildBillingInfoJsonFromFields,
@@ -1209,23 +1212,20 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         }),
         [autopilotForm, companyId, clientId, branchData?.id, autopilotServices],
     );
-    const autopilotNeedsBranchName = autopilotDerived.needsBranchName;
-    const autopilotMissingInputs = autopilotDerived.missingInputs;
-    const autopilotBlockedByScorecard = Boolean(branchData?.id && scorecardFailed);
-    const canRunAutopilot = (
-        canEdit
-        && !runAutopilotMutation.isPending
-        && autopilotMissingInputs.length === 0
-        && !autopilotBlockedByScorecard
+    const goNoGoMissingLabels = goNoGoMissing.map((item) => formatMissingRequirement(item));
+    const autopilotRunState = useMemo(
+        () => buildAutopilotRunState({
+            canEdit,
+            isPending: runAutopilotMutation.isPending,
+            branchId: branchData?.id,
+            scorecardFailed,
+            missingInputs: autopilotDerived.missingInputs,
+        }),
+        [autopilotDerived.missingInputs, branchData?.id, canEdit, runAutopilotMutation.isPending, scorecardFailed],
     );
-
-    const handleToggleAutopilotService = (serviceId: OnboardingPurchasedService) => {
-        setAutopilotServices((prev) => (
-            prev.includes(serviceId)
-                ? prev.filter((item) => item !== serviceId)
-                : [...prev, serviceId]
-        ));
-    };
+    const autopilotMissingInputs = autopilotRunState.missingInputs;
+    const autopilotBlockedByScorecard = autopilotRunState.blockedByScorecard;
+    const canRunAutopilot = autopilotRunState.canRun;
 
     const handleApproveGoLive = () => {
         const reason = goLiveDecisionReason.trim();
@@ -1303,13 +1303,13 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     };
 
     const handleRunAutopilot = () => {
-        if (autopilotMissingInputs.length > 0) {
-            reportValidationError(`Не хватает данных: ${autopilotMissingInputs.join(", ")}`);
-            return;
-        }
-        if (autopilotBlockedByScorecard) {
-            const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
-            reportValidationError(`Автопроцесс заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
+        const validationError = buildAutopilotRunValidationError({
+            missingInputs: autopilotMissingInputs,
+            blockedByScorecard: autopilotBlockedByScorecard,
+            scorecardMissingLabels: goNoGoMissingLabels,
+        });
+        if (validationError) {
+            reportValidationError(validationError);
             return;
         }
         const payload: OnboardingAutopilotRequest = buildRunAutopilotPayload({
@@ -1722,8 +1722,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                     {branchData?.id && (
                         <div className="mt-1 text-xs text-muted-foreground">
                             Server scorecard: {scorecardStatus ?? "—"}
-                            {scorecardFailed && goNoGoMissing.length > 0
-                                ? ` (${goNoGoMissing.map((item) => formatMissingRequirement(item)).join(", ")})`
+                            {scorecardFailed && goNoGoMissingLabels.length > 0
+                                ? ` (${goNoGoMissingLabels.join(", ")})`
                                 : ""}
                         </div>
                     )}
@@ -1771,11 +1771,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                     />
                     <input
                         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                        placeholder={autopilotNeedsBranchName ? "Branch name *" : "Branch name (optional)"}
+                        placeholder={autopilotDerived.needsBranchName ? "Branch name *" : "Branch name (optional)"}
                         value={autopilotForm.branchName}
                         onChange={(event) => setAutopilotForm((prev) => ({ ...prev, branchName: event.target.value }))}
                         disabled={!canEdit}
-                        required={autopilotNeedsBranchName}
+                        required={autopilotDerived.needsBranchName}
                     />
                     <input
                         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -1950,7 +1950,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 <input
                                     type="checkbox"
                                     checked={autopilotServices.includes(option.id)}
-                                    onChange={() => handleToggleAutopilotService(option.id)}
+                                    onChange={() => setAutopilotServices((prev) => toggleAutopilotServiceSelection(prev, option.id))}
                                     disabled={!canEdit}
                                 />
                                 {option.label}
@@ -1985,8 +1985,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 {autopilotBlockedByScorecard && (
                     <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                         Автопроцесс заблокирован: scorecard=fail.
-                        {goNoGoMissing.length > 0
-                            ? ` Missing: ${goNoGoMissing.map((item) => formatMissingRequirement(item)).join(", ")}`
+                        {goNoGoMissingLabels.length > 0
+                            ? ` Missing: ${goNoGoMissingLabels.join(", ")}`
                             : ""}
                     </div>
                 )}

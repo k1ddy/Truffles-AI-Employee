@@ -5,7 +5,43 @@ import pytest
 
 from app.routers import console as console_router
 from app.schemas.console import ConsoleBranchChangePublishRequest, ConsoleBranchChangeRollbackRequest
+from app.services.console_branch_changes import (
+    build_branch_change_diff,
+    normalize_branch_change_patch,
+    prepare_branch_change_payload,
+)
 from app.services.console_errors import ConsoleAPIError
+
+
+def _normalize_patch_for_branch_change(
+    *,
+    db: object,
+    branch: object,
+    patch_payload: dict,
+) -> tuple[dict[str, object], list[str]]:
+    return normalize_branch_change_patch(
+        db=db,  # type: ignore[arg-type]
+        branch=branch,  # type: ignore[arg-type]
+        patch_payload=patch_payload,
+        validation_error_type=ConsoleAPIError,
+        ensure_unique_branch_field=console_router._ensure_unique_branch_field,
+        normalize_slug=console_router._normalize_slug,
+        normalize_required_text=console_router._normalize_required_text,
+        normalize_timezone_name=console_router._normalize_timezone_name,
+        normalize_optional_text=console_router._normalize_optional_text,
+        normalize_branch_phone=console_router._normalize_branch_phone,
+        normalize_telegram_chat_id=console_router._normalize_telegram_chat_id,
+        normalize_knowledge_tag=console_router._normalize_knowledge_tag,
+        require_branch_go_live_gate=lambda current_branch: console_router._require_branch_go_live_gate(
+            current_branch,
+            operation="branch_activate",
+        ),
+        require_branch_scorecard_ready=lambda current_db, current_branch: console_router._require_branch_scorecard_ready(
+            current_db,
+            current_branch,
+            operation="branch_activate",
+        ),
+    )
 
 
 def test_build_branch_change_diff_skips_unchanged_fields():
@@ -19,7 +55,7 @@ def test_build_branch_change_diff_skips_unchanged_fields():
         "name": "Branch B",
         "is_active": False,
     }
-    diff = console_router._build_branch_change_diff(base, patch)
+    diff = build_branch_change_diff(base, patch)
 
     assert "slug" not in diff
     assert diff["name"] == {"before": "Branch A", "after": "Branch B"}
@@ -72,7 +108,7 @@ def test_normalize_branch_change_patch_requires_instance_for_activation(monkeypa
     monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "_require_branch_scorecard_ready", lambda *args, **kwargs: None)
 
-    normalized, errors = console_router._normalize_branch_change_patch(
+    normalized, errors = _normalize_patch_for_branch_change(
         db=SimpleNamespace(),
         branch=branch,
         patch_payload={"is_active": True},
@@ -106,7 +142,7 @@ def test_normalize_branch_change_patch_rejects_invalid_inputs(monkeypatch, patch
     monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "_require_branch_scorecard_ready", lambda *args, **kwargs: None)
 
-    _normalized, errors = console_router._normalize_branch_change_patch(
+    _normalized, errors = _normalize_patch_for_branch_change(
         db=SimpleNamespace(),
         branch=branch,
         patch_payload=patch,
@@ -129,7 +165,7 @@ def test_normalize_branch_change_patch_normalizes_knowledge_tag(monkeypatch):
     monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "_require_branch_scorecard_ready", lambda *args, **kwargs: None)
 
-    normalized, errors = console_router._normalize_branch_change_patch(
+    normalized, errors = _normalize_patch_for_branch_change(
         db=SimpleNamespace(),
         branch=branch,
         patch_payload={"knowledge_tag": "Demo_Tag"},
@@ -137,6 +173,58 @@ def test_normalize_branch_change_patch_normalizes_knowledge_tag(monkeypatch):
 
     assert errors == []
     assert normalized["knowledge_tag"] == "demo_tag"
+
+
+def test_prepare_branch_change_payload_reports_no_effective_changes(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        slug="branch-a",
+        name="Branch A",
+        timezone="UTC",
+        instance_id="inst-1",
+        phone="+77000000000",
+        telegram_chat_id="123456",
+        knowledge_tag="demo_tag",
+        working_hours={"monday": ["09:00-18:00"]},
+        booking_settings={"enabled": True},
+        is_active=False,
+        go_live_state="approved",
+        go_live_reason=None,
+        go_live_waiver_until=None,
+    )
+    monkeypatch.setattr(console_router, "_ensure_unique_branch_field", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_require_branch_scorecard_ready", lambda *args, **kwargs: None)
+
+    normalized, errors, diff_payload, base_snapshot = prepare_branch_change_payload(
+        db=SimpleNamespace(),
+        branch=branch,
+        patch_payload={"name": "Branch A"},
+        validation_error_type=ConsoleAPIError,
+        ensure_unique_branch_field=console_router._ensure_unique_branch_field,
+        normalize_slug=console_router._normalize_slug,
+        normalize_required_text=console_router._normalize_required_text,
+        normalize_timezone_name=console_router._normalize_timezone_name,
+        normalize_optional_text=console_router._normalize_optional_text,
+        normalize_branch_phone=console_router._normalize_branch_phone,
+        normalize_telegram_chat_id=console_router._normalize_telegram_chat_id,
+        normalize_knowledge_tag=console_router._normalize_knowledge_tag,
+        require_branch_go_live_gate=lambda current_branch: console_router._require_branch_go_live_gate(
+            current_branch,
+            operation="branch_activate",
+        ),
+        require_branch_scorecard_ready=lambda current_db, current_branch: console_router._require_branch_scorecard_ready(
+            current_db,
+            current_branch,
+            operation="branch_activate",
+        ),
+    )
+
+    assert normalized["name"] == "Branch A"
+    assert diff_payload == {}
+    assert "No effective branch changes detected" in errors
+    assert base_snapshot["name"] == "Branch A"
 
 
 @pytest.mark.asyncio
