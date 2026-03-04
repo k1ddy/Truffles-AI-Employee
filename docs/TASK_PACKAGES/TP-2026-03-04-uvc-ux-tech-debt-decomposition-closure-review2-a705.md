@@ -18,6 +18,51 @@
 - `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave6-a705.md`
 - `docs/CONSOLE_AUDIT/UX_BACKLOG.md` (`UX-11`, `UX-12`)
 
+## Requirement traceability (mandatory)
+- `REQ-1` no disconnected/duplicate UX actions:
+  - solution: closure-review2 is governance/evidence only; runtime UX/actions unchanged.
+  - proof: no runtime code changes in this block.
+- `REQ-2` no shortcut/costyl:
+  - solution: decision derives from merged-main metrics (`LOC + deterministic checks`), not merged PR count.
+  - proof: explicit rationale in closure-review2 artifact and canon.
+- `REQ-3` optimize existing surfaces before new tabs:
+  - solution: next block (if needed) is `wave7` decomposition in existing files; no new top-level routes.
+
+## FACT pre-check (before implementation)
+- `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` -> `24743`, `4617`
+- `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/services/console_fleet_state.py truffles-api/tests/test_console_fleet_state.py` -> `pass`
+- `pytest -q truffles-api/tests/test_console_fleet_state.py truffles-api/tests/test_console_router_utils.py truffles-api/tests/test_console_control_tower_program.py truffles-api/tests/test_console_onboarding_readiness.py` -> `24 passed`
+
+## One web search (mandatory before implementation)
+- **Query (exact):** `SonarQube cognitive complexity and maintainability metrics definitions`
+- **Date/time (local):** `2026-03-04 13:17 +0500`
+- **Sources opened (from this query):**
+  - `https://docs.sonarsource.com/sonarqube-server/10.6/user-guide/code-metrics/metrics-definition`
+- **Found reusable solution:** debt closure should rely on objective maintainability/complexity signals, not on milestone count.
+- **Decision:** `integrate` objective closure criteria and keep residual open when large-file blast-radius remains high.
+- **Rejected options:** mark `UX-11/UX-12` fixed immediately after wave6 merge without closure threshold evidence.
+
+## Root cause (mandatory)
+- **Symptom:** `UX-11/UX-12` may still remain open after wave6 despite additional extraction.
+- **Minimal reproduction:**
+  1. run `wc -l` for `console.py` and `ProvisioningWizard.tsx`;
+  2. run deterministic checks (`py_compile`, `pytest`);
+  3. compare residual blast-radius with closure expectation.
+- **Evidence:** merged-main wave6 baseline (`24743/4617`, `pytest 24 passed`) + previous closure-review chain.
+- **Five Whys:**
+  1. Why possible residual? monolith concentration remains high even after bounded splits.
+  2. Why after wave6? extraction was intentionally bounded to minimize behavior risk.
+  3. Why risky? small feature edits still touch high-context files.
+  4. Why no early `Fixed`? would hide residual maintenance risk.
+  5. Why closure-review2 now? wave6 contract requires explicit merged-main decision.
+- **Root cause statement:** current decomposition improved structure but may still be above closure threshold for `UX-11/UX-12`.
+- **Fix mechanism:** make fail-closed status decision from merged-main evidence; if open, launch wave7 with bounded slices.
+
+## Reuse-first plan (mandatory)
+- **Internal reuse:** reuse existing decomposition pattern (`console_*` services and `provisioning-wizard-*` modules).
+- **External reuse:** Sonar metric definitions as objective maintainability reference.
+- **Why not build from scratch:** closure-review2 is decision/governance block, not rewrite.
+
 ## Invariant
 - No runtime behavior changes.
 - No new tabs/routes.
@@ -62,6 +107,17 @@
 - wave6 merged PR URL + commit SHA.
 - merged-main deterministic check outputs.
 - closure-review2 artifact + canon sync diff.
+
+## Token / run budget (mandatory for expensive suites)
+- Max full runs: `0` (docs/evidence decision block).
+- E2E policy: reuse green wave6 acceptance evidence (`26 passed`) since runtime unchanged.
+- Stop condition: if decision requires runtime code, stop and move to wave7 block.
+
+## Release safety (mandatory for non-doc changes)
+- **Strategy:** documentation/evidence-only closure decision.
+- **Go/no-go signals:** deterministic checks green + session gate green.
+- **Rollback:** revert closure-review2 commit.
+- **Post-release monitoring window:** wave7 PR must rerun targeted acceptance lane if launched.
 
 ## Rollback
 - `git revert COMMIT_SHA` + rerun `SESSION_AGENT=a705 scripts/session_check.sh`.

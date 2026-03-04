@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave6-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE6-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review2-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW2-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC structural decomposition wave6 for `UX-11/UX-12` (bounded backend/frontend extraction + deterministic validation + canon sync) without runtime behavior changes
+- scope: UVC closure-review2 fail-closed status decision for `UX-11/UX-12` on merged-main wave6 evidence + follow-up wave7 contract lock
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -114,8 +114,13 @@
   - Backend wave6 extraction: moved fleet lifecycle/payment/service resolver layer from `console.py` to `truffles-api/app/services/console_fleet_state.py` and added deterministic tests `truffles-api/tests/test_console_fleet_state.py`.
   - Frontend wave6 extraction: moved provisioning JSON payload handlers (`billing_info`, `working_hours`, `booking_settings`) from `ProvisioningWizard.tsx` to `console-web/src/components/provisioning-wizard-json-payloads.ts`.
   - Published wave6 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave6-a705.md` and added follow-up TP `TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review2-a705.md`.
+  - Synced branch with merged `main` wave6 commit (`Merge PR #895`, `9ae410bb`) and revalidated deterministic baseline (`24743/4617`, `pytest 24 passed`).
+  - Executed `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW2-A705` as fail-closed decision block on merged-main evidence.
+  - Published closure-review2 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review2-a705.md` with explicit decision: `UX-11/UX-12` remain `Open (Mitigated wave6; wave7 required)`.
+  - Added follow-up implementation contract `TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave7-a705.md`.
 - next:
-  - Sync wave6 canon docs, open wave6 PR, then execute closure-review2 after merge.
+  - Open closure-review2 PR with canon/session sync.
+  - After merge, start wave7 implementation block from `TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave7-a705.md`.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -134,6 +139,7 @@
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave6-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review2-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave7-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closeout-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-close-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave5-a705.md
@@ -186,6 +192,7 @@
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave4-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave6-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review2-a705.md
   - /tmp/uvc_stage5_kpi_snapshot_a705.json
   - /tmp/uvc_stage5_kpi_post_a705.json
   - /tmp/uvc_stage5_kpi_main_post_a705.json
