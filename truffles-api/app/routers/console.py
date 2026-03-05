@@ -440,7 +440,13 @@ from app.services.console_control_tower_program import (
     build_admin_control_tower_action_center_response as _build_admin_control_tower_action_center_response,
 )
 from app.services.console_control_tower_program import (
+    build_admin_control_tower_drift_board_response as _build_admin_control_tower_drift_board_response,
+)
+from app.services.console_control_tower_program import (
     build_admin_control_tower_migration_program_response as _build_admin_control_tower_migration_program_response,
+)
+from app.services.console_control_tower_program import (
+    build_admin_control_tower_readiness_board_response as _build_admin_control_tower_readiness_board_response,
 )
 from app.services.console_control_tower_utils import (
     build_admin_control_tower_migration_wave_detail as _build_admin_control_tower_migration_wave_detail,
@@ -8255,166 +8261,18 @@ def _build_admin_control_tower_readiness_board(
     limit: int,
     now: datetime,
 ) -> ConsoleAdminControlTowerReadinessBoardResponse:
-    if not active_clients:
-        return ConsoleAdminControlTowerReadinessBoardResponse(
-            generated_at=now.isoformat(),
-            limit=limit,
-            include_ready=include_ready_mode,
-            summary=ConsoleAdminControlTowerReadinessSummary(
-                total_branches=0,
-                ready_branches=0,
-                blocked_branches=0,
-                hard_gate_failed_branches=0,
-                go_live_draft_branches=0,
-                go_live_approved_branches=0,
-                go_live_rejected_branches=0,
-                degraded_branches=0,
-            ),
-            top_blockers=[],
-            items=[],
-        )
-
-    client_ids = [client.id for client in active_clients]
-    client_slug_map = {client.id: client.name for client in active_clients}
-    client_company_map = {
-        client.id: client.company_id
-        for client in active_clients
-        if getattr(client, "company_id", None)
-    }
-    branches = (
-        db.query(Branch)
-        .filter(
-            Branch.client_id.in_(client_ids),
-            Branch.is_active.is_(True),
-        )
-        .order_by(Branch.created_at.desc(), Branch.id.desc())
-        .all()
-    )
-
-    summary = ConsoleAdminControlTowerReadinessSummary(
-        total_branches=0,
-        ready_branches=0,
-        blocked_branches=0,
-        hard_gate_failed_branches=0,
-        go_live_draft_branches=0,
-        go_live_approved_branches=0,
-        go_live_rejected_branches=0,
-        degraded_branches=0,
-    )
-    issue_counter: dict[str, int] = {}
-    items: list[ConsoleAdminControlTowerReadinessItem] = []
-    allowed_steps = {
-        "branch_draft",
-        "integrations",
-        "team",
-        "telegram",
-        "knowledge",
-        "booking",
-        "go_no_go",
-    }
-
-    for branch in branches:
-        client_slug = client_slug_map.get(branch.client_id)
-        if not client_slug:
-            continue
-        summary.total_branches += 1
-
-        onboarding_status = build_onboarding_status(db, branch)
-        scorecard = build_onboarding_scorecard(db, branch)
-        missing = list(getattr(scorecard, "missing", []) or [])
-        readiness_kernel = getattr(scorecard, "readiness_kernel", None)
-        readiness_status = (
-            getattr(readiness_kernel, "status", None)
-            if readiness_kernel is not None
-            else None
-        )
-        if readiness_status not in {"pass", "warn", "fail"}:
-            readiness_status = "pass" if getattr(scorecard, "ready", False) else "fail"
-        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(
-            readiness_kernel,
-            hard_gate_codes=_ONBOARDING_READINESS_HARD_GATE_CODES,
-        )
-        hard_gate_status = "fail" if hard_gate_blockers else "pass"
-
-        if getattr(scorecard, "ready", False):
-            summary.ready_branches += 1
-        blocked = (not getattr(scorecard, "ready", False)) or bool(hard_gate_blockers)
-        if blocked:
-            summary.blocked_branches += 1
-        if hard_gate_status == "fail":
-            summary.hard_gate_failed_branches += 1
-
-        go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
-        if go_live_state == "approved":
-            summary.go_live_approved_branches += 1
-        elif go_live_state == "rejected":
-            summary.go_live_rejected_branches += 1
-        else:
-            summary.go_live_draft_branches += 1
-
-        integration_state = (_normalize_optional_text(getattr(branch, "integration_state", None)) or "ok").lower()
-        if integration_state not in {"ok", "degraded"}:
-            integration_state = "ok"
-        if integration_state == "degraded":
-            summary.degraded_branches += 1
-
-        if not include_ready_mode and not blocked:
-            continue
-
-        current_step = (
-            getattr(getattr(onboarding_status, "current_step", None), "value", None)
-            or "branch_draft"
-        )
-        if current_step not in allowed_steps:
-            current_step = "branch_draft"
-
-        company_id = client_company_map.get(branch.client_id)
-        company_name = companies_by_id.get(company_id).name if company_id and company_id in companies_by_id else None
-        item = ConsoleAdminControlTowerReadinessItem(
-            company_id=company_id,
-            company_name=company_name,
-            client_id=branch.client_id,
-            client_slug=client_slug,
-            branch_id=branch.id,
-            branch_slug=branch.slug,
-            branch_name=branch.name,
-            current_step=current_step,
-            scorecard_status="pass" if getattr(scorecard, "ready", False) else "fail",
-            readiness_status=readiness_status,
-            hard_gate_status=hard_gate_status,
-            ready=bool(getattr(scorecard, "ready", False)),
-            go_live_state=go_live_state,
-            integration_state=integration_state,
-            missing=missing,
-            hard_gate_blockers=hard_gate_blockers,
-        )
-        items.append(item)
-
-        for code in missing + hard_gate_blockers:
-            normalized = (code or "").strip()
-            if not normalized:
-                continue
-            issue_counter[normalized] = issue_counter.get(normalized, 0) + 1
-
-    readiness_rank = {"fail": 2, "warn": 1, "pass": 0}
-    items.sort(
-        key=lambda item: (
-            -int(not item.ready),
-            -int(item.hard_gate_status == "fail"),
-            -readiness_rank.get(item.readiness_status, 0),
-            -len(item.hard_gate_blockers),
-            -len(item.missing),
-            item.client_slug,
-            item.branch_name,
-        )
-    )
-    return ConsoleAdminControlTowerReadinessBoardResponse(
-        generated_at=now.isoformat(),
+    return _build_admin_control_tower_readiness_board_response(
+        db=db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        include_ready_mode=include_ready_mode,
         limit=limit,
-        include_ready=include_ready_mode,
-        summary=summary,
-        top_blockers=_build_control_tower_issue_counts(issue_counter, limit=10),
-        items=items[:limit],
+        now=now,
+        build_onboarding_status=build_onboarding_status,
+        build_onboarding_scorecard=build_onboarding_scorecard,
+        resolve_readiness_hard_gate_blockers=_resolve_readiness_hard_gate_blockers,
+        normalize_branch_go_live_state=_normalize_branch_go_live_state,
+        hard_gate_codes=_ONBOARDING_READINESS_HARD_GATE_CODES,
     )
 
 
@@ -8428,198 +8286,21 @@ def _build_admin_control_tower_drift_board(
     limit: int,
     now: datetime,
 ) -> ConsoleAdminControlTowerDriftBoardResponse:
-    if not active_clients:
-        return ConsoleAdminControlTowerDriftBoardResponse(
-            generated_at=now.isoformat(),
-            stale_after_minutes=stale_after_minutes,
-            limit=limit,
-            only_problematic=only_problematic_mode,
-            summary=ConsoleAdminControlTowerDriftSummary(
-                total_branches=0,
-                ok_branches=0,
-                warn_branches=0,
-                error_branches=0,
-                degraded_branches=0,
-                queue_p0=0,
-                queue_p1=0,
-                queue_p2=0,
-            ),
-            top_issues=[],
-            items=[],
-            provider_ops_queue=[],
-        )
-
-    client_ids = [client.id for client in active_clients]
-    client_slug_map = {client.id: client.name for client in active_clients}
-    client_company_map = {
-        client.id: client.company_id
-        for client in active_clients
-        if getattr(client, "company_id", None)
-    }
-    client_domain_map: dict[UUID, str] = {}
-    for client in active_clients:
-        config = getattr(client, "config", None)
-        if not isinstance(config, dict):
-            continue
-        domain_key = _normalize_optional_domain_slug_token(
-            config.get("domain_slug") or config.get("domain")
-        )
-        if domain_key:
-            client_domain_map[client.id] = domain_key
-
-    branches = (
-        db.query(Branch)
-        .filter(
-            Branch.client_id.in_(client_ids),
-            Branch.is_active.is_(True),
-        )
-        .order_by(Branch.created_at.desc(), Branch.id.desc())
-        .all()
-    )
-    if not branches:
-        return ConsoleAdminControlTowerDriftBoardResponse(
-            generated_at=now.isoformat(),
-            stale_after_minutes=stale_after_minutes,
-            limit=limit,
-            only_problematic=only_problematic_mode,
-            summary=ConsoleAdminControlTowerDriftSummary(
-                total_branches=0,
-                ok_branches=0,
-                warn_branches=0,
-                error_branches=0,
-                degraded_branches=0,
-                queue_p0=0,
-                queue_p1=0,
-                queue_p2=0,
-            ),
-            top_issues=[],
-            items=[],
-            provider_ops_queue=[],
-        )
-
-    branch_by_id = {branch.id: branch for branch in branches}
-    branch_client_ids = sorted({branch.client_id for branch in branches})
-    token_rows = (
-        db.query(
-            ClientSettings.client_id,
-            ClientSettings.telegram_bot_token,
-        )
-        .filter(ClientSettings.client_id.in_(branch_client_ids))
-        .all()
-    )
-    telegram_token_map: dict[UUID, bool] = {}
-    for row_client_id, token in token_rows:
-        telegram_token_map[row_client_id] = bool(_normalize_optional_text(token))
-
-    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
-        db,
-        client_ids=branch_client_ids,
-    )
-    provider_binding_by_branch = _build_provider_binding_lifecycle_map(
-        db,
-        client_ids=branch_client_ids,
-        branches=branches,
-        now=now,
-    )
-
-    all_status_items: list[ConsoleBranchIntegrationStatus] = []
-    for branch in branches:
-        client_slug = client_slug_map.get(branch.client_id)
-        if not client_slug:
-            continue
-        observed = inbound_observations.get(branch.id)
-        last_inbound_at: Optional[datetime] = observed[0] if observed else None
-        last_inbound_instance_id: Optional[str] = observed[1] if observed else None
-        all_status_items.append(
-            _build_branch_integration_status(
-                client_id=branch.client_id,
-                client_slug=client_slug,
-                branch=branch,
-                has_telegram_bot_token=telegram_token_map.get(branch.client_id, False),
-                stale_after_minutes=stale_after_minutes,
-                last_inbound_at=last_inbound_at,
-                last_inbound_instance_id=last_inbound_instance_id,
-                now=now,
-                provider_binding=provider_binding_by_branch.get(branch.id),
-            )
-        )
-
-    provider_ops_queue = _build_provider_ops_queue(
-        all_status_items,
-        generated_at=now,
-    )
-    queue_counter = {"p0": 0, "p1": 0, "p2": 0}
-    for queue_item in provider_ops_queue:
-        queue_counter[queue_item.priority] = queue_counter.get(queue_item.priority, 0) + 1
-
-    summary = ConsoleAdminControlTowerDriftSummary(
-        total_branches=len(all_status_items),
-        ok_branches=sum(1 for item in all_status_items if item.status == "ok"),
-        warn_branches=sum(1 for item in all_status_items if item.status == "warn"),
-        error_branches=sum(1 for item in all_status_items if item.status == "error"),
-        degraded_branches=sum(1 for item in all_status_items if item.integration_state == "degraded"),
-        queue_p0=queue_counter.get("p0", 0),
-        queue_p1=queue_counter.get("p1", 0),
-        queue_p2=queue_counter.get("p2", 0),
-    )
-
-    scoped_items: list[ConsoleBranchIntegrationStatus] = []
-    for status_item in all_status_items:
-        decision = _resolve_provider_ops_decision(status_item)
-        if only_problematic_mode and status_item.status == "ok" and not decision:
-            continue
-        scoped_items.append(status_item)
-
-    severity_rank = {"error": 2, "warn": 1, "ok": 0}
-    scoped_items.sort(
-        key=lambda item: (
-            -severity_rank.get(item.status, 0),
-            -int(item.integration_state == "degraded"),
-            -len(item.drift_issues),
-            item.client_slug,
-            item.branch_name,
-        )
-    )
-
-    issue_counter: dict[str, int] = {}
-    for status_item in scoped_items:
-        for issue in status_item.drift_issues:
-            normalized = (issue or "").strip()
-            if not normalized:
-                continue
-            issue_counter[normalized] = issue_counter.get(normalized, 0) + 1
-        if status_item.integration_state == "degraded":
-            issue_counter["integration_degraded"] = issue_counter.get("integration_degraded", 0) + 1
-
-    lifecycle_items: list[ConsoleProviderLifecycleItem] = []
-    for status_item in scoped_items[:limit]:
-        branch = branch_by_id.get(status_item.branch_id)
-        if not branch:
-            continue
-        company_id = client_company_map.get(status_item.client_id)
-        company_name = companies_by_id.get(company_id).name if company_id and company_id in companies_by_id else None
-        lifecycle_items.append(
-            _build_provider_lifecycle_item(
-                db=db,
-                status=status_item,
-                branch=branch,
-                company_id=company_id,
-                company_name=company_name,
-                domain_key=client_domain_map.get(status_item.client_id),
-                generated_at=now,
-                now=now,
-            )
-        )
-
-    return ConsoleAdminControlTowerDriftBoardResponse(
-        generated_at=now.isoformat(),
+    return _build_admin_control_tower_drift_board_response(
+        db=db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
         stale_after_minutes=stale_after_minutes,
+        only_problematic_mode=only_problematic_mode,
         limit=limit,
-        only_problematic=only_problematic_mode,
-        summary=summary,
-        top_issues=_build_control_tower_issue_counts(issue_counter, limit=10),
-        items=lifecycle_items,
-        provider_ops_queue=provider_ops_queue[:limit],
+        now=now,
+        normalize_optional_domain_slug_token=_normalize_optional_domain_slug_token,
+        load_latest_branch_inbound_observations_for_clients=_load_latest_branch_inbound_observations_for_clients,
+        build_provider_binding_lifecycle_map=_build_provider_binding_lifecycle_map,
+        build_branch_integration_status=_build_branch_integration_status,
+        build_provider_ops_queue=_build_provider_ops_queue,
+        resolve_provider_ops_decision=_resolve_provider_ops_decision,
+        build_provider_lifecycle_item=_build_provider_lifecycle_item,
     )
 
 
