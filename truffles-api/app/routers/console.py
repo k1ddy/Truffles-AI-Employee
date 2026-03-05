@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import os
@@ -19,7 +20,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import and_, case, delete, event, func, or_, text
 from sqlalchemy.exc import ProgrammingError
@@ -10852,6 +10853,161 @@ async def get_case_messages(
 
 
 @router.get(
+    "/cases/{case_id}/stream",
+    responses={
+        200: {"content": {"text/event-stream": {}}},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def stream_case_updates(
+    case_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """SSE stream for a single case with polling fallback on the frontend."""
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "read")
+    _reject_unknown_query_params(request, set())
+
+    case = (
+        db.query(Handover)
+        .filter(
+            Handover.id == case_id,
+            Handover.client_id == context.client.id,
+        )
+        .first()
+    )
+    if not case:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Case not found")
+
+    conversation = db.query(Conversation).filter(Conversation.id == case.conversation_id).first()
+    if not conversation:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+    _require_branch_access(context, conversation.branch_id, message="Access to this case denied")
+
+    poll_interval_seconds = 3.0
+    heartbeat_seconds = 15.0
+    conversation_id = conversation.id
+
+    latest_message = (
+        db.query(Message.id, Message.created_at)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+    last_case_updated_at = case.updated_at or case.created_at
+    last_message_created_at = latest_message.created_at if latest_message else None
+    last_message_id = str(latest_message.id) if latest_message else None
+
+    def _sse_event(event_name: str, payload: dict[str, Any]) -> str:
+        return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    async def event_generator():
+        nonlocal last_case_updated_at, last_message_created_at, last_message_id
+        last_emitted_at = datetime.now(timezone.utc)
+
+        yield _sse_event(
+            "ready",
+            {
+                "reason_code": "stream_ready",
+                "case_id": str(case_id),
+                "conversation_id": str(conversation_id),
+            },
+        )
+
+        while True:
+            if await request.is_disconnected():
+                return
+
+            await asyncio.sleep(poll_interval_seconds)
+
+            refreshed_case = (
+                db.query(Handover)
+                .filter(
+                    Handover.id == case_id,
+                    Handover.client_id == context.client.id,
+                )
+                .first()
+            )
+            if not refreshed_case:
+                yield _sse_event(
+                    "closed",
+                    {
+                        "reason_code": "case_not_found",
+                        "case_id": str(case_id),
+                    },
+                )
+                return
+
+            refreshed_message = (
+                db.query(Message.id, Message.created_at)
+                .filter(Message.conversation_id == conversation_id)
+                .order_by(Message.created_at.desc())
+                .first()
+            )
+
+            refreshed_case_updated_at = refreshed_case.updated_at or refreshed_case.created_at
+            refreshed_message_created_at = refreshed_message.created_at if refreshed_message else None
+            refreshed_message_id = str(refreshed_message.id) if refreshed_message else None
+
+            changed_reasons: list[str] = []
+            if refreshed_case_updated_at and (
+                not last_case_updated_at or refreshed_case_updated_at > last_case_updated_at
+            ):
+                changed_reasons.append("case_updated")
+                last_case_updated_at = refreshed_case_updated_at
+
+            if refreshed_message_created_at and (
+                not last_message_created_at or refreshed_message_created_at > last_message_created_at
+            ):
+                changed_reasons.append("message_appended")
+                last_message_created_at = refreshed_message_created_at
+                last_message_id = refreshed_message_id
+
+            if changed_reasons:
+                yield _sse_event(
+                    "case.refresh",
+                    {
+                        "reason_code": "case_refresh",
+                        "reasons": changed_reasons,
+                        "case_id": str(case_id),
+                        "conversation_id": str(conversation_id),
+                        "case_updated_at": (
+                            last_case_updated_at.isoformat() if last_case_updated_at else None
+                        ),
+                        "latest_message_at": (
+                            last_message_created_at.isoformat() if last_message_created_at else None
+                        ),
+                        "latest_message_id": last_message_id,
+                    },
+                )
+                last_emitted_at = datetime.now(timezone.utc)
+                continue
+
+            now = datetime.now(timezone.utc)
+            if (now - last_emitted_at).total_seconds() >= heartbeat_seconds:
+                yield _sse_event(
+                    "heartbeat",
+                    {
+                        "reason_code": "heartbeat",
+                        "case_id": str(case_id),
+                        "server_time": now.isoformat(),
+                    },
+                )
+                last_emitted_at = now
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get(
     "/inbox/macros",
     response_model=ConsoleMacroListResponse,
     responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
@@ -15254,6 +15410,35 @@ def _resolve_kpi_status(
     return "fact"
 
 
+def _resolve_threshold_kpi_status(
+    value: Optional[float],
+    *,
+    max_fact: float,
+) -> str:
+    if value is None:
+        return "need"
+    if value <= max_fact:
+        return "fact"
+    return "need"
+
+
+def _derive_stale_view_rate(
+    *,
+    inbound_total: Optional[int],
+    no_response_alert_total: Optional[int],
+) -> Optional[float]:
+    if inbound_total is None or inbound_total <= 0:
+        return None
+    if no_response_alert_total is None:
+        return None
+    ratio = no_response_alert_total / float(inbound_total)
+    if ratio < 0:
+        ratio = 0.0
+    if ratio > 1:
+        ratio = 1.0
+    return round(ratio, 4)
+
+
 @router.get(
     "/metrics/daily",
     response_model=ConsoleMetricsDailyResponse,
@@ -15490,6 +15675,18 @@ async def get_metrics_daily(
         missing_total=booking_missing_conversation_total,
     )
     first_response_status = _resolve_kpi_status(first_response_p50_seconds)
+    queue_lag_seconds = first_response_p50_seconds
+    queue_lag_status = _resolve_threshold_kpi_status(queue_lag_seconds, max_fact=180.0)
+    stale_view_rate = _derive_stale_view_rate(
+        inbound_total=inbound_conversations_total,
+        no_response_alert_total=no_response_alert_total,
+    )
+    stale_view_status = _resolve_threshold_kpi_status(stale_view_rate, max_fact=0.05)
+    case_action_apply_latency_seconds = manager_median_response_seconds
+    case_action_apply_latency_status = _resolve_threshold_kpi_status(
+        case_action_apply_latency_seconds,
+        max_fact=300.0,
+    )
     after_hours_status = _resolve_kpi_status(
         after_hours_coverage_rate,
         missing_total=after_hours_missing_total,
@@ -15531,6 +15728,12 @@ async def get_metrics_daily(
         first_response_p90_seconds=first_response_p90_seconds,
         first_response_missing_total=first_response_missing_total,
         first_response_status=first_response_status,
+        queue_lag_seconds=queue_lag_seconds,
+        queue_lag_status=queue_lag_status,
+        stale_view_rate=stale_view_rate,
+        stale_view_status=stale_view_status,
+        case_action_apply_latency_seconds=case_action_apply_latency_seconds,
+        case_action_apply_latency_status=case_action_apply_latency_status,
         after_hours_total=after_hours_total,
         after_hours_covered=after_hours_covered,
         after_hours_missing_total=after_hours_missing_total,

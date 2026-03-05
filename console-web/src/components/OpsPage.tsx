@@ -38,6 +38,9 @@ interface MetricsData {
     active_cases: number;
     resolved_cases: number;
     avg_resolution_hours: number | null;
+    queue_lag_seconds?: number | null;
+    stale_view_rate?: number | null;
+    case_action_apply_latency_seconds?: number | null;
 }
 
 // TG-03: Telegram Health
@@ -222,6 +225,27 @@ function formatSignedDelta(value: number): string {
         return `+${value}`;
     }
     return `${value}`;
+}
+
+function formatDurationSeconds(value?: number | null): string {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+        return "—";
+    }
+    if (value < 60) {
+        return `${Math.round(value)}с`;
+    }
+    const minutes = value / 60;
+    if (minutes < 60) {
+        return `${minutes.toFixed(1)}м`;
+    }
+    return `${(minutes / 60).toFixed(1)}ч`;
+}
+
+function formatRatioPercent(value?: number | null): string {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+        return "—";
+    }
+    return `${(value * 100).toFixed(1)}%`;
 }
 
 function resolutionChecklistReady(draft: IncidentResolutionDraft): boolean {
@@ -1282,7 +1306,7 @@ export default function OpsPage() {
                             Не удалось загрузить метрики
                         </div>
                     ) : (
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
                             <MetricCard label="Всего заявок" value={metrics?.total_cases ?? 0} />
                             <MetricCard label="Ожидает" value={metrics?.pending_cases ?? 0} />
                             <MetricCard label="В работе" value={metrics?.active_cases ?? 0} />
@@ -1290,6 +1314,16 @@ export default function OpsPage() {
                                 label="Закрыто"
                                 value={metrics?.resolved_cases ?? 0}
                                 subtext={metrics?.avg_resolution_hours ? `Средн: ${metrics.avg_resolution_hours}ч` : undefined}
+                            />
+                            <MetricCard
+                                label="Queue lag (p50)"
+                                value={formatDurationSeconds(metrics?.queue_lag_seconds)}
+                                subtext="цель <= 3м"
+                            />
+                            <MetricCard
+                                label="Stale view rate"
+                                value={formatRatioPercent(metrics?.stale_view_rate)}
+                                subtext={`Latency: ${formatDurationSeconds(metrics?.case_action_apply_latency_seconds)}`}
                             />
                         </div>
                     )}

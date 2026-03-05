@@ -140,6 +140,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/cases/{case_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Case Updates
+         * @description SSE stream for a single case with polling fallback on the frontend.
+         */
+        get: operations["stream_case_updates_console_v1_cases__case_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/inbox/macros": {
         parameters: {
             query?: never;
@@ -6058,6 +6078,18 @@ export interface components {
             first_response_missing_total?: number | null;
             /** First Response Status */
             first_response_status?: ("fact" | "estimate" | "need") | null;
+            /** Queue Lag Seconds */
+            queue_lag_seconds?: number | null;
+            /** Queue Lag Status */
+            queue_lag_status?: ("fact" | "estimate" | "need") | null;
+            /** Stale View Rate */
+            stale_view_rate?: number | null;
+            /** Stale View Status */
+            stale_view_status?: ("fact" | "estimate" | "need") | null;
+            /** Case Action Apply Latency Seconds */
+            case_action_apply_latency_seconds?: number | null;
+            /** Case Action Apply Latency Status */
+            case_action_apply_latency_status?: ("fact" | "estimate" | "need") | null;
             /** After Hours Total */
             after_hours_total?: number | null;
             /** After Hours Covered */
@@ -8932,6 +8964,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleMessageListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_case_updates_console_v1_cases__case_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
                 };
             };
             /** @description Validation Error */
