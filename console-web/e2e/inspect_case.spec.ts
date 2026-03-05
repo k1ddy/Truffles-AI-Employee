@@ -418,12 +418,17 @@ test('inspect first case', async ({ page }) => {
     const emptyState = page.getByTestId('cases-empty');
     let openedFixtureCaseDirectly = false;
     if (await emptyState.isVisible().catch(() => false)) {
-        console.log('No cases in queue, opening fixture case directly.');
+        console.log('No cases in queue.');
         const screenshotPath = path.resolve('inbox_debug.png');
         await page.screenshot({ path: screenshotPath, fullPage: true });
         console.log(`Debug screenshot saved to: ${screenshotPath}`);
-        await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
-        openedFixtureCaseDirectly = true;
+        if (useRouteMocks) {
+            await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
+            openedFixtureCaseDirectly = true;
+        } else {
+            console.log('Live mode: queue is empty, case drill-down step skipped.');
+            return;
+        }
     }
 
     if (!openedFixtureCaseDirectly) {
