@@ -25,10 +25,10 @@ What changed
 
 LOC impact
 - `truffles-api/app/routers/console.py`: `24365 -> 24354` (`-11`)
-- `console-web/src/components/ProvisioningWizard.tsx`: `4365 -> 4351` (`-14`)
+- `console-web/src/components/ProvisioningWizard.tsx`: `4365 -> 4355` (`-10`)
 
 Checks
-- `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` -> `24354`, `4351`
+- `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` -> `24354`, `4355`
 - `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/services/console_branch_changes.py truffles-api/tests/test_console_branch_changes.py` -> `pass`
 - `pytest -q truffles-api/tests/test_console_onboarding_readiness.py truffles-api/tests/test_console_membership_state.py truffles-api/tests/test_console_fleet_state.py truffles-api/tests/test_console_router_utils.py truffles-api/tests/test_console_control_tower_program.py` -> `35 passed`
 - `pytest -q truffles-api/tests/test_console_branch_changes.py truffles-api/tests/test_console_admin_provisioning.py -k "branch_change"` -> `15 passed, 23 deselected`
