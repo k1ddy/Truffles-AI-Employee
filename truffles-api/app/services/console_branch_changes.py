@@ -486,3 +486,23 @@ def prepare_branch_change_payload(
     if not diff_payload:
         errors.append("No effective branch changes detected")
     return normalized_patch, errors, diff_payload, base_snapshot
+
+
+def prepare_branch_change_rollback_payload(
+    *,
+    db: Session,
+    branch: Branch,
+    rollback_patch: Mapping[str, object],
+    validation_error_type: type[Exception],
+    normalize_branch_change_patch: Callable[..., tuple[dict[str, object], list[str]]],
+    normalize_kwargs: Mapping[str, object],
+) -> tuple[dict[str, object], list[str]]:
+    try:
+        return normalize_branch_change_patch(
+            db=db,
+            branch=branch,
+            patch_payload=rollback_patch,
+            **normalize_kwargs,
+        )
+    except validation_error_type as exc:
+        return {}, [_error_message(exc)]

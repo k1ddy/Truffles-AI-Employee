@@ -18,6 +18,7 @@ from app.services.console_branch_changes import (
     build_branch_change_list_response,
     normalize_branch_change_patch,
     prepare_branch_change_payload,
+    prepare_branch_change_rollback_payload,
 )
 from app.services.console_errors import ConsoleAPIError
 
@@ -294,6 +295,49 @@ def test_prepare_branch_change_payload_reports_no_effective_changes(monkeypatch)
     assert diff_payload == {}
     assert "No effective branch changes detected" in errors
     assert base_snapshot["name"] == "Branch A"
+
+
+def test_prepare_branch_change_rollback_payload_normalizes_patch():
+    db = SimpleNamespace()
+    branch = SimpleNamespace(id=uuid4())
+    normalize_call: dict[str, object] = {}
+
+    def normalize_patch(**kwargs):
+        normalize_call.update(kwargs)
+        return {"name": "Branch A"}, []
+
+    normalized, errors = prepare_branch_change_rollback_payload(
+        db=db,  # type: ignore[arg-type]
+        branch=branch,  # type: ignore[arg-type]
+        rollback_patch={"name": "Branch A"},
+        validation_error_type=ConsoleAPIError,
+        normalize_branch_change_patch=normalize_patch,
+        normalize_kwargs={"marker": "rollback"},
+    )
+
+    assert normalized == {"name": "Branch A"}
+    assert errors == []
+    assert normalize_call["db"] is db
+    assert normalize_call["branch"] is branch
+    assert normalize_call["patch_payload"] == {"name": "Branch A"}
+    assert normalize_call["marker"] == "rollback"
+
+
+def test_prepare_branch_change_rollback_payload_maps_validation_error():
+    def raise_error(**_kwargs):
+        raise ConsoleAPIError(409, "CHANGE_VALIDATION_FAILED", "validation failed")
+
+    normalized, errors = prepare_branch_change_rollback_payload(
+        db=SimpleNamespace(),  # type: ignore[arg-type]
+        branch=SimpleNamespace(id=uuid4()),  # type: ignore[arg-type]
+        rollback_patch={"name": "Branch A"},
+        validation_error_type=ConsoleAPIError,
+        normalize_branch_change_patch=raise_error,
+        normalize_kwargs={},
+    )
+
+    assert normalized == {}
+    assert errors == ["validation failed"]
 
 
 def test_apply_branch_change_validation_result_marks_validated():

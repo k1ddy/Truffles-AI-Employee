@@ -70,11 +70,10 @@ import {
     buildCreateCompanyPayload,
 } from "@/components/provisioning-wizard-account-actions";
 import {
-    buildGoLiveDecisionPayload,
-    buildGoLiveWaiverPayload,
     buildCreateBranchPayload,
     handleBranchMutationError,
-    submitGoLiveMutation,
+    submitGoLiveDecisionMutation,
+    submitGoLiveWaiverMutation,
     buildSaveBookingPayload,
     buildSaveInstancePayload,
     buildSaveKnowledgePayload,
@@ -1220,58 +1219,46 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const autopilotMissingInputs = autopilotRunState.missingInputs;
     const autopilotBlockedByScorecard = autopilotRunState.blockedByScorecard;
     const canRunAutopilot = autopilotRunState.canRun;
+    const clearGoLiveDecisionReason = () => {
+        setGoLiveDecisionReason("");
+    };
 
     const handleApproveGoLive = () => {
-        submitGoLiveMutation({
-            result: buildGoLiveDecisionPayload({
-                branchId: branchData?.id,
-                reason: goLiveDecisionReason,
-                decisionLabel: "approve",
-                enforceScorecard: scorecardFailed,
-                scorecardMissingLabels: goNoGoMissingLabels,
-            }),
-            fallbackError: "Ошибка валидации approve",
+        submitGoLiveDecisionMutation({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            decisionLabel: "approve",
+            enforceScorecard: scorecardFailed,
+            scorecardMissingLabels: goNoGoMissingLabels,
             reportValidationError,
             mutate: approveGoLiveMutation.mutate,
-            clearReason: () => {
-                setGoLiveDecisionReason("");
-            },
+            clearReason: clearGoLiveDecisionReason,
         });
     };
 
     const handleRejectGoLive = () => {
-        submitGoLiveMutation({
-            result: buildGoLiveDecisionPayload({
-                branchId: branchData?.id,
-                reason: goLiveDecisionReason,
-                decisionLabel: "reject",
-                enforceScorecard: false,
-                scorecardMissingLabels: [],
-            }),
-            fallbackError: "Ошибка валидации reject",
+        submitGoLiveDecisionMutation({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            decisionLabel: "reject",
+            enforceScorecard: false,
+            scorecardMissingLabels: [],
             reportValidationError,
             mutate: rejectGoLiveMutation.mutate,
-            clearReason: () => {
-                setGoLiveDecisionReason("");
-            },
+            clearReason: clearGoLiveDecisionReason,
         });
     };
 
     const handleWaiveGoLive = () => {
-        submitGoLiveMutation({
-            result: buildGoLiveWaiverPayload({
-                branchId: branchData?.id,
-                reason: goLiveDecisionReason,
-                ttlHoursInput: goLiveWaiverHours,
-                enforceScorecard: scorecardFailed,
-                scorecardMissingLabels: goNoGoMissingLabels,
-            }),
-            fallbackError: "Ошибка валидации waiver",
+        submitGoLiveWaiverMutation({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            ttlHoursInput: goLiveWaiverHours,
+            enforceScorecard: scorecardFailed,
+            scorecardMissingLabels: goNoGoMissingLabels,
             reportValidationError,
             mutate: waiveGoLiveMutation.mutate,
-            clearReason: () => {
-                setGoLiveDecisionReason("");
-            },
+            clearReason: clearGoLiveDecisionReason,
         });
     };
 
