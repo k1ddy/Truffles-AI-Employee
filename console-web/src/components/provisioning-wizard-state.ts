@@ -55,6 +55,12 @@ export type ProvisioningAutopilotFormState = {
     clientDataText: string;
 };
 
+export type ProvisioningWizardResetState = {
+    branchForm: ProvisioningBranchFormState;
+    branchBootstrap: ProvisioningBranchBootstrapState;
+    autopilotForm: ProvisioningAutopilotFormState;
+};
+
 type BranchLike = {
     id?: string | null;
     name?: string | null;
@@ -118,6 +124,28 @@ export function createInitialAutopilotForm(defaultTimezone: string): Provisionin
         providerBindingAlertState: "warn",
         providerBindingNotes: "",
         clientDataText: "",
+    };
+}
+
+export function createProvisioningWizardResetState(defaultTimezone: string): ProvisioningWizardResetState {
+    return {
+        branchForm: createInitialBranchForm(defaultTimezone),
+        branchBootstrap: createInitialBranchBootstrapState(),
+        autopilotForm: createInitialAutopilotForm(defaultTimezone),
+    };
+}
+
+export function createInitialAgentFormState<TRole extends string>(defaultRole: TRole): {
+    name: string;
+    role: TRole;
+    oidcSubject: string;
+    branchId: string;
+} {
+    return {
+        name: "",
+        role: defaultRole,
+        oidcSubject: "",
+        branchId: "",
     };
 }
 
