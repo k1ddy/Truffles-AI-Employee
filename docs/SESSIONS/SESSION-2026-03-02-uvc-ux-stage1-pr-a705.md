@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave19-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE19-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave20-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE20-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,10 +12,14 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC wave19 bounded decomposition for `UX-11/UX-12` with immediate closure-review15 follow-up contract
+- scope: UVC wave20 bounded extraction to close closure-review15 failed criterion `C1` (`console.py <= 24396`) without behavioral drift
 - done:
   - Session created.
   - Synced worktree to merged `main` after closure-review14 merge (`41fd52bd`).
+  - Started `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE20-A705` implementation block to close closure-review15 failed criterion `C1`.
+  - Backend wave20 extraction: moved control-tower drift-board and readiness-board orchestration from `truffles-api/app/routers/console.py` to `truffles-api/app/services/console_control_tower_program.py` (`build_admin_control_tower_drift_board_response`, `build_admin_control_tower_readiness_board_response`) and rewired router delegation boundaries.
+  - Revalidated deterministic lane for wave20 (`wc 24353/4287`, `py_compile`, `pytest 35 passed`, `pytest branch_change 32 passed`, targeted control-tower drift/readiness tests `4 passed`, `SESSION_TP_SCOPE_OVERRIDE=UVC_SCOPE_OVERRIDE_A705 SESSION_AGENT=a705 scripts/session_check.sh`).
+  - Published wave20 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave20-a705.md` and locked follow-up closure contract `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review16-a705.md`.
   - Executed wave19 bounded backend extraction: delegated branch-change context lookup + client-access guard to `get_branch_for_change_context` in `truffles-api/app/services/console_branch_changes.py` and rewired `validate/publish/rollback` handlers in `truffles-api/app/routers/console.py`.
   - Executed wave19 bounded frontend extraction: delegated Provisioning Wizard reset-state assembly to `createProvisioningWizardResetState` in `console-web/src/components/provisioning-wizard-state.ts` and rewired `console-web/src/components/ProvisioningWizard.tsx`.
   - Added deterministic service tests for backend extraction in `truffles-api/tests/test_console_branch_changes.py` (`29 passed` in branch-change lane).
@@ -250,9 +254,15 @@
   - Added TP execution-profile boundary contract to `docs/TASK_PACKAGES/TP_TEMPLATE_ZERO_CONTEXT.md` and rollout policy v2 to `docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-tech-debt-decomposition-a705.md`; enforced in `scripts/session_check.sh`.
   - Added follow-up closure contract `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review15-a705.md`.
   - Opened wave19 PR `#924` and fixed red `session-gate` by syncing required session artifacts (`docs/SESSIONS/SESSION-2026-03-02-uvc-ux-stage1-pr-a705.md` + `docs/SESSION_INDEX.md`).
+  - Synced worktree to merged `main` after wave19 merge (`PR #924`, merge commit `125ee13d`).
+  - Hardened closure-review15 TP with binary DoD matrix (`Fixed` iff all objective checks pass; otherwise mandatory `Open + wave20` with failed-criteria map).
+  - Executed `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW15-A705` on merged-main evidence:
+  - Binary DoD matrix result: `FAIL` on criterion `C1` (`console.py=24469` > threshold `24396`), while deterministic lanes remained green (`35 passed`, `branch_change 32 passed`).
+  - Published closure-review15 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review15-a705.md`.
+  - Locked follow-up implementation contract `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave20-a705.md` with explicit failed-criteria map.
 - next:
-  - Keep PR `#924` green and merge wave19 changes.
-  - After wave19 merge, execute `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW15-A705` on merged-main evidence and lock next bounded implementation block.
+  - Merge closure-review15 doc update PR and execute `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE20-A705`.
+  - Close failed criterion `C1` (`console.py <= 24396`) and rerun closure-review16 binary matrix.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -311,8 +321,11 @@
   - docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave18-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review14-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave19-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review15-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave20-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave18-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review14-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review15-a705.md
   - console-web/src/components/provisioning-wizard-autopilot.ts
   - console-web/src/components/provisioning-wizard-branch-actions.ts
   - truffles-api/app/services/console_branch_changes.py
@@ -463,5 +476,13 @@
   - checks: `cd console-web && npm run lint -- --file src/components/ProvisioningWizard.tsx --file src/components/provisioning-wizard-branch-actions.ts --file e2e/platform-admin.spec.ts` (`No ESLint warnings or errors`)
   - checks: `cd console-web && npm run build` (`pass`)
   - checks: `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 E2E_USE_STORAGE_STATE=0 E2E_DETERMINISTIC_AUTH=1 npm run test:e2e -- --grep "show actionable provisioning guidance for quick-create server errors|deep-link from Tenants action queue to Workspace execute"` (`2 passed`)
+  - checks: `wc -l truffles-api/app/routers/console.py console-web/src/components/ProvisioningWizard.tsx` (`24469`, `4287`)
+  - checks: `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/services/console_branch_changes.py truffles-api/tests/test_console_branch_changes.py` (`pass`)
+  - checks: `pytest -q truffles-api/tests/test_console_onboarding_readiness.py truffles-api/tests/test_console_membership_state.py truffles-api/tests/test_console_fleet_state.py truffles-api/tests/test_console_router_utils.py truffles-api/tests/test_console_control_tower_program.py` (`35 passed`)
+  - checks: `pytest -q truffles-api/tests/test_console_branch_changes.py truffles-api/tests/test_console_admin_provisioning.py -k "branch_change"` (`32 passed, 23 deselected`)
+  - checks: `rg -n "def get_branch_change_draft_payload|def get_branch_for_change_context" truffles-api/app/services/console_branch_changes.py` (`found`)
+  - checks: `rg -n "get_branch_change_draft_payload|get_branch_for_change_context" truffles-api/app/routers/console.py` (`found`)
+  - checks: `rg -n "createInitialAgentFormState|createProvisioningWizardResetState" console-web/src/components/provisioning-wizard-state.ts` (`found`)
+  - checks: `rg -n "createInitialAgentFormState|createProvisioningWizardResetState" console-web/src/components/ProvisioningWizard.tsx` (`found`)
   - checks: `SESSION_AGENT=a705 scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-05
