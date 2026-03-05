@@ -375,6 +375,15 @@ from app.services.console_branch_changes import (
     apply_branch_change_publish_failed_state as _apply_branch_change_publish_failed_state,
 )
 from app.services.console_branch_changes import (
+    apply_branch_change_publish_runtime_error_state as _apply_branch_change_publish_runtime_error_state,
+)
+from app.services.console_branch_changes import (
+    apply_branch_change_rollback_failed_state as _apply_branch_change_rollback_failed_state,
+)
+from app.services.console_branch_changes import (
+    apply_branch_change_rolled_back_state as _apply_branch_change_rolled_back_state,
+)
+from app.services.console_branch_changes import (
     apply_branch_change_validation_result as _apply_branch_change_validation_result,
 )
 from app.services.console_branch_changes import (
@@ -20387,9 +20396,11 @@ async def publish_branch_change(
             db=db,
         )
     except ConsoleAPIError as exc:
-        change.status = "publish_failed"
-        change.publish_error = exc.message
-        change.updated_at = now
+        _apply_branch_change_publish_runtime_error_state(
+            change=change,
+            error_message=exc.message,
+            now=now,
+        )
         db.commit()
         raise
 
@@ -20458,12 +20469,12 @@ async def rollback_branch_change(
 
     now = datetime.now(timezone.utc)
     if not rollback_patch:
-        change.status = "rolled_back"
-        change.rollback_error = None
-        change.rollback_snapshot = _jsonable_payload(current_snapshot)
-        change.rolled_back_at = now
-        change.rolled_back_by = context.agent.id
-        change.updated_at = now
+        _apply_branch_change_rolled_back_state(
+            change=change,
+            rollback_snapshot=current_snapshot,
+            actor_id=context.agent.id,
+            now=now,
+        )
         db.commit()
         db.refresh(change)
         return ConsoleBranchChangeResponse(
@@ -20483,8 +20494,11 @@ async def rollback_branch_change(
         normalized_patch, errors = {}, [exc.message]
     if errors:
         message = "; ".join(errors)
-        change.rollback_error = message
-        change.updated_at = now
+        _apply_branch_change_rollback_failed_state(
+            change=change,
+            error_message=message,
+            now=now,
+        )
         db.commit()
         raise ConsoleAPIError(409, "CHANGE_VALIDATION_FAILED", message, {"errors": errors})
 
@@ -20500,18 +20514,22 @@ async def rollback_branch_change(
             db=db,
         )
     except ConsoleAPIError as exc:
-        change.rollback_error = exc.message
-        change.updated_at = now
+        _apply_branch_change_rollback_failed_state(
+            change=change,
+            error_message=exc.message,
+            now=now,
+        )
         db.commit()
         raise
 
     refreshed_branch = db.query(Branch).filter(Branch.id == branch.id).first()
-    change.status = "rolled_back"
-    change.rollback_error = None
-    change.rollback_snapshot = _jsonable_payload(_snapshot_branch_for_change(refreshed_branch)) if refreshed_branch else None
-    change.rolled_back_at = now
-    change.rolled_back_by = context.agent.id
-    change.updated_at = now
+    rollback_snapshot = _snapshot_branch_for_change(refreshed_branch) if refreshed_branch else {}
+    _apply_branch_change_rolled_back_state(
+        change=change,
+        rollback_snapshot=rollback_snapshot,
+        actor_id=context.agent.id,
+        now=now,
+    )
     record_audit_event(
         db,
         actor=context.agent,

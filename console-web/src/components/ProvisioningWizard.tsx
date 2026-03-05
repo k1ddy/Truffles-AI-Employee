@@ -70,6 +70,8 @@ import {
     buildCreateCompanyPayload,
 } from "@/components/provisioning-wizard-account-actions";
 import {
+    buildGoLiveDecisionPayload,
+    buildGoLiveWaiverPayload,
     buildCreateBranchPayload,
     handleBranchMutationError,
     buildSaveBookingPayload,
@@ -1219,22 +1221,19 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const canRunAutopilot = autopilotRunState.canRun;
 
     const handleApproveGoLive = () => {
-        const reason = goLiveDecisionReason.trim();
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        if (scorecardFailed) {
-            const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
-            reportValidationError(`Go-live заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
-            return;
-        }
-        if (!reason) {
-            reportValidationError("Укажите reason для approve");
+        const result = buildGoLiveDecisionPayload({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            decisionLabel: "approve",
+            enforceScorecard: scorecardFailed,
+            scorecardMissingLabels: goNoGoMissingLabels,
+        });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Ошибка валидации approve");
             return;
         }
         approveGoLiveMutation.mutate(
-            { reason },
+            result.payload,
             {
                 onSuccess: () => {
                     setGoLiveDecisionReason("");
@@ -1244,17 +1243,19 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     };
 
     const handleRejectGoLive = () => {
-        const reason = goLiveDecisionReason.trim();
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        if (!reason) {
-            reportValidationError("Укажите reason для reject");
+        const result = buildGoLiveDecisionPayload({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            decisionLabel: "reject",
+            enforceScorecard: false,
+            scorecardMissingLabels: [],
+        });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Ошибка валидации reject");
             return;
         }
         rejectGoLiveMutation.mutate(
-            { reason },
+            result.payload,
             {
                 onSuccess: () => {
                     setGoLiveDecisionReason("");
@@ -1264,27 +1265,19 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     };
 
     const handleWaiveGoLive = () => {
-        const reason = goLiveDecisionReason.trim();
-        const ttlHours = Number.parseInt(goLiveWaiverHours, 10);
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        if (scorecardFailed) {
-            const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
-            reportValidationError(`Go-live заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
-            return;
-        }
-        if (!reason) {
-            reportValidationError("Укажите reason для waiver");
-            return;
-        }
-        if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
-            reportValidationError("ttl_hours должен быть положительным числом");
+        const result = buildGoLiveWaiverPayload({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            ttlHoursInput: goLiveWaiverHours,
+            enforceScorecard: scorecardFailed,
+            scorecardMissingLabels: goNoGoMissingLabels,
+        });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Ошибка валидации waiver");
             return;
         }
         waiveGoLiveMutation.mutate(
-            { reason, ttl_hours: ttlHours },
+            result.payload,
             {
                 onSuccess: () => {
                     setGoLiveDecisionReason("");
