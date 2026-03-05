@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md
-- branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-a1
+- task_package: docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md
+- branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
@@ -27,8 +27,20 @@
   - Calendar booking response extended with action semantics (`needs_action`, `attention_reason`) and queue-aware contract.
   - Inbox case read-model extended with queue semantics fields (`priority_tier`, `attention_reason`, `target_response_at`) for list/get endpoints.
   - OpenAPI contract synced to include new calendar filters and response fields.
+  - Wave4 runtime slice started: backend `GET /cases/{case_id}/stream` (SSE) with heartbeat + refresh events.
+  - Proxy upgraded to pass through `text/event-stream` and resolve scope from query params for EventSource.
+  - `useCaseData` switched to SSE-first sync with controlled polling fallback and `reason_code` state.
+  - OpenAPI + generated API types synced for new stream endpoint.
+  - Wave4 observability slice implemented in `/metrics/daily`: `queue_lag_seconds`, `stale_view_rate`, `case_action_apply_latency_seconds` + status fields.
+  - Insights/Ops UI updated with realtime reliability KPI cards and action-oriented hints.
+  - OpenAPI contract tests expanded for realtime metrics schema coverage.
+  - Closeout TP created for post-wave4 release discipline with explicit canary/go-no-go/rollback block.
+  - Wave4 release runbook added (`INBOX_CALENDAR_WAVE4_RELEASE.md`) with staged rollout and KPI gates.
+  - `useCaseData` now supports runtime rollback flag (`NEXT_PUBLIC_CASE_SSE_ENABLED=0`) to force polling-only mode.
+  - `inspect_case` live lane hardened with explicit auth-gate reasoned skip and direct-case fallback.
+  - Master/Wave4 TP linkage updated to include closeout block.
 - next:
-  - Continue wave3 with additional frontend consume hardening and rollout prep.
+  - Publish closeout commit and PR update; execute canary by runbook after green CI.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -46,5 +58,23 @@
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`skip`, live workspace unavailable)
   - `python3 scripts/check_migration_governance.py --strict` (`pass`)
+  - `scripts/session_check.sh` (`Session OK`)
+  - `python3 scripts/generate_openapi.py`
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd console-web && npm run generate:api`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check`
+  - `pytest -q truffles-api/tests/test_console_openapi_case_stream_contract.py truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py` (`12 passed`)
+  - `pytest -q truffles-api/tests/test_console_cases_helpers.py` (`17 passed`)
+  - `cd console-web && npm run lint -- --file src/hooks/useCaseData.ts --file src/app/api/proxy/[...path]/route.ts` (`pass`)
+  - `cd console-web && npm run check:uvc-antidrift` (`pass`)
+  - `cd truffles-api && pytest -q tests/test_console_analytics.py tests/test_console_openapi_case_stream_contract.py tests/test_console_openapi_metrics_contract.py tests/test_console_openapi_calendar_contract.py tests/test_calendar_bookings_router.py tests/test_console_cases_helpers.py` (`41 passed`)
+  - `cd console-web && npm run lint -- --file src/app/insights/page.tsx --file src/components/OpsPage.tsx --file src/hooks/useCaseData.ts --file src/app/api/proxy/[...path]/route.ts` (`pass`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run check:uvc-antidrift` (`pass`)
+  - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`skip`, live data lane unavailable for case assertion)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run lint -- --file src/hooks/useCaseData.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --reporter=line` (`pass`)
+  - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --reporter=line` (`skip`, auth gate reasoned)
   - `scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-05

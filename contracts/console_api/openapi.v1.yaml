@@ -365,6 +365,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/{case_id}/stream:
+    get:
+      tags:
+      - console
+      summary: Stream Case Updates
+      description: SSE stream for a single case with polling fallback on the frontend.
+      operationId: stream_case_updates_console_v1_cases__case_id__stream_get
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Case Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+            text/event-stream: {}
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/inbox/macros:
     get:
       tags:
@@ -13331,6 +13365,48 @@ components:
             - need
           - type: 'null'
           title: First Response Status
+        queue_lag_seconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Queue Lag Seconds
+        queue_lag_status:
+          anyOf:
+          - type: string
+            enum:
+            - fact
+            - estimate
+            - need
+          - type: 'null'
+          title: Queue Lag Status
+        stale_view_rate:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Stale View Rate
+        stale_view_status:
+          anyOf:
+          - type: string
+            enum:
+            - fact
+            - estimate
+            - need
+          - type: 'null'
+          title: Stale View Status
+        case_action_apply_latency_seconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Case Action Apply Latency Seconds
+        case_action_apply_latency_status:
+          anyOf:
+          - type: string
+            enum:
+            - fact
+            - estimate
+            - need
+          - type: 'null'
+          title: Case Action Apply Latency Status
         after_hours_total:
           anyOf:
           - type: integer

@@ -2697,6 +2697,12 @@ class ConsoleMetricsDailyResponse(BaseModel):
     first_response_p90_seconds: Optional[float] = None
     first_response_missing_total: Optional[int] = None
     first_response_status: Optional[KpiStatus] = None
+    queue_lag_seconds: Optional[float] = None
+    queue_lag_status: Optional[KpiStatus] = None
+    stale_view_rate: Optional[float] = None
+    stale_view_status: Optional[KpiStatus] = None
+    case_action_apply_latency_seconds: Optional[float] = None
+    case_action_apply_latency_status: Optional[KpiStatus] = None
     after_hours_total: Optional[int] = None
     after_hours_covered: Optional[int] = None
     after_hours_missing_total: Optional[int] = None

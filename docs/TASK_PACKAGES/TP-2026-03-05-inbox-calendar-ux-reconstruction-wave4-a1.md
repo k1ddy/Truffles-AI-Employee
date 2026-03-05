@@ -145,7 +145,7 @@
 - `Current residuals accepted in this block`: монолитность `calendar/page.tsx` и `CaseList.tsx` сохраняется частично.
 - `Why not in this block`: приоритет — runtime reliability и прод-контроль, не UI decomposition.
 - `Risk if deferred`: стоимость будущих изменений queue UX останется высокой.
-- `Linked follow-up Task Package(s)`: `TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md` (создать при старте пост-wave4 hardening).
+- `Linked follow-up Task Package(s)`: `TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md`.
 - `Expiry/trigger to stop deferral`: следующий крупный UX change request в календаре.
 
 ## Next-block contract (mandatory)
