@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-05-console-e2e-live-auth-hardening-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -39,8 +39,12 @@
   - `useCaseData` now supports runtime rollback flag (`NEXT_PUBLIC_CASE_SSE_ENABLED=0`) to force polling-only mode.
   - `inspect_case` live lane hardened with explicit auth-gate reasoned skip and direct-case fallback.
   - Master/Wave4 TP linkage updated to include closeout block.
+  - Follow-up TP created for live auth hardening (`TP-2026-03-05-console-e2e-live-auth-hardening-a1.md`) with mandatory RCA + one-web-search sections.
+  - `inspect_case` live no-mocks hardened against stale workspace filters and fixture-only case fallback.
+  - Added API-backed live case discovery and calendar queue fallback path when no inspectable case exists in current live scope.
+  - Removed flaky auth-gate skip path by re-login recovery + deterministic calendar-surface validation.
 - next:
-  - Publish closeout commit and PR update; execute canary by runbook after green CI.
+  - Publish live-auth hardening commit/PR and continue with unified auth-helper follow-up if requested.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -77,4 +81,8 @@
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --reporter=line` (`pass`)
   - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --reporter=line` (`skip`, auth gate reasoned)
   - `scripts/session_check.sh` (`Session OK`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/login.spec.ts --project=chromium-login --reporter=line` (`3 passed`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`, calendar fallback for empty queue)
+  - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
 - last_updated: 2026-03-05
