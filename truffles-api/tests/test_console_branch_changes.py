@@ -1,4 +1,6 @@
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -7,6 +9,7 @@ from app.routers import console as console_router
 from app.schemas.console import ConsoleBranchChangePublishRequest, ConsoleBranchChangeRollbackRequest
 from app.services.console_branch_changes import (
     build_branch_change_diff,
+    build_branch_change_list_response,
     normalize_branch_change_patch,
     prepare_branch_change_payload,
 )
@@ -41,6 +44,28 @@ def _normalize_patch_for_branch_change(
             current_branch,
             operation="branch_activate",
         ),
+    )
+
+
+def _build_branch_change_row(*, created_at: datetime, status: str = "draft") -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid4(),
+        branch_id=uuid4(),
+        status=status,
+        reason="test",
+        draft_payload={},
+        diff_payload={},
+        validation_payload={"ok": True, "errors": []},
+        base_snapshot={},
+        published_snapshot=None,
+        rollback_snapshot=None,
+        publish_error=None,
+        rollback_error=None,
+        created_at=created_at,
+        updated_at=created_at,
+        validated_at=None,
+        published_at=None,
+        rolled_back_at=None,
     )
 
 
@@ -85,6 +110,44 @@ def test_build_branch_change_rollback_patch_only_includes_changed_fields():
         "name": "Branch A",
         "is_active": True,
     }
+
+
+def test_build_branch_change_list_response_builds_page_and_cursor():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    rows = [
+        _build_branch_change_row(created_at=now, status="draft"),
+        _build_branch_change_row(created_at=now - timedelta(minutes=1), status="draft"),
+        _build_branch_change_row(created_at=now - timedelta(minutes=2), status="draft"),
+    ]
+    query = Mock()
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.limit.return_value = query
+    query.all.return_value = rows
+
+    response = build_branch_change_list_response(
+        query=query,
+        status="draft",
+        cursor_date=None,
+        limit=2,
+    )
+
+    assert len(response.items) == 2
+    assert response.has_more is True
+    assert response.cursor == rows[1].created_at.isoformat()
+    query.filter.assert_called_once()
+    query.order_by.assert_called_once()
+    query.limit.assert_called_once_with(3)
+
+
+def test_build_branch_change_list_response_rejects_invalid_status():
+    with pytest.raises(ValueError, match="Invalid status"):
+        build_branch_change_list_response(
+            query=Mock(),
+            status="unknown",
+            cursor_date=None,
+            limit=10,
+        )
 
 
 def test_normalize_branch_change_status_filter():

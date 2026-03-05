@@ -1,12 +1,17 @@
 import json
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from app.models import Branch, ConsoleBranchChange
-from app.schemas.console import ConsoleBranchChangeRecord, ConsoleBranchUpdateRequest
+from app.schemas.console import (
+    ConsoleBranchChangeListResponse,
+    ConsoleBranchChangeRecord,
+    ConsoleBranchUpdateRequest,
+)
 
 BRANCH_CHANGE_MANAGED_FIELDS: tuple[str, ...] = (
     "slug",
@@ -141,6 +146,34 @@ def normalize_branch_change_status_filter(value: str | None) -> str | None:
     if normalized not in BRANCH_CHANGE_ALLOWED_STATUSES:
         raise ValueError("Invalid status")
     return normalized
+
+
+def build_branch_change_list_response(
+    *,
+    query: Any,
+    status: str | None,
+    cursor_date: datetime | None,
+    limit: int,
+) -> ConsoleBranchChangeListResponse:
+    normalized_status = normalize_branch_change_status_filter(status)
+    if normalized_status:
+        query = query.filter(ConsoleBranchChange.status == normalized_status)
+    if cursor_date is not None:
+        query = query.filter(ConsoleBranchChange.created_at < cursor_date)
+
+    rows = (
+        query.order_by(ConsoleBranchChange.created_at.desc(), ConsoleBranchChange.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    has_more = len(rows) > limit
+    items_rows = rows[:limit]
+    next_cursor = items_rows[-1].created_at.isoformat() if has_more and items_rows else None
+    return ConsoleBranchChangeListResponse(
+        items=[serialize_branch_change_record(row) for row in items_rows],
+        cursor=next_cursor,
+        has_more=has_more,
+    )
 
 
 def build_branch_update_request(

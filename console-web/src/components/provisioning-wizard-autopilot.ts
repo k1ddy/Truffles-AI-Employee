@@ -2,7 +2,9 @@ import type { components } from "@/types/api.generated";
 import type { ProvisioningAutopilotFormState } from "@/components/provisioning-wizard-state";
 
 type OnboardingAutopilotRequest = components["schemas"]["ConsoleOnboardingAutopilotRequest"];
+type OnboardingAutopilotResponse = components["schemas"]["ConsoleOnboardingAutopilotResponse"];
 type OnboardingPurchasedService = NonNullable<OnboardingAutopilotRequest["purchased_services"]>[number];
+type PaymentStatus = "pending" | "confirmed" | "rejected";
 
 type DeriveAutopilotStateInput = {
     form: ProvisioningAutopilotFormState;
@@ -56,6 +58,32 @@ export type AutopilotRunState = {
     missingInputs: string[];
     blockedByScorecard: boolean;
     canRun: boolean;
+};
+
+type SyncAutopilotMutationSuccessInput<
+    TBranch,
+    TCapabilities,
+    TContract extends { purchased?: unknown },
+> = {
+    data: OnboardingAutopilotResponse;
+    setAutopilotResult: (value: OnboardingAutopilotResponse) => void;
+    setCompanyId: (value: string) => void;
+    setClientId: (value: string) => void;
+    setClientSlug: (value: string) => void;
+    setBranchData: (value: TBranch) => void;
+    setCapabilitiesDraft: (value: TCapabilities) => void;
+    setCapabilitiesTouched: (value: boolean) => void;
+    normalizeCapabilities: (value: unknown) => TCapabilities;
+    normalizeOnboardingContractPayload: (value: unknown) => TContract;
+    setOnboardingContractDraft: (value: TContract) => void;
+    setPurchasedCapabilitiesDraft: (value: TCapabilities) => void;
+    setOnboardingContractTouched: (value: boolean) => void;
+    setPurchasedJsonDraft: (value: string) => void;
+    setPurchasedJsonDirty: (value: boolean) => void;
+    setPaymentStatusDraft: (value: PaymentStatus) => void;
+    setIntegrationWebhookSecret: (value: string) => void;
+    setIntegrationWebhookUrl: (value: string) => void;
+    setAutoStepSync: (value: boolean) => void;
 };
 
 export function deriveAutopilotState(input: DeriveAutopilotStateInput): DerivedAutopilotState {
@@ -201,4 +229,55 @@ export function buildRunAutopilotPayload(input: BuildRunAutopilotPayloadInput): 
         auto_create_reference_pack: true,
         auto_publish_knowledge: false,
     };
+}
+
+export function syncAutopilotMutationSuccess<
+    TBranch,
+    TCapabilities,
+    TContract extends { purchased?: unknown },
+>(
+    input: SyncAutopilotMutationSuccessInput<TBranch, TCapabilities, TContract>,
+): void {
+    const { data } = input;
+    input.setAutopilotResult(data);
+
+    if (data.company?.id) {
+        input.setCompanyId(data.company.id);
+    }
+    if (data.client?.id) {
+        input.setClientId(data.client.id);
+    }
+    if (data.client?.slug) {
+        input.setClientSlug(data.client.slug);
+    }
+    if (data.branch) {
+        input.setBranchData(data.branch as TBranch);
+    }
+
+    if (data.capabilities?.payload) {
+        const normalizedCapabilities = input.normalizeCapabilities(data.capabilities.payload);
+        input.setCapabilitiesDraft(normalizedCapabilities);
+        input.setCapabilitiesTouched(false);
+    }
+
+    if (data.onboarding_contract?.payload) {
+        const normalizedContract = input.normalizeOnboardingContractPayload(data.onboarding_contract.payload);
+        const normalizedPurchased = input.normalizeCapabilities(normalizedContract.purchased ?? null);
+        input.setOnboardingContractDraft(normalizedContract);
+        input.setPurchasedCapabilitiesDraft(normalizedPurchased);
+        input.setOnboardingContractTouched(false);
+        input.setPurchasedJsonDraft(JSON.stringify(normalizedPurchased, null, 2));
+        input.setPurchasedJsonDirty(false);
+    }
+
+    if (data.payment_status) {
+        input.setPaymentStatusDraft(data.payment_status as PaymentStatus);
+    }
+    if (data.webhook_secret) {
+        input.setIntegrationWebhookSecret(data.webhook_secret);
+    }
+    if (data.webhook_url) {
+        input.setIntegrationWebhookUrl(data.webhook_url);
+    }
+    input.setAutoStepSync(true);
 }

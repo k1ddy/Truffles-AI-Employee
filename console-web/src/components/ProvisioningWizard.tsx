@@ -82,6 +82,7 @@ import {
     buildAutopilotRunValidationError,
     buildRunAutopilotPayload,
     deriveAutopilotState,
+    syncAutopilotMutationSuccess,
     toggleAutopilotServiceSelection,
 } from "@/components/provisioning-wizard-autopilot";
 import {
@@ -929,42 +930,31 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return response.data as OnboardingAutopilotResponse;
         },
         onSuccess: (data) => {
-            setAutopilotResult(data);
-            if (data.company?.id) {
-                setCompanyId(data.company.id);
-            }
-            if (data.client?.id) {
-                setClientId(data.client.id);
-            }
-            if (data.client?.slug) {
-                setClientSlug(data.client.slug);
-            }
-            if (data.branch) {
-                setBranchData(data.branch as ProvisioningBranch);
-            }
-            if (data.capabilities?.payload) {
-                setCapabilitiesDraft(normalizeCapabilities(data.capabilities.payload));
-                setCapabilitiesTouched(false);
-            }
-            if (data.onboarding_contract?.payload) {
-                const normalizedContract = normalizeOnboardingContractPayload(data.onboarding_contract.payload);
-                const normalizedPurchased = normalizeCapabilities(normalizedContract.purchased);
-                setOnboardingContractDraft(normalizedContract);
-                setPurchasedCapabilitiesDraft(normalizedPurchased);
-                setOnboardingContractTouched(false);
-                setPurchasedJsonDraft(JSON.stringify(normalizedPurchased, null, 2));
-                setPurchasedJsonDirty(false);
-            }
-            if (data.payment_status) {
-                setPaymentStatusDraft(data.payment_status);
-            }
-            if (data.webhook_secret) {
-                setIntegrationWebhookSecret(data.webhook_secret);
-            }
-            if (data.webhook_url) {
-                setIntegrationWebhookUrl(data.webhook_url);
-            }
-            setAutoStepSync(true);
+            syncAutopilotMutationSuccess({
+                data,
+                setAutopilotResult,
+                setCompanyId,
+                setClientId,
+                setClientSlug,
+                setBranchData: (branch) => setBranchData(branch as ProvisioningBranch),
+                setCapabilitiesDraft,
+                setCapabilitiesTouched,
+                normalizeCapabilities: (value) => normalizeCapabilities(value as RawCapabilitiesPayload | null | undefined),
+                normalizeOnboardingContractPayload: (value) => (
+                    normalizeOnboardingContractPayload(value as OnboardingContractPayload | null | undefined)
+                ),
+                setOnboardingContractDraft: (value) => (
+                    setOnboardingContractDraft(value as OnboardingContractPayload)
+                ),
+                setPurchasedCapabilitiesDraft,
+                setOnboardingContractTouched,
+                setPurchasedJsonDraft,
+                setPurchasedJsonDirty,
+                setPaymentStatusDraft,
+                setIntegrationWebhookSecret,
+                setIntegrationWebhookUrl,
+                setAutoStepSync,
+            });
             queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
             queryClient.invalidateQueries({ queryKey: ["onboarding-scorecard"] });
             queryClient.invalidateQueries({ queryKey: ["admin-capabilities"] });
