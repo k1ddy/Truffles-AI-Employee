@@ -369,13 +369,13 @@ from app.services.compliance_policy_registry_service import (
 )
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_branch_changes import (
+    BRANCH_CHANGE_MUTABLE_STATUSES as _BRANCH_CHANGE_MUTABLE_STATUSES,
+)
+from app.services.console_branch_changes import (
     apply_branch_change_publish_failed_state as _apply_branch_change_publish_failed_state,
 )
 from app.services.console_branch_changes import (
     apply_branch_change_validation_result as _apply_branch_change_validation_result,
-)
-from app.services.console_branch_changes import (
-    BRANCH_CHANGE_MUTABLE_STATUSES as _BRANCH_CHANGE_MUTABLE_STATUSES,
 )
 from app.services.console_branch_changes import (
     build_branch_change_list_response as _build_branch_change_list_response,
