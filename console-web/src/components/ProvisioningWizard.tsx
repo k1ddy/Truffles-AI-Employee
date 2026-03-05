@@ -70,11 +70,11 @@ import {
     buildCreateCompanyPayload,
 } from "@/components/provisioning-wizard-account-actions";
 import {
-    buildGoLiveDecisionPayload,
-    buildGoLiveWaiverPayload,
     buildCreateBranchPayload,
     handleBranchMutationError,
-    submitGoLiveMutation,
+    submitBranchMutation,
+    submitGoLiveDecisionMutation,
+    submitGoLiveWaiverMutation,
     buildSaveBookingPayload,
     buildSaveInstancePayload,
     buildSaveKnowledgePayload,
@@ -1220,58 +1220,46 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const autopilotMissingInputs = autopilotRunState.missingInputs;
     const autopilotBlockedByScorecard = autopilotRunState.blockedByScorecard;
     const canRunAutopilot = autopilotRunState.canRun;
+    const clearGoLiveDecisionReason = () => {
+        setGoLiveDecisionReason("");
+    };
 
     const handleApproveGoLive = () => {
-        submitGoLiveMutation({
-            result: buildGoLiveDecisionPayload({
-                branchId: branchData?.id,
-                reason: goLiveDecisionReason,
-                decisionLabel: "approve",
-                enforceScorecard: scorecardFailed,
-                scorecardMissingLabels: goNoGoMissingLabels,
-            }),
-            fallbackError: "Ошибка валидации approve",
+        submitGoLiveDecisionMutation({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            decisionLabel: "approve",
+            enforceScorecard: scorecardFailed,
+            scorecardMissingLabels: goNoGoMissingLabels,
             reportValidationError,
             mutate: approveGoLiveMutation.mutate,
-            clearReason: () => {
-                setGoLiveDecisionReason("");
-            },
+            clearReason: clearGoLiveDecisionReason,
         });
     };
 
     const handleRejectGoLive = () => {
-        submitGoLiveMutation({
-            result: buildGoLiveDecisionPayload({
-                branchId: branchData?.id,
-                reason: goLiveDecisionReason,
-                decisionLabel: "reject",
-                enforceScorecard: false,
-                scorecardMissingLabels: [],
-            }),
-            fallbackError: "Ошибка валидации reject",
+        submitGoLiveDecisionMutation({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            decisionLabel: "reject",
+            enforceScorecard: false,
+            scorecardMissingLabels: [],
             reportValidationError,
             mutate: rejectGoLiveMutation.mutate,
-            clearReason: () => {
-                setGoLiveDecisionReason("");
-            },
+            clearReason: clearGoLiveDecisionReason,
         });
     };
 
     const handleWaiveGoLive = () => {
-        submitGoLiveMutation({
-            result: buildGoLiveWaiverPayload({
-                branchId: branchData?.id,
-                reason: goLiveDecisionReason,
-                ttlHoursInput: goLiveWaiverHours,
-                enforceScorecard: scorecardFailed,
-                scorecardMissingLabels: goNoGoMissingLabels,
-            }),
-            fallbackError: "Ошибка валидации waiver",
+        submitGoLiveWaiverMutation({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            ttlHoursInput: goLiveWaiverHours,
+            enforceScorecard: scorecardFailed,
+            scorecardMissingLabels: goNoGoMissingLabels,
             reportValidationError,
             mutate: waiveGoLiveMutation.mutate,
-            clearReason: () => {
-                setGoLiveDecisionReason("");
-            },
+            clearReason: clearGoLiveDecisionReason,
         });
     };
 
@@ -1327,82 +1315,78 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     };
 
     const handleCreateBranch = () => {
-        const result = buildCreateBranchPayload({
-            clientId,
-            branchName: branchForm.name,
-            branchSlug: branchForm.slug,
-            timezone: branchForm.timezone,
-            phone: branchForm.phone,
-            bootstrap: branchBootstrap,
+        submitBranchMutation({
+            result: buildCreateBranchPayload({
+                clientId,
+                branchName: branchForm.name,
+                branchSlug: branchForm.slug,
+                timezone: branchForm.timezone,
+                phone: branchForm.phone,
+                bootstrap: branchBootstrap,
+            }),
+            fallbackError: "Не удалось собрать payload для branch",
+            reportValidationError,
+            mutate: createBranchMutation.mutate,
         });
-        if (result.error || !result.payload) {
-            reportValidationError(result.error ?? "Не удалось собрать payload для branch");
-            return;
-        }
-        createBranchMutation.mutate(result.payload);
     };
 
     const handleUpdateBranchDraft = () => {
-        const result = buildUpdateBranchDraftPayload({
-            branchId: branchData?.id,
-            branchName: branchForm.name,
-            branchSlug: branchForm.slug,
-            timezone: branchForm.timezone,
-            phone: branchForm.phone,
+        submitBranchMutation({
+            result: buildUpdateBranchDraftPayload({
+                branchId: branchData?.id,
+                branchName: branchForm.name,
+                branchSlug: branchForm.slug,
+                timezone: branchForm.timezone,
+                phone: branchForm.phone,
+            }),
+            fallbackError: "Не удалось собрать payload для branch draft",
+            reportValidationError,
+            mutate: patchBranchMutation.mutate,
         });
-        if (result.error || !result.payload) {
-            reportValidationError(result.error ?? "Не удалось собрать payload для branch draft");
-            return;
-        }
-        patchBranchMutation.mutate(result.payload);
     };
 
     const handleSaveInstance = () => {
-        const result = buildSaveInstancePayload({
-            branchId: branchData?.id,
-            instanceId: branchForm.instanceId,
-            phone: branchForm.phone,
-            activateOnSave,
-        });
-        if (result.error || !result.payload) {
-            reportValidationError(result.error ?? "Не удалось собрать payload для instance");
-            return;
-        }
-        patchBranchMutation.mutate(
-            result.payload,
-            {
-                onSuccess: (data) => {
-                    const typed = data as ProvisioningBranch;
-                    if (typed?.id && typed.instance_id) {
-                        getWebhookSecretMutation.mutate({ branchId: typed.id });
-                    }
-                },
+        submitBranchMutation({
+            result: buildSaveInstancePayload({
+                branchId: branchData?.id,
+                instanceId: branchForm.instanceId,
+                phone: branchForm.phone,
+                activateOnSave,
+            }),
+            fallbackError: "Не удалось собрать payload для instance",
+            reportValidationError,
+            mutate: patchBranchMutation.mutate,
+            onSuccess: (data?: unknown) => {
+                const typed = data as ProvisioningBranch;
+                if (typed?.id && typed.instance_id) {
+                    getWebhookSecretMutation.mutate({ branchId: typed.id });
+                }
             },
-        );
+        });
     };
 
     const handleSaveTelegram = () => {
-        const result = buildSaveTelegramPayload({
-            branchId: branchData?.id,
-            chatId: branchForm.telegramChatId,
+        submitBranchMutation({
+            result: buildSaveTelegramPayload({
+                branchId: branchData?.id,
+                chatId: branchForm.telegramChatId,
+            }),
+            fallbackError: "Не удалось собрать payload для telegram",
+            reportValidationError,
+            mutate: patchBranchMutation.mutate,
         });
-        if (result.error || !result.payload) {
-            reportValidationError(result.error ?? "Не удалось собрать payload для telegram");
-            return;
-        }
-        patchBranchMutation.mutate(result.payload);
     };
 
     const handleSaveKnowledge = () => {
-        const result = buildSaveKnowledgePayload({
-            branchId: branchData?.id,
-            knowledgeTag: branchForm.knowledgeTag,
+        submitBranchMutation({
+            result: buildSaveKnowledgePayload({
+                branchId: branchData?.id,
+                knowledgeTag: branchForm.knowledgeTag,
+            }),
+            fallbackError: "Не удалось собрать payload для knowledge",
+            reportValidationError,
+            mutate: patchBranchMutation.mutate,
         });
-        if (result.error || !result.payload) {
-            reportValidationError(result.error ?? "Не удалось собрать payload для knowledge");
-            return;
-        }
-        patchBranchMutation.mutate(result.payload);
     };
 
     const handleSaveBooking = () => {
@@ -1416,10 +1400,6 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             bookingDefaultDuration,
             bookingBufferMin,
         });
-        if (result.error || !result.payload) {
-            reportValidationError(result.error ?? "Не удалось собрать payload для booking");
-            return;
-        }
         if (result.nextWorkingHoursJson || result.nextBookingSettingsJson) {
             setBranchForm((prev) => ({
                 ...prev,
@@ -1427,7 +1407,12 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 bookingSettings: result.nextBookingSettingsJson ?? prev.bookingSettings,
             }));
         }
-        patchBranchMutation.mutate(result.payload);
+        submitBranchMutation({
+            result,
+            fallbackError: "Не удалось собрать payload для booking",
+            reportValidationError,
+            mutate: patchBranchMutation.mutate,
+        });
     };
 
     const handleCreateAgent = () => {

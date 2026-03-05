@@ -25,6 +25,36 @@ type GoLiveMutationInput<TPayload> = {
     clearReason: () => void;
 };
 
+type BranchMutationInput<TPayload> = {
+    result: ActionResult<TPayload>;
+    fallbackError: string;
+    reportValidationError: (message: string) => void;
+    mutate: (payload: TPayload, options?: { onSuccess: (data: unknown) => void }) => void;
+    onSuccess?: (data: unknown) => void;
+};
+
+type GoLiveDecisionMutationInput = {
+    branchId: string | null | undefined;
+    reason: string;
+    decisionLabel: "approve" | "reject";
+    enforceScorecard: boolean;
+    scorecardMissingLabels: string[];
+    reportValidationError: (message: string) => void;
+    mutate: (payload: BranchGoLiveDecisionRequest, options: { onSuccess: () => void }) => void;
+    clearReason: () => void;
+};
+
+type GoLiveWaiverMutationInput = {
+    branchId: string | null | undefined;
+    reason: string;
+    ttlHoursInput: string;
+    enforceScorecard: boolean;
+    scorecardMissingLabels: string[];
+    reportValidationError: (message: string) => void;
+    mutate: (payload: BranchGoLiveWaiverRequest, options: { onSuccess: () => void }) => void;
+    clearReason: () => void;
+};
+
 type SaveBookingResult = ActionResult<BranchUpdateRequest> & {
     nextWorkingHoursJson?: string;
     nextBookingSettingsJson?: string;
@@ -126,6 +156,47 @@ export function submitGoLiveMutation<TPayload>(input: GoLiveMutationInput<TPaylo
         onSuccess: () => {
             input.clearReason();
         },
+    });
+}
+
+export function submitBranchMutation<TPayload>(input: BranchMutationInput<TPayload>): void {
+    if (input.result.error || !input.result.payload) {
+        input.reportValidationError(input.result.error ?? input.fallbackError);
+        return;
+    }
+    const options = input.onSuccess ? { onSuccess: input.onSuccess } : undefined;
+    input.mutate(input.result.payload, options);
+}
+
+export function submitGoLiveDecisionMutation(input: GoLiveDecisionMutationInput): void {
+    submitGoLiveMutation({
+        result: buildGoLiveDecisionPayload({
+            branchId: input.branchId,
+            reason: input.reason,
+            decisionLabel: input.decisionLabel,
+            enforceScorecard: input.enforceScorecard,
+            scorecardMissingLabels: input.scorecardMissingLabels,
+        }),
+        fallbackError: `Ошибка валидации ${input.decisionLabel}`,
+        reportValidationError: input.reportValidationError,
+        mutate: input.mutate,
+        clearReason: input.clearReason,
+    });
+}
+
+export function submitGoLiveWaiverMutation(input: GoLiveWaiverMutationInput): void {
+    submitGoLiveMutation({
+        result: buildGoLiveWaiverPayload({
+            branchId: input.branchId,
+            reason: input.reason,
+            ttlHoursInput: input.ttlHoursInput,
+            enforceScorecard: input.enforceScorecard,
+            scorecardMissingLabels: input.scorecardMissingLabels,
+        }),
+        fallbackError: "Ошибка валидации waiver",
+        reportValidationError: input.reportValidationError,
+        mutate: input.mutate,
+        clearReason: input.clearReason,
     });
 }
 

@@ -10,6 +10,7 @@ from app.models import Branch, ConsoleBranchChange
 from app.schemas.console import (
     ConsoleBranchChangeListResponse,
     ConsoleBranchChangeRecord,
+    ConsoleBranchChangeResponse,
     ConsoleBranchUpdateRequest,
 )
 
@@ -90,6 +91,18 @@ def serialize_branch_change_record(change: ConsoleBranchChange) -> ConsoleBranch
         validated_at=change.validated_at.isoformat() if change.validated_at else None,
         published_at=change.published_at.isoformat() if change.published_at else None,
         rolled_back_at=change.rolled_back_at.isoformat() if change.rolled_back_at else None,
+    )
+
+
+def build_branch_change_response(
+    *,
+    change: ConsoleBranchChange,
+    branch: Branch | None,
+    serialize_branch: Callable[[Branch], Any],
+) -> ConsoleBranchChangeResponse:
+    return ConsoleBranchChangeResponse(
+        change=serialize_branch_change_record(change),
+        branch=serialize_branch(branch) if branch else None,
     )
 
 
@@ -486,3 +499,23 @@ def prepare_branch_change_payload(
     if not diff_payload:
         errors.append("No effective branch changes detected")
     return normalized_patch, errors, diff_payload, base_snapshot
+
+
+def prepare_branch_change_rollback_payload(
+    *,
+    db: Session,
+    branch: Branch,
+    rollback_patch: Mapping[str, object],
+    validation_error_type: type[Exception],
+    normalize_branch_change_patch: Callable[..., tuple[dict[str, object], list[str]]],
+    normalize_kwargs: Mapping[str, object],
+) -> tuple[dict[str, object], list[str]]:
+    try:
+        return normalize_branch_change_patch(
+            db=db,
+            branch=branch,
+            patch_payload=rollback_patch,
+            **normalize_kwargs,
+        )
+    except validation_error_type as exc:
+        return {}, [_error_message(exc)]

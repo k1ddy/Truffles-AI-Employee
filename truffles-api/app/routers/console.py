@@ -393,6 +393,9 @@ from app.services.console_branch_changes import (
     build_branch_change_list_response as _build_branch_change_list_response,
 )
 from app.services.console_branch_changes import (
+    build_branch_change_response as _build_branch_change_response_for_context,
+)
+from app.services.console_branch_changes import (
     build_branch_change_rollback_patch as _build_branch_change_rollback_patch,
 )
 from app.services.console_branch_changes import (
@@ -409,6 +412,9 @@ from app.services.console_branch_changes import (
 )
 from app.services.console_branch_changes import (
     prepare_branch_change_payload as _prepare_branch_change_payload_for_context,
+)
+from app.services.console_branch_changes import (
+    prepare_branch_change_rollback_payload as _prepare_branch_change_rollback_payload_for_context,
 )
 from app.services.console_branch_changes import (
     query_branch_changes_for_context as _query_branch_changes_for_context,
@@ -20272,9 +20278,10 @@ async def get_branch_change(
     )
     change = _get_branch_change_for_context(db, context=context, change_id=change_id)
     branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(branch) if branch else None,
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -20346,9 +20353,10 @@ async def draft_branch_change(
     db.commit()
     db.refresh(change)
 
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(branch),
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -20397,9 +20405,10 @@ async def validate_branch_change(
     )
     db.commit()
     db.refresh(change)
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(branch),
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -20497,9 +20506,10 @@ async def publish_branch_change(
     )
     db.commit()
     db.refresh(change)
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(refreshed_branch) if refreshed_branch else None,
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=refreshed_branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -20548,21 +20558,20 @@ async def rollback_branch_change(
         )
         db.commit()
         db.refresh(change)
-        return ConsoleBranchChangeResponse(
-            change=_serialize_branch_change_record(change),
-            branch=_serialize_branch(branch),
+        return _build_branch_change_response_for_context(
+            change=change,
+            branch=branch,
+            serialize_branch=_serialize_branch,
         )
 
-    errors: list[str] = []
-    try:
-        normalized_patch, errors = _normalize_branch_change_patch_payload(
-            db=db,
-            branch=branch,
-            patch_payload=rollback_patch,
-            **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
-        )
-    except ConsoleAPIError as exc:
-        normalized_patch, errors = {}, [exc.message]
+    normalized_patch, errors = _prepare_branch_change_rollback_payload_for_context(
+        db=db,
+        branch=branch,
+        rollback_patch=rollback_patch,
+        validation_error_type=ConsoleAPIError,
+        normalize_branch_change_patch=_normalize_branch_change_patch_payload,
+        normalize_kwargs=_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+    )
     if errors:
         message = "; ".join(errors)
         _apply_branch_change_rollback_failed_state(
@@ -20616,9 +20625,10 @@ async def rollback_branch_change(
     )
     db.commit()
     db.refresh(change)
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(refreshed_branch) if refreshed_branch else None,
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=refreshed_branch,
+        serialize_branch=_serialize_branch,
     )
 
 

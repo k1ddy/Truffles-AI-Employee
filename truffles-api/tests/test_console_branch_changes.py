@@ -16,8 +16,10 @@ from app.services.console_branch_changes import (
     apply_branch_change_validation_result,
     build_branch_change_diff,
     build_branch_change_list_response,
+    build_branch_change_response,
     normalize_branch_change_patch,
     prepare_branch_change_payload,
+    prepare_branch_change_rollback_payload,
 )
 from app.services.console_errors import ConsoleAPIError
 
@@ -116,6 +118,44 @@ def test_build_branch_change_rollback_patch_only_includes_changed_fields():
         "name": "Branch A",
         "is_active": True,
     }
+
+
+def test_build_branch_change_response_with_branch():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = _build_branch_change_row(created_at=now, status="validated")
+    branch = SimpleNamespace(id=uuid4(), slug="branch-a")
+
+    response = build_branch_change_response(
+        change=change,  # type: ignore[arg-type]
+        branch=branch,  # type: ignore[arg-type]
+        serialize_branch=lambda item: {
+            "id": str(item.id),
+            "slug": item.slug,
+            "name": "Branch A",
+            "is_active": True,
+        },
+    )
+
+    assert response.change.id == change.id
+    assert response.branch is not None
+    assert response.branch.id == branch.id
+    assert response.branch.slug == "branch-a"
+    assert response.branch.name == "Branch A"
+    assert response.branch.is_active is True
+
+
+def test_build_branch_change_response_without_branch():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = _build_branch_change_row(created_at=now, status="draft")
+
+    response = build_branch_change_response(
+        change=change,  # type: ignore[arg-type]
+        branch=None,
+        serialize_branch=lambda item: {"id": str(item.id)},
+    )
+
+    assert response.change.id == change.id
+    assert response.branch is None
 
 
 def test_build_branch_change_list_response_builds_page_and_cursor():
@@ -294,6 +334,49 @@ def test_prepare_branch_change_payload_reports_no_effective_changes(monkeypatch)
     assert diff_payload == {}
     assert "No effective branch changes detected" in errors
     assert base_snapshot["name"] == "Branch A"
+
+
+def test_prepare_branch_change_rollback_payload_normalizes_patch():
+    db = SimpleNamespace()
+    branch = SimpleNamespace(id=uuid4())
+    normalize_call: dict[str, object] = {}
+
+    def normalize_patch(**kwargs):
+        normalize_call.update(kwargs)
+        return {"name": "Branch A"}, []
+
+    normalized, errors = prepare_branch_change_rollback_payload(
+        db=db,  # type: ignore[arg-type]
+        branch=branch,  # type: ignore[arg-type]
+        rollback_patch={"name": "Branch A"},
+        validation_error_type=ConsoleAPIError,
+        normalize_branch_change_patch=normalize_patch,
+        normalize_kwargs={"marker": "rollback"},
+    )
+
+    assert normalized == {"name": "Branch A"}
+    assert errors == []
+    assert normalize_call["db"] is db
+    assert normalize_call["branch"] is branch
+    assert normalize_call["patch_payload"] == {"name": "Branch A"}
+    assert normalize_call["marker"] == "rollback"
+
+
+def test_prepare_branch_change_rollback_payload_maps_validation_error():
+    def raise_error(**_kwargs):
+        raise ConsoleAPIError(409, "CHANGE_VALIDATION_FAILED", "validation failed")
+
+    normalized, errors = prepare_branch_change_rollback_payload(
+        db=SimpleNamespace(),  # type: ignore[arg-type]
+        branch=SimpleNamespace(id=uuid4()),  # type: ignore[arg-type]
+        rollback_patch={"name": "Branch A"},
+        validation_error_type=ConsoleAPIError,
+        normalize_branch_change_patch=raise_error,
+        normalize_kwargs={},
+    )
+
+    assert normalized == {}
+    assert errors == ["validation failed"]
 
 
 def test_apply_branch_change_validation_result_marks_validated():
