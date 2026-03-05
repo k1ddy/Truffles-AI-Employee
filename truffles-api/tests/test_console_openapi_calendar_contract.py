@@ -113,6 +113,10 @@ def test_booking_response_contract_exposes_no_show_followup_flag() -> None:
     assert _has_string_type(properties.get("conversation_id") or {})
     assert "case_id" in properties
     assert _has_string_type(properties.get("case_id") or {})
+    assert "needs_action" in properties
+    assert (properties.get("needs_action") or {}).get("type") == "boolean"
+    assert "attention_reason" in properties
+    assert _has_string_type(properties.get("attention_reason") or {})
 
 
 def test_calendar_bookings_list_contract_exposes_conversation_filter() -> None:
@@ -122,6 +126,23 @@ def test_calendar_bookings_list_contract_exposes_conversation_filter() -> None:
     get_op = path_item.get("get") or {}
     params = get_op.get("parameters") or []
     assert any((param or {}).get("name") == "conversation_id" for param in params)
+    assert any((param or {}).get("name") == "case_id" for param in params)
+    assert any((param or {}).get("name") == "lane" for param in params)
+    assert any((param or {}).get("name") == "needs_action" for param in params)
+    assert any((param or {}).get("name") == "cursor" for param in params)
+
+
+def test_bookings_list_response_contract_exposes_cursor_and_has_more() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    bookings_list_schema = schemas.get("BookingsListResponse") or {}
+    properties = bookings_list_schema.get("properties") or {}
+
+    assert "items" in properties
+    assert "cursor" in properties
+    assert _has_string_type(properties.get("cursor") or {})
+    assert "has_more" in properties
+    assert (properties.get("has_more") or {}).get("type") == "boolean"
 
 
 def test_no_show_followup_request_contract_exposes_result_and_rebook_link() -> None:

@@ -799,6 +799,44 @@ def _calculate_sla_status(created_at: datetime) -> str:
     return "ok"
 
 
+def _build_case_queue_signals(
+    *,
+    created_at: datetime,
+    needs_reply: bool,
+    has_delivery_error: bool,
+    has_pending_outbox: bool,
+    human_lock_active: bool,
+) -> dict[str, Optional[str]]:
+    sla_status = _calculate_sla_status(created_at)
+    target_response_at = (created_at + timedelta(hours=1)).isoformat()
+    priority_tier = "low"
+    attention_reason = None
+    if has_delivery_error:
+        priority_tier = "urgent"
+        attention_reason = "Ошибка доставки: проверьте отправку"
+    elif needs_reply and sla_status == "breached":
+        priority_tier = "urgent"
+        attention_reason = "SLA просрочен: нужен ответ менеджера"
+    elif needs_reply and sla_status == "warning":
+        priority_tier = "high"
+        attention_reason = "SLA на подходе: ответьте клиенту"
+    elif has_pending_outbox:
+        priority_tier = "high"
+        attention_reason = "Есть ожидающие отправки сообщения"
+    elif needs_reply:
+        priority_tier = "normal"
+        attention_reason = "Клиент ожидает ответ"
+    elif human_lock_active:
+        priority_tier = "normal"
+        attention_reason = "Диалог на ручном контроле менеджера"
+    return {
+        "sla_status": sla_status,
+        "priority_tier": priority_tier,
+        "attention_reason": attention_reason,
+        "target_response_at": target_response_at,
+    }
+
+
 def _format_telegram_timestamp(value: Optional[int]) -> Optional[str]:
     if not value:
         return None
@@ -10204,7 +10242,10 @@ async def list_cases(
                 channel=handover.channel,
                 created_at=handover.created_at.isoformat(),
                 **_format_case_metrics(handover),
-                sla_status=_calculate_sla_status(handover.created_at),
+                sla_status=queue_signals["sla_status"],
+                priority_tier=queue_signals["priority_tier"],
+                attention_reason=queue_signals["attention_reason"],
+                target_response_at=queue_signals["target_response_at"],
                 customer_name=user.name if user else None,
                 customer_phone=user.phone if user else None,
                 customer_remote_jid=user.remote_jid if user else None,
@@ -10217,12 +10258,10 @@ async def list_cases(
                     conversation_channel=conversation.channel,
                 ),
                 last_message_preview=last_message_preview,
-                needs_reply=bool(
-                    last_inbound_at and (not last_outbound_at or last_inbound_at > last_outbound_at)
-                ),
-                has_delivery_error=bool(failed_count and failed_count > 0),
-                has_pending_outbox=bool(pending_count and pending_count > 0),
-                human_lock_active=bool(lock_until),
+                needs_reply=needs_reply,
+                has_delivery_error=has_delivery_error,
+                has_pending_outbox=has_pending_outbox,
+                human_lock_active=human_lock_active,
                 human_lock_until=lock_until.isoformat() if lock_until else None,
                 human_lock_remaining_seconds=(
                     max(0, int((lock_until - now_utc).total_seconds())) if lock_until else None
@@ -10248,6 +10287,21 @@ async def list_cases(
                 lock_reason,
                 lock_by_name,
             ) in items
+            for needs_reply in [bool(
+                last_inbound_at and (not last_outbound_at or last_inbound_at > last_outbound_at)
+            )]
+            for has_delivery_error in [bool(failed_count and failed_count > 0)]
+            for has_pending_outbox in [bool(pending_count and pending_count > 0)]
+            for human_lock_active in [bool(lock_until)]
+            for queue_signals in [
+                _build_case_queue_signals(
+                    created_at=handover.created_at,
+                    needs_reply=needs_reply,
+                    has_delivery_error=has_delivery_error,
+                    has_pending_outbox=has_pending_outbox,
+                    human_lock_active=human_lock_active,
+                )
+            ]
         ],
         cursor=next_cursor,
         has_more=has_more,
@@ -11012,7 +11066,17 @@ async def get_case(
     if branch_id is not None and branch_id not in allowed_branch_ids:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this case denied")
     
-    sla_status = _calculate_sla_status(case.created_at)
+    needs_reply = bool(case_health.get("needs_reply"))
+    has_delivery_error = bool(case_health.get("has_delivery_error"))
+    has_pending_outbox = bool(case_health.get("has_pending_outbox"))
+    human_lock_active = bool(human_lock_snapshot.get("human_lock_active"))
+    queue_signals = _build_case_queue_signals(
+        created_at=case.created_at,
+        needs_reply=needs_reply,
+        has_delivery_error=has_delivery_error,
+        has_pending_outbox=has_pending_outbox,
+        human_lock_active=human_lock_active,
+    )
     
     return ConsoleCase(
         id=case.id,
@@ -11027,7 +11091,10 @@ async def get_case(
         channel=case.channel,
         created_at=case.created_at.isoformat(),
         **_format_case_metrics(case),
-        sla_status=sla_status,
+        sla_status=queue_signals["sla_status"],
+        priority_tier=queue_signals["priority_tier"],
+        attention_reason=queue_signals["attention_reason"],
+        target_response_at=queue_signals["target_response_at"],
         customer_name=customer_name,
         customer_phone=customer_phone,
         customer_remote_jid=customer_remote_jid,
@@ -11040,9 +11107,9 @@ async def get_case(
         last_activity_at=case_health.get("last_activity_at").isoformat() if case_health.get("last_activity_at") else None,
         last_activity_channel=case_health.get("last_activity_channel"),
         last_message_preview=case_health.get("last_message_preview"),
-        needs_reply=case_health.get("needs_reply"),
-        has_delivery_error=case_health.get("has_delivery_error"),
-        has_pending_outbox=case_health.get("has_pending_outbox"),
+        needs_reply=needs_reply,
+        has_delivery_error=has_delivery_error,
+        has_pending_outbox=has_pending_outbox,
         **human_lock_snapshot,
         telegram_trail=telegram_trail,
     )

@@ -1,13 +1,17 @@
-# TP-2026-03-05-inbox-calendar-ux-reconstruction-a1
+# TP-2026-03-05-inbox-calendar-ux-reconstruction-a1 (Master Program)
 
 ## Block identity
-- `BLOCK_ID`: CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-A1
+- `BLOCK_ID`: CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-MASTER-A1
 - `PARENT_BLOCK_ID`: none
 - `DEPENDS_ON`: none
-- `UNLOCKS`: CONSOLE-INBOX-CALENDAR-UX-HARDENING-A1
+- `UNLOCKS`:
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE1-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE2-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE3-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE4-A1`
 
 ## Название/цель
-Капитально улучшить UX и бизнес-логику вкладок `Заявки` и `Записи`: связать их в единый рабочий поток менеджера, убрать вводящие в заблуждение SLA-ярлыки, уменьшить лишний скролл и добавить понятные действия без дублирования функций.
+Обновить ТЗ в формат исполнимой программы: закрыть все бизнес-требования по вкладкам `Заявки` и `Записи` в полном объеме через связанный набор TP/PR волн, без дублирования логики и без разрыва контекста между операторскими действиями.
 
 ## Canon refs
 - `AGENTS.md`
@@ -16,136 +20,137 @@
 - `STRATEGY/REQUIREMENTS.md`
 - `SPECS/SYSTEM_REFERENCE.md`
 - `docs/CONSOLE_AUDIT/UX_BACKLOG.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave1-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave2-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave3-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1.md`
 
 ## FACT pre-check (before implementation)
-- `Impacted code/contracts/tests`:
-  - `truffles-api/app/routers/calendar.py`
-  - `truffles-api/app/services/appointment_service.py`
-  - `truffles-api/app/models/handover.py`
-  - `truffles-api/tests/test_console_openapi_calendar_contract.py`
-  - `console-web/src/app/calendar/page.tsx`
-  - `console-web/src/components/CaseConversation.tsx`
-  - `console-web/src/components/CaseList.tsx`
-  - `console-web/src/components/InboxView.tsx`
-  - `console-web/src/utils/labels.ts`
-  - `console-web/e2e/inspect_case.spec.ts`
-- `Baseline findings`:
-  - Календарь (`Записи`) не содержит контекстного возврата к заявке и не использует `conversation_id` для фильтрации очереди.
-  - Бэкенд принимает `conversation_id` в `BookingCreate`, но выдача bookings не возвращает `conversation_id/case_id`.
-  - В `Заявках` большой блок контекста/аутрича до чата увеличивает скролл до рабочего содержимого.
-  - SLA-лейблы вида `В норме / До внимания: 59м / На связи 1м` не объясняют операторское действие.
+- `Implemented in previous waves (fact)`:
+  - Связка `Заявки -> Записи` и контекстный возврат уже внедрены.
+  - UX-29..UX-33 в `docs/CONSOLE_AUDIT/UX_BACKLOG.md` переведены в `Fixed/Mitigated`.
+- `Remaining architecture gaps (fact)`:
+  - SLA в `Заявках` все еще завязан на age-threshold и не выражает формальный action priority contract.
+  - `appointments` не содержит явной `case_id` связи на уровне модели; часть связки остается эвристикой по `conversation_id`.
+  - `calendar/bookings` выдается list-only (без cursor/has_more), queue-triage масштабируется ограниченно.
+  - Реал-тайм обновления операторского контекста основаны на polling, нет событийного канала для управляемой задержки.
 
 ## One web search (mandatory before implementation)
-- **Query (exact):** `Zendesk agent workspace omnichannel routing best practices for reducing context switching between tickets and scheduling`
-- **Date/time (local):** `2026-03-05T07:10:03+05:00`
+- **Query (exact):** `Dynamics 365 Customer Service unified routing queue prioritization assignment methods`
+- **Date/time (local):** `2026-03-05T09:37:36+05:00`
 - **Sources opened:**
-  - `https://www.zendesk.com/service/agent-workspace/`
-  - `https://www.zendesk.com/service/features/omnichannel-routing/`
-  - `https://support.zendesk.com/hc/en-us/articles/4408821224858`
-- **Ready solutions found:** единый агентский workspace, контекстные переходы без потери текущего кейса, приоритизация очереди по action-driven статусам вместо абстрактных time-only меток.
-- **Decision (`reuse/integrate/build`):** `integrate` — внедрить в текущие вкладки связанный workflow `case-booking` и action-driven SLA copy, без добавления новой вкладки.
-- **Rejected options:** отдельный новый модуль/вкладка для "диспетчеризации" (лишний IA-слой и дублирование).
+  - `https://learn.microsoft.com/en-us/dynamics365/customer-service/administer/queues-omnichannel`
+  - `https://learn.microsoft.com/en-us/dynamics365/customer-service/administer/configure-assignment-rules`
+  - `https://learn.microsoft.com/en-us/dynamics365/customer-service/use/work-with-queues`
+- **Ready solutions found:** приоритет очереди как формальный сигнал (priority number + routing rules), явные assignment methods, наблюдаемая lifecycle-диагностика work items.
+- **Decision (`reuse/integrate/build`):** `integrate` — внедрить приоритеты, причины внимания и operator queue semantics в текущие вкладки `Заявки/Записи` без добавления нового top-level модуля.
+- **Rejected options:** отдельный новый "диспетчер" экран как главный путь работы менеджера.
+- **Source quality:** high-signal primary source = official Microsoft Learn documentation.
 
 ## Root cause (mandatory)
-- **Symptom:** менеджер делает лишние переходы между `Заявками` и `Записями`, теряет контекст и тратит время на чтение непонятных статусов.
-- **Minimal reproduction:** открыть кейс в `Заявках`, затем перейти в `Записи`; отсутствуют прямые контекстные ссылки/фильтры и нельзя быстро вернуться к кейсу/чату.
-- **Evidence:** текущие контракты API и UI-поток страниц выше.
+- **Symptom:** менеджеры видят улучшенный UI, но не получают полностью управляемый операционный контур для приоритизации и масштабного triage.
+- **Minimal reproduction:** последовательность `входящий кейс -> переход в записи -> приоритизация очереди -> возврат в чат` требует ручных/эвристических решений и не дает контрактной модели срочности.
+- **Evidence:** API/model ограничения и UI polling-модель, перечисленные в FACT pre-check.
 - **Five Whys:**
-  1. Почему лишние переходы? Нет контрактной связи кейса и брони в выдаче `bookings`.
-  2. Почему нет связи в UI? `calendar` не получает/не отображает `conversation_id` и `case_id`.
-  3. Почему менеджер скроллит вниз в `Заявках`? Первичный экран перегружен вторичными блоками до чата.
-  4. Почему SLA вводит в заблуждение? Лейблы ориентированы на минуты, а не на действие и бизнес-приоритет.
-  5. Почему это критично? Падает скорость обработки лидов и растет риск неверных действий.
-- **Root cause statement:** контракты и UI не реализуют единый action-driven рабочий поток по кейсу/броне, из-за чего менеджер работает в разорванном контексте.
-- **Fix mechanism:** расширить booking read-model (`conversation_id`, `case_id`), добавить фильтр/переходы между вкладками, упростить SLA copy и сократить первый скролл.
+  1. Почему теряется бизнес-смысл SLA? Нет явного queue-priority контракта, есть только возраст кейса.
+  2. Почему контекст иногда неполный? Связь кейса и записи частично восстанавливается эвристикой.
+  3. Почему triage плохо масштабируется? Нет server-side курсоров и формального lane-сигнала в read-model.
+  4. Почему менеджерские действия не полностью наблюдаемы? Нет унифицированного action audit/readout в потоке `case-booking`.
+  5. Почему это критично? Падает предсказуемость SLA, растет время ответа и риск неверного приоритета.
+- **Root cause statement:** отсутствует полный operator-grade контракт между case queue semantics, booking linkage и runtime наблюдаемостью; UI-правки без этого не закрывают ТЗ полностью.
+- **Fix mechanism:** завершить программу отдельными волнами с атомарным scope: `queue contract -> runtime reliability/scale`, с явным TP/PR linkage.
 
 ## Reuse-first plan (mandatory)
-- **Reuse:** текущие роуты `calendar`, `cases`, существующие компоненты Inbox/Calendar, текущие e2e-спеки.
-- **Integrate:** добавить недостающую связку и action copy в существующие экраны.
-- **Build only if needed:** новые поля ответа и минимальная UI-панель контекста в календаре.
+- **Reuse:** существующие `console`/`calendar` роуты, текущие `Inbox/Calendar` страницы, уже реализованные UX-паттерны wave1/wave2.
+- **Integrate:** добавить формальный queue/read-model контракт и reliability-слой поверх текущих вкладок.
+- **Build only if needed:** только недостающие контракты, миграции и event-stream части, без новой IA.
 
 ## Invariant
-- Никаких semantic hardcode в core/runtime policy.
-- `Заявки` остаются источником чата/кейса, `Записи` остаются источником бронирований.
-- Улучшения не ломают текущие сценарии создания/редактирования записи.
+- Сохраняем LLM-first и deterministic-boundary принципы.
+- Не добавляем новые top-level вкладки.
+- Не дублируем действия между `Заявки` и `Записи`.
+- Любая метрика/статус должна иметь явное бизнес-действие менеджера.
 
 ## Scope
-- Добавить `conversation_id` и `case_id` в booking response.
-- Добавить фильтр `conversation_id` в `GET /calendar/bookings`.
-- Добавить двустороннюю навигацию между `Заявки` и `Записи`.
-- Упростить SLA-лейблы на action-language.
-- Свернуть вторичные блоки в `Заявках`, чтобы чат был выше в первом экране.
-- Сделать screenshot-based проверку UI.
+- Обновить ТЗ до multi-wave execution model с обязательной связью TP/PR.
+- Зафиксировать границы wave3/wave4 так, чтобы закрыть остаток требований без архитектурных костылей.
+- Зафиксировать acceptance и release safety условия для полного завершения темы.
 
 ## Out of scope
-- Полный редизайн всех вкладок console-web.
-- Изменение доменной модели booking beyond linkage fields.
-- Новые top-level разделы навигации.
+- Немедленная реализация всех wave3/wave4 изменений в этом TP.
+- Изменение продуктовой модели вне вкладок `Заявки/Записи`.
 
 ## Touch-list
-- `docs/CONSOLE_AUDIT/UX_BACKLOG.md`
-- `truffles-api/app/routers/calendar.py`
-- `truffles-api/app/services/appointment_service.py`
-- `truffles-api/tests/test_console_openapi_calendar_contract.py`
-- `console-web/src/app/calendar/page.tsx`
-- `console-web/src/components/CaseConversation.tsx`
-- `console-web/src/components/CaseList.tsx`
-- `console-web/src/components/InboxView.tsx`
-- `console-web/src/utils/labels.ts`
-- `console-web/e2e/inspect_case.spec.ts`
+- `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave1-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave2-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave3-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1.md`
+- `docs/SESSIONS/SESSION-2026-03-05-inbox-calendar-ux-reconstruction-a1.md`
 
 ## Plan (1..N)
-1. Расширить backend read-contract по booking linkage + фильтр по `conversation_id`.
-2. Обновить frontend API-потребление и добавить context banner/return actions в `calendar`.
-3. Обновить `Inbox` layout: чат выше, вторичные блоки collapse by default.
-4. Переписать SLA copy на action-language без двусмысленных time-фраз.
-5. Добавить/обновить e2e снимки (`Заявки`, `Записи`, переходы).
-6. Прогнать targeted тесты и зафиксировать evidence.
+1. Зафиксировать master-TP как source-of-truth программы и contract map.
+2. Привязать wave2 к master и закрыть continuity-разрыв в `Next-block contract`.
+3. Создать wave3 TP (backend/data-contract atomics + operator queue semantics).
+4. Создать wave4 TP (realtime/observability/scale + production rollout discipline).
+5. Проверить link-integrity и mandatory sections по всем wave-документам.
+
+## Execution model (mandatory TP/PR split)
+| Wave | TP document | PR policy | Objective | Status |
+|---|---|---|---|---|
+| Wave1 | `TP-2026-03-05-inbox-calendar-ux-reconstruction-wave1-a1.md` | PR-1 (completed) | Базовая связка `Заявки и Записи`, first-screen улучшения, SLA copy cleanup. | Done |
+| Wave2 | `TP-2026-03-05-inbox-calendar-ux-reconstruction-wave2-a1.md` | PR-2 (completed) | Action-first queue controls и терминология для оператора. | Done |
+| Wave3 | `TP-2026-03-05-inbox-calendar-ux-reconstruction-wave3-a1.md` | PR-3 (single PR; split allowed into `-part1/-part2` только по TP update) | Formal queue semantics и backend contract consistency. | Planned |
+| Wave4 | `TP-2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1.md` | PR-4 (single PR; split allowed into `-part1/-part2` только по TP update) | Realtime reliability, observability, rollout safety на проде. | Planned |
+
+## TP/PR linkage rules (mandatory)
+- Если wave не помещается в один PR, перед split обязателен update соответствующего wave TP с явным `part`-разделением и зависимостями.
+- Каждый child TP обязан ссылаться на `BLOCK_ID` master + предыдущую волну в `DEPENDS_ON`.
+- Merge следующей волны запрещен без evidence и `Next-block contract` из предыдущей.
 
 ## DoD
-- Менеджер может из `Заявки` открыть релевантные `Записи` по кейсу и вернуться назад.
-- В `Записях` виден и используется контекст кейса (`conversation_id/case_id`).
-- Первый экран `Заявки` не требует прокрутки для чтения чата.
-- SLA лейблы объясняют действие (что делать), а не только время.
-- Цепочка тестов и скриншоты подтверждают отсутствие регрессии.
+- Есть master TP с полной программной декомпозицией и четкими связями wave->TP->PR.
+- У каждой волны есть собственный TP с mandatory секциями и deterministic checks.
+- Все remaining requirements из ТЗ отображены в конкретных волнах, без “потом решим”.
+- Между волнами нет дублирования scope и нет логических разрывов.
 
 ## Checks
-- `cd truffles-api && pytest -q tests/test_console_openapi_calendar_contract.py`
-- `cd truffles-api && pytest -q tests/test_calendar_noshow_followup_router.py`
-- `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file src/utils/labels.ts`
-- `cd console-web && npx playwright test e2e/inspect_case.spec.ts`
+- `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "## (One web search|Root cause|Residual architecture debt|Next-block contract)" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave1-a1.md docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave2-a1.md docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave3-a1.md docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1.md`
+- `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave1-a1.md docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave2-a1.md docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave3-a1.md docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1.md`
 
 ## Evidence
 - Git diff по touch-list.
-- Output команд checks.
-- Скриншоты Playwright после изменений с `inbox` + `calendar` и переходами.
+- Output checks.
+- Обновленный session log с ссылкой на master + wave3/wave4 TP.
 
 ## Release safety (mandatory)
-- **Rollout:** без feature-флага, но в рамках существующих экранов и контрактно-совместимого API-расширения.
-- **Go/no-go:** зеленые targeted tests + e2e + визуальная проверка скриншотов.
-- **Rollback:** revert commit блока и повтор checks.
+- **Rollout:** по волнам; каждая волна проходит свой go/no-go до старта следующей.
+- **Go/no-go:** mandatory checks + wave-specific tests/evidence + отсутствие open P0 regressions.
+- **Rollback:** `git revert` текущего PR и возврат к предыдущей завершенной волне.
 
 ## Rollback
-- `git revert REVISION_SHA` в рабочей ветке и повторный прогон checks.
+- `git revert REVISION_SHA`
+- Перезапуск checks для подтверждения восстановленного состояния.
 
 ## No-go
-- Добавление новой вкладки без явной необходимости.
-- Дублирование одинаковых действий в `Заявках` и `Записях`.
-- Снижение quality gates ради скорости.
+- Декомпозиция "на словах" без отдельных TP/PR и ссылок между ними.
+- Добавление новых top-level вкладок вместо оптимизации `Заявки/Записи`.
+- Ослабление acceptance-гейтов для ускорения merge.
 
 ## Риски/блокеры
-- Возможная зависимость e2e от живого окружения/данных.
-- Возможные ожидания старого SLA текста в существующих тестах.
+- Разрастание scope wave3 (migration + API + UI) в один PR.
+- Различия данных на live backend для wave4 realtime/evidence.
+- Риск regressions при переходе от polling к event-driven модели.
 
 ## Residual architecture debt (mandatory)
-- `Current residuals accepted in this block`: календарный экран все еще совмещает создание записи и очередь в одном компоненте.
-- `Why not in this block`: цель блока — связка и UX-поток, а не полная декомпозиция страницы.
-- `Risk if deferred`: сложнее безопасно расширять advanced-фильтры и bulk-операции.
-- `Linked follow-up Task Package(s)`: `TP-2026-03-xx-calendar-queue-decomposition-a1` (создать после merge).
-- `Expiry/trigger to stop deferral`: при следующем изменении calendar UI более чем в 3 зонах.
+- `Current residuals accepted in this block`: отсутствует формальный queue-priority контракт и полноценный event-driven контур.
+- `Why not in this block`: текущий блок только обновляет ТЗ и программную структуру.
+- `Risk if deferred`: UX будет улучшен визуально, но без полного операционного эффекта на проде.
+- `Linked follow-up Task Package(s)`: `TP-2026-03-05-inbox-calendar-ux-reconstruction-wave3-a1.md`, `TP-2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1.md`.
+- `Expiry/trigger to stop deferral`: любой новый P0 UX/SLA дефект в `Заявки/Записи` требует немедленного старта wave3.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: разделить `calendar/page.tsx` на queue/read-model и create/edit flow модули.
-- `First deterministic check command`: `cd console-web && npm run lint -- --file src/app/calendar/page.tsx`
-- `Blocked-by conditions`: текущий блок должен пройти e2e/скриншоты и API contract checks.
+- `Next block objective`: реализовать wave3 — формальный queue semantics контракт и устранить эвристическую связь кейса/записи.
+- `First deterministic check command`: `cd truffles-api && pytest -q tests/test_console_openapi_calendar_contract.py tests/test_calendar_bookings_router.py tests/test_console_cases_helpers.py`
+- `Blocked-by conditions`: wave2 evidence должно оставаться валидным, а master TP не должен иметь open continuity gaps.
 - `Owner role for closure`: Brain / Top Architect.

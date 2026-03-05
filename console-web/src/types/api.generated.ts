@@ -2495,6 +2495,8 @@ export interface components {
             notes?: string | null;
             /** Conversation Id */
             conversation_id?: string | null;
+            /** Case Id */
+            case_id?: string | null;
         };
         /** BookingNoShowFollowUpRequest */
         BookingNoShowFollowUpRequest: {
@@ -2548,6 +2550,13 @@ export interface components {
             conversation_id?: string | null;
             /** Case Id */
             case_id?: string | null;
+            /**
+             * Needs Action
+             * @default false
+             */
+            needs_action: boolean;
+            /** Attention Reason */
+            attention_reason?: string | null;
             /** Created At */
             created_at: string;
         };
@@ -2562,6 +2571,13 @@ export interface components {
         BookingsListResponse: {
             /** Items */
             items: components["schemas"]["BookingResponse"][];
+            /** Cursor */
+            cursor?: string | null;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
         };
         /** CapabilitiesPayload */
         "CapabilitiesPayload-Input": {
@@ -4011,6 +4027,12 @@ export interface components {
              * @default ok
              */
             sla_status: string | null;
+            /** Priority Tier */
+            priority_tier?: string | null;
+            /** Attention Reason */
+            attention_reason?: string | null;
+            /** Target Response At */
+            target_response_at?: string | null;
             /** Customer Name */
             customer_name?: string | null;
             /** Customer Phone */
@@ -15567,9 +15589,13 @@ export interface operations {
             query?: {
                 specialist_id?: string | null;
                 conversation_id?: string | null;
+                case_id?: string | null;
+                lane?: "attention" | "all";
+                needs_action?: boolean | null;
                 date_from?: string | null;
                 date_to?: string | null;
                 status?: string | null;
+                cursor?: string | null;
                 limit?: number;
             };
             header?: never;
