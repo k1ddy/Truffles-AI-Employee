@@ -393,6 +393,9 @@ from app.services.console_branch_changes import (
     build_branch_change_list_response as _build_branch_change_list_response,
 )
 from app.services.console_branch_changes import (
+    build_branch_change_response as _build_branch_change_response_for_context,
+)
+from app.services.console_branch_changes import (
     build_branch_change_rollback_patch as _build_branch_change_rollback_patch,
 )
 from app.services.console_branch_changes import (
@@ -20208,9 +20211,10 @@ async def get_branch_change(
     )
     change = _get_branch_change_for_context(db, context=context, change_id=change_id)
     branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(branch) if branch else None,
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -20282,9 +20286,10 @@ async def draft_branch_change(
     db.commit()
     db.refresh(change)
 
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(branch),
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -20333,9 +20338,10 @@ async def validate_branch_change(
     )
     db.commit()
     db.refresh(change)
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(branch),
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -20433,9 +20439,10 @@ async def publish_branch_change(
     )
     db.commit()
     db.refresh(change)
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(refreshed_branch) if refreshed_branch else None,
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=refreshed_branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -20484,9 +20491,10 @@ async def rollback_branch_change(
         )
         db.commit()
         db.refresh(change)
-        return ConsoleBranchChangeResponse(
-            change=_serialize_branch_change_record(change),
-            branch=_serialize_branch(branch),
+        return _build_branch_change_response_for_context(
+            change=change,
+            branch=branch,
+            serialize_branch=_serialize_branch,
         )
 
     normalized_patch, errors = _prepare_branch_change_rollback_payload_for_context(
@@ -20550,9 +20558,10 @@ async def rollback_branch_change(
     )
     db.commit()
     db.refresh(change)
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(refreshed_branch) if refreshed_branch else None,
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=refreshed_branch,
+        serialize_branch=_serialize_branch,
     )
 
 
