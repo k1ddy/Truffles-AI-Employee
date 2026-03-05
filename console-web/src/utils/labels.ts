@@ -92,11 +92,11 @@ export function getSlaIndicator(createdAt: string): SlaIndicator {
     const diffMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
 
     if (diffMinutes < SLA_WARNING_MINUTES) {
-        return { label: "В рабочем окне", className: "bg-green-100 text-green-800", minutes: diffMinutes };
+        return { label: "Ответ по плану", className: "bg-green-100 text-green-800", minutes: diffMinutes };
     } else if (diffMinutes < SLA_BREACHED_MINUTES) {
-        return { label: "Ответить сейчас", className: "bg-yellow-100 text-yellow-800", minutes: diffMinutes };
+        return { label: "Ответ в приоритете", className: "bg-yellow-100 text-yellow-800", minutes: diffMinutes };
     } else {
-        return { label: "Срочно ответить", className: "bg-red-100 text-red-800", minutes: diffMinutes };
+        return { label: "Срочный ответ", className: "bg-red-100 text-red-800", minutes: diffMinutes };
     }
 }
 
@@ -121,7 +121,7 @@ export function getSlaCountdown(createdAt: string): SlaCountdown {
     }
 
     return {
-        label: "Срок ответа нарушен",
+        label: "Срочный ответ менеджера",
         className: "bg-red-100 text-red-800",
     };
 }
