@@ -2544,6 +2544,10 @@ export interface components {
             no_show_followup_rebooked_appointment_id?: string | null;
             /** Google Event Id */
             google_event_id?: string | null;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Case Id */
+            case_id?: string | null;
             /** Created At */
             created_at: string;
         };
@@ -15562,6 +15566,7 @@ export interface operations {
         parameters: {
             query?: {
                 specialist_id?: string | null;
+                conversation_id?: string | null;
                 date_from?: string | null;
                 date_to?: string | null;
                 status?: string | null;
