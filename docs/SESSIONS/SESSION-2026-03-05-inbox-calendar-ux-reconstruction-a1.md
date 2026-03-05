@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave2-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -13,13 +13,20 @@
   - Backend calendar contract expanded with `conversation_id`/`case_id` linkage and `conversation_id` filter.
   - Frontend Inbox/Calendar flow connected with contextual navigation and action-oriented SLA copy.
   - Screenshot-based validation executed for Inbox and Calendar context mode.
+  - Wave2 TP created with root-cause + one web-search + action-first queue scope.
+  - Calendar queue toolbar added (action lanes, status filter, search, attention reasons).
+  - Case first-screen simplified (single action hint, no SLA duplication, compact context).
+  - Terminology simplified for manual message flow and SLA labels.
+  - `inspect_case` smoke extended with queue-controls assertions and live-mode availability fallback.
 - next:
-  - Optional: validate the same flow against live backend data lane (without Playwright route mocks).
+  - Prepare merge/PR for wave2 block.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
   - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file src/utils/labels.ts --file e2e/inspect_case.spec.ts`
-  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts`
+  - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/components/CaseConversation.tsx --file src/utils/labels.ts --file e2e/inspect_case.spec.ts`
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`skip`, live workspace unavailable)
   - `console-web/case_inspection.png`
   - `console-web/calendar_case_context.png`
 - last_updated: 2026-03-05
