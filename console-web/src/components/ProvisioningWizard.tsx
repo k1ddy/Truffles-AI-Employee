@@ -74,6 +74,7 @@ import {
     buildGoLiveWaiverPayload,
     buildCreateBranchPayload,
     handleBranchMutationError,
+    submitGoLiveMutation,
     buildSaveBookingPayload,
     buildSaveInstancePayload,
     buildSaveKnowledgePayload,
@@ -1221,69 +1222,57 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const canRunAutopilot = autopilotRunState.canRun;
 
     const handleApproveGoLive = () => {
-        const result = buildGoLiveDecisionPayload({
-            branchId: branchData?.id,
-            reason: goLiveDecisionReason,
-            decisionLabel: "approve",
-            enforceScorecard: scorecardFailed,
-            scorecardMissingLabels: goNoGoMissingLabels,
-        });
-        if (result.error || !result.payload) {
-            reportValidationError(result.error ?? "Ошибка валидации approve");
-            return;
-        }
-        approveGoLiveMutation.mutate(
-            result.payload,
-            {
-                onSuccess: () => {
-                    setGoLiveDecisionReason("");
-                },
+        submitGoLiveMutation({
+            result: buildGoLiveDecisionPayload({
+                branchId: branchData?.id,
+                reason: goLiveDecisionReason,
+                decisionLabel: "approve",
+                enforceScorecard: scorecardFailed,
+                scorecardMissingLabels: goNoGoMissingLabels,
+            }),
+            fallbackError: "Ошибка валидации approve",
+            reportValidationError,
+            mutate: approveGoLiveMutation.mutate,
+            clearReason: () => {
+                setGoLiveDecisionReason("");
             },
-        );
+        });
     };
 
     const handleRejectGoLive = () => {
-        const result = buildGoLiveDecisionPayload({
-            branchId: branchData?.id,
-            reason: goLiveDecisionReason,
-            decisionLabel: "reject",
-            enforceScorecard: false,
-            scorecardMissingLabels: [],
-        });
-        if (result.error || !result.payload) {
-            reportValidationError(result.error ?? "Ошибка валидации reject");
-            return;
-        }
-        rejectGoLiveMutation.mutate(
-            result.payload,
-            {
-                onSuccess: () => {
-                    setGoLiveDecisionReason("");
-                },
+        submitGoLiveMutation({
+            result: buildGoLiveDecisionPayload({
+                branchId: branchData?.id,
+                reason: goLiveDecisionReason,
+                decisionLabel: "reject",
+                enforceScorecard: false,
+                scorecardMissingLabels: [],
+            }),
+            fallbackError: "Ошибка валидации reject",
+            reportValidationError,
+            mutate: rejectGoLiveMutation.mutate,
+            clearReason: () => {
+                setGoLiveDecisionReason("");
             },
-        );
+        });
     };
 
     const handleWaiveGoLive = () => {
-        const result = buildGoLiveWaiverPayload({
-            branchId: branchData?.id,
-            reason: goLiveDecisionReason,
-            ttlHoursInput: goLiveWaiverHours,
-            enforceScorecard: scorecardFailed,
-            scorecardMissingLabels: goNoGoMissingLabels,
-        });
-        if (result.error || !result.payload) {
-            reportValidationError(result.error ?? "Ошибка валидации waiver");
-            return;
-        }
-        waiveGoLiveMutation.mutate(
-            result.payload,
-            {
-                onSuccess: () => {
-                    setGoLiveDecisionReason("");
-                },
+        submitGoLiveMutation({
+            result: buildGoLiveWaiverPayload({
+                branchId: branchData?.id,
+                reason: goLiveDecisionReason,
+                ttlHoursInput: goLiveWaiverHours,
+                enforceScorecard: scorecardFailed,
+                scorecardMissingLabels: goNoGoMissingLabels,
+            }),
+            fallbackError: "Ошибка валидации waiver",
+            reportValidationError,
+            mutate: waiveGoLiveMutation.mutate,
+            clearReason: () => {
+                setGoLiveDecisionReason("");
             },
-        );
+        });
     };
 
     const handleRunAutopilot = () => {
