@@ -13,6 +13,7 @@ from app.schemas.console import (
     ConsoleBranchChangeResponse,
     ConsoleBranchUpdateRequest,
 )
+from app.services.console_errors import ConsoleAPIError
 
 BRANCH_CHANGE_MANAGED_FIELDS: tuple[str, ...] = (
     "slug",
@@ -138,6 +139,19 @@ def get_branch_change_for_context(
     if query is None:
         return None
     return query.filter(ConsoleBranchChange.id == change_id).first()
+
+
+def get_branch_for_change_context(
+    *,
+    db: Session,
+    change: ConsoleBranchChange,
+    require_client_access: Callable[[UUID], None],
+) -> Branch:
+    branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    require_client_access(branch.client_id)
+    return branch
 
 
 def build_branch_change_rollback_patch(

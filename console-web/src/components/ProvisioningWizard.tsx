@@ -98,6 +98,7 @@ import {
     createInitialAutopilotForm,
     createInitialBranchBootstrapState,
     createInitialBranchForm,
+    createProvisioningWizardResetState,
     hydrateBillingFieldsFromJson,
     hydrateBookingSettingsFieldsFromJson,
     hydrateWorkingHoursFieldsFromJson,
@@ -1523,20 +1524,12 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     };
 
     const handleReset = () => {
+        const resetState = createProvisioningWizardResetState(DEFAULT_TIMEZONE);
         setOnboardingMode("autopilot");
         setStepIndex(0);
         setBranchData(null);
-        setBranchForm({
-            name: "",
-            slug: "",
-            timezone: DEFAULT_TIMEZONE,
-            phone: "",
-            instanceId: "",
-            telegramChatId: "",
-            knowledgeTag: "",
-            workingHours: "",
-            bookingSettings: "",
-        });
+        setBranchForm(resetState.branchForm);
+        setBranchBootstrap(resetState.branchBootstrap);
         setWorkingHoursDays([]);
         setWorkingHoursStart("");
         setWorkingHoursEnd("");
@@ -1562,27 +1555,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             oidcSubject: "",
             branchId: "",
         });
-        setAutopilotForm({
-            companyName: "",
-            clientSlug: "",
-            branchName: "",
-            branchSlug: "",
-            timezone: DEFAULT_TIMEZONE,
-            phone: "",
-            instanceId: "",
-            domainSlug: "beauty",
-            paymentStatus: "pending",
-            providerBindingProvider: "chatflow",
-            providerBindingWebhookStatus: "pending",
-            providerBindingPaidUntil: "",
-            providerBindingOwner: "",
-            providerBindingNextRenewalAt: "",
-            providerBindingLastRebindAt: "",
-            providerBindingRebindRequired: false,
-            providerBindingAlertState: "warn",
-            providerBindingNotes: "",
-            clientDataText: "",
-        });
+        setAutopilotForm(resetState.autopilotForm);
         setAutopilotServices(["whatsapp"]);
         setAutopilotResult(null);
         setIntegrationWebhookSecret("");
