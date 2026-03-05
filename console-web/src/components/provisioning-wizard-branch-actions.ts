@@ -8,6 +8,8 @@ import { parseOptionalJson } from "@/components/provisioning-wizard-utils";
 
 type BranchBootstrapAccount = components["schemas"]["ConsoleBranchBootstrapAccountTemplate"];
 type BranchCreateRequest = components["schemas"]["ConsoleBranchCreateRequest"];
+type BranchGoLiveDecisionRequest = components["schemas"]["ConsoleBranchGoLiveDecisionRequest"];
+type BranchGoLiveWaiverRequest = components["schemas"]["ConsoleBranchGoLiveWaiverRequest"];
 type BranchUpdateRequest = components["schemas"]["ConsoleBranchUpdateRequest"];
 
 type ActionResult<T> = {
@@ -52,6 +54,59 @@ export function handleBranchMutationError(input: BranchMutationErrorInput): void
         return;
     }
     input.reportProvisioningError(input.error, input.action, input.endpoint);
+}
+
+function buildGoLiveScorecardError(scorecardMissingLabels: string[]): string {
+    return `Go-live заблокирован scorecard: ${scorecardMissingLabels.join(", ") || "есть незавершенные проверки"}`;
+}
+
+export function buildGoLiveDecisionPayload(input: {
+    branchId: string | null | undefined;
+    reason: string;
+    decisionLabel: "approve" | "reject";
+    enforceScorecard: boolean;
+    scorecardMissingLabels: string[];
+}): ActionResult<BranchGoLiveDecisionRequest> {
+    if (!input.branchId) {
+        return { error: "Сначала создайте филиал" };
+    }
+    if (input.enforceScorecard && input.scorecardMissingLabels.length > 0) {
+        return { error: buildGoLiveScorecardError(input.scorecardMissingLabels) };
+    }
+    const reason = input.reason.trim();
+    if (!reason) {
+        return { error: `Укажите reason для ${input.decisionLabel}` };
+    }
+    return { payload: { reason } };
+}
+
+export function buildGoLiveWaiverPayload(input: {
+    branchId: string | null | undefined;
+    reason: string;
+    ttlHoursInput: string;
+    enforceScorecard: boolean;
+    scorecardMissingLabels: string[];
+}): ActionResult<BranchGoLiveWaiverRequest> {
+    if (!input.branchId) {
+        return { error: "Сначала создайте филиал" };
+    }
+    if (input.enforceScorecard && input.scorecardMissingLabels.length > 0) {
+        return { error: buildGoLiveScorecardError(input.scorecardMissingLabels) };
+    }
+    const reason = input.reason.trim();
+    if (!reason) {
+        return { error: "Укажите reason для waiver" };
+    }
+    const ttlHours = Number.parseInt(input.ttlHoursInput, 10);
+    if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
+        return { error: "ttl_hours должен быть положительным числом" };
+    }
+    return {
+        payload: {
+            reason,
+            ttl_hours: ttlHours,
+        },
+    };
 }
 
 export function buildBranchBootstrapAccounts(input: {
