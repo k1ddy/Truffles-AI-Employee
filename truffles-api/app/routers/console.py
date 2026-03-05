@@ -411,6 +411,9 @@ from app.services.console_branch_changes import (
     prepare_branch_change_payload as _prepare_branch_change_payload_for_context,
 )
 from app.services.console_branch_changes import (
+    prepare_branch_change_rollback_payload as _prepare_branch_change_rollback_payload_for_context,
+)
+from app.services.console_branch_changes import (
     query_branch_changes_for_context as _query_branch_changes_for_context,
 )
 from app.services.console_branch_changes import (
@@ -20486,16 +20489,14 @@ async def rollback_branch_change(
             branch=_serialize_branch(branch),
         )
 
-    errors: list[str] = []
-    try:
-        normalized_patch, errors = _normalize_branch_change_patch_payload(
-            db=db,
-            branch=branch,
-            patch_payload=rollback_patch,
-            **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
-        )
-    except ConsoleAPIError as exc:
-        normalized_patch, errors = {}, [exc.message]
+    normalized_patch, errors = _prepare_branch_change_rollback_payload_for_context(
+        db=db,
+        branch=branch,
+        rollback_patch=rollback_patch,
+        validation_error_type=ConsoleAPIError,
+        normalize_branch_change_patch=_normalize_branch_change_patch_payload,
+        normalize_kwargs=_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+    )
     if errors:
         message = "; ".join(errors)
         _apply_branch_change_rollback_failed_state(
