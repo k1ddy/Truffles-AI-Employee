@@ -71,6 +71,7 @@ Artifacts
 - `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave15-a705.md`
 - `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review11-a705.md`
 - `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave16-a705.md`
+- `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review12-a705.md`
 
 Backlog
 - `docs/CONSOLE_AUDIT/UX_BACKLOG.md`
