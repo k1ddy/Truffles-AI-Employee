@@ -75,6 +75,9 @@ interface BookingActionResponse {
     booking: Booking;
 }
 
+type BookingQueueLane = "attention" | "all";
+type BookingStatusFilter = "all" | "scheduled" | "completed" | "no_show" | "cancelled";
+
 async function fetchSpecialists(): Promise<{ items: Specialist[] }> {
     const response = await api.get("/calendar/specialists");
     return response.data;
@@ -128,6 +131,48 @@ function getVisitActionOptions(status: string): Array<{ status: BookingStatusUpd
     return [];
 }
 
+function bookingNeedsAttention(booking: Booking): boolean {
+    const normalized = booking.status.toUpperCase();
+    if (normalized === "NO_SHOW" && !booking.no_show_followup_done) {
+        return true;
+    }
+    return ["PENDING_CONFIRMATION", "RESCHEDULE_REQUESTED", "NO_SHOW", "HOLD"].includes(normalized);
+}
+
+function getBookingAttentionLabel(booking: Booking): string | null {
+    const normalized = booking.status.toUpperCase();
+    if (normalized === "PENDING_CONFIRMATION") {
+        return "Нужно подтвердить визит";
+    }
+    if (normalized === "RESCHEDULE_REQUESTED") {
+        return "Клиент просит перенос";
+    }
+    if (normalized === "HOLD") {
+        return "Нужно решение менеджера";
+    }
+    if (normalized === "NO_SHOW" && !booking.no_show_followup_done) {
+        return "Связаться после неявки";
+    }
+    return null;
+}
+
+function matchesStatusFilter(booking: Booking, filter: BookingStatusFilter): boolean {
+    if (filter === "all") {
+        return true;
+    }
+    const normalized = booking.status.toUpperCase();
+    if (filter === "completed") {
+        return normalized === "COMPLETED";
+    }
+    if (filter === "no_show") {
+        return normalized === "NO_SHOW";
+    }
+    if (filter === "cancelled") {
+        return normalized === "CANCELLED";
+    }
+    return ["PENDING", "DRAFT", "HOLD", "PENDING_CONFIRMATION", "CONFIRMED", "CHECKED_IN", "RESCHEDULE_REQUESTED"].includes(normalized);
+}
+
 function formatDate(date: Date): string {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -168,6 +213,9 @@ export default function CalendarPage() {
     const [showPastDates, setShowPastDates] = useState(false);
     const [statusUpdateBookingId, setStatusUpdateBookingId] = useState<string | null>(null);
     const [followUpBookingId, setFollowUpBookingId] = useState<string | null>(null);
+    const [queueLane, setQueueLane] = useState<BookingQueueLane>(focusedConversationId ? "all" : "attention");
+    const [queueStatusFilter, setQueueStatusFilter] = useState<BookingStatusFilter>("all");
+    const [queueSearch, setQueueSearch] = useState("");
 
     // Queries
     const { data: specialistsData, isError: specialistsError, error: specialistsErrorData } = useQuery({
@@ -201,33 +249,43 @@ export default function CalendarPage() {
 
     const bookings = useMemo(() => bookingsData?.items ?? [], [bookingsData?.items]);
     const bookingsSorted = useMemo(() => {
-        const attentionFirstStatuses = new Set([
-            "PENDING_CONFIRMATION",
-            "RESCHEDULE_REQUESTED",
-            "NO_SHOW",
-            "HOLD",
-        ]);
-        const requiresAttention = (booking: Booking) =>
-            attentionFirstStatuses.has(booking.status.toUpperCase()) ||
-            (booking.status.toUpperCase() === "NO_SHOW" && !booking.no_show_followup_done);
         return [...bookings].sort((left, right) => {
-            const leftPriority = requiresAttention(left) ? 1 : 0;
-            const rightPriority = requiresAttention(right) ? 1 : 0;
+            const leftPriority = bookingNeedsAttention(left) ? 1 : 0;
+            const rightPriority = bookingNeedsAttention(right) ? 1 : 0;
             if (leftPriority !== rightPriority) {
                 return rightPriority - leftPriority;
             }
             return new Date(left.start_at).getTime() - new Date(right.start_at).getTime();
         });
     }, [bookings]);
-    const attentionCount = bookingsSorted.filter((booking) => {
-        const normalized = booking.status.toUpperCase();
-        return (
-            normalized === "PENDING_CONFIRMATION" ||
-            normalized === "RESCHEDULE_REQUESTED" ||
-            normalized === "HOLD" ||
-            (normalized === "NO_SHOW" && !booking.no_show_followup_done)
-        );
-    }).length;
+    const attentionCount = bookingsSorted.filter((booking) => bookingNeedsAttention(booking)).length;
+    const noShowAttentionCount = bookingsSorted.filter(
+        (booking) => booking.status.toUpperCase() === "NO_SHOW" && !booking.no_show_followup_done
+    ).length;
+    const queueSearchNormalized = queueSearch.trim().toLowerCase();
+    const bookingsVisible = useMemo(() => {
+        return bookingsSorted.filter((booking) => {
+            if (queueLane === "attention" && !bookingNeedsAttention(booking)) {
+                return false;
+            }
+            if (!matchesStatusFilter(booking, queueStatusFilter)) {
+                return false;
+            }
+            if (!queueSearchNormalized) {
+                return true;
+            }
+            const haystack = [
+                booking.customer_name || "",
+                booking.customer_phone || "",
+                booking.service_type || "",
+                booking.specialist_name || "",
+                booking.id || "",
+            ]
+                .join(" ")
+                .toLowerCase();
+            return haystack.includes(queueSearchNormalized);
+        });
+    }, [bookingsSorted, queueLane, queueStatusFilter, queueSearchNormalized]);
 
     // Create booking mutation
     const createMutation = useMutation({
@@ -666,9 +724,67 @@ export default function CalendarPage() {
                         <h2 className="font-semibold text-lg mb-4">
                             Записи на {new Date(selectedDate).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
                         </h2>
-                        <p className="mb-4 text-xs text-muted-foreground">
-                            Требуют внимания: <span className="font-semibold text-foreground">{attentionCount}</span>
-                        </p>
+                        <div className="mb-3 flex flex-wrap gap-2 text-xs">
+                            <span className="rounded bg-muted px-2.5 py-1 text-muted-foreground">
+                                Всего: <span className="font-semibold text-foreground">{bookingsSorted.length}</span>
+                            </span>
+                            <span className="rounded bg-amber-100 px-2.5 py-1 text-amber-900">
+                                Требуют внимания: <span className="font-semibold">{attentionCount}</span>
+                            </span>
+                            <span className="rounded bg-red-100 px-2.5 py-1 text-red-900">
+                                Неявки без связи: <span className="font-semibold">{noShowAttentionCount}</span>
+                            </span>
+                        </div>
+                        <div className="mb-4 space-y-2" data-testid="calendar-queue-controls">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setQueueLane("attention")}
+                                    className={`rounded border px-2.5 py-1 text-xs font-semibold ${
+                                        queueLane === "attention"
+                                            ? "border-amber-300 bg-amber-100 text-amber-900"
+                                            : "border-border/60 text-muted-foreground hover:text-foreground"
+                                    }`}
+                                    data-testid="calendar-queue-lane-attention"
+                                >
+                                    Только действия
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setQueueLane("all")}
+                                    className={`rounded border px-2.5 py-1 text-xs font-semibold ${
+                                        queueLane === "all"
+                                            ? "border-primary/40 bg-primary/10 text-primary"
+                                            : "border-border/60 text-muted-foreground hover:text-foreground"
+                                    }`}
+                                    data-testid="calendar-queue-lane-all"
+                                >
+                                    Все записи
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+                                <input
+                                    type="text"
+                                    value={queueSearch}
+                                    onChange={(event) => setQueueSearch(event.target.value)}
+                                    placeholder="Поиск по клиенту, телефону или услуге"
+                                    className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                    data-testid="calendar-queue-search"
+                                />
+                                <select
+                                    value={queueStatusFilter}
+                                    onChange={(event) => setQueueStatusFilter(event.target.value as BookingStatusFilter)}
+                                    className="rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                    data-testid="calendar-queue-status-filter"
+                                >
+                                    <option value="all">Все статусы</option>
+                                    <option value="scheduled">Запланированные</option>
+                                    <option value="completed">Пришёл</option>
+                                    <option value="no_show">Не пришёл</option>
+                                    <option value="cancelled">Отменённые</option>
+                                </select>
+                            </div>
+                        </div>
 
                         {bookingsLoading ? (
                             <div className="animate-pulse space-y-3">
@@ -676,18 +792,22 @@ export default function CalendarPage() {
                                     <div key={i} className="h-16 bg-muted/70 rounded"></div>
                                 ))}
                             </div>
-                        ) : bookingsSorted.length === 0 ? (
+                        ) : bookingsVisible.length === 0 ? (
                             <p className="text-muted-foreground text-center py-4">
-                                {focusedConversationId ? "По этой заявке записей на выбранную дату нет" : "Нет записей на эту дату"}
+                                {focusedConversationId
+                                    ? "По этой заявке нет записей под выбранные фильтры"
+                                    : "Нет записей под выбранные фильтры"}
                             </p>
                         ) : (
                             <div className="space-y-3">
-                                {bookingsSorted.map((booking) => (
-                                    <div
-                                        key={booking.id}
-                                        className="p-3 border border-border/60 rounded-lg hover:bg-muted/60"
-                                        data-testid="calendar-booking-card"
-                                    >
+                                {bookingsVisible.map((booking) => {
+                                    const attentionLabel = getBookingAttentionLabel(booking);
+                                    return (
+                                        <div
+                                            key={booking.id}
+                                            className="p-3 border border-border/60 rounded-lg hover:bg-muted/60"
+                                            data-testid="calendar-booking-card"
+                                        >
                                         <div className="flex justify-between items-start mb-1">
                                             <span className="font-medium text-sm">
                                                 {new Date(booking.start_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
@@ -714,6 +834,13 @@ export default function CalendarPage() {
                                                 {booking.service_type}
                                             </div>
                                         )}
+                                        {attentionLabel && (
+                                            <div className="mt-2">
+                                                <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
+                                                    {attentionLabel}
+                                                </span>
+                                            </div>
+                                        )}
                                         {booking.case_id && (
                                             <div className="mt-2 flex items-center gap-2">
                                                 <Link
@@ -721,7 +848,7 @@ export default function CalendarPage() {
                                                     className="rounded border border-border/60 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-background"
                                                     data-testid="calendar-booking-open-case"
                                                 >
-                                                    Открыть заявку
+                                                    Открыть чат заявки
                                                 </Link>
                                                 {focusedCaseId && booking.case_id === focusedCaseId && (
                                                     <span className="rounded bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
@@ -754,12 +881,12 @@ export default function CalendarPage() {
                                                     <>
                                                         <span className="px-2.5 py-1.5 rounded-md bg-green-100 text-green-800 text-xs font-medium">
                                                             {booking.no_show_followup_result === "rebooked"
-                                                                ? "follow-up закрыт: перезаписан"
-                                                                : "follow-up закрыт: связались"}
+                                                                ? "После неявки: перезаписан"
+                                                                : "После неявки: связались"}
                                                         </span>
                                                         {booking.no_show_followup_rebooked_appointment_id && (
                                                             <span className="px-2.5 py-1.5 rounded-md bg-muted text-muted-foreground text-xs font-medium">
-                                                                новая запись: {booking.no_show_followup_rebooked_appointment_id.slice(0, 8)}
+                                                                Новая запись: {booking.no_show_followup_rebooked_appointment_id.slice(0, 8)}
                                                             </span>
                                                         )}
                                                     </>
@@ -797,8 +924,9 @@ export default function CalendarPage() {
                                                 )}
                                             </div>
                                         )}
-                                    </div>
-                                ))}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>

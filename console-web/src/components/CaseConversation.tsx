@@ -8,7 +8,7 @@ import toast from "react-hot-toast";
 import { casesApi, outreachApi, type CaseActionResponse } from "@/lib/api-client";
 import type { Case, Message } from "@/types";
 import ChatInterface from "./ChatInterface";
-import { getSlaCountdown, getStatusLabel, getSlaLabel } from "@/utils/labels";
+import { getStatusLabel, getSlaLabel } from "@/utils/labels";
 
 interface CaseConversationProps {
     caseDetail: Case;
@@ -76,7 +76,7 @@ function SlaBadge({ status }: { status?: string }) {
 
 const HUMAN_LOCK_SOURCE_LABELS: Record<string, string> = {
     console_message: "Ответ менеджера",
-    console_outreach: "Outreach",
+    console_outreach: "Ручное сообщение",
     console_pause: "Ручная пауза",
     console_media: "Медиа",
 };
@@ -239,13 +239,13 @@ export default function CaseConversation({
         onSuccess: (response) => {
             if (!response.success) {
                 const suffix = response.error_code ? ` (${response.error_code})` : "";
-                toast.error(`Не удалось отправить outreach${suffix}`);
+                toast.error(`Не удалось отправить ручное сообщение${suffix}`);
                 return;
             }
             if (response.delivery_status === "queued") {
-                toast.success("Outreach поставлен в очередь");
+                toast.success("Сообщение поставлено в очередь");
             } else {
-                toast.success("Outreach отправлен");
+                toast.success("Сообщение отправлено");
             }
             setOutreachContent("");
             queryClient.invalidateQueries({ queryKey: ["messages", caseId] });
@@ -260,10 +260,10 @@ export default function CaseConversation({
                 return;
             }
             if (code === "CONVERSATION_REQUIRED") {
-                toast.error("Outreach доступен только в рамках заявки");
+                toast.error("Ручное сообщение доступно только в рамках заявки");
                 return;
             }
-            toast.error("Не удалось отправить outreach");
+            toast.error("Не удалось отправить ручное сообщение");
         },
     });
 
@@ -305,7 +305,7 @@ export default function CaseConversation({
     const isActive = caseDetail.status === "active";
     const isPending = caseDetail.status === "pending";
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
-    const compactContextLimit = 180;
+    const compactContextLimit = layout === "inbox" ? 110 : 180;
     const contextTitle = caseDetail.context_summary ? "Суть запроса" : "Последнее сообщение";
     const lastInbound = caseDetail.last_inbound_at
         ? new Date(caseDetail.last_inbound_at).toLocaleString("ru-RU")
@@ -318,18 +318,10 @@ export default function CaseConversation({
     const contextBody = contextCanExpand && !contextExpanded
         ? `${contextText.slice(0, compactContextLimit).trimEnd()}...`
         : contextText;
-    const slaCountdown = getSlaCountdown(caseDetail.created_at || new Date().toISOString());
-    const issueHints: string[] = [];
-    if (caseDetail.has_delivery_error) {
-        issueHints.push("Есть ошибка доставки. Ответ мог не дойти до клиента.");
-    }
-    if (caseDetail.has_pending_outbox) {
-        issueHints.push("Есть сообщения в очереди отправки. Доставка может задерживаться.");
-    }
     const headerClass = `flex flex-col gap-4 border-b border-border/60 pb-4 ${
         isInboxLayout ? "px-5 pt-5" : ""
     }`;
-    const contextClass = `rounded-lg border border-border/60 bg-card p-3 text-sm ${
+    const contextClass = `rounded-lg border border-border/60 bg-card ${isInboxLayout ? "p-2.5" : "p-3"} text-sm ${
         isInboxLayout ? "mx-5" : ""
     }`;
     const humanLockStatus = humanLockQuery.data?.status;
@@ -368,6 +360,21 @@ export default function CaseConversation({
     const outreachBusy =
         sendOutreachMutation.isPending || pauseMutation.isPending || releasePauseMutation.isPending;
     const canSubmitOutreach = Boolean(outreachDestination.trim() && outreachContent.trim());
+    let nextActionHint = "Диалог под контролем";
+    let nextActionHintClass = "bg-green-100 text-green-800";
+    if (caseDetail.needs_reply) {
+        nextActionHint = "Ответьте клиенту в чате";
+        nextActionHintClass = "bg-yellow-100 text-yellow-800";
+    } else if (caseDetail.has_delivery_error) {
+        nextActionHint = "Проверьте ошибку доставки и отправьте повторно";
+        nextActionHintClass = "bg-red-100 text-red-800";
+    } else if (caseDetail.has_pending_outbox) {
+        nextActionHint = "Проверьте очередь отправки";
+        nextActionHintClass = "bg-amber-100 text-amber-800";
+    } else if (humanLockActive) {
+        nextActionHint = "Бот на паузе: ведите диалог вручную";
+        nextActionHintClass = "bg-emerald-100 text-emerald-800";
+    }
     const toggleOutreachPanel = () => {
         const nextExpanded = !outreachExpanded;
         setOutreachExpanded(nextExpanded);
@@ -476,8 +483,8 @@ export default function CaseConversation({
                                 Заявка {caseDetail.id.slice(0, 8)}
                             </h1>
                             <SlaBadge status={caseDetail.sla_status} />
-                            <span className={`rounded px-2 py-1 text-[11px] font-medium ${slaCountdown.className}`} data-testid="case-sla-countdown">
-                                {slaCountdown.label}
+                            <span className={`rounded px-2 py-1 text-[11px] font-semibold ${nextActionHintClass}`} data-testid="case-next-action">
+                                Действие: {nextActionHint}
                             </span>
                             {caseDetail.needs_reply && (
                                 <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-yellow-100 text-yellow-800">
@@ -531,7 +538,7 @@ export default function CaseConversation({
                                     className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
                                     data-testid="outreach-open"
                                 >
-                                    {outreachExpanded ? "Скрыть outreach" : "Связаться с клиентом"}
+                                    {outreachExpanded ? "Скрыть блок связи" : "Связаться с клиентом"}
                                 </button>
                             )}
                             {caseDetail.conversation_id && (
@@ -611,13 +618,6 @@ export default function CaseConversation({
                     </button>
                 )}
             </div>
-            {issueHints.length > 0 && (
-                <div className={`rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 ${
-                    isInboxLayout ? "mx-5" : ""
-                }`}>
-                    {issueHints.join(" ")}
-                </div>
-            )}
             {canOutreach && outreachExpanded && (
                 <div
                     ref={outreachPanelRef}
