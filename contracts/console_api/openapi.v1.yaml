@@ -6439,6 +6439,14 @@ paths:
           - type: string
           - type: 'null'
           title: Specialist Id
+      - name: conversation_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Conversation Id
       - name: date_from
         in: query
         required: false
@@ -6824,6 +6832,16 @@ components:
           - type: string
           - type: 'null'
           title: Google Event Id
+        conversation_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Conversation Id
+        case_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Id
         created_at:
           type: string
           title: Created At

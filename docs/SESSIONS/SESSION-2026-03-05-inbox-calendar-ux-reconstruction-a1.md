@@ -1,0 +1,25 @@
+# SESSION 2026-03-05-inbox-calendar-ux-reconstruction-a1 — Inbox+Calendar UX Reconstruction
+
+- status: active
+- owner: Top Architect | Brain | Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md
+- branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-a1
+- worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
+- base_ref: origin/main
+- scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
+- done:
+  - Worktree created and baseline rollback completed.
+  - Task Package restored with mandatory gates and one web search evidence.
+  - Backend calendar contract expanded with `conversation_id`/`case_id` linkage and `conversation_id` filter.
+  - Frontend Inbox/Calendar flow connected with contextual navigation and action-oriented SLA copy.
+  - Screenshot-based validation executed for Inbox and Calendar context mode.
+- next:
+  - Optional: validate the same flow against live backend data lane (without Playwright route mocks).
+- evidence:
+  - `git worktree list`
+  - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
+  - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file src/utils/labels.ts --file e2e/inspect_case.spec.ts`
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts`
+  - `console-web/case_inspection.png`
+  - `console-web/calendar_case_context.png`
+- last_updated: 2026-03-05
