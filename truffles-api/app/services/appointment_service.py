@@ -495,6 +495,7 @@ class SchedulingService:
         client_id: UUID,
         specialist_id: Optional[UUID] = None,
         branch_ids: Optional[List[UUID]] = None,
+        conversation_id: Optional[UUID] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
         status: Optional[str] = None,
@@ -506,6 +507,8 @@ class SchedulingService:
             query = query.filter(Appointment.specialist_id == specialist_id)
         if branch_ids:
             query = query.filter(Appointment.branch_id.in_(branch_ids))
+        if conversation_id:
+            query = query.filter(Appointment.conversation_id == conversation_id)
         if date_from:
             query = query.filter(Appointment.start_at >= date_from)
         if date_to:

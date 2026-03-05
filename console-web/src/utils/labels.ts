@@ -18,9 +18,9 @@ export function getStatusLabel(status: string): string {
 // SLA status labels
 export function getSlaLabel(status?: string): string {
     const labels: Record<string, string> = {
-        ok: "В норме",
-        warning: "Внимание",
-        breached: "Просрочено",
+        ok: "В рабочем окне",
+        warning: "Нужен ответ менеджера",
+        breached: "Срок ответа нарушен",
     };
     return labels[status || ""] || status || "";
 }
@@ -92,12 +92,11 @@ export function getSlaIndicator(createdAt: string): SlaIndicator {
     const diffMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
 
     if (diffMinutes < SLA_WARNING_MINUTES) {
-        return { label: `${diffMinutes}м`, className: "bg-green-100 text-green-800", minutes: diffMinutes };
+        return { label: "В рабочем окне", className: "bg-green-100 text-green-800", minutes: diffMinutes };
     } else if (diffMinutes < SLA_BREACHED_MINUTES) {
-        return { label: `${diffMinutes}м`, className: "bg-yellow-100 text-yellow-800", minutes: diffMinutes };
+        return { label: "Ответить сейчас", className: "bg-yellow-100 text-yellow-800", minutes: diffMinutes };
     } else {
-        const hours = Math.floor(diffMinutes / 60);
-        return { label: `${hours}ч+`, className: "bg-red-100 text-red-800", minutes: diffMinutes };
+        return { label: "Срочно ответить", className: "bg-red-100 text-red-800", minutes: diffMinutes };
     }
 }
 
@@ -108,33 +107,21 @@ export function getSlaCountdown(createdAt: string): SlaCountdown {
     const diffMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
 
     if (diffMinutes < SLA_WARNING_MINUTES) {
-        const minutesLeft = Math.max(0, SLA_WARNING_MINUTES - diffMinutes);
         return {
-            label: `До внимания: ${minutesLeft}м`,
+            label: "Ответ в рабочем окне",
             className: "bg-green-100 text-green-800",
         };
     }
 
     if (diffMinutes < SLA_BREACHED_MINUTES) {
-        const minutesLeft = Math.max(0, SLA_BREACHED_MINUTES - diffMinutes);
         return {
-            label: `До просрочки: ${minutesLeft}м`,
+            label: "Нужен ответ менеджера",
             className: "bg-yellow-100 text-yellow-800",
         };
     }
 
-    const overdueMinutes = diffMinutes - SLA_BREACHED_MINUTES;
-    if (overdueMinutes < 60) {
-        return {
-            label: `Просрочено: ${overdueMinutes}м`,
-            className: "bg-red-100 text-red-800",
-        };
-    }
-
-    const overdueHours = Math.floor(overdueMinutes / 60);
-    const restMinutes = overdueMinutes % 60;
     return {
-        label: `Просрочено: ${overdueHours}ч ${restMinutes}м`,
+        label: "Срок ответа нарушен",
         className: "bg-red-100 text-red-800",
     };
 }

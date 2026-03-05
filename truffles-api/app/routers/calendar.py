@@ -19,6 +19,7 @@ from app.models.appointment_audit import AppointmentAudit
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.models.appointment_sync_state import AppointmentSyncState
 from app.models.branch import Branch
+from app.models.handover import Handover
 from app.models.specialist import Specialist
 from app.services.appointment_reminder_service import schedule_default_reminders
 from app.services.appointment_service import (
@@ -144,6 +145,8 @@ class BookingResponse(BaseModel):
     no_show_followup_closed_by: Optional[str] = None
     no_show_followup_rebooked_appointment_id: Optional[str] = None
     google_event_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    case_id: Optional[str] = None
     created_at: str
 
 
@@ -292,6 +295,34 @@ def _serialize_no_show_followup_state(audit_row: Optional[AppointmentAudit]) -> 
     }
 
 
+def _latest_case_ids_by_conversation(
+    db: Session,
+    *,
+    client_id: UUID,
+    conversation_ids: set[UUID],
+) -> dict[UUID, UUID]:
+    if not conversation_ids:
+        return {}
+
+    rows = (
+        db.query(Handover)
+        .filter(
+            Handover.client_id == client_id,
+            Handover.conversation_id.in_(conversation_ids),
+        )
+        .order_by(Handover.conversation_id.asc(), Handover.created_at.desc())
+        .all()
+    )
+    mapping: dict[UUID, UUID] = {}
+    for row in rows:
+        if not row.conversation_id:
+            continue
+        if row.conversation_id in mapping:
+            continue
+        mapping[row.conversation_id] = row.id
+    return mapping
+
+
 def _build_booking_response(db: Session, booking: Appointment) -> BookingResponse:
     specialist = None
     if booking.specialist_id:
@@ -319,6 +350,19 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         .first()
     )
     no_show_followup_state = _serialize_no_show_followup_state(no_show_followup_audit)
+    case_id = None
+    if booking.conversation_id:
+        latest_case = (
+            db.query(Handover)
+            .filter(
+                Handover.client_id == booking.client_id,
+                Handover.conversation_id == booking.conversation_id,
+            )
+            .order_by(Handover.created_at.desc())
+            .first()
+        )
+        if latest_case:
+            case_id = str(latest_case.id)
     return BookingResponse(
         id=str(booking.id),
         specialist_id=str(booking.specialist_id),
@@ -335,6 +379,8 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         no_show_followup_closed_by=no_show_followup_state["closed_by"],
         no_show_followup_rebooked_appointment_id=no_show_followup_state["rebooked_appointment_id"],
         google_event_id=google_event_id,
+        conversation_id=str(booking.conversation_id) if booking.conversation_id else None,
+        case_id=case_id,
         created_at=booking.created_at.isoformat(),
     )
 
@@ -675,6 +721,7 @@ async def create_booking(
 async def list_bookings(
     request: Request,
     specialist_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     status: Optional[str] = None,
@@ -710,11 +757,15 @@ async def list_bookings(
             "reschedule_requested": "RESCHEDULE_REQUESTED",
         }
         status_filter = status_map.get(status_norm, status.upper())
+
+    specialist_uuid = _parse_uuid(specialist_id, field_name="specialist_id") if specialist_id else None
+    conversation_uuid = _parse_uuid(conversation_id, field_name="conversation_id") if conversation_id else None
     
     bookings = service.get_appointments(
         client_id=context.client.id,
-        specialist_id=UUID(specialist_id) if specialist_id else None,
+        specialist_id=specialist_uuid,
         branch_ids=list(context.allowed_branch_ids) if context.branch_restricted else None,
+        conversation_id=conversation_uuid,
         date_from=parsed_from,
         date_to=parsed_to,
         status=status_filter,
@@ -765,6 +816,13 @@ async def list_bookings(
             if row.appointment_id in no_show_followup_map:
                 continue
             no_show_followup_map[row.appointment_id] = _serialize_no_show_followup_state(row)
+
+    conversation_ids = {b.conversation_id for b in bookings if b.conversation_id}
+    case_map = _latest_case_ids_by_conversation(
+        db,
+        client_id=context.client.id,
+        conversation_ids=conversation_ids,
+    )
     
     return BookingsListResponse(
         items=[
@@ -784,6 +842,8 @@ async def list_bookings(
                 no_show_followup_closed_by=no_show_followup_map.get(b.id, {}).get("closed_by"),
                 no_show_followup_rebooked_appointment_id=no_show_followup_map.get(b.id, {}).get("rebooked_appointment_id"),
                 google_event_id=sync_map.get(b.id),
+                conversation_id=str(b.conversation_id) if b.conversation_id else None,
+                case_id=str(case_map.get(b.conversation_id)) if b.conversation_id and case_map.get(b.conversation_id) else None,
                 created_at=b.created_at.isoformat()
             )
             for b in bookings
