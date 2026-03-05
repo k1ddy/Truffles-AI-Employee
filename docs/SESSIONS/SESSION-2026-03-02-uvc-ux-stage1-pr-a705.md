@@ -243,9 +243,16 @@
   - Executed `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW14-A705` on merged-main wave18 evidence (`console.py=24390`, `ProvisioningWizard.tsx=4323`, deterministic lane retained: `35 passed` + `branch_change 27 passed`) with fail-closed decision: `UX-11/UX-12` remain `Open (Mitigated wave18; wave19 required)`.
   - Published closure-review14 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review14-a705.md`.
   - Added follow-up implementation contract `TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave19-a705.md`.
+  - Executed `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE19-A705` bounded extraction:
+  - Backend: added reusable branch-change draft payload and branch lookup helpers in `truffles-api/app/services/console_branch_changes.py` (`get_branch_change_draft_payload`, `get_branch_by_id`) and rewired `validate/publish/rollback` handlers in `truffles-api/app/routers/console.py`.
+  - Frontend: added generic initial agent-form state helper in `console-web/src/components/provisioning-wizard-state.ts` (`createInitialAgentFormState`) and rewired `console-web/src/components/ProvisioningWizard.tsx` reset/bootstrap flow.
+  - Added deterministic tests for extracted helper contracts in `truffles-api/tests/test_console_branch_changes.py`.
+  - Added TP execution-profile boundary contract to `docs/TASK_PACKAGES/TP_TEMPLATE_ZERO_CONTEXT.md` and rollout policy v2 to `docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-tech-debt-decomposition-a705.md`; enforced in `scripts/session_check.sh`.
+  - Added follow-up closure contract `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review15-a705.md`.
+  - Opened wave19 PR `#924` and fixed red `session-gate` by syncing required session artifacts (`docs/SESSIONS/SESSION-2026-03-02-uvc-ux-stage1-pr-a705.md` + `docs/SESSION_INDEX.md`).
 - next:
-  - Open closure-review14 PR with artifact/canon/session sync and linked wave19 TP.
-  - After closure-review14 merge, execute `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE19-A705`.
+  - Keep PR `#924` green and merge wave19 changes.
+  - After wave19 merge, execute `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW15-A705` on merged-main evidence and lock next bounded implementation block.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
