@@ -20,6 +20,40 @@ type SaveBookingResult = ActionResult<BranchUpdateRequest> & {
     nextBookingSettingsJson?: string;
 };
 
+type BranchMutationSuccessInput<TBranch> = {
+    data: TBranch;
+    toastMessage: string;
+    setBranchData: (value: TBranch) => void;
+    refetchOnboarding: () => void;
+    refetchOnboardingScorecard: () => void;
+    notifySuccess: (message: string) => void;
+};
+
+type BranchMutationErrorInput = {
+    error: unknown;
+    action: string;
+    endpoint: string;
+    reportValidationError: (message: string) => void;
+    reportProvisioningError: (error: unknown, action: string, endpoint: string) => void;
+    branchRequiredMessage?: string;
+};
+
+export function syncBranchMutationSuccess<TBranch>(input: BranchMutationSuccessInput<TBranch>): void {
+    input.setBranchData(input.data);
+    input.refetchOnboarding();
+    input.refetchOnboardingScorecard();
+    input.notifySuccess(input.toastMessage);
+}
+
+export function handleBranchMutationError(input: BranchMutationErrorInput): void {
+    const branchRequiredMessage = input.branchRequiredMessage ?? "Сначала создайте филиал";
+    if (input.error instanceof Error && input.error.message === "BRANCH_REQUIRED") {
+        input.reportValidationError(branchRequiredMessage);
+        return;
+    }
+    input.reportProvisioningError(input.error, input.action, input.endpoint);
+}
+
 export function buildBranchBootstrapAccounts(input: {
     bootstrap: ProvisioningBranchBootstrapState;
     branchName: string;

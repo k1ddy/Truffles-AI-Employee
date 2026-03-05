@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review9-a705.md
-- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW9-A705
+- task_package: docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave14-a705.md
+- block_id: UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE14-A705
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-02-uvc-ux-stage1-pr-a705
 - worktree: /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705
 - base_ref: origin/main
-- scope: UVC closure-review9 fail-closed decision for UX-11/UX-12 on merged-main wave13 evidence and wave14 contract lock
+- scope: UVC wave14 bounded decomposition for UX-11/UX-12 (backend branch-change state extraction + frontend branch-mutation orchestration extraction) with closure-review10 contract lock
 - done:
   - Session created.
   - Added full dedicated Task Packages for Stage 3/4/5 with mandatory gates and traceability.
@@ -188,9 +188,14 @@
   - Executed `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW9-A705` on merged-main wave13 evidence (`console.py=24354`, `ProvisioningWizard.tsx=4355`, retained deterministic suite `35 passed` + `branch_change 15 passed`) with fail-closed decision: `UX-11/UX-12` remain `Open (Mitigated wave13; wave14 required)`.
   - Published closure-review9 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review9-a705.md`.
   - Added follow-up implementation contract `TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave14-a705.md`.
+  - Executed `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE14-A705` bounded extraction:
+  - Backend: delegated branch-change validate/publish-failed state transitions from `console.py` to `truffles-api/app/services/console_branch_changes.py` (`apply_branch_change_validation_result`, `apply_branch_change_publish_failed_state`) with deterministic service tests (`18 passed` in branch-change lane).
+  - Frontend: delegated repeated branch mutation success/error orchestration from `ProvisioningWizard.tsx` to `console-web/src/components/provisioning-wizard-branch-actions.ts` (`syncBranchMutationSuccess`, `handleBranchMutationError`) while preserving UX behavior and copy.
+  - Published wave14 artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave14-a705.md`.
+  - Added follow-up closure contract `TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review10-a705.md`.
 - next:
-  - Open closure-review9 PR with artifact/canon/session sync and linked wave14 TP.
-  - After closure-review9 merge, execute `UVC-UX-TECH-DEBT-DECOMPOSITION-WAVE14-A705`.
+  - Open wave14 PR with artifact/canon/session sync and linked closure-review10 TP.
+  - After wave14 merge, execute `UVC-UX-TECH-DEBT-DECOMPOSITION-CLOSURE-REVIEW10-A705`.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage1-ia-matrix-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-stage3-cross-tab-flows-a705.md
@@ -231,7 +236,11 @@
   - docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review9-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review9-a705.md
   - docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave14-a705.md
+  - docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave14-a705.md
+  - docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review10-a705.md
   - console-web/src/components/provisioning-wizard-autopilot.ts
+  - console-web/src/components/provisioning-wizard-branch-actions.ts
+  - truffles-api/app/services/console_branch_changes.py
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closeout-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-close-a705.md
   - docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave5-a705.md

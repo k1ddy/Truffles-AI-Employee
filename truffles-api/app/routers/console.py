@@ -369,6 +369,12 @@ from app.services.compliance_policy_registry_service import (
 )
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_branch_changes import (
+    apply_branch_change_publish_failed_state as _apply_branch_change_publish_failed_state,
+)
+from app.services.console_branch_changes import (
+    apply_branch_change_validation_result as _apply_branch_change_validation_result,
+)
+from app.services.console_branch_changes import (
     BRANCH_CHANGE_MUTABLE_STATUSES as _BRANCH_CHANGE_MUTABLE_STATUSES,
 )
 from app.services.console_branch_changes import (
@@ -20301,17 +20307,15 @@ async def validate_branch_change(
     )
 
     now = datetime.now(timezone.utc)
-    change.draft_payload = _jsonable_payload(normalized_patch)
-    change.diff_payload = _jsonable_payload(diff_payload)
-    change.base_snapshot = _jsonable_payload(base_snapshot)
-    change.base_branch_updated_at = branch.updated_at
-    change.validation_payload = {
-        "ok": len(errors) == 0,
-        "errors": errors,
-    }
-    change.status = "validated" if not errors else "draft"
-    change.validated_at = now if not errors else None
-    change.updated_at = now
+    _apply_branch_change_validation_result(
+        change=change,
+        branch=branch,
+        normalized_patch=normalized_patch,
+        diff_payload=diff_payload,
+        base_snapshot=base_snapshot,
+        errors=errors,
+        now=now,
+    )
     db.commit()
     db.refresh(change)
     return ConsoleBranchChangeResponse(
@@ -20363,11 +20367,11 @@ async def publish_branch_change(
 
     now = datetime.now(timezone.utc)
     if errors:
-        message = "; ".join(errors)
-        change.status = "publish_failed"
-        change.publish_error = message
-        change.validation_payload = {"ok": False, "errors": errors}
-        change.updated_at = now
+        message = _apply_branch_change_publish_failed_state(
+            change=change,
+            errors=errors,
+            now=now,
+        )
         db.commit()
         raise ConsoleAPIError(409, "CHANGE_VALIDATION_FAILED", message, {"errors": errors})
 

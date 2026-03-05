@@ -8,6 +8,8 @@ import pytest
 from app.routers import console as console_router
 from app.schemas.console import ConsoleBranchChangePublishRequest, ConsoleBranchChangeRollbackRequest
 from app.services.console_branch_changes import (
+    apply_branch_change_publish_failed_state,
+    apply_branch_change_validation_result,
     build_branch_change_diff,
     build_branch_change_list_response,
     normalize_branch_change_patch,
@@ -288,6 +290,94 @@ def test_prepare_branch_change_payload_reports_no_effective_changes(monkeypatch)
     assert diff_payload == {}
     assert "No effective branch changes detected" in errors
     assert base_snapshot["name"] == "Branch A"
+
+
+def test_apply_branch_change_validation_result_marks_validated():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = SimpleNamespace(
+        draft_payload=None,
+        diff_payload=None,
+        base_snapshot=None,
+        base_branch_updated_at=None,
+        validation_payload=None,
+        status="draft",
+        validated_at=None,
+        updated_at=None,
+    )
+    branch = SimpleNamespace(updated_at=now)
+
+    apply_branch_change_validation_result(
+        change=change,
+        branch=branch,
+        normalized_patch={"name": "Branch B"},
+        diff_payload={"name": {"before": "Branch A", "after": "Branch B"}},
+        base_snapshot={"name": "Branch A"},
+        errors=[],
+        now=now,
+    )
+
+    assert change.status == "validated"
+    assert change.validated_at == now
+    assert change.updated_at == now
+    assert change.base_branch_updated_at == now
+    assert change.validation_payload == {"ok": True, "errors": []}
+    assert change.draft_payload == {"name": "Branch B"}
+
+
+def test_apply_branch_change_validation_result_marks_draft_on_errors():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = SimpleNamespace(
+        draft_payload=None,
+        diff_payload=None,
+        base_snapshot=None,
+        base_branch_updated_at=None,
+        validation_payload=None,
+        status="validated",
+        validated_at=now,
+        updated_at=None,
+    )
+    branch = SimpleNamespace(updated_at=now - timedelta(minutes=5))
+
+    apply_branch_change_validation_result(
+        change=change,
+        branch=branch,
+        normalized_patch={"is_active": True},
+        diff_payload={"is_active": {"before": False, "after": True}},
+        base_snapshot={"is_active": False},
+        errors=["instance_id required to activate branch"],
+        now=now,
+    )
+
+    assert change.status == "draft"
+    assert change.validated_at is None
+    assert change.updated_at == now
+    assert change.base_branch_updated_at == branch.updated_at
+    assert change.validation_payload == {
+        "ok": False,
+        "errors": ["instance_id required to activate branch"],
+    }
+
+
+def test_apply_branch_change_publish_failed_state_sets_error_payload():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = SimpleNamespace(
+        status="validated",
+        publish_error=None,
+        validation_payload=None,
+        updated_at=None,
+    )
+
+    message = apply_branch_change_publish_failed_state(
+        change=change,
+        errors=["err-1", "err-2"],
+        now=now,
+    )
+
+    assert message == "err-1; err-2"
+    assert change.status == "publish_failed"
+    assert change.publish_error == "err-1; err-2"
+    assert change.validation_payload == {"ok": False, "errors": ["err-1", "err-2"]}
+    assert change.updated_at == now
 
 
 @pytest.mark.asyncio
