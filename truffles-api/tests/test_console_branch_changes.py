@@ -9,6 +9,10 @@ from app.routers import console as console_router
 from app.schemas.console import ConsoleBranchChangePublishRequest, ConsoleBranchChangeRollbackRequest
 from app.services.console_branch_changes import (
     apply_branch_change_publish_failed_state,
+    apply_branch_change_publish_runtime_error_state,
+    apply_branch_change_published_state,
+    apply_branch_change_rollback_failed_state,
+    apply_branch_change_rolled_back_state,
     apply_branch_change_validation_result,
     build_branch_change_diff,
     build_branch_change_list_response,
@@ -377,6 +381,123 @@ def test_apply_branch_change_publish_failed_state_sets_error_payload():
     assert change.status == "publish_failed"
     assert change.publish_error == "err-1; err-2"
     assert change.validation_payload == {"ok": False, "errors": ["err-1", "err-2"]}
+    assert change.updated_at == now
+
+
+def test_apply_branch_change_publish_runtime_error_state_sets_publish_failed():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = SimpleNamespace(
+        status="validated",
+        publish_error=None,
+        updated_at=None,
+    )
+
+    apply_branch_change_publish_runtime_error_state(
+        change=change,
+        error_message="runtime-failed",
+        now=now,
+    )
+
+    assert change.status == "publish_failed"
+    assert change.publish_error == "runtime-failed"
+    assert change.updated_at == now
+
+
+def test_apply_branch_change_published_state_sets_snapshot_and_actor():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    actor_id = uuid4()
+    change = SimpleNamespace(
+        status="validated",
+        publish_error="old-error",
+        published_snapshot=None,
+        published_at=None,
+        published_by=None,
+        updated_at=None,
+    )
+
+    apply_branch_change_published_state(
+        change=change,
+        published_snapshot={"name": "Branch A", "is_active": True},
+        actor_id=actor_id,
+        now=now,
+    )
+
+    assert change.status == "published"
+    assert change.publish_error is None
+    assert change.published_snapshot == {"name": "Branch A", "is_active": True}
+    assert change.published_at == now
+    assert change.published_by == actor_id
+    assert change.updated_at == now
+
+
+def test_apply_branch_change_published_state_preserves_none_snapshot():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    actor_id = uuid4()
+    change = SimpleNamespace(
+        status="validated",
+        publish_error="old-error",
+        published_snapshot={"name": "Branch A"},
+        published_at=None,
+        published_by=None,
+        updated_at=None,
+    )
+
+    apply_branch_change_published_state(
+        change=change,
+        published_snapshot=None,
+        actor_id=actor_id,
+        now=now,
+    )
+
+    assert change.status == "published"
+    assert change.publish_error is None
+    assert change.published_snapshot is None
+    assert change.published_at == now
+    assert change.published_by == actor_id
+    assert change.updated_at == now
+
+
+def test_apply_branch_change_rollback_failed_state_sets_error():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = SimpleNamespace(
+        rollback_error=None,
+        updated_at=None,
+    )
+
+    apply_branch_change_rollback_failed_state(
+        change=change,
+        error_message="rollback-failed",
+        now=now,
+    )
+
+    assert change.rollback_error == "rollback-failed"
+    assert change.updated_at == now
+
+
+def test_apply_branch_change_rolled_back_state_sets_snapshot_and_actor():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    actor_id = uuid4()
+    change = SimpleNamespace(
+        status="published",
+        rollback_error="old-error",
+        rollback_snapshot=None,
+        rolled_back_at=None,
+        rolled_back_by=None,
+        updated_at=None,
+    )
+
+    apply_branch_change_rolled_back_state(
+        change=change,
+        rollback_snapshot={"name": "Branch A", "is_active": False},
+        actor_id=actor_id,
+        now=now,
+    )
+
+    assert change.status == "rolled_back"
+    assert change.rollback_error is None
+    assert change.rollback_snapshot == {"name": "Branch A", "is_active": False}
+    assert change.rolled_back_at == now
+    assert change.rolled_back_by == actor_id
     assert change.updated_at == now
 
 
