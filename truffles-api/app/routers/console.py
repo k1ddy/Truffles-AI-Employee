@@ -372,6 +372,9 @@ from app.services.console_branch_changes import (
     BRANCH_CHANGE_MUTABLE_STATUSES as _BRANCH_CHANGE_MUTABLE_STATUSES,
 )
 from app.services.console_branch_changes import (
+    build_branch_change_list_response as _build_branch_change_list_response,
+)
+from app.services.console_branch_changes import (
     build_branch_change_rollback_patch as _build_branch_change_rollback_patch,
 )
 from app.services.console_branch_changes import (
@@ -20152,30 +20155,16 @@ async def list_branch_changes(
     if query is None:
         return ConsoleBranchChangeListResponse(items=[], cursor=None, has_more=False)
 
-    normalized_status = None
     try:
         normalized_status = _normalize_branch_change_status_filter(status)
     except ValueError as exc:
         raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
-    if normalized_status:
-        query = query.filter(ConsoleBranchChange.status == normalized_status)
-
     cursor_date = _parse_cursor_param(cursor)
-    if cursor_date is not None:
-        query = query.filter(ConsoleBranchChange.created_at < cursor_date)
-
-    rows = (
-        query.order_by(ConsoleBranchChange.created_at.desc(), ConsoleBranchChange.id.desc())
-        .limit(limit + 1)
-        .all()
-    )
-    has_more = len(rows) > limit
-    items_rows = rows[:limit]
-    next_cursor = items_rows[-1].created_at.isoformat() if has_more and items_rows else None
-    return ConsoleBranchChangeListResponse(
-        items=[_serialize_branch_change_record(row) for row in items_rows],
-        cursor=next_cursor,
-        has_more=has_more,
+    return _build_branch_change_list_response(
+        query=query,
+        status=normalized_status,
+        cursor_date=cursor_date,
+        limit=limit,
     )
 
 
