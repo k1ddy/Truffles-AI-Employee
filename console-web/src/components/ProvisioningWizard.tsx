@@ -95,9 +95,11 @@ import {
     buildBookingSettingsJsonFromFields,
     buildBranchFormFromBranchData,
     buildWorkingHoursJsonFromFields,
+    createInitialAgentFormState,
     createInitialAutopilotForm,
     createInitialBranchBootstrapState,
     createInitialBranchForm,
+    createProvisioningWizardResetState,
     hydrateBillingFieldsFromJson,
     hydrateBookingSettingsFieldsFromJson,
     hydrateWorkingHoursFieldsFromJson,
@@ -238,12 +240,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const [bookingDefaultDuration, setBookingDefaultDuration] = useState("");
     const [bookingBufferMin, setBookingBufferMin] = useState("");
     const [activateOnSave, setActivateOnSave] = useState(true);
-    const [agentForm, setAgentForm] = useState({
-        name: "",
-        role: "owner" as AgentRole,
-        oidcSubject: "",
-        branchId: "",
-    });
+    const [agentForm, setAgentForm] = useState(() => createInitialAgentFormState<AgentRole>("owner"));
     const [createdAgents, setCreatedAgents] = useState<ProvisioningAgent[]>([]);
     const [capabilitiesDraft, setCapabilitiesDraft] = useState<CapabilitiesPayload>(() => normalizeCapabilities());
     const [capabilitiesTouched, setCapabilitiesTouched] = useState(false);
@@ -1523,20 +1520,12 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     };
 
     const handleReset = () => {
+        const resetState = createProvisioningWizardResetState(DEFAULT_TIMEZONE);
         setOnboardingMode("autopilot");
         setStepIndex(0);
         setBranchData(null);
-        setBranchForm({
-            name: "",
-            slug: "",
-            timezone: DEFAULT_TIMEZONE,
-            phone: "",
-            instanceId: "",
-            telegramChatId: "",
-            knowledgeTag: "",
-            workingHours: "",
-            bookingSettings: "",
-        });
+        setBranchForm(resetState.branchForm);
+        setBranchBootstrap(resetState.branchBootstrap);
         setWorkingHoursDays([]);
         setWorkingHoursStart("");
         setWorkingHoursEnd("");
@@ -1556,33 +1545,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setPaymentStatusDraft("pending");
         setReferencePackTitle("");
         setSpecialistsConfirmed(false);
-        setAgentForm({
-            name: "",
-            role: "owner",
-            oidcSubject: "",
-            branchId: "",
-        });
-        setAutopilotForm({
-            companyName: "",
-            clientSlug: "",
-            branchName: "",
-            branchSlug: "",
-            timezone: DEFAULT_TIMEZONE,
-            phone: "",
-            instanceId: "",
-            domainSlug: "beauty",
-            paymentStatus: "pending",
-            providerBindingProvider: "chatflow",
-            providerBindingWebhookStatus: "pending",
-            providerBindingPaidUntil: "",
-            providerBindingOwner: "",
-            providerBindingNextRenewalAt: "",
-            providerBindingLastRebindAt: "",
-            providerBindingRebindRequired: false,
-            providerBindingAlertState: "warn",
-            providerBindingNotes: "",
-            clientDataText: "",
-        });
+        setAgentForm(createInitialAgentFormState<AgentRole>("owner"));
+        setAutopilotForm(resetState.autopilotForm);
         setAutopilotServices(["whatsapp"]);
         setAutopilotResult(null);
         setIntegrationWebhookSecret("");

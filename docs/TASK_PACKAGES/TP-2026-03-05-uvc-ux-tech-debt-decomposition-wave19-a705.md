@@ -59,6 +59,13 @@
 - **External reuse:** extraction pattern from Refactoring catalog (`Extract Function`) to keep cohesive responsibilities isolated.
 - **Why not build from scratch:** bounded extraction lowers regression blast radius and preserves UVC contracts.
 
+## Execution profile (mandatory for non-doc blocks)
+- **TP mode:** `implementation`
+- **Doc touch budget (files):** `3`
+- **Code dominance:** `required`
+- **Override token:** `UVC_SCOPE_OVERRIDE_A705`
+- **Why this profile fits:** wave19 is runtime extraction block; docs are limited to contract/template updates while code changes must dominate.
+
 ## Invariant
 - No API contract drift for existing `/admin/*` endpoints.
 - No new top-level tabs/routes and no ownership duplication across existing tabs.

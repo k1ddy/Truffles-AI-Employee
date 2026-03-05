@@ -407,6 +407,112 @@ require_context_integrity_sections() {
   require_tp_token_in_file "$tp_file" "Owner role for closure"
 }
 
+tp_execution_profile_value() {
+  local tp_file="$1"
+  local key="$2"
+  awk -v key="$key" '
+    /^## Execution profile \(mandatory for non-doc blocks\)/ {in_section=1; next}
+    /^## Execution profile \(mandatory\)/ {in_section=1; next}
+    in_section && /^## / {exit}
+    in_section && index($0, key) > 0 {
+      line=$0
+      sub(/^.*:[*[:space:]]*/, "", line)
+      gsub(/`/, "", line)
+      gsub(/^[[:space:]]+/, "", line)
+      gsub(/[[:space:]]+$/, "", line)
+      print line
+      exit
+    }
+  ' "$tp_file"
+}
+
+enforce_tp_execution_profile_gate() {
+  local changed_files="$1"
+  local tp_file="$repo_root/$task_package"
+  if [[ ! -f "$tp_file" ]]; then
+    return 0
+  fi
+
+  local tp_mode
+  tp_mode=$(tp_execution_profile_value "$tp_file" "TP mode:")
+  if [[ -z "$tp_mode" ]]; then
+    return 0
+  fi
+  tp_mode=$(echo "$tp_mode" | tr '[:upper:]' '[:lower:]' | awk '{print $1}')
+
+  local doc_budget_raw code_dominance_raw override_token_raw
+  doc_budget_raw=$(tp_execution_profile_value "$tp_file" "Doc touch budget (files):")
+  code_dominance_raw=$(tp_execution_profile_value "$tp_file" "Code dominance:")
+  override_token_raw=$(tp_execution_profile_value "$tp_file" "Override token:")
+
+  local override_token=""
+  override_token=$(echo "$override_token_raw" | tr -d '[:space:]')
+  if [[ -n "$override_token" && "$override_token" != "none" ]]; then
+    if [[ "${SESSION_TP_SCOPE_OVERRIDE:-}" == "$override_token" ]]; then
+      return 0
+    fi
+  fi
+
+  local doc_files=0
+  local code_files=0
+  while read -r file; do
+    [[ -z "$file" ]] && continue
+    if echo "$file" | grep -Eq "$allowed_doc_regex"; then
+      doc_files=$((doc_files + 1))
+    else
+      code_files=$((code_files + 1))
+    fi
+  done <<< "$changed_files"
+
+  if [[ "$doc_files" -eq 0 && "$code_files" -eq 0 ]]; then
+    return 0
+  fi
+
+  case "$tp_mode" in
+    implementation)
+      if [[ "$code_files" -eq 0 ]]; then
+        echo "ERROR: TP mode=implementation requires runtime/code changes; found doc-only change set." >&2
+        exit 1
+      fi
+
+      if [[ -n "$doc_budget_raw" ]]; then
+        local doc_budget
+        doc_budget=$(echo "$doc_budget_raw" | tr -d '[:space:]')
+        if [[ "$doc_budget" =~ ^[0-9]+$ ]]; then
+          if (( doc_files > doc_budget )); then
+            echo "ERROR: TP doc touch budget exceeded: docs=${doc_files}, budget=${doc_budget}." >&2
+            echo "Set SESSION_TP_SCOPE_OVERRIDE=${override_token} only with approved TP override token." >&2
+            exit 1
+          fi
+        else
+          echo "ERROR: TP mode=implementation requires numeric 'Doc touch budget (files)' value (got '${doc_budget_raw}')." >&2
+          exit 1
+        fi
+      fi
+
+      local code_dominance
+      code_dominance=$(echo "$code_dominance_raw" | tr '[:upper:]' '[:lower:]' | awk '{print $1}')
+      if [[ "$code_dominance" == "required" ]]; then
+        if (( doc_files > code_files )); then
+          echo "ERROR: TP code dominance failed: docs=${doc_files}, code=${code_files}." >&2
+          echo "Set SESSION_TP_SCOPE_OVERRIDE=${override_token} only with approved TP override token." >&2
+          exit 1
+        fi
+      fi
+      ;;
+    closure_review|doc_only)
+      if (( code_files > 0 )); then
+        echo "ERROR: TP mode=${tp_mode} is docs-only, but code files changed (${code_files})." >&2
+        exit 1
+      fi
+      ;;
+    *)
+      echo "ERROR: Unsupported TP mode '${tp_mode}' in ${tp_file}." >&2
+      exit 1
+      ;;
+  esac
+}
+
 enforce_research_driven_tp_gate() {
   local research_mode root_cause_mode reuse_mode release_safety_mode
   research_mode=$(effective_research_mode)
@@ -604,5 +710,6 @@ fi
 scope_changed_files=$(collect_scope_changed_files)
 enforce_zero_context_gate_if_required
 enforce_llm_evidence_gate "$scope_changed_files"
+enforce_tp_execution_profile_gate "$scope_changed_files"
 
 echo "Session OK: ${session_id} (${branch})"

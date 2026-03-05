@@ -17,6 +17,9 @@ from app.services.console_branch_changes import (
     build_branch_change_diff,
     build_branch_change_list_response,
     build_branch_change_response,
+    get_branch_by_id,
+    get_branch_change_draft_payload,
+    get_branch_for_change_context,
     normalize_branch_change_patch,
     prepare_branch_change_payload,
     prepare_branch_change_rollback_payload,
@@ -156,6 +159,75 @@ def test_build_branch_change_response_without_branch():
 
     assert response.change.id == change.id
     assert response.branch is None
+
+
+def test_get_branch_change_draft_payload_returns_dict_payload():
+    change = SimpleNamespace(draft_payload={"name": "Branch A"})
+    payload = get_branch_change_draft_payload(change)  # type: ignore[arg-type]
+    assert payload == {"name": "Branch A"}
+
+
+def test_get_branch_change_draft_payload_returns_empty_for_non_dict():
+    change = SimpleNamespace(draft_payload="invalid")
+    payload = get_branch_change_draft_payload(change)  # type: ignore[arg-type]
+    assert payload == {}
+
+
+def test_get_branch_by_id_returns_branch_or_none():
+    branch = SimpleNamespace(id=uuid4())
+    query = Mock()
+    query.filter.return_value = query
+    query.first.return_value = branch
+    db = SimpleNamespace(query=Mock(return_value=query))
+
+    resolved = get_branch_by_id(db=db, branch_id=branch.id)  # type: ignore[arg-type]
+
+    assert resolved is branch
+
+    missing_query = Mock()
+    missing_query.filter.return_value = missing_query
+    missing_query.first.return_value = None
+    missing_db = SimpleNamespace(query=Mock(return_value=missing_query))
+    assert get_branch_by_id(db=missing_db, branch_id=uuid4()) is None  # type: ignore[arg-type]
+
+
+def test_get_branch_for_change_context_requires_access():
+    branch = SimpleNamespace(id=uuid4(), client_id=uuid4())
+    change = SimpleNamespace(branch_id=branch.id)
+    query = Mock()
+    query.filter.return_value = query
+    query.first.return_value = branch
+    db = SimpleNamespace(query=Mock(return_value=query))
+    require_client_access = Mock()
+
+    resolved = get_branch_for_change_context(
+        db=db,  # type: ignore[arg-type]
+        change=change,  # type: ignore[arg-type]
+        require_client_access=require_client_access,
+    )
+
+    assert resolved is branch
+    require_client_access.assert_called_once_with(branch.client_id)
+
+
+def test_get_branch_for_change_context_raises_when_branch_missing():
+    change = SimpleNamespace(branch_id=uuid4())
+    query = Mock()
+    query.filter.return_value = query
+    query.first.return_value = None
+    db = SimpleNamespace(query=Mock(return_value=query))
+    require_client_access = Mock()
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        get_branch_for_change_context(
+            db=db,  # type: ignore[arg-type]
+            change=change,  # type: ignore[arg-type]
+            require_client_access=require_client_access,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.code == "NOT_FOUND"
+    require_client_access.assert_not_called()
 
 
 def test_build_branch_change_list_response_builds_page_and_cursor():

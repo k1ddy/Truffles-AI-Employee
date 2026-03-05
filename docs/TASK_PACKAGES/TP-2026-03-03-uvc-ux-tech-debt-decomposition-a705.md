@@ -74,6 +74,13 @@
 - **External reuse:** Fowler incremental refactoring guidance.
 - **Why not build from scratch:** текущая логика рабочая; нужен перенос без изменения поведения.
 
+## Execution profile policy (v2, mandatory for follow-up waves)
+- **TP mode split:** each follow-up block must explicitly choose `implementation` or `closure_review`; mixed-mode blocks are forbidden.
+- **Implementation boundary:** runtime code + tests first, docs limited to `artifact + short STATE delta + session log` inside the same block.
+- **Closure boundary:** docs-only decision block; runtime files are not allowed.
+- **Hard limits for implementation blocks:** `Doc touch budget (files) <= 3` and `Code dominance = required` unless override is approved.
+- **Override contract:** any boundary exception requires explicit `Override token` in TP and matching `SESSION_TP_SCOPE_OVERRIDE`.
+
 ## Invariant
 - Не менять runtime business semantics и backend/frontend API contracts.
 - Не добавлять новые top-level tabs/routes.
