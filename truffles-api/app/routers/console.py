@@ -402,6 +402,12 @@ from app.services.console_branch_changes import (
     build_branch_update_request as _build_branch_update_request,
 )
 from app.services.console_branch_changes import (
+    get_branch_by_id as _get_branch_by_id_for_change_context,
+)
+from app.services.console_branch_changes import (
+    get_branch_change_draft_payload as _get_branch_change_draft_payload,
+)
+from app.services.console_branch_changes import (
     get_branch_change_for_context as _get_branch_change_for_context_row,
 )
 from app.services.console_branch_changes import (
@@ -20326,7 +20332,7 @@ async def validate_branch_change(
     normalized_patch, errors, diff_payload, base_snapshot = _prepare_branch_change_payload_for_context(
         db=db,
         branch=branch,
-        patch_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
+        patch_payload=_get_branch_change_draft_payload(change),
         **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
     )
 
@@ -20387,7 +20393,7 @@ async def publish_branch_change(
     normalized_patch, errors, diff_payload, _base_snapshot = _prepare_branch_change_payload_for_context(
         db=db,
         branch=branch,
-        patch_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
+        patch_payload=_get_branch_change_draft_payload(change),
         **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
     )
 
@@ -20421,7 +20427,7 @@ async def publish_branch_change(
         db.commit()
         raise
 
-    refreshed_branch = db.query(Branch).filter(Branch.id == branch.id).first()
+    refreshed_branch = _get_branch_by_id_for_change_context(db=db, branch_id=branch.id)
     published_snapshot = _snapshot_branch_for_change(refreshed_branch) if refreshed_branch else None
     _apply_branch_change_published_state(
         change=change,
@@ -20541,7 +20547,7 @@ async def rollback_branch_change(
         db.commit()
         raise
 
-    refreshed_branch = db.query(Branch).filter(Branch.id == branch.id).first()
+    refreshed_branch = _get_branch_by_id_for_change_context(db=db, branch_id=branch.id)
     rollback_snapshot = _snapshot_branch_for_change(refreshed_branch) if refreshed_branch else {}
     _apply_branch_change_rolled_back_state(
         change=change,

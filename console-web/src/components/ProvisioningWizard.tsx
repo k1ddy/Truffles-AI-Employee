@@ -95,6 +95,7 @@ import {
     buildBookingSettingsJsonFromFields,
     buildBranchFormFromBranchData,
     buildWorkingHoursJsonFromFields,
+    createInitialAgentFormState,
     createInitialAutopilotForm,
     createInitialBranchBootstrapState,
     createInitialBranchForm,
@@ -239,12 +240,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const [bookingDefaultDuration, setBookingDefaultDuration] = useState("");
     const [bookingBufferMin, setBookingBufferMin] = useState("");
     const [activateOnSave, setActivateOnSave] = useState(true);
-    const [agentForm, setAgentForm] = useState({
-        name: "",
-        role: "owner" as AgentRole,
-        oidcSubject: "",
-        branchId: "",
-    });
+    const [agentForm, setAgentForm] = useState(() => createInitialAgentFormState<AgentRole>("owner"));
     const [createdAgents, setCreatedAgents] = useState<ProvisioningAgent[]>([]);
     const [capabilitiesDraft, setCapabilitiesDraft] = useState<CapabilitiesPayload>(() => normalizeCapabilities());
     const [capabilitiesTouched, setCapabilitiesTouched] = useState(false);
@@ -1549,12 +1545,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setPaymentStatusDraft("pending");
         setReferencePackTitle("");
         setSpecialistsConfirmed(false);
-        setAgentForm({
-            name: "",
-            role: "owner",
-            oidcSubject: "",
-            branchId: "",
-        });
+        setAgentForm(createInitialAgentFormState<AgentRole>("owner"));
         setAutopilotForm(resetState.autopilotForm);
         setAutopilotServices(["whatsapp"]);
         setAutopilotResult(null);

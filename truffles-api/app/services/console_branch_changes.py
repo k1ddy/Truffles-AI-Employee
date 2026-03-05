@@ -154,6 +154,16 @@ def get_branch_for_change_context(
     return branch
 
 
+def get_branch_change_draft_payload(change: ConsoleBranchChange) -> dict[str, object]:
+    if isinstance(change.draft_payload, dict):
+        return change.draft_payload
+    return {}
+
+
+def get_branch_by_id(*, db: Session, branch_id: UUID) -> Branch | None:
+    return db.query(Branch).filter(Branch.id == branch_id).first()
+
+
 def build_branch_change_rollback_patch(
     *,
     base_snapshot: Mapping[str, object],

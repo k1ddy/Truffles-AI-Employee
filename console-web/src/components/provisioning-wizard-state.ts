@@ -135,6 +135,20 @@ export function createProvisioningWizardResetState(defaultTimezone: string): Pro
     };
 }
 
+export function createInitialAgentFormState<TRole extends string>(defaultRole: TRole): {
+    name: string;
+    role: TRole;
+    oidcSubject: string;
+    branchId: string;
+} {
+    return {
+        name: "",
+        role: defaultRole,
+        oidcSubject: "",
+        branchId: "",
+    };
+}
+
 export function buildBranchFormFromBranchData(
     branchData: BranchLike,
     defaultTimezone: string,
