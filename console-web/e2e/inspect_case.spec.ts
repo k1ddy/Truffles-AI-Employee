@@ -416,7 +416,7 @@ test('inspect first case', async ({ page }) => {
     if (useRouteMocks) {
         await expect(casesTitle).toBeVisible({ timeout: 20000 });
     } else if (!hasCasesWorkspace) {
-        test.skip(true, 'Live mode: cases workspace is unavailable for inspect-case scenario.');
+        test.skip(true, 'Live mode: cases workspace is unavailable for inspect-case flow.');
     }
 
     const tableHtml = await page.getByTestId('cases-table').innerHTML().catch(() => 'Table HTML not found');
@@ -445,7 +445,7 @@ test('inspect first case', async ({ page }) => {
         if (await firstRow.isVisible().catch(() => false)) {
             await firstRow.click({ force: true });
         } else if (!useRouteMocks) {
-            test.skip(true, 'Live mode: queue row is unavailable for inspect-case scenario.');
+            test.skip(true, 'Live mode: queue row is unavailable for inspect-case flow.');
         } else {
             await expect(firstRow).toBeVisible({ timeout: 15000 });
             await firstRow.click({ force: true });
@@ -467,7 +467,7 @@ test('inspect first case', async ({ page }) => {
 
     if (!(await casePane.first().isVisible().catch(() => false))) {
         if (!useRouteMocks) {
-            test.skip(true, 'Live mode: case pane is unavailable for inspect-case scenario.');
+            test.skip(true, 'Live mode: case pane is unavailable for inspect-case flow.');
         }
         await expect(casePane.first()).toBeVisible({ timeout: 15000 });
     }
