@@ -9,6 +9,7 @@
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE2-A1`
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE3-A1`
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE4-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-CLOSEOUT-A1`
 
 ## Название/цель
 Обновить ТЗ в формат исполнимой программы: закрыть все бизнес-требования по вкладкам `Заявки` и `Записи` в полном объеме через связанный набор TP/PR волн, без дублирования логики и без разрыва контекста между операторскими действиями.
@@ -24,6 +25,7 @@
 - `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave2-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave3-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md`
 
 ## FACT pre-check (before implementation)
 - `Implemented in previous waves (fact)`:
@@ -102,6 +104,7 @@
 | Wave2 | `TP-2026-03-05-inbox-calendar-ux-reconstruction-wave2-a1.md` | PR-2 (completed) | Action-first queue controls и терминология для оператора. | Done |
 | Wave3 | `TP-2026-03-05-inbox-calendar-ux-reconstruction-wave3-a1.md` | PR-3 (single PR; split allowed into `-part1/-part2` только по TP update) | Formal queue semantics и backend contract consistency. | Planned |
 | Wave4 | `TP-2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1.md` | PR-4 (single PR; split allowed into `-part1/-part2` только по TP update) | Realtime reliability, observability, rollout safety на проде. | Planned |
+| Closeout | `TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md` | PR-5 (single PR) | Canary/go-no-go/rollback discipline и live lane evidence closure. | Planned |
 
 ## TP/PR linkage rules (mandatory)
 - Если wave не помещается в один PR, перед split обязателен update соответствующего wave TP с явным `part`-разделением и зависимостями.

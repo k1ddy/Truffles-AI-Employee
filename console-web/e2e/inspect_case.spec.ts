@@ -12,6 +12,7 @@ const CLIENT_ID = '22222222-2222-4222-8222-222222222222';
 const BRANCH_ID = '33333333-3333-4333-8333-333333333333';
 const AGENT_ID = '44444444-4444-4444-8444-444444444444';
 const CASE_ID = '55555555-5555-4555-8555-555555555555';
+const LIVE_CASE_ID = process.env.INSPECT_CASE_LIVE_CASE_ID ?? CASE_ID;
 const CONVERSATION_ID = '66666666-6666-4666-8666-666666666666';
 const SPECIALIST_ID = '77777777-7777-4777-8777-777777777777';
 
@@ -294,6 +295,34 @@ async function gotoWithRetry(page: import('@playwright/test').Page, url: string,
     throw new Error(`Failed to navigate to ${url}`);
 }
 
+async function openCaseDirectly(
+    page: import('@playwright/test').Page,
+    caseId: string,
+): Promise<boolean> {
+    if (!caseId) {
+        return false;
+    }
+    const caseUrl = `${baseURL}/cases/${caseId}`;
+    await gotoWithRetry(page, caseUrl);
+    const casePane = page
+        .getByTestId('case-conversation')
+        .or(page.getByTestId('case-details'))
+        .or(page.getByTestId('case-view'));
+    if (await casePane.first().isVisible().catch(() => false)) {
+        return true;
+    }
+    return false;
+}
+
+async function isLiveAuthGateVisible(page: import('@playwright/test').Page): Promise<boolean> {
+    const ssoButton = page.getByRole('button', { name: /войти через sso/i }).first();
+    const loadingProfile = page.getByText(/загрузка профиля/i).first();
+    return Boolean(
+        (await ssoButton.isVisible().catch(() => false))
+        || (await loadingProfile.isVisible().catch(() => false)),
+    );
+}
+
 async function selectOptionIfNeeded(selector: import('@playwright/test').Locator) {
     if (!(await selector.isVisible().catch(() => false))) {
         return false;
@@ -363,6 +392,7 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     }
 
     if (await loginButtonLocator.isVisible().catch(() => false)) {
+        const startUrl = page.url();
         let clicked = false;
         for (let attempt = 1; attempt <= 3; attempt += 1) {
             try {
@@ -382,9 +412,25 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
 
         await Promise.race([
             page.waitForURL(keycloakHostPattern, { timeout: 15000 }).catch(() => null),
-            page.waitForURL(consoleHostPattern, { timeout: 15000 }).catch(() => null),
+            page.waitForURL((url) => {
+                return consoleHostPattern.test(url.toString()) && url.toString() !== startUrl;
+            }, { timeout: 15000 }).catch(() => null),
             casesTitle.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null),
+            page.locator('#username').waitFor({ state: 'visible', timeout: 15000 }).catch(() => null),
         ]);
+
+        if (
+            !(await page.locator('#username').isVisible().catch(() => false))
+            && !(await casesTitle.isVisible().catch(() => false))
+            && await loginButtonLocator.isVisible().catch(() => false)
+        ) {
+            await gotoWithRetry(page, `${baseURL}/api/auth/signin/keycloak`);
+            await Promise.race([
+                page.waitForURL(keycloakHostPattern, { timeout: 15000 }).catch(() => null),
+                page.locator('#username').waitFor({ state: 'visible', timeout: 15000 }).catch(() => null),
+            ]);
+        }
+
         if (await page.locator('#username').isVisible().catch(() => false)) {
             await page.fill('#username', loginUser);
             await page.fill('#password', loginPassword);
@@ -420,7 +466,19 @@ test('inspect first case', async ({ page }) => {
     if (useRouteMocks) {
         await expect(casesTitle).toBeVisible({ timeout: 20000 });
     } else if (!hasCasesWorkspace) {
-        test.skip(true, 'Live mode: cases workspace is unavailable for inspect-case flow.');
+        const screenshotPath = path.resolve('live_cases_workspace_unavailable.png');
+        await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => null);
+        console.log('Live mode: cases workspace unavailable, trying direct case fallback.');
+        console.log(`Fallback screenshot: ${screenshotPath}`);
+        const opened = await openCaseDirectly(page, LIVE_CASE_ID);
+        if (!opened) {
+            if (await isLiveAuthGateVisible(page)) {
+                test.skip(true, 'Live mode blocked: auth gate visible (SSO/login not established).');
+            }
+            throw new Error(
+                `Live mode: cases workspace unavailable and direct case fallback failed for case_id=${LIVE_CASE_ID}.`,
+            );
+        }
     }
 
     const tableHtml = await page.getByTestId('cases-table').innerHTML().catch(() => 'Table HTML not found');
@@ -439,8 +497,16 @@ test('inspect first case', async ({ page }) => {
             await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
             openedFixtureCaseDirectly = true;
         } else {
-            console.log('Live mode: queue is empty, case drill-down step skipped.');
-            return;
+            console.log('Live mode: queue is empty, trying direct case fallback.');
+            openedFixtureCaseDirectly = await openCaseDirectly(page, LIVE_CASE_ID);
+            if (!openedFixtureCaseDirectly) {
+                if (await isLiveAuthGateVisible(page)) {
+                    test.skip(true, 'Live mode blocked: auth gate visible (SSO/login not established).');
+                }
+                throw new Error(
+                    `Live mode: queue is empty and direct case fallback failed for case_id=${LIVE_CASE_ID}.`,
+                );
+            }
         }
     }
 
@@ -449,7 +515,16 @@ test('inspect first case', async ({ page }) => {
         if (await firstRow.isVisible().catch(() => false)) {
             await firstRow.click({ force: true });
         } else if (!useRouteMocks) {
-            test.skip(true, 'Live mode: queue row is unavailable for inspect-case flow.');
+            console.log('Live mode: queue row unavailable, trying direct case fallback.');
+            const opened = await openCaseDirectly(page, LIVE_CASE_ID);
+            if (!opened) {
+                if (await isLiveAuthGateVisible(page)) {
+                    test.skip(true, 'Live mode blocked: auth gate visible (SSO/login not established).');
+                }
+                throw new Error(
+                    `Live mode: queue row unavailable and direct case fallback failed for case_id=${LIVE_CASE_ID}.`,
+                );
+            }
         } else {
             await expect(firstRow).toBeVisible({ timeout: 15000 });
             await firstRow.click({ force: true });
@@ -471,7 +546,15 @@ test('inspect first case', async ({ page }) => {
 
     if (!(await casePane.first().isVisible().catch(() => false))) {
         if (!useRouteMocks) {
-            test.skip(true, 'Live mode: case pane is unavailable for inspect-case flow.');
+            const opened = await openCaseDirectly(page, LIVE_CASE_ID);
+            if (!opened) {
+                if (await isLiveAuthGateVisible(page)) {
+                    test.skip(true, 'Live mode blocked: auth gate visible (SSO/login not established).');
+                }
+                throw new Error(
+                    `Live mode: case pane unavailable after fallback for case_id=${LIVE_CASE_ID}.`,
+                );
+            }
         }
         await expect(casePane.first()).toBeVisible({ timeout: 15000 });
     }

@@ -156,6 +156,8 @@
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
 | `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` | Booking confirm verification runbook | QA/OPS/Brain |
+| `docs/runbooks/INBOX_CALENDAR_WAVE4_RELEASE.md` | Wave4 release runbook for Inbox/Calendar (`canary -> go/no-go -> rollback`) | Brain/Architect/OPS |
+| `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md` | Closeout Task Package for Inbox/Calendar wave4 release discipline (`flag rollback + live lane evidence + runbook`) | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |

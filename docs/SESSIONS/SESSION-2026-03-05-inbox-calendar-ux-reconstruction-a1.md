@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -34,8 +34,13 @@
   - Wave4 observability slice implemented in `/metrics/daily`: `queue_lag_seconds`, `stale_view_rate`, `case_action_apply_latency_seconds` + status fields.
   - Insights/Ops UI updated with realtime reliability KPI cards and action-oriented hints.
   - OpenAPI contract tests expanded for realtime metrics schema coverage.
+  - Closeout TP created for post-wave4 release discipline with explicit canary/go-no-go/rollback block.
+  - Wave4 release runbook added (`INBOX_CALENDAR_WAVE4_RELEASE.md`) with staged rollout and KPI gates.
+  - `useCaseData` now supports runtime rollback flag (`NEXT_PUBLIC_CASE_SSE_ENABLED=0`) to force polling-only mode.
+  - `inspect_case` live lane hardened with explicit auth-gate reasoned skip and direct-case fallback.
+  - Master/Wave4 TP linkage updated to include closeout block.
 - next:
-  - Capture mandatory live no-mocks Playwright evidence and finalize canary/rollback runbook linkage for Wave4 closeout.
+  - Publish closeout commit and PR update; execute canary by runbook after green CI.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -68,4 +73,8 @@
   - `cd console-web && npm run check:uvc-antidrift` (`pass`)
   - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`skip`, live data lane unavailable for case assertion)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run lint -- --file src/hooks/useCaseData.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --reporter=line` (`pass`)
+  - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --reporter=line` (`skip`, auth gate reasoned)
+  - `scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-05

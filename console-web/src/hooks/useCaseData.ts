@@ -48,6 +48,7 @@ export function useCaseData(caseId?: string | null) {
     const enabled = Boolean(caseId);
     const documentVisible = useDocumentVisible();
     const queryClient = useQueryClient();
+    const sseEnabled = process.env.NEXT_PUBLIC_CASE_SSE_ENABLED !== "0";
     const [syncMode, setSyncMode] = useState<"sse" | "polling">("polling");
     const [syncReasonCode, setSyncReasonCode] = useState<string | null>("stream_not_initialized");
     const casePollMs = syncMode === "sse" ? 120000 : 30000;
@@ -62,6 +63,11 @@ export function useCaseData(caseId?: string | null) {
         if (typeof window === "undefined" || typeof EventSource === "undefined") {
             setSyncMode("polling");
             setSyncReasonCode("event_source_unsupported");
+            return;
+        }
+        if (!sseEnabled) {
+            setSyncMode("polling");
+            setSyncReasonCode("sse_disabled_by_flag");
             return;
         }
 
@@ -124,7 +130,7 @@ export function useCaseData(caseId?: string | null) {
             stopped = true;
             stream.close();
         };
-    }, [caseId, documentVisible, enabled, queryClient]);
+    }, [caseId, documentVisible, enabled, queryClient, sseEnabled]);
 
     const caseQuery = useQuery({
         queryKey: ["case", caseId],
