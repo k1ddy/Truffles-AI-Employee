@@ -224,6 +224,57 @@ def apply_branch_change_publish_failed_state(
     return message
 
 
+def apply_branch_change_publish_runtime_error_state(
+    *,
+    change: ConsoleBranchChange,
+    error_message: str,
+    now: datetime,
+) -> None:
+    change.status = "publish_failed"
+    change.publish_error = error_message
+    change.updated_at = now
+
+
+def apply_branch_change_published_state(
+    *,
+    change: ConsoleBranchChange,
+    published_snapshot: Mapping[str, object] | None,
+    actor_id: UUID,
+    now: datetime,
+) -> None:
+    change.status = "published"
+    change.publish_error = None
+    change.published_snapshot = _jsonable_payload(published_snapshot) if published_snapshot is not None else None
+    change.published_at = now
+    change.published_by = actor_id
+    change.updated_at = now
+
+
+def apply_branch_change_rollback_failed_state(
+    *,
+    change: ConsoleBranchChange,
+    error_message: str,
+    now: datetime,
+) -> None:
+    change.rollback_error = error_message
+    change.updated_at = now
+
+
+def apply_branch_change_rolled_back_state(
+    *,
+    change: ConsoleBranchChange,
+    rollback_snapshot: Mapping[str, object],
+    actor_id: UUID,
+    now: datetime,
+) -> None:
+    change.status = "rolled_back"
+    change.rollback_error = None
+    change.rollback_snapshot = _jsonable_payload(rollback_snapshot)
+    change.rolled_back_at = now
+    change.rolled_back_by = actor_id
+    change.updated_at = now
+
+
 def _error_message(exc: Exception) -> str:
     message = getattr(exc, "message", None)
     return str(message) if message else str(exc)
