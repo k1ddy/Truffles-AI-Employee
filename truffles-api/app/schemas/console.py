@@ -992,6 +992,9 @@ class ConsoleCase(BaseModel):
     channel: Optional[str] = None
     created_at: str
     sla_status: Optional[str] = "ok"  # ok, warning, breached
+    priority_tier: Optional[str] = None  # low, normal, high, urgent
+    attention_reason: Optional[str] = None
+    target_response_at: Optional[str] = None
     # Customer info
     customer_name: Optional[str] = None
     customer_phone: Optional[str] = None

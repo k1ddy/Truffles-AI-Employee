@@ -6447,6 +6447,32 @@ paths:
           - type: string
           - type: 'null'
           title: Conversation Id
+      - name: case_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Id
+      - name: lane
+        in: query
+        required: false
+        schema:
+          enum:
+          - attention
+          - all
+          type: string
+          default: all
+          title: Lane
+      - name: needs_action
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Needs Action
       - name: date_from
         in: query
         required: false
@@ -6471,6 +6497,14 @@ paths:
           - type: string
           - type: 'null'
           title: Status
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
       - name: limit
         in: query
         required: false
@@ -6740,6 +6774,11 @@ components:
           - type: string
           - type: 'null'
           title: Conversation Id
+        case_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Id
       type: object
       required:
       - specialist_id
@@ -6842,6 +6881,15 @@ components:
           - type: string
           - type: 'null'
           title: Case Id
+        needs_action:
+          type: boolean
+          title: Needs Action
+          default: false
+        attention_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Attention Reason
         created_at:
           type: string
           title: Created At
@@ -6879,6 +6927,15 @@ components:
             $ref: '#/components/schemas/BookingResponse'
           type: array
           title: Items
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
       type: object
       required:
       - items
@@ -9609,6 +9666,21 @@ components:
           - type: 'null'
           title: Sla Status
           default: ok
+        priority_tier:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Priority Tier
+        attention_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Attention Reason
+        target_response_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Response At
         customer_name:
           anyOf:
           - type: string
