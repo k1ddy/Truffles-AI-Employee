@@ -214,6 +214,7 @@
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave16-a705.md` | Artifact report: wave16 structural decomposition for `UX-11`/`UX-12` (branch-change publish-success state extraction + provisioning go-live mutation submit-flow extraction) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review12-a705.md` | Artifact report: closure-review12 merged-main decision after wave16 (`Open (Mitigated wave16; wave17 required)`) | Brain/Architect |
 | `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave17-a705.md` | Artifact report: wave17 structural decomposition for `UX-11`/`UX-12` (branch-change rollback normalization extraction + provisioning go-live submit-orchestration extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review13-a705.md` | Artifact report: closure-review13 merged-main decision after wave17 (`Open (Mitigated wave17; wave18 required)`) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave4-a705.md` | Follow-up Task Package for next decomposition wave after closeout residual confirmation | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-close-a705.md` | Final-close Task Package for post-wave4 deterministic status decision and residual contract | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md` | Next bounded wave Task Package for residual `UX-11/UX-12` decomposition after final-close merge | Brain/Architect |
@@ -242,6 +243,7 @@
 | `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review12-a705.md` | Closure-review Task Package after wave16 merge to decide `Fixed` vs `Open + wave17` for `UX-11`/`UX-12` | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave17-a705.md` | Next bounded decomposition Task Package after closure-review12 residual decision for `UX-11`/`UX-12` | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review13-a705.md` | Closure-review Task Package after wave17 merge to decide `Fixed` vs `Open + wave18` for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave18-a705.md` | Next bounded decomposition Task Package after closure-review13 residual decision for `UX-11`/`UX-12` | Brain/Architect |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
 | `SPECS/INBOX_HUMAN_LOCK.md` | ТЗ: manual messaging + human lock в «Заявках» | Архитектор/Backend/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
