@@ -71,10 +71,12 @@ import {
 } from "@/components/provisioning-wizard-account-actions";
 import {
     buildCreateBranchPayload,
+    handleBranchMutationError,
     buildSaveBookingPayload,
     buildSaveInstancePayload,
     buildSaveKnowledgePayload,
     buildSaveTelegramPayload,
+    syncBranchMutationSuccess,
     buildUpdateBranchDraftPayload,
 } from "@/components/provisioning-wizard-branch-actions";
 import {
@@ -188,10 +190,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         clearErrors,
     } = useInlineErrorSummary();
 
-    const reportValidationError = (message: string, code = "VALIDATION_ERROR") => {
+    const reportValidationError = useCallback((message: string, code = "VALIDATION_ERROR") => {
         toast.error(message);
         reportInlineError({ code, message });
-    };
+    }, [reportInlineError]);
     const reportProvisioningError = useCallback(
         (error: unknown, operation: string, endpoint: string) =>
             reportError(error, {
@@ -704,6 +706,33 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setAutoStepSync(false);
     }, [autoStepSync, onboardingStatus]);
 
+    const applyBranchMutationSuccess = useCallback(
+        (nextBranch: ProvisioningBranch, message: string) => {
+            syncBranchMutationSuccess({
+                data: nextBranch,
+                toastMessage: message,
+                setBranchData,
+                refetchOnboarding,
+                refetchOnboardingScorecard,
+                notifySuccess: (toastMessage) => toast.success(toastMessage),
+            });
+        },
+        [refetchOnboarding, refetchOnboardingScorecard],
+    );
+
+    const handleBranchMutationFailure = useCallback(
+        (error: unknown, action: string, endpoint: string) => {
+            handleBranchMutationError({
+                error,
+                action,
+                endpoint,
+                reportValidationError,
+                reportProvisioningError,
+            });
+        },
+        [reportProvisioningError, reportValidationError],
+    );
+
     const createCompanyMutation = useMutation({
         mutationFn: async (payload: components["schemas"]["ConsoleCompanyCreateRequest"]) => {
             const response = await adminApi.createCompany(payload);
@@ -770,17 +799,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return response.data;
         },
         onSuccess: (data) => {
-            setBranchData(data as ProvisioningBranch);
-            refetchOnboarding();
-            refetchOnboardingScorecard();
-            toast.success("Филиал обновлён");
+            applyBranchMutationSuccess(data as ProvisioningBranch, "Филиал обновлён");
         },
         onError: (error) => {
-            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                reportValidationError("Сначала создайте филиал");
-                return;
-            }
-            reportProvisioningError(error, "обновление филиала", "PATCH /api/proxy/admin/branches/:id");
+            handleBranchMutationFailure(error, "обновление филиала", "PATCH /api/proxy/admin/branches/:id");
         },
     });
 
@@ -793,17 +815,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return response.data;
         },
         onSuccess: (data) => {
-            setBranchData(data as ProvisioningBranch);
-            refetchOnboarding();
-            refetchOnboardingScorecard();
-            toast.success("Go-live одобрен");
+            applyBranchMutationSuccess(data as ProvisioningBranch, "Go-live одобрен");
         },
         onError: (error) => {
-            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                reportValidationError("Сначала создайте филиал");
-                return;
-            }
-            reportProvisioningError(error, "подтверждение go-live", "POST /api/proxy/admin/branches/:id/go-live/approve");
+            handleBranchMutationFailure(error, "подтверждение go-live", "POST /api/proxy/admin/branches/:id/go-live/approve");
         },
     });
 
@@ -816,17 +831,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return response.data;
         },
         onSuccess: (data) => {
-            setBranchData(data as ProvisioningBranch);
-            refetchOnboarding();
-            refetchOnboardingScorecard();
-            toast.success("Go-live отклонен");
+            applyBranchMutationSuccess(data as ProvisioningBranch, "Go-live отклонен");
         },
         onError: (error) => {
-            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                reportValidationError("Сначала создайте филиал");
-                return;
-            }
-            reportProvisioningError(error, "отклонение go-live", "POST /api/proxy/admin/branches/:id/go-live/reject");
+            handleBranchMutationFailure(error, "отклонение go-live", "POST /api/proxy/admin/branches/:id/go-live/reject");
         },
     });
 
@@ -839,17 +847,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return response.data;
         },
         onSuccess: (data) => {
-            setBranchData(data as ProvisioningBranch);
-            refetchOnboarding();
-            refetchOnboardingScorecard();
-            toast.success("Go-live waiver сохранен");
+            applyBranchMutationSuccess(data as ProvisioningBranch, "Go-live waiver сохранен");
         },
         onError: (error) => {
-            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                reportValidationError("Сначала создайте филиал");
-                return;
-            }
-            reportProvisioningError(error, "waiver go-live", "POST /api/proxy/admin/branches/:id/go-live/waive");
+            handleBranchMutationFailure(error, "waiver go-live", "POST /api/proxy/admin/branches/:id/go-live/waive");
         },
     });
 

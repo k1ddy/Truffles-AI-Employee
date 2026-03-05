@@ -187,6 +187,43 @@ def build_branch_update_request(
     return ConsoleBranchUpdateRequest.model_validate(payload)
 
 
+def apply_branch_change_validation_result(
+    *,
+    change: ConsoleBranchChange,
+    branch: Branch,
+    normalized_patch: Mapping[str, object],
+    diff_payload: Mapping[str, Mapping[str, object]],
+    base_snapshot: Mapping[str, object],
+    errors: list[str],
+    now: datetime,
+) -> None:
+    change.draft_payload = _jsonable_payload(normalized_patch)
+    change.diff_payload = _jsonable_payload(diff_payload)
+    change.base_snapshot = _jsonable_payload(base_snapshot)
+    change.base_branch_updated_at = branch.updated_at
+    change.validation_payload = {
+        "ok": len(errors) == 0,
+        "errors": errors,
+    }
+    change.status = "validated" if not errors else "draft"
+    change.validated_at = now if not errors else None
+    change.updated_at = now
+
+
+def apply_branch_change_publish_failed_state(
+    *,
+    change: ConsoleBranchChange,
+    errors: list[str],
+    now: datetime,
+) -> str:
+    message = "; ".join(errors)
+    change.status = "publish_failed"
+    change.publish_error = message
+    change.validation_payload = {"ok": False, "errors": errors}
+    change.updated_at = now
+    return message
+
+
 def _error_message(exc: Exception) -> str:
     message = getattr(exc, "message", None)
     return str(message) if message else str(exc)
