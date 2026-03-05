@@ -14,6 +14,7 @@ from app.services.console_branch_changes import (
     apply_branch_change_rollback_failed_state,
     apply_branch_change_rolled_back_state,
     apply_branch_change_validation_result,
+    build_branch_change_response,
     build_branch_change_diff,
     build_branch_change_list_response,
     normalize_branch_change_patch,
@@ -117,6 +118,44 @@ def test_build_branch_change_rollback_patch_only_includes_changed_fields():
         "name": "Branch A",
         "is_active": True,
     }
+
+
+def test_build_branch_change_response_with_branch():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = _build_branch_change_row(created_at=now, status="validated")
+    branch = SimpleNamespace(id=uuid4(), slug="branch-a")
+
+    response = build_branch_change_response(
+        change=change,  # type: ignore[arg-type]
+        branch=branch,  # type: ignore[arg-type]
+        serialize_branch=lambda item: {
+            "id": str(item.id),
+            "slug": item.slug,
+            "name": "Branch A",
+            "is_active": True,
+        },
+    )
+
+    assert response.change.id == change.id
+    assert response.branch is not None
+    assert response.branch.id == branch.id
+    assert response.branch.slug == "branch-a"
+    assert response.branch.name == "Branch A"
+    assert response.branch.is_active is True
+
+
+def test_build_branch_change_response_without_branch():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = _build_branch_change_row(created_at=now, status="draft")
+
+    response = build_branch_change_response(
+        change=change,  # type: ignore[arg-type]
+        branch=None,
+        serialize_branch=lambda item: {"id": str(item.id)},
+    )
+
+    assert response.change.id == change.id
+    assert response.branch is None
 
 
 def test_build_branch_change_list_response_builds_page_and_cursor():
