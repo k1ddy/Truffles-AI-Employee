@@ -713,7 +713,7 @@ export default function CaseList({
                                     )}
                                     {isLive && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-green-100 text-green-800">
-                                            На связи
+                                            Недавний диалог
                                         </span>
                                     )}
                                     {hasHumanLock && (
@@ -816,7 +816,7 @@ export default function CaseList({
                                                 )}
                                                 {isLive && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-800">
-                                                        На связи
+                                                        Недавний диалог
                                                     </span>
                                                 )}
                                                 {hasIssue && (

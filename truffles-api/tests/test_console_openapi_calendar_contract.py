@@ -109,6 +109,19 @@ def test_booking_response_contract_exposes_no_show_followup_flag() -> None:
     assert _has_string_type(properties.get("no_show_followup_closed_by") or {})
     assert "no_show_followup_rebooked_appointment_id" in properties
     assert _has_string_type(properties.get("no_show_followup_rebooked_appointment_id") or {})
+    assert "conversation_id" in properties
+    assert _has_string_type(properties.get("conversation_id") or {})
+    assert "case_id" in properties
+    assert _has_string_type(properties.get("case_id") or {})
+
+
+def test_calendar_bookings_list_contract_exposes_conversation_filter() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+    path_item = _find_path(paths, "/calendar/bookings") or {}
+    get_op = path_item.get("get") or {}
+    params = get_op.get("parameters") or []
+    assert any((param or {}).get("name") == "conversation_id" for param in params)
 
 
 def test_no_show_followup_request_contract_exposes_result_and_rebook_link() -> None:

@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import { getBookingStatusLabel, getBookingStatusColor } from "@/utils/labels";
 import AccessDenied from "@/components/AccessDenied";
@@ -42,6 +43,8 @@ interface Booking {
     no_show_followup_closed_at?: string | null;
     no_show_followup_closed_by?: string | null;
     no_show_followup_rebooked_appointment_id?: string | null;
+    conversation_id?: string | null;
+    case_id?: string | null;
     created_at: string;
 }
 
@@ -82,9 +85,17 @@ async function fetchSlots(specialistId: string, date: string, duration: number):
     return response.data;
 }
 
-async function fetchBookings(date?: string): Promise<{ items: Booking[] }> {
-    const params = date ? `?date_from=${date}&date_to=${date}` : "";
-    const response = await api.get(`/calendar/bookings${params}`);
+async function fetchBookings(options?: { date?: string; conversationId?: string }): Promise<{ items: Booking[] }> {
+    const params = new URLSearchParams();
+    if (options?.date) {
+        params.set("date_from", options.date);
+        params.set("date_to", options.date);
+    }
+    if (options?.conversationId) {
+        params.set("conversation_id", options.conversationId);
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    const response = await api.get(`/calendar/bookings${suffix}`);
     return response.data;
 }
 
@@ -126,8 +137,11 @@ function formatDate(date: Date): string {
 
 export default function CalendarPage() {
     const { data: session } = useSession();
+    const searchParams = useSearchParams();
     const queryClient = useQueryClient();
     const today = formatDate(new Date());
+    const focusedConversationId = searchParams.get("conversation_id") || "";
+    const focusedCaseId = searchParams.get("case_id") || "";
 
     const { data: meData } = useQuery({
         queryKey: ["console-me"],
@@ -176,12 +190,44 @@ export default function CalendarPage() {
     const slots = slotsData?.slots ?? [];
 
     const { data: bookingsData, isLoading: bookingsLoading } = useQuery({
-        queryKey: ["bookings", selectedDate],
-        queryFn: () => fetchBookings(selectedDate),
+        queryKey: ["bookings", selectedDate, focusedConversationId],
+        queryFn: () =>
+            fetchBookings({
+                date: selectedDate,
+                conversationId: focusedConversationId || undefined,
+            }),
         enabled: !!session && canReadCalendar,
     });
 
-    const bookings = bookingsData?.items ?? [];
+    const bookings = useMemo(() => bookingsData?.items ?? [], [bookingsData?.items]);
+    const bookingsSorted = useMemo(() => {
+        const attentionFirstStatuses = new Set([
+            "PENDING_CONFIRMATION",
+            "RESCHEDULE_REQUESTED",
+            "NO_SHOW",
+            "HOLD",
+        ]);
+        const requiresAttention = (booking: Booking) =>
+            attentionFirstStatuses.has(booking.status.toUpperCase()) ||
+            (booking.status.toUpperCase() === "NO_SHOW" && !booking.no_show_followup_done);
+        return [...bookings].sort((left, right) => {
+            const leftPriority = requiresAttention(left) ? 1 : 0;
+            const rightPriority = requiresAttention(right) ? 1 : 0;
+            if (leftPriority !== rightPriority) {
+                return rightPriority - leftPriority;
+            }
+            return new Date(left.start_at).getTime() - new Date(right.start_at).getTime();
+        });
+    }, [bookings]);
+    const attentionCount = bookingsSorted.filter((booking) => {
+        const normalized = booking.status.toUpperCase();
+        return (
+            normalized === "PENDING_CONFIRMATION" ||
+            normalized === "RESCHEDULE_REQUESTED" ||
+            normalized === "HOLD" ||
+            (normalized === "NO_SHOW" && !booking.no_show_followup_done)
+        );
+    }).length;
 
     // Create booking mutation
     const createMutation = useMutation({
@@ -292,6 +338,7 @@ export default function CalendarPage() {
             customer_phone: customerPhone || undefined,
             service_type: selectedService?.name || undefined,
             notes: notes || undefined,
+            conversation_id: focusedConversationId || undefined,
         });
     };
 
@@ -316,7 +363,7 @@ export default function CalendarPage() {
                     <div className="badge mb-3">Calendar</div>
                     <h1 className="text-2xl font-semibold">Записи</h1>
                     <p className="mt-2 text-sm text-muted-foreground">
-                        Подберите слот, подтвердите услугу и создайте запись вручную при необходимости.
+                        Управляйте очередью визитов, подтверждайте статусы и возвращайтесь к нужной заявке без потери контекста.
                     </p>
                     {!canWriteCalendar && (
                         <p className="mt-2 text-xs text-muted-foreground">
@@ -324,10 +371,48 @@ export default function CalendarPage() {
                         </p>
                     )}
                 </div>
-                <Link href="/" className="btn-ghost">
-                    ← Назад к заявкам
+                <Link
+                    href={focusedCaseId ? `/cases/${encodeURIComponent(focusedCaseId)}` : "/"}
+                    className="btn-ghost"
+                    data-testid="calendar-back-to-cases"
+                >
+                    ← {focusedCaseId ? "Вернуться в заявку" : "Назад к заявкам"}
                 </Link>
             </div>
+
+            {focusedConversationId && (
+                <div
+                    className="card-surface border border-primary/30 bg-primary/5 p-4"
+                    data-testid="calendar-case-context-banner"
+                >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <p className="text-sm font-semibold">Режим по заявке включен</p>
+                            <p className="text-xs text-muted-foreground">
+                                Показываются записи, связанные с выбранной заявкой.
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {focusedCaseId && (
+                                <Link
+                                    href={`/cases/${encodeURIComponent(focusedCaseId)}`}
+                                    className="rounded border border-border/60 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-background"
+                                    data-testid="calendar-open-linked-case"
+                                >
+                                    Открыть заявку
+                                </Link>
+                            )}
+                            <Link
+                                href="/calendar"
+                                className="rounded border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-background"
+                                data-testid="calendar-clear-case-context"
+                            >
+                                Показать все записи
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Left: Filters & Slots */}
@@ -581,6 +666,9 @@ export default function CalendarPage() {
                         <h2 className="font-semibold text-lg mb-4">
                             Записи на {new Date(selectedDate).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
                         </h2>
+                        <p className="mb-4 text-xs text-muted-foreground">
+                            Требуют внимания: <span className="font-semibold text-foreground">{attentionCount}</span>
+                        </p>
 
                         {bookingsLoading ? (
                             <div className="animate-pulse space-y-3">
@@ -588,16 +676,17 @@ export default function CalendarPage() {
                                     <div key={i} className="h-16 bg-muted/70 rounded"></div>
                                 ))}
                             </div>
-                        ) : bookings.length === 0 ? (
+                        ) : bookingsSorted.length === 0 ? (
                             <p className="text-muted-foreground text-center py-4">
-                                Нет записей на эту дату
+                                {focusedConversationId ? "По этой заявке записей на выбранную дату нет" : "Нет записей на эту дату"}
                             </p>
                         ) : (
                             <div className="space-y-3">
-                                {bookings.map((booking) => (
+                                {bookingsSorted.map((booking) => (
                                     <div
                                         key={booking.id}
                                         className="p-3 border border-border/60 rounded-lg hover:bg-muted/60"
+                                        data-testid="calendar-booking-card"
                                     >
                                         <div className="flex justify-between items-start mb-1">
                                             <span className="font-medium text-sm">
@@ -623,6 +712,22 @@ export default function CalendarPage() {
                                         {booking.service_type && (
                                             <div className="text-xs text-muted-foreground mt-1">
                                                 {booking.service_type}
+                                            </div>
+                                        )}
+                                        {booking.case_id && (
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <Link
+                                                    href={`/cases/${encodeURIComponent(booking.case_id)}`}
+                                                    className="rounded border border-border/60 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-background"
+                                                    data-testid="calendar-booking-open-case"
+                                                >
+                                                    Открыть заявку
+                                                </Link>
+                                                {focusedCaseId && booking.case_id === focusedCaseId && (
+                                                    <span className="rounded bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                                                        Текущая заявка
+                                                    </span>
+                                                )}
                                             </div>
                                         )}
                                         {canWriteCalendar && getVisitActionOptions(booking.status).length > 0 && (

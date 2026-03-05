@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import toast from "react-hot-toast";
 import { casesApi, outreachApi, type CaseActionResponse } from "@/lib/api-client";
 import type { Case, Message } from "@/types";
@@ -199,6 +200,7 @@ export default function CaseConversation({
     const [replyPauseEnabled, setReplyPauseEnabled] = useState(true);
     const [replyPauseMinutes, setReplyPauseMinutes] = useState(30);
     const [outreachExpanded, setOutreachExpanded] = useState(false);
+    const [contextExpanded, setContextExpanded] = useState(layout !== "inbox");
     const outreachPanelRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
@@ -209,7 +211,8 @@ export default function CaseConversation({
         setReplyPauseEnabled(true);
         setReplyPauseMinutes(30);
         setOutreachExpanded(false);
-    }, [caseId, caseDetail.customer_phone, caseDetail.customer_remote_jid]);
+        setContextExpanded(layout !== "inbox");
+    }, [caseId, caseDetail.customer_phone, caseDetail.customer_remote_jid, layout]);
 
     const humanLockQuery = useQuery({
         queryKey: ["human-lock", caseDetail.conversation_id],
@@ -302,6 +305,7 @@ export default function CaseConversation({
     const isActive = caseDetail.status === "active";
     const isPending = caseDetail.status === "pending";
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
+    const compactContextLimit = 180;
     const contextTitle = caseDetail.context_summary ? "Суть запроса" : "Последнее сообщение";
     const lastInbound = caseDetail.last_inbound_at
         ? new Date(caseDetail.last_inbound_at).toLocaleString("ru-RU")
@@ -310,6 +314,10 @@ export default function CaseConversation({
     const showDetailsToggle = typeof onToggleDetails === "function";
     const detailsLabel = detailsOpen ? "Скрыть детали" : "Детали";
     const isInboxLayout = layout === "inbox";
+    const contextCanExpand = isInboxLayout && contextText.length > compactContextLimit;
+    const contextBody = contextCanExpand && !contextExpanded
+        ? `${contextText.slice(0, compactContextLimit).trimEnd()}...`
+        : contextText;
     const slaCountdown = getSlaCountdown(caseDetail.created_at || new Date().toISOString());
     const issueHints: string[] = [];
     if (caseDetail.has_delivery_error) {
@@ -360,11 +368,14 @@ export default function CaseConversation({
     const outreachBusy =
         sendOutreachMutation.isPending || pauseMutation.isPending || releasePauseMutation.isPending;
     const canSubmitOutreach = Boolean(outreachDestination.trim() && outreachContent.trim());
-    const openOutreachPanel = () => {
-        setOutreachExpanded(true);
-        window.requestAnimationFrame(() => {
-            outreachPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-        });
+    const toggleOutreachPanel = () => {
+        const nextExpanded = !outreachExpanded;
+        setOutreachExpanded(nextExpanded);
+        if (nextExpanded) {
+            window.requestAnimationFrame(() => {
+                outreachPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+        }
     };
     const replyPauseConfig = {
         enabled: replyPauseEnabled,
@@ -516,12 +527,21 @@ export default function CaseConversation({
                             {canOutreach && (
                                 <button
                                     type="button"
-                                    onClick={openOutreachPanel}
+                                    onClick={toggleOutreachPanel}
                                     className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
                                     data-testid="outreach-open"
                                 >
-                                    Связаться с клиентом
+                                    {outreachExpanded ? "Скрыть outreach" : "Связаться с клиентом"}
                                 </button>
+                            )}
+                            {caseDetail.conversation_id && (
+                                <Link
+                                    href={`/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}`}
+                                    className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
+                                    data-testid="case-open-calendar"
+                                >
+                                    Записи по заявке
+                                </Link>
                             )}
                             {canGoNextCase && (
                                 <button
@@ -579,7 +599,17 @@ export default function CaseConversation({
                     <span>{contextTitle}</span>
                     <span>Последнее входящее: {lastInbound}</span>
                 </div>
-                <p className="text-sm text-foreground">{contextText}</p>
+                <p className="text-sm text-foreground">{contextBody}</p>
+                {contextCanExpand && (
+                    <button
+                        type="button"
+                        onClick={() => setContextExpanded((value) => !value)}
+                        className="mt-2 rounded border border-border/60 px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                        data-testid="case-context-toggle"
+                    >
+                        {contextExpanded ? "Свернуть контекст" : "Показать контекст"}
+                    </button>
+                )}
             </div>
             {issueHints.length > 0 && (
                 <div className={`rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 ${
@@ -588,7 +618,7 @@ export default function CaseConversation({
                     {issueHints.join(" ")}
                 </div>
             )}
-            {canOutreach && (
+            {canOutreach && outreachExpanded && (
                 <div
                     ref={outreachPanelRef}
                     className={`rounded-lg border border-border/60 bg-card px-3 py-3 text-sm ${
@@ -615,115 +645,106 @@ export default function CaseConversation({
                             </span>
                             <button
                                 type="button"
-                                onClick={() => setOutreachExpanded((value) => !value)}
+                                onClick={toggleOutreachPanel}
                                 className="rounded border border-border/60 px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
                                 data-testid="outreach-toggle"
                             >
-                                {outreachExpanded ? "Свернуть" : "Открыть"}
+                                Свернуть
                             </button>
                         </div>
                     </div>
-                    {!outreachExpanded && (
-                        <p className="rounded border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                            Откройте блок, чтобы отправить сообщение клиенту и при необходимости включить паузу бота.
-                        </p>
-                    )}
-                    {outreachExpanded && (
-                        <>
-                            <div className="grid gap-2 md:grid-cols-[2fr_1fr]">
-                                <label className="space-y-1">
-                                    <span className="text-xs text-muted-foreground">WhatsApp номер или JID</span>
-                                    <input
-                                        type="text"
-                                        value={outreachDestination}
-                                        onChange={(event) => setOutreachDestination(event.target.value)}
-                                        className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
-                                        placeholder="+7 777 123 45 67"
-                                        data-testid="outreach-destination"
-                                    />
-                                </label>
-                                <label className="space-y-1">
-                                    <span className="text-xs text-muted-foreground">Пауза (мин)</span>
-                                    <input
-                                        type="number"
-                                        min={0}
-                                        max={1440}
-                                        value={pauseMinutes}
-                                        onChange={(event) => {
-                                            const next = Number(event.target.value);
-                                            const normalized = Number.isFinite(next) ? Math.min(Math.max(next, 0), 1440) : 0;
-                                            setPauseMinutes(normalized);
-                                        }}
-                                        disabled={!outreachPauseEnabled}
-                                        className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
-                                        data-testid="human-lock-minutes"
-                                    />
-                                </label>
-                            </div>
-                            <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                                <input
-                                    type="checkbox"
-                                    checked={outreachPauseEnabled}
-                                    onChange={(event) => setOutreachPauseEnabled(event.target.checked)}
-                                    className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                    data-testid="outreach-pause-toggle"
-                                />
-                                Ставить паузу после отправки
-                            </label>
-                            <label className="mt-2 block space-y-1">
-                                <span className="text-xs text-muted-foreground">Сообщение клиенту</span>
-                                <textarea
-                                    value={outreachContent}
-                                    onChange={(event) => setOutreachContent(event.target.value)}
-                                    rows={3}
-                                    className="w-full resize-y rounded border border-border/60 bg-background px-3 py-2 text-sm"
-                                    placeholder="Например: Мы на связи, продолжаем вручную"
-                                    data-testid="outreach-message"
-                                />
-                            </label>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        if (!canSubmitOutreach) {
-                                            toast.error("Заполните номер и текст сообщения");
-                                            return;
-                                        }
-                                        sendOutreachMutation.mutate();
-                                    }}
-                                    disabled={outreachBusy || !canSubmitOutreach}
-                                    className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
-                                    data-testid="outreach-send"
-                                >
-                                    {sendOutreachMutation.isPending ? "Отправка..." : "Отправить клиенту"}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        if (!pauseMinutes || pauseMinutes < 1) {
-                                            toast.error("Укажите длительность паузы");
-                                            return;
-                                        }
-                                        pauseMutation.mutate();
-                                    }}
-                                    disabled={outreachBusy}
-                                    className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-foreground disabled:opacity-50"
-                                    data-testid="human-lock-pause"
-                                >
-                                    {pauseMutation.isPending ? "Ставим паузу..." : "Пауза бота"}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => releasePauseMutation.mutate()}
-                                    disabled={outreachBusy || !humanLockActive}
-                                    className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground disabled:opacity-50"
-                                    data-testid="human-lock-release"
-                                >
-                                    {releasePauseMutation.isPending ? "Снимаем..." : "Снять паузу"}
-                                </button>
-                            </div>
-                        </>
-                    )}
+                    <div className="grid gap-2 md:grid-cols-[2fr_1fr]">
+                        <label className="space-y-1">
+                            <span className="text-xs text-muted-foreground">WhatsApp номер или JID</span>
+                            <input
+                                type="text"
+                                value={outreachDestination}
+                                onChange={(event) => setOutreachDestination(event.target.value)}
+                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                                placeholder="+7 777 123 45 67"
+                                data-testid="outreach-destination"
+                            />
+                        </label>
+                        <label className="space-y-1">
+                            <span className="text-xs text-muted-foreground">Пауза (мин)</span>
+                            <input
+                                type="number"
+                                min={0}
+                                max={1440}
+                                value={pauseMinutes}
+                                onChange={(event) => {
+                                    const next = Number(event.target.value);
+                                    const normalized = Number.isFinite(next) ? Math.min(Math.max(next, 0), 1440) : 0;
+                                    setPauseMinutes(normalized);
+                                }}
+                                disabled={!outreachPauseEnabled}
+                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                                data-testid="human-lock-minutes"
+                            />
+                        </label>
+                    </div>
+                    <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                        <input
+                            type="checkbox"
+                            checked={outreachPauseEnabled}
+                            onChange={(event) => setOutreachPauseEnabled(event.target.checked)}
+                            className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                            data-testid="outreach-pause-toggle"
+                        />
+                        Ставить паузу после отправки
+                    </label>
+                    <label className="mt-2 block space-y-1">
+                        <span className="text-xs text-muted-foreground">Сообщение клиенту</span>
+                        <textarea
+                            value={outreachContent}
+                            onChange={(event) => setOutreachContent(event.target.value)}
+                            rows={3}
+                            className="w-full resize-y rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                            placeholder="Например: Мы на связи, продолжаем вручную"
+                            data-testid="outreach-message"
+                        />
+                    </label>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (!canSubmitOutreach) {
+                                    toast.error("Заполните номер и текст сообщения");
+                                    return;
+                                }
+                                sendOutreachMutation.mutate();
+                            }}
+                            disabled={outreachBusy || !canSubmitOutreach}
+                            className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                            data-testid="outreach-send"
+                        >
+                            {sendOutreachMutation.isPending ? "Отправка..." : "Отправить клиенту"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (!pauseMinutes || pauseMinutes < 1) {
+                                    toast.error("Укажите длительность паузы");
+                                    return;
+                                }
+                                pauseMutation.mutate();
+                            }}
+                            disabled={outreachBusy}
+                            className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-foreground disabled:opacity-50"
+                            data-testid="human-lock-pause"
+                        >
+                            {pauseMutation.isPending ? "Ставим паузу..." : "Пауза бота"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => releasePauseMutation.mutate()}
+                            disabled={outreachBusy || !humanLockActive}
+                            className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground disabled:opacity-50"
+                            data-testid="human-lock-release"
+                        >
+                            {releasePauseMutation.isPending ? "Снимаем..." : "Снять паузу"}
+                        </button>
+                    </div>
                 </div>
             )}
 
