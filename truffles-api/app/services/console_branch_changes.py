@@ -235,6 +235,21 @@ def apply_branch_change_publish_runtime_error_state(
     change.updated_at = now
 
 
+def apply_branch_change_published_state(
+    *,
+    change: ConsoleBranchChange,
+    published_snapshot: Mapping[str, object] | None,
+    actor_id: UUID,
+    now: datetime,
+) -> None:
+    change.status = "published"
+    change.publish_error = None
+    change.published_snapshot = _jsonable_payload(published_snapshot) if published_snapshot is not None else None
+    change.published_at = now
+    change.published_by = actor_id
+    change.updated_at = now
+
+
 def apply_branch_change_rollback_failed_state(
     *,
     change: ConsoleBranchChange,

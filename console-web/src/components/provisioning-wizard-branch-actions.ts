@@ -17,6 +17,14 @@ type ActionResult<T> = {
     payload?: T;
 };
 
+type GoLiveMutationInput<TPayload> = {
+    result: ActionResult<TPayload>;
+    fallbackError: string;
+    reportValidationError: (message: string) => void;
+    mutate: (payload: TPayload, options: { onSuccess: () => void }) => void;
+    clearReason: () => void;
+};
+
 type SaveBookingResult = ActionResult<BranchUpdateRequest> & {
     nextWorkingHoursJson?: string;
     nextBookingSettingsJson?: string;
@@ -107,6 +115,18 @@ export function buildGoLiveWaiverPayload(input: {
             ttl_hours: ttlHours,
         },
     };
+}
+
+export function submitGoLiveMutation<TPayload>(input: GoLiveMutationInput<TPayload>): void {
+    if (input.result.error || !input.result.payload) {
+        input.reportValidationError(input.result.error ?? input.fallbackError);
+        return;
+    }
+    input.mutate(input.result.payload, {
+        onSuccess: () => {
+            input.clearReason();
+        },
+    });
 }
 
 export function buildBranchBootstrapAccounts(input: {

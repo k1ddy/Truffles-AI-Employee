@@ -378,6 +378,9 @@ from app.services.console_branch_changes import (
     apply_branch_change_publish_runtime_error_state as _apply_branch_change_publish_runtime_error_state,
 )
 from app.services.console_branch_changes import (
+    apply_branch_change_published_state as _apply_branch_change_published_state,
+)
+from app.services.console_branch_changes import (
     apply_branch_change_rollback_failed_state as _apply_branch_change_rollback_failed_state,
 )
 from app.services.console_branch_changes import (
@@ -20405,12 +20408,13 @@ async def publish_branch_change(
         raise
 
     refreshed_branch = db.query(Branch).filter(Branch.id == branch.id).first()
-    change.status = "published"
-    change.publish_error = None
-    change.published_snapshot = _jsonable_payload(_snapshot_branch_for_change(refreshed_branch)) if refreshed_branch else None
-    change.published_at = now
-    change.published_by = context.agent.id
-    change.updated_at = now
+    published_snapshot = _snapshot_branch_for_change(refreshed_branch) if refreshed_branch else None
+    _apply_branch_change_published_state(
+        change=change,
+        published_snapshot=published_snapshot,
+        actor_id=context.agent.id,
+        now=now,
+    )
     record_audit_event(
         db,
         actor=context.agent,
