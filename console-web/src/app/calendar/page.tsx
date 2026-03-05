@@ -767,7 +767,7 @@ export default function CalendarPage() {
                                     type="text"
                                     value={queueSearch}
                                     onChange={(event) => setQueueSearch(event.target.value)}
-                                    placeholder="Поиск по клиенту, телефону, услуге или ID"
+                                    placeholder="Поиск по клиенту, телефону, услуге или ID записи"
                                     className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
                                     data-testid="calendar-queue-search"
                                 />
