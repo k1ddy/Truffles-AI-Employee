@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-05-console-e2e-live-auth-hardening-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-console-e2e-auth-helper-unification-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -40,11 +40,13 @@
   - `inspect_case` live lane hardened with explicit auth-gate reasoned skip and direct-case fallback.
   - Master/Wave4 TP linkage updated to include closeout block.
   - Follow-up TP created for live auth hardening (`TP-2026-03-05-console-e2e-live-auth-hardening-a1.md`) with mandatory RCA + one-web-search sections.
+  - Follow-up TP created for shared auth helper unification (`TP-2026-03-06-console-e2e-auth-helper-unification-a1.md`) with mandatory RCA + one-web-search sections.
   - `inspect_case` live no-mocks hardened against stale workspace filters and fixture-only case fallback.
   - Added API-backed live case discovery and calendar queue fallback path when no inspectable case exists in current live scope.
   - Removed flaky auth-gate skip path by re-login recovery + deterministic calendar-surface validation.
+  - Unified Keycloak auth helper added in `console-web/e2e/support/keycloak-auth.ts` and connected to `login/smoke/inspect_case` to remove local `start/login` drift.
 - next:
-  - Publish live-auth hardening commit/PR and continue with unified auth-helper follow-up if requested.
+  - Open PR for `CONSOLE-E2E-AUTH-HELPER-UNIFICATION-A1`, watch CI, and merge after green checks.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -85,4 +87,11 @@
   - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`, calendar fallback for empty queue)
   - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `cd console-web && rg -n "async function (startKeycloakLogin|loginThroughKeycloak)" e2e/login.spec.ts e2e/smoke.spec.ts e2e/inspect_case.spec.ts` (no matches)
+  - `cd console-web && npm run lint -- --file e2e/support/keycloak-auth.ts --file e2e/login.spec.ts --file e2e/smoke.spec.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/login.spec.ts --project=chromium-login --reporter=line` (`3 passed`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/smoke.spec.ts --project=chromium --reporter=line --grep "should display filter controls|should navigate to Settings"` (`2 passed`)
+  - `scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-05

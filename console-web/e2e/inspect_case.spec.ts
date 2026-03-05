@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
+import { isAuthGateVisible, loginThroughKeycloak } from './support/keycloak-auth';
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
 const consoleHostPattern = /localhost:3000|localhost:3100|192\.168\.5\.27:3000|console\.truffles\.kz/;
-const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
 const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
 const useRouteMocks = process.env.INSPECT_CASE_USE_MOCKS !== '0';
@@ -318,19 +318,6 @@ async function openCaseDirectly(
     return false;
 }
 
-async function isLiveAuthGateVisible(page: import('@playwright/test').Page): Promise<boolean> {
-    const logoutButton = page.getByTestId('logout-button').first();
-    if (await logoutButton.isVisible().catch(() => false)) {
-        return false;
-    }
-    const ssoButton = page.getByRole('button', { name: /войти через sso/i }).first();
-    const loadingProfile = page.getByText(/загрузка профиля/i).first();
-    return Boolean(
-        (await ssoButton.isVisible().catch(() => false))
-        || (await loadingProfile.isVisible().catch(() => false)),
-    );
-}
-
 async function clearInboxWorkspaceStorage(page: import('@playwright/test').Page) {
     await page.evaluate(() => {
         const inboxWorkspacePrefixes = [
@@ -473,51 +460,13 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     }
 
     if (await loginButtonLocator.isVisible().catch(() => false)) {
-        const startUrl = page.url();
-        let clicked = false;
-        for (let attempt = 1; attempt <= 3; attempt += 1) {
-            try {
-                await loginButtonLocator.click({ timeout: 5000 });
-                clicked = true;
-                break;
-            } catch {
-                if (await casesTitle.isVisible().catch(() => false)) {
-                    return;
-                }
-                await page.waitForTimeout(400 * attempt);
-            }
-        }
-        if (!clicked && !(await casesTitle.isVisible().catch(() => false))) {
-            throw new Error('Failed to click login button after retries');
-        }
-
-        await Promise.race([
-            page.waitForURL(keycloakHostPattern, { timeout: 15000 }).catch(() => null),
-            page.waitForURL((url) => {
-                return consoleHostPattern.test(url.toString()) && url.toString() !== startUrl;
-            }, { timeout: 15000 }).catch(() => null),
-            casesTitle.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null),
-            page.locator('#username').waitFor({ state: 'visible', timeout: 15000 }).catch(() => null),
-        ]);
-
-        if (
-            !(await page.locator('#username').isVisible().catch(() => false))
-            && !(await casesTitle.isVisible().catch(() => false))
-            && await loginButtonLocator.isVisible().catch(() => false)
-        ) {
-            await gotoWithRetry(page, `${baseURL}/api/auth/signin/keycloak`);
-            await Promise.race([
-                page.waitForURL(keycloakHostPattern, { timeout: 15000 }).catch(() => null),
-                page.locator('#username').waitFor({ state: 'visible', timeout: 15000 }).catch(() => null),
-            ]);
-        }
-
-        if (await page.locator('#username').isVisible().catch(() => false)) {
-            await page.fill('#username', loginUser);
-            await page.fill('#password', loginPassword);
-            await page.click('#kc-login');
-            await page.waitForURL(consoleHostPattern, { timeout: 20000 });
-        }
+        await loginThroughKeycloak(page, {
+            baseURL,
+            consoleHostPattern,
+            loginUser,
+            loginPassword,
+            authWaitTimeoutMs: 20000,
+        });
         await gotoWithRetry(page, baseURL);
     }
 
@@ -538,7 +487,7 @@ async function recoverAndValidateCalendarSurface(
     page: import('@playwright/test').Page,
     message: string,
 ) {
-    if (await isLiveAuthGateVisible(page)) {
+    if (await isAuthGateVisible(page)) {
         console.log('Live mode: auth gate detected during fallback, retrying login.');
         await ensureLoggedIn(page);
     }
@@ -583,8 +532,15 @@ test('inspect first case', async ({ page }) => {
     if (await emptyState.isVisible().catch(() => false)) {
         console.log('No cases in queue.');
         const screenshotPath = path.resolve('inbox_debug.png');
-        await page.screenshot({ path: screenshotPath, fullPage: true });
-        console.log(`Debug screenshot saved to: ${screenshotPath}`);
+        const screenshotTaken = await page
+            .screenshot({ path: screenshotPath, fullPage: true })
+            .then(() => true)
+            .catch(() => false);
+        if (screenshotTaken) {
+            console.log(`Debug screenshot saved to: ${screenshotPath}`);
+        } else {
+            console.log('Debug screenshot skipped: unable to capture screenshot in current browser state.');
+        }
         if (useRouteMocks) {
             await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
             openedFixtureCaseDirectly = true;
