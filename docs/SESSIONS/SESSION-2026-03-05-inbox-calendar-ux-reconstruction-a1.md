@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave2-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -18,8 +18,17 @@
   - Case first-screen simplified (single action hint, no SLA duplication, compact context).
   - Terminology simplified for manual message flow and SLA labels.
   - `inspect_case` smoke extended with queue-controls assertions and live-mode availability fallback.
+  - Master TP upgraded to full multi-wave program contract (TP/PR linkage rules).
+  - Historical wave1 scope extracted into dedicated TP for clean document-level decomposition.
+  - Wave3 TP created for backend/data-contract completion.
+  - Wave4 TP created for realtime/observability/release-safety closure.
+  - Wave3 implementation started: explicit `appointments.case_id` linkage in model/service/create booking flow.
+  - Calendar bookings API upgraded with server-side queue filters (`lane`, `needs_action`, `case_id`) and cursor pagination (`cursor`, `has_more`).
+  - Calendar booking response extended with action semantics (`needs_action`, `attention_reason`) and queue-aware contract.
+  - Inbox case read-model extended with queue semantics fields (`priority_tier`, `attention_reason`, `target_response_at`) for list/get endpoints.
+  - OpenAPI contract synced to include new calendar filters and response fields.
 - next:
-  - Prepare merge/PR for wave2 block.
+  - Continue wave3 with additional frontend consume hardening and rollout prep.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -29,4 +38,13 @@
   - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`skip`, live workspace unavailable)
   - `console-web/case_inspection.png`
   - `console-web/calendar_case_context.png`
+  - `python3 -m py_compile truffles-api/app/models/appointment.py truffles-api/app/services/appointment_service.py truffles-api/app/routers/calendar.py truffles-api/app/routers/console.py truffles-api/app/schemas/console.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_console_openapi_calendar_contract.py`
+  - `pytest -q truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_apply_sql_migrations.py` (`26 passed`)
+  - `pytest -q truffles-api/tests/test_console_cases_helpers.py` (`17 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check`
+  - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/components/CaseList.tsx --file src/types/index.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`skip`, live workspace unavailable)
+  - `python3 scripts/check_migration_governance.py --strict` (`pass`)
+  - `scripts/session_check.sh` (`Session OK`)
 - last_updated: 2026-03-05

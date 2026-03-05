@@ -33,6 +33,9 @@ export interface Case {
     resolution_time_seconds?: number | null;
     channel: string;
     sla_status?: string;
+    priority_tier?: "low" | "normal" | "high" | "urgent" | string;
+    attention_reason?: string | null;
+    target_response_at?: string | null;
     // Customer info
     customer_name?: string | null;
     customer_phone?: string | null;

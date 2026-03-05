@@ -116,6 +116,7 @@ class BookingCreate(BaseModel):
     service_type: Optional[str] = None
     notes: Optional[str] = None
     conversation_id: Optional[str] = None
+    case_id: Optional[str] = None
 
 
 class BookingStatusUpdateRequest(BaseModel):
@@ -147,11 +148,15 @@ class BookingResponse(BaseModel):
     google_event_id: Optional[str] = None
     conversation_id: Optional[str] = None
     case_id: Optional[str] = None
+    needs_action: bool = False
+    attention_reason: Optional[str] = None
     created_at: str
 
 
 class BookingsListResponse(BaseModel):
     items: List[BookingResponse]
+    cursor: Optional[str] = None
+    has_more: bool = False
 
 
 class BookingActionResponse(BaseModel):
@@ -180,6 +185,69 @@ def _normalize_required_text(value: str, *, field_name: str) -> str:
     if not cleaned:
         raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is required")
     return cleaned
+
+
+def _parse_booking_cursor(cursor: Optional[str]) -> tuple[datetime, Optional[UUID]] | None:
+    if not cursor:
+        return None
+    cursor_value = cursor.strip()
+    if not cursor_value:
+        return None
+    raw_time, raw_id = cursor_value, None
+    if "|" in cursor_value:
+        raw_time, raw_id = cursor_value.split("|", 1)
+    try:
+        cursor_time = datetime.fromisoformat(raw_time)
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "cursor is invalid") from exc
+    if cursor_time.tzinfo is None:
+        cursor_time = cursor_time.replace(tzinfo=timezone.utc)
+    cursor_id = None
+    if raw_id:
+        cursor_id = _parse_uuid(raw_id, field_name="cursor")
+    return cursor_time, cursor_id
+
+
+def _encode_booking_cursor(booking: Appointment) -> str:
+    return f"{booking.start_at.isoformat()}|{booking.id}"
+
+
+def _normalize_status_filters(status: Optional[str]) -> tuple[Optional[str], Optional[list[str]]]:
+    if not status:
+        return None, None
+    status_norm = status.lower().strip()
+    single_status_map = {
+        "pending": "PENDING_CONFIRMATION",
+        "confirmed": "CONFIRMED",
+        "cancelled": "CANCELLED",
+        "completed": "COMPLETED",
+        "no_show": "NO_SHOW",
+        "draft": "DRAFT",
+        "hold": "HOLD",
+        "checked_in": "CHECKED_IN",
+        "reschedule_requested": "RESCHEDULE_REQUESTED",
+    }
+    if status_norm == "scheduled":
+        return None, ["DRAFT", "HOLD", "PENDING_CONFIRMATION", "CONFIRMED", "CHECKED_IN", "RESCHEDULE_REQUESTED"]
+    resolved_status = single_status_map.get(status_norm, status.upper())
+    return resolved_status, None
+
+
+def _booking_attention_reason(status: str, *, followup_done: bool) -> Optional[str]:
+    normalized = status.upper()
+    if normalized == "PENDING_CONFIRMATION":
+        return "Нужно подтвердить визит"
+    if normalized == "RESCHEDULE_REQUESTED":
+        return "Клиент просит перенос"
+    if normalized == "HOLD":
+        return "Нужно решение менеджера"
+    if normalized == "NO_SHOW" and not followup_done:
+        return "Связаться после неявки"
+    return None
+
+
+def _booking_needs_action(status: str, *, followup_done: bool) -> bool:
+    return _booking_attention_reason(status, followup_done=followup_done) is not None
 
 
 def _normalize_services_payload(
@@ -350,8 +418,8 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         .first()
     )
     no_show_followup_state = _serialize_no_show_followup_state(no_show_followup_audit)
-    case_id = None
-    if booking.conversation_id:
+    case_id = str(booking.case_id) if booking.case_id else None
+    if not case_id and booking.conversation_id:
         latest_case = (
             db.query(Handover)
             .filter(
@@ -363,6 +431,10 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         )
         if latest_case:
             case_id = str(latest_case.id)
+    attention_reason = _booking_attention_reason(
+        booking.status,
+        followup_done=bool(no_show_followup_state["done"]),
+    )
     return BookingResponse(
         id=str(booking.id),
         specialist_id=str(booking.specialist_id),
@@ -381,6 +453,11 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         google_event_id=google_event_id,
         conversation_id=str(booking.conversation_id) if booking.conversation_id else None,
         case_id=case_id,
+        needs_action=_booking_needs_action(
+            booking.status,
+            followup_done=bool(no_show_followup_state["done"]),
+        ),
+        attention_reason=attention_reason,
         created_at=booking.created_at.isoformat(),
     )
 
@@ -661,6 +738,38 @@ async def create_booking(
         raise ConsoleAPIError(400, "BRANCH_REQUIRED", "Specialist branch is required")
 
     service = SchedulingService(db)
+    conversation_uuid = _parse_uuid(data.conversation_id, field_name="conversation_id") if data.conversation_id else None
+    case_uuid = _parse_uuid(data.case_id, field_name="case_id") if data.case_id else None
+    if case_uuid:
+        linked_case = (
+            db.query(Handover)
+            .filter(
+                Handover.id == case_uuid,
+                Handover.client_id == context.client.id,
+            )
+            .first()
+        )
+        if not linked_case:
+            raise ConsoleAPIError(404, "CASE_NOT_FOUND", "Case not found")
+        if conversation_uuid and linked_case.conversation_id != conversation_uuid:
+            raise ConsoleAPIError(
+                400,
+                "INVALID_PARAM",
+                "case_id does not belong to conversation_id",
+            )
+        conversation_uuid = linked_case.conversation_id
+    elif conversation_uuid:
+        latest_case = (
+            db.query(Handover)
+            .filter(
+                Handover.client_id == context.client.id,
+                Handover.conversation_id == conversation_uuid,
+            )
+            .order_by(Handover.created_at.desc())
+            .first()
+        )
+        if latest_case:
+            case_uuid = latest_case.id
     
     try:
         booking = service.create_appointment(
@@ -674,7 +783,8 @@ async def create_booking(
             service_type=data.service_type,
             notes=data.notes,
             created_by=context.agent.id,
-            conversation_id=UUID(data.conversation_id) if data.conversation_id else None,
+            conversation_id=conversation_uuid,
+            case_id=case_uuid,
         )
 
         if specialist.branch and isinstance(specialist.branch.booking_settings, dict):
@@ -722,15 +832,20 @@ async def list_bookings(
     request: Request,
     specialist_id: Optional[str] = None,
     conversation_id: Optional[str] = None,
+    case_id: Optional[str] = None,
+    lane: Literal["attention", "all"] = "all",
+    needs_action: Optional[bool] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     status: Optional[str] = None,
+    cursor: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db)
 ):
     """Get bookings with filters."""
     context = get_console_context(request, db)
     require_console_permission(context, "calendar", "read")
+    resolved_limit = int(getattr(limit, "default", limit))
     
     service = SchedulingService(db)
     
@@ -742,35 +857,37 @@ async def list_bookings(
     if date_to:
         parsed_to = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
 
-    status_filter = None
-    if status:
-        status_norm = status.lower()
-        status_map = {
-            "pending": "PENDING_CONFIRMATION",
-            "confirmed": "CONFIRMED",
-            "cancelled": "CANCELLED",
-            "completed": "COMPLETED",
-            "no_show": "NO_SHOW",
-            "draft": "DRAFT",
-            "hold": "HOLD",
-            "checked_in": "CHECKED_IN",
-            "reschedule_requested": "RESCHEDULE_REQUESTED",
-        }
-        status_filter = status_map.get(status_norm, status.upper())
+    status_filter, status_filters = _normalize_status_filters(status)
 
     specialist_uuid = _parse_uuid(specialist_id, field_name="specialist_id") if specialist_id else None
     conversation_uuid = _parse_uuid(conversation_id, field_name="conversation_id") if conversation_id else None
+    case_uuid = _parse_uuid(case_id, field_name="case_id") if case_id else None
+    cursor_payload = _parse_booking_cursor(cursor)
+    cursor_start_at = cursor_payload[0] if cursor_payload else None
+    cursor_id = cursor_payload[1] if cursor_payload else None
     
     bookings = service.get_appointments(
         client_id=context.client.id,
         specialist_id=specialist_uuid,
         branch_ids=list(context.allowed_branch_ids) if context.branch_restricted else None,
         conversation_id=conversation_uuid,
+        case_id=case_uuid,
         date_from=parsed_from,
         date_to=parsed_to,
         status=status_filter,
-        limit=limit
+        status_filters=status_filters,
+        lane=lane,
+        needs_action=needs_action,
+        cursor_start_at=cursor_start_at,
+        cursor_id=cursor_id,
+        limit=resolved_limit + 1,
     )
+    has_more = len(bookings) > resolved_limit
+    if has_more:
+        bookings = bookings[:resolved_limit]
+        next_cursor = _encode_booking_cursor(bookings[-1])
+    else:
+        next_cursor = None
     
     appointment_ids = [b.id for b in bookings]
     specialist_ids = {b.specialist_id for b in bookings if b.specialist_id}
@@ -817,7 +934,7 @@ async def list_bookings(
                 continue
             no_show_followup_map[row.appointment_id] = _serialize_no_show_followup_state(row)
 
-    conversation_ids = {b.conversation_id for b in bookings if b.conversation_id}
+    conversation_ids = {b.conversation_id for b in bookings if b.conversation_id and not b.case_id}
     case_map = _latest_case_ids_by_conversation(
         db,
         client_id=context.client.id,
@@ -827,27 +944,42 @@ async def list_bookings(
     return BookingsListResponse(
         items=[
             BookingResponse(
-                id=str(b.id),
-                specialist_id=str(b.specialist_id),
-                specialist_name=specialists_map.get(b.specialist_id, "Unknown"),
-                start_at=b.start_at.isoformat(),
-                end_at=b.end_at.isoformat(),
-                customer_name=b.customer_name,
-                customer_phone=b.customer_phone,
-                service_type=services_map.get(b.id),
-                status=b.status,
-                no_show_followup_done=bool(no_show_followup_map.get(b.id, {}).get("done", False)),
-                no_show_followup_result=no_show_followup_map.get(b.id, {}).get("result"),
-                no_show_followup_closed_at=no_show_followup_map.get(b.id, {}).get("closed_at"),
-                no_show_followup_closed_by=no_show_followup_map.get(b.id, {}).get("closed_by"),
-                no_show_followup_rebooked_appointment_id=no_show_followup_map.get(b.id, {}).get("rebooked_appointment_id"),
-                google_event_id=sync_map.get(b.id),
-                conversation_id=str(b.conversation_id) if b.conversation_id else None,
-                case_id=str(case_map.get(b.conversation_id)) if b.conversation_id and case_map.get(b.conversation_id) else None,
-                created_at=b.created_at.isoformat()
+                id=str(booking.id),
+                specialist_id=str(booking.specialist_id),
+                specialist_name=specialists_map.get(booking.specialist_id, "Unknown"),
+                start_at=booking.start_at.isoformat(),
+                end_at=booking.end_at.isoformat(),
+                customer_name=booking.customer_name,
+                customer_phone=booking.customer_phone,
+                service_type=services_map.get(booking.id),
+                status=booking.status,
+                no_show_followup_done=bool(followup_state.get("done", False)),
+                no_show_followup_result=followup_state.get("result"),
+                no_show_followup_closed_at=followup_state.get("closed_at"),
+                no_show_followup_closed_by=followup_state.get("closed_by"),
+                no_show_followup_rebooked_appointment_id=followup_state.get("rebooked_appointment_id"),
+                google_event_id=sync_map.get(booking.id),
+                conversation_id=str(booking.conversation_id) if booking.conversation_id else None,
+                case_id=str(linked_case_id) if linked_case_id else None,
+                needs_action=_booking_needs_action(
+                    booking.status,
+                    followup_done=bool(followup_state.get("done", False)),
+                ),
+                attention_reason=_booking_attention_reason(
+                    booking.status,
+                    followup_done=bool(followup_state.get("done", False)),
+                ),
+                created_at=booking.created_at.isoformat(),
             )
-            for b in bookings
-        ]
+            for booking in bookings
+            for followup_state in [no_show_followup_map.get(booking.id, {})]
+            for linked_case_id in [
+                booking.case_id
+                or (case_map.get(booking.conversation_id) if booking.conversation_id else None)
+            ]
+        ],
+        cursor=next_cursor,
+        has_more=has_more,
     )
 
 

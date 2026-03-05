@@ -55,6 +55,26 @@ const DEFAULT_FILTERS: CaseFilters = {
     sortBy: "activity",
 };
 
+function getPriorityChip(tier?: string | null): { label: string; className: string } | null {
+    const normalized = (tier || "").toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+    if (normalized === "urgent") {
+        return { label: "Критично", className: "bg-red-100 text-red-800" };
+    }
+    if (normalized === "high") {
+        return { label: "Высокий", className: "bg-amber-100 text-amber-900" };
+    }
+    if (normalized === "normal") {
+        return { label: "Обычный", className: "bg-blue-100 text-blue-800" };
+    }
+    if (normalized === "low") {
+        return { label: "Низкий", className: "bg-slate-100 text-slate-700" };
+    }
+    return { label: normalized, className: "bg-muted text-muted-foreground" };
+}
+
 function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPrefs | null {
     if (!raw || typeof raw !== "object") {
         return null;
@@ -674,6 +694,7 @@ export default function CaseList({
                         const preview = c.last_message_preview || c.user_message || "-";
                         const isSelected = selectedCaseId === c.id;
                         const hasHumanLock = !!c.human_lock_active;
+                        const priorityChip = getPriorityChip(c.priority_tier);
                         const statusClass = c.status === "active"
                             ? "bg-green-100 text-green-800"
                             : c.status === "pending"
@@ -695,6 +716,11 @@ export default function CaseList({
                                     <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${statusClass}`}>
                                         {getStatusLabel(c.status)}
                                     </span>
+                                    {priorityChip && (
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${priorityChip.className}`}>
+                                            {priorityChip.label}
+                                        </span>
+                                    )}
                                 </div>
                                 <p className="text-xs text-muted-foreground mb-2">
                                     {preview}
@@ -724,6 +750,11 @@ export default function CaseList({
                                     {hasIssue && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-red-100 text-red-800">
                                             Ошибка
+                                        </span>
+                                    )}
+                                    {c.attention_reason && (
+                                        <span className="px-2 py-0.5 rounded font-semibold bg-primary/10 text-primary">
+                                            {c.attention_reason}
                                         </span>
                                     )}
                                 </div>
@@ -776,6 +807,7 @@ export default function CaseList({
                                 const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
                                 const needsReply = !!c.needs_reply;
                                 const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
+                                const priorityChip = getPriorityChip(c.priority_tier);
                                 return (
                                     <tr key={c.id} className="border-b border-border/60 hover:bg-muted/60" data-testid="cases-row">
                                         <td className="p-4 font-mono text-sm">{c.id.slice(0, 8)}...</td>
@@ -794,6 +826,11 @@ export default function CaseList({
                                                 {c.human_lock_active && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
                                                         Пауза
+                                                    </span>
+                                                )}
+                                                {priorityChip && (
+                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${priorityChip.className}`}>
+                                                        {priorityChip.label}
                                                     </span>
                                                 )}
                                             </div>
@@ -822,6 +859,11 @@ export default function CaseList({
                                                 {hasIssue && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-800">
                                                         Ошибка
+                                                    </span>
+                                                )}
+                                                {c.attention_reason && (
+                                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-primary/10 text-primary">
+                                                        {c.attention_reason}
                                                     </span>
                                                 )}
                                             </div>

@@ -45,6 +45,8 @@ interface Booking {
     no_show_followup_rebooked_appointment_id?: string | null;
     conversation_id?: string | null;
     case_id?: string | null;
+    needs_action?: boolean;
+    attention_reason?: string | null;
     created_at: string;
 }
 
@@ -57,6 +59,7 @@ interface BookingCreateRequest {
     service_type?: string;
     notes?: string;
     conversation_id?: string;
+    case_id?: string;
 }
 
 interface BookingStatusUpdateRequest {
@@ -75,6 +78,12 @@ interface BookingActionResponse {
     booking: Booking;
 }
 
+interface BookingsListResponse {
+    items: Booking[];
+    cursor?: string | null;
+    has_more?: boolean;
+}
+
 type BookingQueueLane = "attention" | "all";
 type BookingStatusFilter = "all" | "scheduled" | "completed" | "no_show" | "cancelled";
 
@@ -88,7 +97,15 @@ async function fetchSlots(specialistId: string, date: string, duration: number):
     return response.data;
 }
 
-async function fetchBookings(options?: { date?: string; conversationId?: string }): Promise<{ items: Booking[] }> {
+async function fetchBookings(options?: {
+    date?: string;
+    conversationId?: string;
+    caseId?: string;
+    lane?: BookingQueueLane;
+    status?: BookingStatusFilter;
+    needsAction?: boolean;
+    cursor?: string;
+}): Promise<BookingsListResponse> {
     const params = new URLSearchParams();
     if (options?.date) {
         params.set("date_from", options.date);
@@ -96,6 +113,21 @@ async function fetchBookings(options?: { date?: string; conversationId?: string 
     }
     if (options?.conversationId) {
         params.set("conversation_id", options.conversationId);
+    }
+    if (options?.caseId) {
+        params.set("case_id", options.caseId);
+    }
+    if (options?.lane) {
+        params.set("lane", options.lane);
+    }
+    if (options?.status && options.status !== "all") {
+        params.set("status", options.status);
+    }
+    if (typeof options?.needsAction === "boolean") {
+        params.set("needs_action", String(options.needsAction));
+    }
+    if (options?.cursor) {
+        params.set("cursor", options.cursor);
     }
     const suffix = params.toString() ? `?${params.toString()}` : "";
     const response = await api.get(`/calendar/bookings${suffix}`);
@@ -132,6 +164,9 @@ function getVisitActionOptions(status: string): Array<{ status: BookingStatusUpd
 }
 
 function bookingNeedsAttention(booking: Booking): boolean {
+    if (typeof booking.needs_action === "boolean") {
+        return booking.needs_action;
+    }
     const normalized = booking.status.toUpperCase();
     if (normalized === "NO_SHOW" && !booking.no_show_followup_done) {
         return true;
@@ -140,6 +175,9 @@ function bookingNeedsAttention(booking: Booking): boolean {
 }
 
 function getBookingAttentionLabel(booking: Booking): string | null {
+    if (booking.attention_reason && booking.attention_reason.trim()) {
+        return booking.attention_reason;
+    }
     const normalized = booking.status.toUpperCase();
     if (normalized === "PENDING_CONFIRMATION") {
         return "Нужно подтвердить визит";
@@ -154,23 +192,6 @@ function getBookingAttentionLabel(booking: Booking): string | null {
         return "Связаться после неявки";
     }
     return null;
-}
-
-function matchesStatusFilter(booking: Booking, filter: BookingStatusFilter): boolean {
-    if (filter === "all") {
-        return true;
-    }
-    const normalized = booking.status.toUpperCase();
-    if (filter === "completed") {
-        return normalized === "COMPLETED";
-    }
-    if (filter === "no_show") {
-        return normalized === "NO_SHOW";
-    }
-    if (filter === "cancelled") {
-        return normalized === "CANCELLED";
-    }
-    return ["PENDING", "DRAFT", "HOLD", "PENDING_CONFIRMATION", "CONFIRMED", "CHECKED_IN", "RESCHEDULE_REQUESTED"].includes(normalized);
 }
 
 function formatDate(date: Date): string {
@@ -238,11 +259,14 @@ export default function CalendarPage() {
     const slots = slotsData?.slots ?? [];
 
     const { data: bookingsData, isLoading: bookingsLoading } = useQuery({
-        queryKey: ["bookings", selectedDate, focusedConversationId],
+        queryKey: ["bookings", selectedDate, focusedConversationId, focusedCaseId, queueLane, queueStatusFilter],
         queryFn: () =>
             fetchBookings({
                 date: selectedDate,
                 conversationId: focusedConversationId || undefined,
+                caseId: focusedCaseId || undefined,
+                lane: queueLane,
+                status: queueStatusFilter,
             }),
         enabled: !!session && canReadCalendar,
     });
@@ -265,12 +289,6 @@ export default function CalendarPage() {
     const queueSearchNormalized = queueSearch.trim().toLowerCase();
     const bookingsVisible = useMemo(() => {
         return bookingsSorted.filter((booking) => {
-            if (queueLane === "attention" && !bookingNeedsAttention(booking)) {
-                return false;
-            }
-            if (!matchesStatusFilter(booking, queueStatusFilter)) {
-                return false;
-            }
             if (!queueSearchNormalized) {
                 return true;
             }
@@ -285,7 +303,7 @@ export default function CalendarPage() {
                 .toLowerCase();
             return haystack.includes(queueSearchNormalized);
         });
-    }, [bookingsSorted, queueLane, queueStatusFilter, queueSearchNormalized]);
+    }, [bookingsSorted, queueSearchNormalized]);
 
     // Create booking mutation
     const createMutation = useMutation({
@@ -397,6 +415,7 @@ export default function CalendarPage() {
             service_type: selectedService?.name || undefined,
             notes: notes || undefined,
             conversation_id: focusedConversationId || undefined,
+            case_id: focusedCaseId || undefined,
         });
     };
 
@@ -734,6 +753,11 @@ export default function CalendarPage() {
                             <span className="rounded bg-red-100 px-2.5 py-1 text-red-900">
                                 Неявки без связи: <span className="font-semibold">{noShowAttentionCount}</span>
                             </span>
+                            {bookingsData?.has_more && (
+                                <span className="rounded bg-primary/10 px-2.5 py-1 text-primary">
+                                    Показаны первые {bookingsSorted.length}
+                                </span>
+                            )}
                         </div>
                         <div className="mb-4 space-y-2" data-testid="calendar-queue-controls">
                             <div className="flex flex-wrap items-center gap-2">

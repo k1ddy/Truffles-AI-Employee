@@ -263,9 +263,13 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
                     no_show_followup_rebooked_appointment_id: null,
                     conversation_id: CONVERSATION_ID,
                     case_id: CASE_ID,
+                    needs_action: true,
+                    attention_reason: 'Нужно подтвердить визит',
                     created_at: '2026-03-05T09:20:00+05:00',
                 },
             ],
+            cursor: null,
+            has_more: false,
         });
     });
 }

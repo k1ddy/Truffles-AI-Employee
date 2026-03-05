@@ -20,6 +20,7 @@ class Appointment(Base):
     specialist_id = Column(UUID(as_uuid=True), ForeignKey("specialists.id"), nullable=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True)
+    case_id = Column(UUID(as_uuid=True), ForeignKey("handovers.id"), nullable=True)
 
     status = Column(Text, nullable=False)
     source = Column(Text, nullable=False)
