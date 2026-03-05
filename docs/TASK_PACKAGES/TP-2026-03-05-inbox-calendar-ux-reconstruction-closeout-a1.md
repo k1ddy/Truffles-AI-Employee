@@ -123,7 +123,7 @@
 - `Current residuals accepted in this block`: live lane зависит от внешнего auth состояния Keycloak/NextAuth.
 - `Why not in this block`: инфраструктурный auth стабилизационный блок вне scope wave4 closeout.
 - `Risk if deferred`: периодические `auth-gate` skip для live lane.
-- `Linked follow-up Task Package(s)`: `TP-2026-03-05-console-e2e-live-auth-hardening-a1.md` (to be created if skips persist).
+- `Linked follow-up Task Package(s)`: `TP-2026-03-05-console-e2e-live-auth-hardening-a1.md`.
 - `Expiry/trigger to stop deferral`: `2` подряд release циклов с `auth-gate` skip.
 
 ## Next-block contract (mandatory)
