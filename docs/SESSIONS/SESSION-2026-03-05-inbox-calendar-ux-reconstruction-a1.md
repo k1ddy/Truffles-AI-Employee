@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -73,8 +73,10 @@
   - Wave8 TP created as the next active block with mandatory one-web-search and bounded split `Part A workspace shell -> Part B context preservation`.
   - Wave8 Part A implemented in branch: embedded `CaseBookingsPanel` added to Inbox/Case workspace, shared booking helpers extracted from `calendar/page.tsx`, and `ConsoleShell` now keeps `/calendar` in the same wide workspace frame.
   - Wave8 Part A committed (`5d459211`) and pushed to the existing PR `#932`.
+  - Wave8 Part B TP created as the next active block for context preservation between inbox workspace and full calendar route.
+  - Wave8 Part B implemented in branch: panel mode and calendar case-context prefs now persist via `inbox-workspace`, full calendar links restore `?panel=bookings`, and case-mode calendar no longer hides linked bookings behind the default today filter.
 - next:
-  - Open follow-up TP for Wave8 Part B context preservation and keep PR `#932` green.
+  - Push Wave8 Part B into PR `#932` and, after green checks, open Wave9 TP for supervisor/admin queue governance.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -171,4 +173,7 @@
   - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title "feat(console): add executable inbox action-macros" ...` (`PR #932`)
   - `cd console-web && npm run build` (`pass`)
   - `git push origin HEAD` (`updated PR #932`)
-- last_updated: 2026-03-06T10:45:55+05:00
+  - `cd console-web && npm run lint -- --file src/lib/inbox-workspace.ts --file src/components/InboxView.tsx --file src/components/CaseConversation.tsx --file src/components/CaseBookingsPanel.tsx --file src/app/calendar/page.tsx --file src/app/cases/[id]/page.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`)
+- last_updated: 2026-03-06T11:04:47+05:00

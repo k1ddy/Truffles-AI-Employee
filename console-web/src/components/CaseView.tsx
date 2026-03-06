@@ -139,8 +139,8 @@ export default function CaseView({ caseId }: CaseViewProps) {
                                 canWriteCalendar={canWriteCalendar}
                                 fullCalendarHref={
                                     caseDetail.conversation_id
-                                        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}`
-                                        : `/calendar?case_id=${encodeURIComponent(caseId)}`
+                                        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}&return_panel=bookings`
+                                        : `/calendar?case_id=${encodeURIComponent(caseId)}&return_panel=bookings`
                                 }
                             />
                         ) : (
@@ -199,8 +199,8 @@ export default function CaseView({ caseId }: CaseViewProps) {
                         canWriteCalendar={canWriteCalendar}
                         fullCalendarHref={
                             caseDetail.conversation_id
-                                ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}`
-                                : `/calendar?case_id=${encodeURIComponent(caseId)}`
+                                ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}&return_panel=bookings`
+                                : `/calendar?case_id=${encodeURIComponent(caseId)}&return_panel=bookings`
                         }
                     />
                 </div>

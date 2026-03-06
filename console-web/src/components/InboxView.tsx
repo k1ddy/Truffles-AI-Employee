@@ -14,18 +14,22 @@ import { useCaseData } from "@/hooks/useCaseData";
 import { authApi, canAccessConsole, outreachApi } from "@/lib/api-client";
 import {
     buildInboxWorkspaceScope,
+    readInboxSidePanelMode,
     readInboxSelectedCase,
+    type InboxSidePanelMode,
+    writeInboxSidePanelMode,
     writeInboxSelectedCase,
 } from "@/lib/inbox-workspace";
 import toast from "react-hot-toast";
 
 interface InboxViewProps {
     initialCaseId?: string | null;
+    initialSidePanel?: InboxSidePanelMode | null;
 }
 
 type SidePanelMode = "details" | "bookings" | null;
 
-export default function InboxView({ initialCaseId }: InboxViewProps) {
+export default function InboxView({ initialCaseId, initialSidePanel = null }: InboxViewProps) {
     const router = useRouter();
     const pathname = usePathname();
     const { data: session } = useSession();
@@ -36,6 +40,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const [visibleCaseIds, setVisibleCaseIds] = useState<string[]>([]);
     const [selectionHydrated, setSelectionHydrated] = useState(Boolean(initialCaseId));
     const restoredScopeRef = useRef<string | null>(null);
+    const restoredPanelScopeRef = useRef<string | null>(null);
     const [standaloneOutreachOpen, setStandaloneOutreachOpen] = useState(false);
     const [standaloneOutreachDestination, setStandaloneOutreachDestination] = useState("");
     const [standaloneOutreachContent, setStandaloneOutreachContent] = useState("");
@@ -86,6 +91,12 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     }, [workspaceScope]);
 
     useEffect(() => {
+        if (workspaceScope && restoredPanelScopeRef.current !== workspaceScope) {
+            restoredPanelScopeRef.current = null;
+        }
+    }, [workspaceScope]);
+
+    useEffect(() => {
         if (typeof window === "undefined") {
             return;
         }
@@ -111,6 +122,15 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     }, [initialCaseId, workspaceScope]);
 
     useEffect(() => {
+        if (initialSidePanel) {
+            setSidePanelMode(initialSidePanel);
+            if (workspaceScope) {
+                restoredPanelScopeRef.current = workspaceScope;
+            }
+        }
+    }, [initialSidePanel, workspaceScope]);
+
+    useEffect(() => {
         if (!workspaceScope || initialCaseId || restoredScopeRef.current === workspaceScope) {
             return;
         }
@@ -124,11 +144,26 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     }, [workspaceScope, initialCaseId, router]);
 
     useEffect(() => {
+        if (!workspaceScope || initialSidePanel || restoredPanelScopeRef.current === workspaceScope) {
+            return;
+        }
+        setSidePanelMode(readInboxSidePanelMode(workspaceScope));
+        restoredPanelScopeRef.current = workspaceScope;
+    }, [workspaceScope, initialSidePanel]);
+
+    useEffect(() => {
         if (!workspaceScope || !selectionHydrated) {
             return;
         }
         writeInboxSelectedCase(workspaceScope, selectedCaseId || null);
     }, [workspaceScope, selectionHydrated, selectedCaseId]);
+
+    useEffect(() => {
+        if (!workspaceScope) {
+            return;
+        }
+        writeInboxSidePanelMode(workspaceScope, sidePanelMode);
+    }, [workspaceScope, sidePanelMode]);
 
     useEffect(() => {
         setDraft("");
@@ -549,8 +584,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                                 canWriteCalendar={canWriteCalendar}
                                                 fullCalendarHref={
                                                     caseDetail.conversation_id
-                                                        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(selectedCaseId)}`
-                                                        : `/calendar?case_id=${encodeURIComponent(selectedCaseId)}`
+                                                        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(selectedCaseId)}&return_panel=bookings`
+                                                        : `/calendar?case_id=${encodeURIComponent(selectedCaseId)}&return_panel=bookings`
                                                 }
                                             />
                                         ) : (
@@ -598,8 +633,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                 canWriteCalendar={canWriteCalendar}
                                 fullCalendarHref={
                                     caseDetail.conversation_id
-                                        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(selectedCaseId)}`
-                                        : `/calendar?case_id=${encodeURIComponent(selectedCaseId)}`
+                                        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(selectedCaseId)}&return_panel=bookings`
+                                        : `/calendar?case_id=${encodeURIComponent(selectedCaseId)}&return_panel=bookings`
                                 }
                             />
                         ) : (

@@ -1,12 +1,16 @@
 "use client";
 
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
+import type { BookingQueueLane, BookingStatusFilter } from "@/lib/calendar-bookings";
 
 const WORKSPACE_TTL_MS = 24 * 60 * 60 * 1000;
 const CASE_LIST_KEY_PREFIX = "console:inbox:case-list:v1:";
 const SELECTED_CASE_KEY_PREFIX = "console:inbox:selected-case:v1:";
+const SIDE_PANEL_KEY_PREFIX = "console:inbox:side-panel:v1:";
+const CALENDAR_PREFS_KEY_PREFIX = "console:calendar:prefs:v1:";
 
 export type InboxSortBy = "created_at" | "sla" | "activity";
+export type InboxSidePanelMode = "details" | "bookings";
 
 export interface InboxCaseFilters {
     status?: string;
@@ -27,6 +31,12 @@ export interface InboxCaseListPrefs {
     showAdvancedFilters: boolean;
     filtersCollapsed: boolean;
     autoRefreshEnabled: boolean;
+}
+
+export interface CalendarWorkspacePrefs {
+    selectedDate: string;
+    queueLane: BookingQueueLane;
+    queueStatusFilter: BookingStatusFilter;
 }
 
 type StoredValue<T> = {
@@ -110,4 +120,34 @@ export function readInboxSelectedCase(scope: string): string | null {
 
 export function writeInboxSelectedCase(scope: string, caseId: string | null) {
     writeStoredValue(buildScopedKey(SELECTED_CASE_KEY_PREFIX, scope), caseId);
+}
+
+export function readInboxSidePanelMode(scope: string): InboxSidePanelMode | null {
+    return readStoredValue<InboxSidePanelMode>(buildScopedKey(SIDE_PANEL_KEY_PREFIX, scope));
+}
+
+export function writeInboxSidePanelMode(scope: string, mode: InboxSidePanelMode | null) {
+    writeStoredValue(buildScopedKey(SIDE_PANEL_KEY_PREFIX, scope), mode);
+}
+
+export function buildCalendarWorkspaceScope({
+    scope,
+    caseId,
+    conversationId,
+}: {
+    scope: string;
+    caseId?: string | null;
+    conversationId?: string | null;
+}): string {
+    const safeCaseId = (caseId || "all").trim() || "all";
+    const safeConversationId = (conversationId || "all").trim() || "all";
+    return `${scope}:${safeCaseId}:${safeConversationId}`;
+}
+
+export function readCalendarWorkspacePrefs(scope: string): CalendarWorkspacePrefs | null {
+    return readStoredValue<CalendarWorkspacePrefs>(buildScopedKey(CALENDAR_PREFS_KEY_PREFIX, scope));
+}
+
+export function writeCalendarWorkspacePrefs(scope: string, prefs: CalendarWorkspacePrefs | null) {
+    writeStoredValue(buildScopedKey(CALENDAR_PREFS_KEY_PREFIX, scope), prefs);
 }

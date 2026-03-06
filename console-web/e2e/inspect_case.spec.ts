@@ -876,11 +876,13 @@ test('inspect first case', async ({ page }) => {
         if (!calendarHref) {
             throw new Error('case-bookings-open-full-calendar link does not contain href');
         }
+        expect(calendarHref).toContain('return_panel=bookings');
         await gotoWithRetry(page, `${baseURL}${calendarHref}`);
         await expect(page.getByTestId('calendar-page')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-controls')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-lane-attention')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-lane-all')).toBeVisible({ timeout: 20000 });
+        await expect(page.getByTestId('calendar-case-all-dates-hint')).toBeVisible({ timeout: 20000 });
 
         await page.getByTestId('calendar-queue-lane-all').click();
         await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
@@ -893,6 +895,8 @@ test('inspect first case', async ({ page }) => {
         if (await openLinkedCase.isVisible().catch(() => false)) {
             await openLinkedCase.click();
             await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
+            await expect(page.locator('[data-testid=\"case-bookings-panel\"]:visible').first()).toBeVisible({ timeout: 20000 });
+            await expect(page).toHaveURL(new RegExp(`/cases/${CASE_ID}\\?panel=bookings$`));
         }
     } else {
         console.log('case-open-calendar button is not visible for this case.');

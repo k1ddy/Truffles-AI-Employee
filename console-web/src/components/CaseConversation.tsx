@@ -563,8 +563,8 @@ export default function CaseConversation({
         replyPauseControls
     );
     const calendarHref = caseDetail.conversation_id
-        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}`
-        : `/calendar?case_id=${encodeURIComponent(caseId)}`;
+        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}&return_panel=bookings`
+        : `/calendar?case_id=${encodeURIComponent(caseId)}&return_panel=bookings`;
     const humanLockPanel = (
         <div
             className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${
