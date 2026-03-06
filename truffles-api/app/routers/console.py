@@ -2218,8 +2218,36 @@ def _build_telegram_trail(
     )
 
 
-def _build_sync_status(status: str, detail: Optional[str] = None) -> ConsoleSyncStatus:
-    return ConsoleSyncStatus(status=status, detail=detail)
+def _resolve_sync_operator_message(
+    *,
+    status: str,
+    detail: Optional[str],
+    target: Optional[Literal["telegram", "client_notify"]],
+) -> Optional[str]:
+    if status != "failed" or not target:
+        return None
+
+    if target == "telegram":
+        if detail == "telegram_edit_failed":
+            return "Не удалось обновить отметку заявки в Telegram."
+        return "Не удалось синхронизировать состояние заявки с Telegram."
+
+    if detail == "chatflow_failed":
+        return "Не удалось отправить системное уведомление клиенту."
+    return "Не удалось отправить системное уведомление клиенту."
+
+
+def _build_sync_status(
+    status: str,
+    detail: Optional[str] = None,
+    *,
+    target: Optional[Literal["telegram", "client_notify"]] = None,
+) -> ConsoleSyncStatus:
+    return ConsoleSyncStatus(
+        status=status,
+        detail=detail,
+        operator_message=_resolve_sync_operator_message(status=status, detail=detail, target=target),
+    )
 
 
 def _normalize_phone_digits(value: Optional[str]) -> str:
@@ -2808,7 +2836,7 @@ def _sync_telegram_after_take(
     message_id = handover.telegram_message_id
 
     if not bot_token or not chat_id or not message_id:
-        return _build_sync_status("skipped", "telegram_context_missing")
+        return _build_sync_status("skipped", "telegram_context_missing", target="telegram")
 
     telegram = TelegramService(bot_token)
     result = telegram._make_request(
@@ -2822,7 +2850,7 @@ def _sync_telegram_after_take(
         },
     )
     if not result.get("ok"):
-        return _build_sync_status("failed", "telegram_edit_failed")
+        return _build_sync_status("failed", "telegram_edit_failed", target="telegram")
 
     if conversation.telegram_topic_id:
         telegram.send_message(
@@ -2831,7 +2859,7 @@ def _sync_telegram_after_take(
             message_thread_id=conversation.telegram_topic_id,
         )
 
-    return _build_sync_status("ok")
+    return _build_sync_status("ok", target="telegram")
 
 
 def _sync_telegram_after_close(
@@ -2852,7 +2880,7 @@ def _sync_telegram_after_close(
     message_id = handover.telegram_message_id
 
     if not bot_token or not chat_id or not message_id:
-        return _build_sync_status("skipped", "telegram_context_missing")
+        return _build_sync_status("skipped", "telegram_context_missing", target="telegram")
 
     telegram = TelegramService(bot_token)
     result = telegram._make_request(
@@ -2860,7 +2888,7 @@ def _sync_telegram_after_close(
         {"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
     )
     if not result.get("ok"):
-        return _build_sync_status("failed", "telegram_edit_failed")
+        return _build_sync_status("failed", "telegram_edit_failed", target="telegram")
 
     telegram.unpin_message(str(chat_id), message_id)
 
@@ -2871,7 +2899,7 @@ def _sync_telegram_after_close(
             message_thread_id=conversation.telegram_topic_id,
         )
 
-    return _build_sync_status("ok")
+    return _build_sync_status("ok", target="telegram")
 
 
 def _notify_client_status(
@@ -2890,10 +2918,10 @@ def _notify_client_status(
         manager_name=manager_name,
     )
     if ok:
-        return _build_sync_status("ok")
+        return _build_sync_status("ok", target="client_notify")
     if detail == "remote_jid_missing":
-        return _build_sync_status("skipped", detail)
-    return _build_sync_status("failed", detail or "notify_failed")
+        return _build_sync_status("skipped", detail, target="client_notify")
+    return _build_sync_status("failed", detail or "notify_failed", target="client_notify")
 
 
 def _require_roles(

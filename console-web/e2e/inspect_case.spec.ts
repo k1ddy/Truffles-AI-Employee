@@ -520,9 +520,46 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             success: true,
             macro: { ...macro },
             case: { ...caseState },
+            sync: macro.action?.type === 'resolve_case'
+                ? {
+                    telegram: { status: 'ok', operator_message: null },
+                    client_notify: {
+                        status: 'failed',
+                        detail: 'chatflow_failed',
+                        operator_message: 'Не удалось отправить системное уведомление клиенту.',
+                    },
+                }
+                : {
+                    telegram: { status: 'ok', operator_message: null },
+                    client_notify: { status: 'ok', operator_message: null },
+                },
+        });
+    });
+    await page.route(`**/api/proxy/cases/${CASE_ID}/reopen`, async (route) => {
+        if (route.request().method() !== 'POST') {
+            await route.fallback();
+            return;
+        }
+        caseState.status = 'active';
+        caseState.business_status_code = 'in_progress';
+        caseState.business_status_label = 'В работе';
+        caseState.sla_action_state = 'reply_due';
+        caseState.target_response_at = '2026-03-05T10:00:00+05:00';
+        caseState.needs_reply = true;
+        await toJsonResponse(route, {
+            success: true,
+            case: { ...caseState },
             sync: {
-                telegram: { status: 'ok' },
-                client_notify: { status: 'ok' },
+                telegram: {
+                    status: 'skipped',
+                    detail: 'reopen_internal_only',
+                    operator_message: null,
+                },
+                client_notify: {
+                    status: 'skipped',
+                    detail: 'reopen_internal_only',
+                    operator_message: null,
+                },
             },
         });
     });
@@ -1356,4 +1393,32 @@ test('manage and apply action macro', async ({ page }) => {
     await expect(
         page.getByPlaceholder('Введите сообщение или подпись к файлу. Enter — отправить.')
     ).toHaveValue(/Отложу заявку и вернусь позже\./, { timeout: 15000 });
+});
+
+test('action feedback hides raw sync reason codes and keeps reopen internal-only', async ({ page }) => {
+    test.skip(!useRouteMocks, 'action feedback contract is covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page);
+    await ensureLoggedIn(page);
+    await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
+    await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
+
+    await page.getByRole('button', { name: /все ответы/i }).click({ force: true });
+    await expect(page.getByTestId(`macro-apply-${ACTION_MACRO_ID}`)).toBeVisible({ timeout: 15000 });
+    await page.getByTestId(`macro-apply-${ACTION_MACRO_ID}`).click({ force: true });
+
+    await expect(page.getByText('Применено: Закрыть заявку. Текст добавлен в черновик.')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('Не удалось отправить системное уведомление клиенту.')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('chatflow_failed')).toHaveCount(0);
+    await expect(page.getByTestId('case-business-status')).toContainText('Закрыта', { timeout: 15000 });
+    await expect(page.getByTestId('case-reopen')).toBeVisible({ timeout: 15000 });
+
+    await expect(page.getByText('Не удалось отправить системное уведомление клиенту.')).toHaveCount(0, { timeout: 7000 });
+
+    await page.getByTestId('case-reopen').click({ force: true });
+    await expect(page.getByText('Заявка возвращена в работу: Manager')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('case-business-status')).toContainText('В работе', { timeout: 15000 });
+    await expect(page.getByText('chatflow_failed')).toHaveCount(0);
+    await expect(page.getByText('Не удалось отправить системное уведомление клиенту.')).toHaveCount(0);
 });

@@ -82,6 +82,17 @@ type CaseSlaLike = {
     snoozed_until?: string | null;
 };
 
+type SyncStatusLike = {
+    status?: string | null;
+    detail?: string | null;
+    operator_message?: string | null;
+};
+
+type CaseActionSyncLike = {
+    telegram?: SyncStatusLike | null;
+    client_notify?: SyncStatusLike | null;
+};
+
 // SLA status labels
 export function getSlaLabel(status?: string): string {
     const labels: Record<string, string> = {
@@ -135,6 +146,36 @@ export function getTriggerLabel(trigger?: string | null): string {
         manual: "Ручной запуск",
     };
     return labels[normalized] ?? trigger;
+}
+
+function getSyncFallbackMessage(target: "telegram" | "client_notify"): string {
+    if (target === "telegram") {
+        return "Не удалось синхронизировать состояние заявки с Telegram.";
+    }
+    return "Не удалось отправить системное уведомление клиенту.";
+}
+
+function getSyncFollowupMessage(
+    target: "telegram" | "client_notify",
+    sync?: SyncStatusLike | null,
+): string | null {
+    if (sync?.status !== "failed") {
+        return null;
+    }
+    return sync.operator_message || getSyncFallbackMessage(target);
+}
+
+export function collectCaseActionFollowupMessages(sync?: CaseActionSyncLike | null): string[] {
+    const messages: string[] = [];
+    const telegramMessage = getSyncFollowupMessage("telegram", sync?.telegram);
+    if (telegramMessage) {
+        messages.push(telegramMessage);
+    }
+    const clientNotifyMessage = getSyncFollowupMessage("client_notify", sync?.client_notify);
+    if (clientNotifyMessage) {
+        messages.push(clientNotifyMessage);
+    }
+    return messages;
 }
 
 // SLA indicator with color styling based on elapsed time

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { inboxApi } from "@/lib/api-client";
 import type { components } from "@/types/api.generated";
+import { collectCaseActionFollowupMessages } from "@/utils/labels";
 
 const DEFAULT_SCOPE: components["schemas"]["ConsoleMacro"]["scope"] = "personal";
 
@@ -263,6 +264,10 @@ function InboxMacros({
             const actionLabel = getMacroActionLabel(data.macro.action);
             const suffix = data.macro.body?.trim() ? " Текст добавлен в черновик." : "";
             toast.success(`Применено: ${actionLabel}.${suffix}`);
+            const followupMessages = collectCaseActionFollowupMessages(data.sync);
+            if (followupMessages.length > 0) {
+                toast(followupMessages.join(" "), { icon: "⚠️" });
+            }
         },
         onError: (error: unknown) => {
             const code = getErrorCode(error);

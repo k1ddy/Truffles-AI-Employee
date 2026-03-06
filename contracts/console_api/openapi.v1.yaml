@@ -17531,6 +17531,11 @@ components:
           - type: string
           - type: 'null'
           title: Detail
+        operator_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Operator Message
       type: object
       required:
       - status

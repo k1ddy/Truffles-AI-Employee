@@ -18,6 +18,11 @@
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE10-A1`
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE11-A1`
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE12-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE13-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE14-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE15-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE15-LIVE-VALIDATION-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE16-A1`
 
 ## Название/цель
 Обновить ТЗ в формат исполнимой программы: закрыть требования по вкладкам `Заявки` и `Записи` не набором разрозненных правок, а полной последовательностью атомарных wave/part блоков с явной бизнес-логикой, строгой связью между TP/PR и без дублирования действий в интерфейсе.
@@ -41,6 +46,14 @@
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave16-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-live-validation-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave14-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave13-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-live-validation-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave11-a1.md`
 
 ## FACT pre-check (before implementation)
 - `Implemented and merged (fact)`:
@@ -55,8 +68,9 @@
   - Макросы остаются текстовыми; нет action-макросов (`assign/status/snooze/tag`).
   - Workspace между `Заявками` и `Записями` стал связным, но еще не доведен до single-workspace уровня без route-level трения.
   - Для supervisor/admin не хватает полноценных queue governance возможностей: team views, configurable columns, routing/admin actions.
-  - Post-merge live feedback выявил новый semantic bug: `reopen` reuse `take` sync side effects и может показывать ложные `telegram_edit_failed/chatflow_failed`.
-  - Compact inbox rail в `Заявках` слишком узкий для текущего количества queue controls и case cards; это уже operator-UX defect, а не косметика.
+  - Post-merge live feedback выявил новый semantic bug: operator UI still leaks raw sync reason-codes such as `chatflow_failed` and conflates business success with secondary sync warnings.
+  - Action area around `Передать / Отложить / Вернуть в работу` remains structurally overloaded: mixed CTA hierarchy, dense reassignment panel, and ambiguous toggle semantics (`Передать` -> `Скрыть передачу`).
+  - Compact inbox rail в `Заявках` слишком узкий и перегруженный для текущего количества queue controls, summaries и case cards; это operator-UX defect, а не косметика.
 
 ## One web search (mandatory before implementation)
 - **Query (exact):** `Dynamics 365 Customer Service unified routing queue prioritization assignment methods`
@@ -114,6 +128,14 @@
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave16-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-live-validation-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave14-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave13-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-live-validation-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave11-a1.md`
 - `docs/SESSIONS/SESSION-2026-03-05-inbox-calendar-ux-reconstruction-a1.md`
 - `docs/SESSION_INDEX.md`
 - `STRUCTURE.md`
@@ -147,7 +169,10 @@
 | Wave11 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave11-a1.md` | One PR preferred; split allowed into `Part A action-sync correctness` then `Part B queue rail UX` | Post-merge live hardening: reopen-safe sync semantics + readable inbox left rail. | Done (merged via `PR #933`) |
 | Wave12 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-live-validation-a1.md` | One PR preferred for feature + post-merge live-validation follow-up | Server-owned policy-based routing automation on current reassignment surfaces (`least_open_cases`, no hidden auto-routing) + precise live validation contract. | Done (merged via `PR #934`; live mutation path blocked without explicit safe `INSPECT_CASE_LIVE_CASE_ID`) |
 | Wave13 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave13-a1.md` | Split allowed and expected: `Part A backend business-status contract`, `Part B queue/header simplification` | Ввести один понятный operator business status и убрать лишний badge-noise в `Заявках`. | Done (merged via `PR #935`) |
-| Wave14 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave14-a1.md` | Split allowed and expected: `Part A backend queue-view contract`, `Part B frontend queue migration` | Перевести queue views на server-owned semantics и убрать local-only approximation из левой очереди. | Implemented in branch |
+| Wave14 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave14-a1.md` | Split allowed and expected: `Part A backend queue-view contract`, `Part B frontend queue migration` | Перевести queue views на server-owned semantics и убрать local-only approximation из левой очереди. | Done (merged via `PR #936`) |
+| Wave15 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-a1.md` | Split allowed and expected: `Part A feedback contract`, `Part B action-specific receipts` | Убрать raw technical reason-codes из operator UX и разделить business outcome от secondary sync warnings. | Implemented in branch |
+| Wave15 Live Validation | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-live-validation-a1.md` | No feature PR; evidence gate after Wave15 merge | Подтвердить на live backend без mocks, что `reopen` и sync-bearing action больше не показывают raw technical feedback менеджеру. | Planned |
+| Wave16 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave16-a1.md` | Split allowed and expected: `Part A case action surface`, `Part B queue rail simplification` | Полностью пересобрать перегруженные operator surfaces в `Заявках`: action area и левую очередь. | Planned |
 
 ## Wave-by-wave closure contract (mandatory)
 1. `Wave5` closes only when SLA перестает быть абстрактным и становится action-driven на сервере и в ключевых UI surface.
@@ -160,6 +185,9 @@
 8. `Wave12` closes only when routing recommendation перестает быть клиентской подсказкой и становится серверным policy contract для single-case и bulk flows без скрытой автоматики.
 9. `Wave13` closes only when менеджер видит один понятный business status заявки вместо смеси raw status/secondary technical badges, а SLA остается отдельным next action.
 10. `Wave14` closes only when ключевые queue views больше не фильтруются локально по текущей странице, а используют server-owned semantics и честные counts.
+11. `Wave15` closes only when operator UI stops leaking raw technical reason-codes and clearly separates successful case state change from secondary sync warnings.
+12. `Wave15 Live Validation` closes only when live no-mocks evidence proves the new operator feedback semantics on a safe explicit case, or closes with a precise blocker instead of a fake pass.
+13. `Wave16` closes only when `Передать / Отложить / Вернуть в работу` and the left queue rail become readable, hierarchical, and business-clear without regressing the current workspace loop.
 
 ## TP/PR linkage rules (mandatory)
 - Если wave не помещается в один PR, split обязан быть зафиксирован прямо в wave TP до начала part-реализации.
@@ -215,11 +243,11 @@
 - `Current residuals accepted in this block`: SLA action contract, case actions, action macros, unified workspace, supervisor governance еще не завершены.
 - `Why not in this block`: master TP задает программу и не заменяет собой реализацию product blocks.
 - `Risk if deferred`: визуально улучшенная console останется частично operator-grade и не закроет ТЗ пользователя полностью.
-- `Linked follow-up Task Package(s)`: `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave11-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-live-validation-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave13-a1.md`.
+- `Linked follow-up Task Package(s)`: `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave11-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-live-validation-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave13-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave14-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-live-validation-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave16-a1.md`.
 - `Expiry/trigger to stop deferral`: любой новый merge по `Заявки/Записи`, который не уменьшает один из этих residual gaps, требует отдельного owner-approved waiver.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: выполнить Wave14 queue-view contract и убрать local-only queue approximation из текущей inbox rail.
-- `First deterministic check command`: `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py`
-- `Blocked-by conditions`: Wave14 must not regress existing branch access, owner filters, bulk actions, or inspect-case workspace flow.
+- `Next block objective`: выполнить Wave15 feedback contract, затем отдельным evidence gate подтвердить его на live и только после этого переходить к Wave16 action/queue UX redesign.
+- `First deterministic check command`: `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_inbox_macros.py`
+- `Blocked-by conditions`: Wave15 must not regress reopen semantics, macro action receipts, or current workspace loop; live validation requires a safe explicit case/scenario.
 - `Owner role for closure`: Brain / Top Architect.

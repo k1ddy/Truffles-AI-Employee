@@ -8321,6 +8321,8 @@ export interface components {
             status: "ok" | "skipped" | "failed";
             /** Detail */
             detail?: string | null;
+            /** Operator Message */
+            operator_message?: string | null;
         };
         /** ConsoleTeamManagerPerformanceItem */
         ConsoleTeamManagerPerformanceItem: {
