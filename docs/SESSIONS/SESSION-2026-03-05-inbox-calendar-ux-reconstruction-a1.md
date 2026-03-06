@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-partb-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -69,8 +69,11 @@
   - Wave7 Part A implemented and verified: executable macro action contract persisted in `console_macros.action_config`, `/inbox/macros/{macro_id}/execute` added, targeted macro/OpenAPI checks green, canonical contract synced to `openapi.v1.yaml`, and frontend API types regenerated.
   - Wave7 Part B TP created as the next active block for macro UI builder/apply flow.
   - Wave7 Part B implemented in frontend: `InboxMacros` now supports action builder/apply flow, `executeMacro` wired into composer-side apply, action hints are visible in use/manage cards, and `inspect_case` mock lane now covers create + apply for action-macros.
+  - PR `#932` opened for Wave7: `feat(console): add executable inbox action-macros`.
+  - Wave8 TP created as the next active block with mandatory one-web-search and bounded split `Part A workspace shell -> Part B context preservation`.
+  - Wave8 Part A implemented in branch: embedded `CaseBookingsPanel` added to Inbox/Case workspace, shared booking helpers extracted from `calendar/page.tsx`, and `ConsoleShell` now keeps `/calendar` in the same wide workspace frame.
 - next:
-  - Open Wave8 TP and start unified workspace shell without route-level friction between `Заявки` and `Записи`.
+  - Commit/push Wave8 Part A into PR `#932`, then open follow-up TP for Wave8 Part B context preservation.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -164,4 +167,6 @@
   - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_inbox_macros.py tests/test_console_openapi_calendar_contract.py` (`pass`)
   - `cd console-web && npm run lint -- --file src/components/InboxMacros.tsx --file src/lib/api-client.ts --file src/components/InboxView.tsx --file src/components/CaseView.tsx --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`)
-- last_updated: 2026-03-06T10:22:37+05:00
+  - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title "feat(console): add executable inbox action-macros" ...` (`PR #932`)
+  - `cd console-web && npm run build` (`pass`)
+- last_updated: 2026-03-06T10:42:09+05:00

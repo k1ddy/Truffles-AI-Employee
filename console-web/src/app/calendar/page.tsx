@@ -7,6 +7,18 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
+import {
+    bookingNeedsAttention,
+    createBooking,
+    fetchBookings,
+    getBookingAttentionLabel,
+    getVisitActionOptions,
+    registerNoShowFollowUp,
+    type BookingQueueLane,
+    type BookingStatusFilter,
+    type BookingStatusUpdateRequest,
+    updateBookingStatus,
+} from "@/lib/calendar-bookings";
 import { getBookingStatusLabel, getBookingStatusColor } from "@/utils/labels";
 import AccessDenied from "@/components/AccessDenied";
 import { authApi, canAccessConsole } from "@/lib/api-client";
@@ -28,65 +40,6 @@ interface TimeSlot {
     available: boolean;
 }
 
-interface Booking {
-    id: string;
-    specialist_id: string;
-    specialist_name: string;
-    start_at: string;
-    end_at: string;
-    customer_name: string | null;
-    customer_phone: string | null;
-    service_type: string | null;
-    status: string;
-    no_show_followup_done?: boolean;
-    no_show_followup_result?: "contacted" | "rebooked" | null;
-    no_show_followup_closed_at?: string | null;
-    no_show_followup_closed_by?: string | null;
-    no_show_followup_rebooked_appointment_id?: string | null;
-    conversation_id?: string | null;
-    case_id?: string | null;
-    needs_action?: boolean;
-    attention_reason?: string | null;
-    created_at: string;
-}
-
-interface BookingCreateRequest {
-    specialist_id: string;
-    start_at: string;
-    end_at: string;
-    customer_name?: string;
-    customer_phone?: string;
-    service_type?: string;
-    notes?: string;
-    conversation_id?: string;
-    case_id?: string;
-}
-
-interface BookingStatusUpdateRequest {
-    status: "COMPLETED" | "NO_SHOW";
-    reason?: string;
-}
-
-interface BookingNoShowFollowUpRequest {
-    result?: "contacted" | "rebooked";
-    rebooked_appointment_id?: string;
-    note?: string;
-}
-
-interface BookingActionResponse {
-    success: boolean;
-    booking: Booking;
-}
-
-interface BookingsListResponse {
-    items: Booking[];
-    cursor?: string | null;
-    has_more?: boolean;
-}
-
-type BookingQueueLane = "attention" | "all";
-type BookingStatusFilter = "all" | "scheduled" | "completed" | "no_show" | "cancelled";
-
 async function fetchSpecialists(): Promise<{ items: Specialist[] }> {
     const response = await api.get("/calendar/specialists");
     return response.data;
@@ -95,103 +48,6 @@ async function fetchSpecialists(): Promise<{ items: Specialist[] }> {
 async function fetchSlots(specialistId: string, date: string, duration: number): Promise<{ slots: TimeSlot[] }> {
     const response = await api.get(`/calendar/slots?specialist_id=${specialistId}&date=${date}&duration=${duration}`);
     return response.data;
-}
-
-async function fetchBookings(options?: {
-    date?: string;
-    conversationId?: string;
-    caseId?: string;
-    lane?: BookingQueueLane;
-    status?: BookingStatusFilter;
-    needsAction?: boolean;
-    cursor?: string;
-}): Promise<BookingsListResponse> {
-    const params = new URLSearchParams();
-    if (options?.date) {
-        params.set("date_from", options.date);
-        params.set("date_to", options.date);
-    }
-    if (options?.conversationId) {
-        params.set("conversation_id", options.conversationId);
-    }
-    if (options?.caseId) {
-        params.set("case_id", options.caseId);
-    }
-    if (options?.lane) {
-        params.set("lane", options.lane);
-    }
-    if (options?.status && options.status !== "all") {
-        params.set("status", options.status);
-    }
-    if (typeof options?.needsAction === "boolean") {
-        params.set("needs_action", String(options.needsAction));
-    }
-    if (options?.cursor) {
-        params.set("cursor", options.cursor);
-    }
-    const suffix = params.toString() ? `?${params.toString()}` : "";
-    const response = await api.get(`/calendar/bookings${suffix}`);
-    return response.data;
-}
-
-async function createBooking(data: BookingCreateRequest): Promise<BookingActionResponse> {
-    const response = await api.post("/calendar/bookings", data);
-    return response.data;
-}
-
-async function updateBookingStatus(bookingId: string, data: BookingStatusUpdateRequest): Promise<BookingActionResponse> {
-    const response = await api.post(`/calendar/bookings/${bookingId}/status`, data);
-    return response.data;
-}
-
-async function registerNoShowFollowUp(
-    bookingId: string,
-    data: BookingNoShowFollowUpRequest = {},
-): Promise<BookingActionResponse> {
-    const response = await api.post(`/calendar/bookings/${bookingId}/no-show-followup`, data);
-    return response.data;
-}
-
-function getVisitActionOptions(status: string): Array<{ status: BookingStatusUpdateRequest["status"]; label: string }> {
-    const normalized = status.toUpperCase();
-    if (["HOLD", "PENDING_CONFIRMATION", "CONFIRMED", "RESCHEDULE_REQUESTED", "CHECKED_IN"].includes(normalized)) {
-        return [
-            { status: "COMPLETED", label: "Пришел" },
-            { status: "NO_SHOW", label: "Не пришел" },
-        ];
-    }
-    return [];
-}
-
-function bookingNeedsAttention(booking: Booking): boolean {
-    if (typeof booking.needs_action === "boolean") {
-        return booking.needs_action;
-    }
-    const normalized = booking.status.toUpperCase();
-    if (normalized === "NO_SHOW" && !booking.no_show_followup_done) {
-        return true;
-    }
-    return ["PENDING_CONFIRMATION", "RESCHEDULE_REQUESTED", "NO_SHOW", "HOLD"].includes(normalized);
-}
-
-function getBookingAttentionLabel(booking: Booking): string | null {
-    if (booking.attention_reason && booking.attention_reason.trim()) {
-        return booking.attention_reason;
-    }
-    const normalized = booking.status.toUpperCase();
-    if (normalized === "PENDING_CONFIRMATION") {
-        return "Нужно подтвердить визит";
-    }
-    if (normalized === "RESCHEDULE_REQUESTED") {
-        return "Клиент просит перенос";
-    }
-    if (normalized === "HOLD") {
-        return "Нужно решение менеджера";
-    }
-    if (normalized === "NO_SHOW" && !booking.no_show_followup_done) {
-        return "Связаться после неявки";
-    }
-    return null;
 }
 
 function formatDate(date: Date): string {

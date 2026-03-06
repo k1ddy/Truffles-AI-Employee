@@ -28,6 +28,9 @@ interface CaseConversationProps {
     composerBefore?: ReactNode;
     detailsOpen?: boolean;
     onToggleDetails?: () => void;
+    bookingsOpen?: boolean;
+    onToggleBookings?: () => void;
+    canReadCalendar?: boolean;
     onNextCase?: () => void;
     canGoNextCase?: boolean;
     chatFrame?: "card" | "plain";
@@ -119,6 +122,9 @@ export default function CaseConversation({
     composerBefore,
     detailsOpen = false,
     onToggleDetails,
+    bookingsOpen = false,
+    onToggleBookings,
+    canReadCalendar = false,
     onNextCase,
     canGoNextCase = false,
     chatFrame = "card",
@@ -441,6 +447,8 @@ export default function CaseConversation({
     const assignedLabel = caseDetail.assigned_to_name ?? "Не назначен";
     const showDetailsToggle = typeof onToggleDetails === "function";
     const detailsLabel = detailsOpen ? "Скрыть детали" : "Детали";
+    const showBookingsToggle = canReadCalendar;
+    const bookingsLabel = bookingsOpen ? "Скрыть записи" : "Записи по заявке";
     const isInboxLayout = layout === "inbox";
     const contextCanExpand = isInboxLayout && contextText.length > compactContextLimit;
     const contextBody = contextCanExpand && !contextExpanded
@@ -554,6 +562,9 @@ export default function CaseConversation({
     ) : (
         replyPauseControls
     );
+    const calendarHref = caseDetail.conversation_id
+        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}`
+        : `/calendar?case_id=${encodeURIComponent(caseId)}`;
     const humanLockPanel = (
         <div
             className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${
@@ -799,14 +810,28 @@ export default function CaseConversation({
                                     {outreachExpanded ? "Скрыть блок связи" : "Связаться с клиентом"}
                                 </button>
                             )}
-                            {caseDetail.conversation_id && (
-                                <Link
-                                    href={`/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}`}
-                                    className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
-                                    data-testid="case-open-calendar"
-                                >
-                                    Записи по заявке
-                                </Link>
+                            {showBookingsToggle && (
+                                typeof onToggleBookings === "function" ? (
+                                    <button
+                                        type="button"
+                                        onClick={onToggleBookings}
+                                        className={`rounded border border-border/60 px-4 py-2 text-sm font-semibold ${
+                                            bookingsOpen ? "bg-muted text-foreground" : "text-foreground hover:bg-muted"
+                                        }`}
+                                        aria-pressed={bookingsOpen}
+                                        data-testid="case-open-calendar"
+                                    >
+                                        {bookingsLabel}
+                                    </button>
+                                ) : (
+                                    <Link
+                                        href={calendarHref}
+                                        className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
+                                        data-testid="case-open-calendar"
+                                    >
+                                        {bookingsLabel}
+                                    </Link>
+                                )
                             )}
                             {canGoNextCase && (
                                 <button

@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import CaseList from "@/components/CaseList";
 import CaseConversation from "@/components/CaseConversation";
+import CaseBookingsPanel from "@/components/CaseBookingsPanel";
 import CaseDetailsPanel from "@/components/CaseDetailsPanel";
 import { InboxMacroChips } from "@/components/InboxMacros";
 import AccessDenied from "@/components/AccessDenied";
@@ -22,6 +23,8 @@ interface InboxViewProps {
     initialCaseId?: string | null;
 }
 
+type SidePanelMode = "details" | "bookings" | null;
+
 export default function InboxView({ initialCaseId }: InboxViewProps) {
     const router = useRouter();
     const pathname = usePathname();
@@ -29,7 +32,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const queryClient = useQueryClient();
     const [selectedCaseId, setSelectedCaseId] = useState(initialCaseId ?? "");
     const [draft, setDraft] = useState("");
-    const [detailsOpen, setDetailsOpen] = useState(false);
+    const [sidePanelMode, setSidePanelMode] = useState<SidePanelMode>(null);
     const [visibleCaseIds, setVisibleCaseIds] = useState<string[]>([]);
     const [selectionHydrated, setSelectionHydrated] = useState(Boolean(initialCaseId));
     const restoredScopeRef = useRef<string | null>(null);
@@ -52,6 +55,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const role = meData?.agent?.role ?? "manager";
     const canReadInbox = canAccessConsole(role, "inbox", "read");
     const canWriteInbox = canAccessConsole(role, "inbox", "write");
+    const canReadCalendar = canAccessConsole(role, "calendar", "read");
+    const canWriteCalendar = canAccessConsole(role, "calendar", "write");
     const canReadOutreach = canAccessConsole(role, "outreach", "read");
     const canWriteOutreach = canAccessConsole(role, "outreach", "write");
     const branches = useMemo(
@@ -111,7 +116,6 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
 
     useEffect(() => {
         setDraft("");
-        setDetailsOpen(false);
     }, [selectedCaseId]);
 
     useEffect(() => {
@@ -165,7 +169,10 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const macroBranchId = caseDetail?.branch_id ?? selectedBranchId;
     const canManageMacros = canWriteInbox;
     const canToggleDetails = Boolean(selectedCaseId && caseDetail && !caseLoading && !caseError);
-    const showDetailsColumn = detailsOpen && !!selectedCaseId;
+    const canToggleBookings = Boolean(selectedCaseId && caseDetail && !caseLoading && !caseError && canReadCalendar);
+    const detailsOpen = sidePanelMode === "details";
+    const bookingsOpen = sidePanelMode === "bookings";
+    const showDetailsColumn = Boolean(sidePanelMode) && !!selectedCaseId;
     const hasSelection = Boolean(selectedCaseId);
     const gridClass = showDetailsColumn
         ? hasSelection
@@ -210,7 +217,14 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
         if (!canToggleDetails) {
             return;
         }
-        setDetailsOpen((prev) => !prev);
+        setSidePanelMode((prev) => prev === "details" ? null : "details");
+    };
+
+    const handleToggleBookings = () => {
+        if (!canToggleBookings) {
+            return;
+        }
+        setSidePanelMode((prev) => prev === "bookings" ? null : "bookings");
     };
 
     const standaloneOutreachMutation = useMutation({
@@ -471,7 +485,10 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                         onDraftChange={setDraft}
                                         composerBefore={composerBefore}
                                         detailsOpen={detailsOpen}
+                                        bookingsOpen={bookingsOpen}
                                         onToggleDetails={handleToggleDetails}
+                                        onToggleBookings={handleToggleBookings}
+                                        canReadCalendar={canReadCalendar}
                                         onNextCase={handleNextCase}
                                         canGoNextCase={Boolean(nextCaseId && nextCaseId !== selectedCaseId)}
                                         chatFrame="plain"
@@ -498,20 +515,35 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                 {!caseLoading && !caseError && caseDetail && (
                                     <>
                                         <div className="sticky top-0 z-10 flex items-center justify-between rounded-2xl border border-border/60 bg-background/90 px-4 py-3 backdrop-blur">
-                                            <p className="text-sm font-semibold">Детали заявки</p>
+                                            <p className="text-sm font-semibold">
+                                                {bookingsOpen ? "Записи по заявке" : "Детали заявки"}
+                                            </p>
                                             <button
                                                 type="button"
-                                                onClick={() => setDetailsOpen(false)}
+                                                onClick={() => setSidePanelMode(null)}
                                                 className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
                                             >
-                                                Скрыть детали
+                                                {bookingsOpen ? "Скрыть записи" : "Скрыть детали"}
                                             </button>
                                         </div>
-                                        <CaseDetailsPanel
-                                            caseDetail={caseDetail}
-                                            messages={messages}
-                                            canViewDiagnostics={canViewDiagnostics}
-                                        />
+                                        {bookingsOpen ? (
+                                            <CaseBookingsPanel
+                                                caseId={selectedCaseId}
+                                                conversationId={caseDetail.conversation_id}
+                                                canWriteCalendar={canWriteCalendar}
+                                                fullCalendarHref={
+                                                    caseDetail.conversation_id
+                                                        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(selectedCaseId)}`
+                                                        : `/calendar?case_id=${encodeURIComponent(selectedCaseId)}`
+                                                }
+                                            />
+                                        ) : (
+                                            <CaseDetailsPanel
+                                                caseDetail={caseDetail}
+                                                messages={messages}
+                                                canViewDiagnostics={canViewDiagnostics}
+                                            />
+                                        )}
                                     </>
                                 )}
                                 {!caseLoading && !caseError && !caseDetail && (
@@ -525,29 +557,42 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                 )}
             </div>
 
-            {detailsOpen && canToggleDetails && caseDetail && (
+            {sidePanelMode && caseDetail && (
                 <div className="fixed inset-0 z-40 xl:hidden">
                     <div
                         className="absolute inset-0 bg-foreground/20"
-                        onClick={() => setDetailsOpen(false)}
+                        onClick={() => setSidePanelMode(null)}
                         aria-hidden="true"
                     />
                     <div className="absolute inset-y-0 right-0 flex h-full w-full max-w-[420px] flex-col gap-3 overflow-y-auto bg-background p-4 shadow-xl">
                         <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold">Детали заявки</p>
+                            <p className="text-sm font-semibold">{bookingsOpen ? "Записи по заявке" : "Детали заявки"}</p>
                             <button
                                 type="button"
-                                onClick={() => setDetailsOpen(false)}
+                                onClick={() => setSidePanelMode(null)}
                                 className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
                             >
-                                Скрыть детали
+                                {bookingsOpen ? "Скрыть записи" : "Скрыть детали"}
                             </button>
                         </div>
-                        <CaseDetailsPanel
-                            caseDetail={caseDetail}
-                            messages={messages}
-                            canViewDiagnostics={canViewDiagnostics}
-                        />
+                        {bookingsOpen ? (
+                            <CaseBookingsPanel
+                                caseId={selectedCaseId}
+                                conversationId={caseDetail.conversation_id}
+                                canWriteCalendar={canWriteCalendar}
+                                fullCalendarHref={
+                                    caseDetail.conversation_id
+                                        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(selectedCaseId)}`
+                                        : `/calendar?case_id=${encodeURIComponent(selectedCaseId)}`
+                                }
+                            />
+                        ) : (
+                            <CaseDetailsPanel
+                                caseDetail={caseDetail}
+                                messages={messages}
+                                canViewDiagnostics={canViewDiagnostics}
+                            />
+                        )}
                     </div>
                 </div>
             )}

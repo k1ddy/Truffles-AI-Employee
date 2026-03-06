@@ -1073,7 +1073,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const accessToken = sessionAuth?.accessToken;
     const hasSession = (status === "authenticated" && !!accessToken && !sessionError) || e2eBypassAuth;
     const queryClient = useQueryClient();
-    const isInboxPage = pathname === "/" || pathname.startsWith("/cases");
+    const isInboxPage = pathname === "/" || pathname.startsWith("/cases") || pathname.startsWith("/calendar");
     const isTenantsPage = pathname === "/tenants" || pathname.startsWith("/tenants/");
     const contentWidthClass = isInboxPage ? "max-w-[1440px]" : "max-w-6xl";
     const contentFrameClass = isInboxPage ? "h-full min-h-0" : "";

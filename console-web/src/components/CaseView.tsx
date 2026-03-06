@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import CaseBookingsPanel from "./CaseBookingsPanel";
 import CaseConversation from "./CaseConversation";
 import CaseDetailsPanel from "./CaseDetailsPanel";
 import { useCaseData } from "@/hooks/useCaseData";
@@ -13,6 +14,8 @@ import { InboxMacroChips } from "@/components/InboxMacros";
 interface CaseViewProps {
     caseId: string;
 }
+
+type SidePanelMode = "details" | "bookings" | null;
 
 function CaseViewSkeleton() {
     return (
@@ -32,7 +35,7 @@ function CaseViewSkeleton() {
 export default function CaseView({ caseId }: CaseViewProps) {
     const { data: session } = useSession();
     const [draft, setDraft] = useState("");
-    const [detailsOpen, setDetailsOpen] = useState(false);
+    const [sidePanelMode, setSidePanelMode] = useState<SidePanelMode>(null);
     const {
         caseDetail,
         caseLoading,
@@ -57,9 +60,13 @@ export default function CaseView({ caseId }: CaseViewProps) {
     const role = meData?.agent?.role ?? "manager";
     const canReadInbox = canAccessConsole(role, "inbox", "read");
     const canWriteInbox = canAccessConsole(role, "inbox", "write");
+    const canReadCalendar = canAccessConsole(role, "calendar", "read");
+    const canWriteCalendar = canAccessConsole(role, "calendar", "write");
     const canReadOutreach = canAccessConsole(role, "outreach", "read");
     const canWriteOutreach = canAccessConsole(role, "outreach", "write");
     const canViewDiagnostics = role === "support" || role === "platform_admin" || role === "owner" || role === "admin";
+    const detailsOpen = sidePanelMode === "details";
+    const bookingsOpen = sidePanelMode === "bookings";
 
     if (!canReadInbox) {
         return <AccessDenied message="Эта роль не имеет доступа к заявкам." />;
@@ -102,18 +109,31 @@ export default function CaseView({ caseId }: CaseViewProps) {
     return (
         <div
             className={`grid grid-cols-1 gap-6 ${
-                detailsOpen ? "xl:grid-cols-[minmax(0,1fr)_320px]" : "xl:grid-cols-[minmax(0,1fr)]"
+                detailsOpen || bookingsOpen ? "xl:grid-cols-[minmax(0,1fr)_320px]" : "xl:grid-cols-[minmax(0,1fr)]"
             }`}
             data-testid="case-view"
         >
             <div className="flex flex-col gap-4">
-                {detailsOpen && (
+                {(detailsOpen || bookingsOpen) && (
                     <div className="xl:hidden">
-                        <CaseDetailsPanel
-                            caseDetail={caseDetail}
-                            messages={messages}
-                            canViewDiagnostics={canViewDiagnostics}
-                        />
+                        {bookingsOpen ? (
+                            <CaseBookingsPanel
+                                caseId={caseId}
+                                conversationId={caseDetail.conversation_id}
+                                canWriteCalendar={canWriteCalendar}
+                                fullCalendarHref={
+                                    caseDetail.conversation_id
+                                        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}`
+                                        : `/calendar?case_id=${encodeURIComponent(caseId)}`
+                                }
+                            />
+                        ) : (
+                            <CaseDetailsPanel
+                                caseDetail={caseDetail}
+                                messages={messages}
+                                canViewDiagnostics={canViewDiagnostics}
+                            />
+                        )}
                     </div>
                 )}
                 <CaseConversation
@@ -140,7 +160,10 @@ export default function CaseView({ caseId }: CaseViewProps) {
                         />
                     }
                     detailsOpen={detailsOpen}
-                    onToggleDetails={() => setDetailsOpen((prev) => !prev)}
+                    bookingsOpen={bookingsOpen}
+                    onToggleDetails={() => setSidePanelMode((prev) => prev === "details" ? null : "details")}
+                    onToggleBookings={() => setSidePanelMode((prev) => prev === "bookings" ? null : "bookings")}
+                    canReadCalendar={canReadCalendar}
                 />
             </div>
             {detailsOpen && (
@@ -149,6 +172,20 @@ export default function CaseView({ caseId }: CaseViewProps) {
                         caseDetail={caseDetail}
                         messages={messages}
                         canViewDiagnostics={canViewDiagnostics}
+                    />
+                </div>
+            )}
+            {bookingsOpen && (
+                <div className="hidden xl:block">
+                    <CaseBookingsPanel
+                        caseId={caseId}
+                        conversationId={caseDetail.conversation_id}
+                        canWriteCalendar={canWriteCalendar}
+                        fullCalendarHref={
+                            caseDetail.conversation_id
+                                ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}`
+                                : `/calendar?case_id=${encodeURIComponent(caseId)}`
+                        }
                     />
                 </div>
             )}

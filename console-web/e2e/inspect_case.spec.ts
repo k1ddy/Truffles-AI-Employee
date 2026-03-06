@@ -138,6 +138,27 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
         snoozed_reason: null,
         snoozed_by: null,
     } as Record<string, unknown>;
+    const bookingState = {
+        id: '99999999-9999-4999-8999-999999999999',
+        specialist_id: SPECIALIST_ID,
+        specialist_name: 'Мастер Айжан',
+        start_at: '2026-03-06T10:00:00+05:00',
+        end_at: '2026-03-06T11:00:00+05:00',
+        customer_name: 'Айгуль',
+        customer_phone: '+77001234567',
+        service_type: 'Маникюр',
+        status: 'PENDING_CONFIRMATION',
+        no_show_followup_done: false,
+        no_show_followup_result: null,
+        no_show_followup_closed_at: null,
+        no_show_followup_closed_by: null,
+        no_show_followup_rebooked_appointment_id: null,
+        conversation_id: CONVERSATION_ID,
+        case_id: CASE_ID,
+        needs_action: true,
+        attention_reason: 'Нужно подтвердить визит',
+        created_at: '2026-03-05T09:20:00+05:00',
+    } as Record<string, unknown>;
     const macroStore = [
         {
             id: ACTION_MACRO_ID,
@@ -408,31 +429,38 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             return;
         }
         await toJsonResponse(route, {
-            items: [
-                {
-                    id: '99999999-9999-4999-8999-999999999999',
-                    specialist_id: SPECIALIST_ID,
-                    specialist_name: 'Мастер Айжан',
-                    start_at: '2026-03-06T10:00:00+05:00',
-                    end_at: '2026-03-06T11:00:00+05:00',
-                    customer_name: 'Айгуль',
-                    customer_phone: '+77001234567',
-                    service_type: 'Маникюр',
-                    status: 'PENDING_CONFIRMATION',
-                    no_show_followup_done: false,
-                    no_show_followup_result: null,
-                    no_show_followup_closed_at: null,
-                    no_show_followup_closed_by: null,
-                    no_show_followup_rebooked_appointment_id: null,
-                    conversation_id: CONVERSATION_ID,
-                    case_id: CASE_ID,
-                    needs_action: true,
-                    attention_reason: 'Нужно подтвердить визит',
-                    created_at: '2026-03-05T09:20:00+05:00',
-                },
-            ],
+            items: [{ ...bookingState }],
             cursor: null,
             has_more: false,
+        });
+    });
+    await page.route(`**/api/proxy/calendar/bookings/${bookingState.id}/status`, async (route) => {
+        if (route.request().method() !== 'POST') {
+            await route.fallback();
+            return;
+        }
+        const payload = route.request().postDataJSON() as { status?: 'COMPLETED' | 'NO_SHOW' } | null;
+        bookingState.status = payload?.status === 'NO_SHOW' ? 'NO_SHOW' : 'COMPLETED';
+        bookingState.needs_action = bookingState.status === 'NO_SHOW';
+        bookingState.attention_reason = bookingState.status === 'NO_SHOW' ? 'Связаться после неявки' : null;
+        await toJsonResponse(route, {
+            success: true,
+            booking: { ...bookingState },
+        });
+    });
+    await page.route(`**/api/proxy/calendar/bookings/${bookingState.id}/no-show-followup`, async (route) => {
+        if (route.request().method() !== 'POST') {
+            await route.fallback();
+            return;
+        }
+        const payload = route.request().postDataJSON() as { result?: 'contacted' | 'rebooked' } | null;
+        bookingState.no_show_followup_done = true;
+        bookingState.no_show_followup_result = payload?.result ?? 'contacted';
+        bookingState.needs_action = false;
+        bookingState.attention_reason = null;
+        await toJsonResponse(route, {
+            success: true,
+            booking: { ...bookingState },
         });
     });
 }
@@ -833,9 +861,20 @@ test('inspect first case', async ({ page }) => {
 
     const openCalendarButton = page.getByTestId('case-open-calendar');
     if (await openCalendarButton.isVisible().catch(() => false)) {
-        const calendarHref = await openCalendarButton.getAttribute('href');
+        await openCalendarButton.click();
+        const visibleBookingsPanel = page.locator('[data-testid=\"case-bookings-panel\"]:visible').first();
+        await expect(visibleBookingsPanel).toBeVisible({ timeout: 20000 });
+        expect(page.url()).not.toContain('/calendar');
+        if (useRouteMocks) {
+            await expect(visibleBookingsPanel.locator('[data-testid=\"case-booking-card\"]').first()).toBeVisible({ timeout: 20000 });
+            await visibleBookingsPanel.getByRole('button', { name: 'Пришел', exact: true }).click();
+            await expect(visibleBookingsPanel.getByText('пришел', { exact: true }).first()).toBeVisible({ timeout: 20000 });
+        }
+
+        const openFullCalendar = visibleBookingsPanel.getByTestId('case-bookings-open-full-calendar');
+        const calendarHref = await openFullCalendar.getAttribute('href');
         if (!calendarHref) {
-            throw new Error('case-open-calendar link does not contain href');
+            throw new Error('case-bookings-open-full-calendar link does not contain href');
         }
         await gotoWithRetry(page, `${baseURL}${calendarHref}`);
         await expect(page.getByTestId('calendar-page')).toBeVisible({ timeout: 20000 });
