@@ -111,6 +111,29 @@ function caseNoun(count: number) {
     return count < 5 ? "заявки" : "заявок";
 }
 
+function sortAssigneeOptionsByLoad(options: CaseAssigneeOption[]) {
+    return [...options].sort((left, right) => {
+        const leftLoad = left.open_case_count ?? 0;
+        const rightLoad = right.open_case_count ?? 0;
+        if (leftLoad !== rightLoad) {
+            return leftLoad - rightLoad;
+        }
+        return left.agent_name.localeCompare(right.agent_name, "ru");
+    });
+}
+
+function sortAssigneeOptionsByName(options: CaseAssigneeOption[]) {
+    return [...options].sort((left, right) => left.agent_name.localeCompare(right.agent_name, "ru"));
+}
+
+function formatQueueAssigneeOptionLabel(option: CaseAssigneeOption) {
+    return `${option.agent_name} · ${option.open_case_count ?? 0} в работе`;
+}
+
+function formatBulkAssigneeOptionLabel(option: CaseAssigneeOption) {
+    return `${option.agent_name} · ${option.open_case_count ?? 0} в работе`;
+}
+
 function buildBulkSummary(response: CaseBulkActionResponse): BulkSummary {
     const parts: string[] = [];
     if (response.processed_count > 0) {
@@ -745,7 +768,10 @@ export default function CaseList({
         },
         enabled: canBulkManage && bulkActionMode === "reassign" && !!bulkAssigneeSourceCaseId,
     });
-    const bulkAssignees = bulkAssigneesData?.items ?? [];
+    const bulkAssignees = useMemo(
+        () => sortAssigneeOptionsByLoad(bulkAssigneesData?.items ?? []),
+        [bulkAssigneesData?.items],
+    );
     const { data: queueAssigneesData, isFetching: queueAssigneesLoading } = useQuery({
         queryKey: ["case-assignees-queue", filters.branchId || "all", viewerRole],
         queryFn: async () => {
@@ -754,7 +780,10 @@ export default function CaseList({
         },
         enabled: privilegedOwnerFilterVisible,
     });
-    const queueAssignees = queueAssigneesData?.items ?? [];
+    const queueAssignees = useMemo(
+        () => sortAssigneeOptionsByName(queueAssigneesData?.items ?? []),
+        [queueAssigneesData?.items],
+    );
     const selectedAssigneeLabel = filters.assigneeId
         ? queueAssignees.find((item) => String(item.agent_id) === filters.assigneeId)?.agent_name ?? filters.assigneeId
         : ownerFilterLabel;
@@ -1173,7 +1202,7 @@ export default function CaseList({
                             <option value="__unassigned__">Без владельца</option>
                             {queueAssignees.map((option) => (
                                 <option key={option.agent_id} value={String(option.agent_id)}>
-                                    {option.agent_name}
+                                    {formatQueueAssigneeOptionLabel(option)}
                                 </option>
                             ))}
                         </select>
@@ -1394,7 +1423,7 @@ export default function CaseList({
                                             <option value="">Выберите менеджера</option>
                                             {bulkAssignees.map((option) => (
                                                 <option key={option.agent_id} value={option.agent_id}>
-                                                    {option.agent_name}
+                                                    {formatBulkAssigneeOptionLabel(option)}
                                                 </option>
                                             ))}
                                         </select>
@@ -1409,7 +1438,7 @@ export default function CaseList({
                                         </button>
                                     </div>
                                     <p className="text-xs text-muted-foreground">
-                                        Передача меняет ответственного только у активных заявок в выбранном филиале.
+                                        Передача меняет ответственного только у активных заявок в выбранном филиале. Список отсортирован по открытым заявкам.
                                     </p>
                                 </div>
                             )}

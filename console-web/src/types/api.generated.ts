@@ -4263,6 +4263,11 @@ export interface components {
              * @default false
              */
             is_current: boolean;
+            /**
+             * Open Case Count
+             * @default 0
+             */
+            open_case_count: number;
         };
         /** ConsoleCaseBulkActionRequest */
         ConsoleCaseBulkActionRequest: {

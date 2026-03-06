@@ -5699,10 +5699,78 @@ def _list_case_assignee_options(
             is_current=str(agent.id) == (current_assignee_id or ""),
         )
 
+    load_rows_query = (
+        db.query(
+            Handover.assigned_to.label("assigned_to"),
+            Handover.assigned_to_name.label("assigned_to_name"),
+            func.count(Handover.id).label("open_case_count"),
+        )
+        .join(Conversation, Conversation.id == Handover.conversation_id)
+        .filter(
+            Handover.client_id == client_id,
+            Handover.status.in_(("pending", "active")),
+        )
+    )
+    if branch_id:
+        load_rows_query = load_rows_query.filter(Conversation.branch_id == branch_id)
+
+    load_rows = load_rows_query.group_by(Handover.assigned_to, Handover.assigned_to_name).all()
+    load_map = _map_case_assignee_loads(
+        options_by_agent_id,
+        [
+            (
+                row.assigned_to,
+                row.assigned_to_name,
+                int(row.open_case_count or 0),
+            )
+            for row in load_rows
+        ],
+    )
+    for agent_id, option in options_by_agent_id.items():
+        option.open_case_count = load_map.get(agent_id, 0)
+
     return sorted(
         options_by_agent_id.values(),
         key=lambda item: (not item.is_current, item.agent_name.lower(), str(item.agent_id)),
     )
+
+
+def _map_case_assignee_loads(
+    options_by_agent_id: dict[UUID, ConsoleCaseAssigneeOption],
+    rows: list[tuple[Optional[str], Optional[str], int]],
+) -> dict[UUID, int]:
+    load_map: dict[UUID, int] = {agent_id: 0 for agent_id in options_by_agent_id.keys()}
+    name_to_agent_ids: dict[str, set[UUID]] = {}
+
+    for agent_id, option in options_by_agent_id.items():
+        normalized_name = option.agent_name.strip().lower()
+        if normalized_name:
+            name_to_agent_ids.setdefault(normalized_name, set()).add(agent_id)
+        load_map.setdefault(agent_id, 0)
+
+    for assigned_to, assigned_to_name, open_case_count in rows:
+        if open_case_count <= 0:
+            continue
+
+        resolved_agent_id: UUID | None = None
+        if assigned_to:
+            try:
+                candidate_agent_id = UUID(str(assigned_to))
+            except ValueError:
+                candidate_agent_id = None
+            if candidate_agent_id in load_map:
+                resolved_agent_id = candidate_agent_id
+
+        if resolved_agent_id is None and assigned_to_name:
+            normalized_name = assigned_to_name.strip().lower()
+            candidate_agent_ids = name_to_agent_ids.get(normalized_name) or set()
+            if len(candidate_agent_ids) == 1:
+                resolved_agent_id = next(iter(candidate_agent_ids))
+
+        if resolved_agent_id is not None:
+            load_map[resolved_agent_id] = load_map.get(resolved_agent_id, 0) + open_case_count
+
+    return load_map
 
 
 def _resolve_membership_target(

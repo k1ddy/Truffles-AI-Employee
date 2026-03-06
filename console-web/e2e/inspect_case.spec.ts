@@ -323,6 +323,7 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
                     role: 'manager',
                     branch_id: BRANCH_ID,
                     is_current: false,
+                    open_case_count: 2,
                 },
                 {
                     agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -330,6 +331,7 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
                     role: 'manager',
                     branch_id: BRANCH_ID,
                     is_current: false,
+                    open_case_count: 1,
                 },
             ],
         });
@@ -473,6 +475,7 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
                     role: 'manager',
                     branch_id: BRANCH_ID,
                     is_current: true,
+                    open_case_count: 2,
                 },
                 {
                     agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -480,6 +483,7 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
                     role: 'manager',
                     branch_id: BRANCH_ID,
                     is_current: false,
+                    open_case_count: 1,
                 },
             ],
         });
@@ -956,6 +960,8 @@ test('inspect first case', async ({ page }) => {
     if (useRouteMocks) {
         await expect(page.getByTestId('cases-queue-views')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('cases-filter-assignee')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-filter-assignee').locator('option').nth(2)).toContainText('Manager · 2 в работе');
+        await expect(page.getByTestId('cases-filter-assignee').locator('option').nth(3)).toContainText('Manager Two · 1 в работе');
         await expect(page.getByTestId('cases-queue-view-unassigned')).toBeVisible({ timeout: 15000 });
         await page.getByTestId('cases-field-toggle').click({ force: true });
         await page.getByTestId('cases-field-owner').check({ force: true });
@@ -999,6 +1005,8 @@ test('inspect first case', async ({ page }) => {
         });
         await page.getByTestId('case-reassign-toggle').click({ force: true });
         await expect(page.getByTestId('case-reassign-select')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('case-reassign-select').locator('option').nth(0)).toContainText('Manager · 2 в работе · текущий');
+        await expect(page.getByTestId('case-reassign-select').locator('option').nth(1)).toContainText('Manager Two · Manager · 1 в работе');
         await page.getByTestId('case-snooze-toggle').click({ force: true });
         await expect(page.getByTestId('case-snooze-minutes')).toBeVisible({ timeout: 15000 });
     }

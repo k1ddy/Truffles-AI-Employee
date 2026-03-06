@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from app.routers import console as console_router
+from app.schemas.console import ConsoleCaseAssigneeOption
 from app.services.console_errors import ConsoleAPIError
 
 
@@ -66,6 +67,71 @@ def test_parse_case_owner_filters_accepts_unassigned():
 
     assert parsed_assignee_id is None
     assert unassigned is True
+
+
+def test_map_case_assignee_loads_prefers_direct_agent_id() -> None:
+    agent_id = uuid4()
+    options = {
+        agent_id: ConsoleCaseAssigneeOption(
+            agent_id=agent_id,
+            agent_name="Manager",
+            role="manager",
+            open_case_count=0,
+        ),
+    }
+
+    load_map = console_router._map_case_assignee_loads(
+        options,
+        [(str(agent_id), "Manager", 3)],
+    )
+
+    assert load_map[agent_id] == 3
+
+
+def test_map_case_assignee_loads_uses_unique_legacy_name_fallback() -> None:
+    agent_id = uuid4()
+    options = {
+        agent_id: ConsoleCaseAssigneeOption(
+            agent_id=agent_id,
+            agent_name="Manager Two",
+            role="manager",
+            open_case_count=0,
+        ),
+    }
+
+    load_map = console_router._map_case_assignee_loads(
+        options,
+        [(None, "Manager Two", 2)],
+    )
+
+    assert load_map[agent_id] == 2
+
+
+def test_map_case_assignee_loads_ignores_ambiguous_legacy_name() -> None:
+    agent_one_id = uuid4()
+    agent_two_id = uuid4()
+    options = {
+        agent_one_id: ConsoleCaseAssigneeOption(
+            agent_id=agent_one_id,
+            agent_name="Manager",
+            role="manager",
+            open_case_count=0,
+        ),
+        agent_two_id: ConsoleCaseAssigneeOption(
+            agent_id=agent_two_id,
+            agent_name="Manager",
+            role="admin",
+            open_case_count=0,
+        ),
+    }
+
+    load_map = console_router._map_case_assignee_loads(
+        options,
+        [(None, "Manager", 4)],
+    )
+
+    assert load_map[agent_one_id] == 0
+    assert load_map[agent_two_id] == 0
 
 
 @pytest.mark.parametrize(

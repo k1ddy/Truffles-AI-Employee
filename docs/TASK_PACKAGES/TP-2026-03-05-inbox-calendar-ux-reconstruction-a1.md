@@ -15,6 +15,7 @@
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE7-A1`
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE8-A1`
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE9-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE10-A1`
 
 ## Название/цель
 Обновить ТЗ в формат исполнимой программы: закрыть требования по вкладкам `Заявки` и `Записи` не набором разрозненных правок, а полной последовательностью атомарных wave/part блоков с явной бизнес-логикой, строгой связью между TP/PR и без дублирования действий в интерфейсе.
@@ -36,6 +37,7 @@
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md`
 
 ## FACT pre-check (before implementation)
 - `Implemented and merged (fact)`:
@@ -105,6 +107,7 @@
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md`
 - `docs/SESSIONS/SESSION-2026-03-05-inbox-calendar-ux-reconstruction-a1.md`
 - `docs/SESSION_INDEX.md`
 - `STRUCTURE.md`
@@ -133,6 +136,7 @@
 | Wave7 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-partb-a1.md` | Split allowed and expected: `Part A action-macro backend`, `Part B macro UI/integration` | Превратить макросы из текстовых в executable operator actions. | In PR `#932` |
 | Wave8 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md` | Split allowed and expected: `Part A workspace shell`, `Part B queue position/context preservation` | Довести `Заявки/Записи` до единого workspace без потери контекста. | In PR `#932` (`Part A` + `Part B`) |
 | Wave9 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md` | Split allowed and expected: `Part A queue governance`, `Part B routing/admin views` | Supervisor/admin-grade queue governance: team views, columns, routing controls. | In PR `#932` (`Part A` + `Part B`) |
+| Wave10 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md` | Split allowed and expected: `Part A factual load signals`, `Part B recommended routing action` | Сделать reassignment менее слепым: factual workload hints before any automation. | In progress (`Part A` in branch -> PR `#932`) |
 
 ## Wave-by-wave closure contract (mandatory)
 1. `Wave5` closes only when SLA перестает быть абстрактным и становится action-driven на сервере и в ключевых UI surface.
@@ -140,6 +144,7 @@
 3. `Wave7` closes only when макрос может менять не только текст, но и состояние/operator action.
 4. `Wave8` closes only when переход `кейс -> запись -> кейс` перестает быть route-friction сценарием и становится единым рабочим экраном.
 5. `Wave9` closes only when очередь становится управляемой для supervisor/admin на масштабе, а не только удобной для одного менеджера.
+6. `Wave10` closes only when reassignment stops being a blind name-pick and shows factual workload signals in the current operator surfaces.
 
 ## TP/PR linkage rules (mandatory)
 - Если wave не помещается в один PR, split обязан быть зафиксирован прямо в wave TP до начала part-реализации.
@@ -195,11 +200,11 @@
 - `Current residuals accepted in this block`: SLA action contract, case actions, action macros, unified workspace, supervisor governance еще не завершены.
 - `Why not in this block`: master TP задает программу и не заменяет собой реализацию product blocks.
 - `Risk if deferred`: визуально улучшенная console останется частично operator-grade и не закроет ТЗ пользователя полностью.
-- `Linked follow-up Task Package(s)`: `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md`.
+- `Linked follow-up Task Package(s)`: `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md`.
 - `Expiry/trigger to stop deferral`: любой новый merge по `Заявки/Записи`, который не уменьшает один из этих residual gaps, требует отдельного owner-approved waiver.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: закрыть Wave9 через bounded closure review: подтвердить, что supervisor/admin queue governance уже достаточно для текущего ТЗ, либо открыть отдельный follow-up TP только на policy-based routing automation.
+- `Next block objective`: завершить Wave10 Part A: добавить factual workload signals в reassignment surfaces без fake availability и без нового routing route.
 - `First deterministic check command`: `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line`
-- `Blocked-by conditions`: PR `#932` must keep Wave7/Wave8 behavior intact; owner/unassigned governance must not regress selection, bulk actions, current case focus or default manager readability.
+- `Blocked-by conditions`: PR `#932` must keep Wave6-Wave9 behavior intact; new routing signals must not regress selection, bulk actions, current case focus or default manager readability.
 - `Owner role for closure`: Brain / Top Architect.

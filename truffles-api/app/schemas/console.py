@@ -1089,6 +1089,7 @@ class ConsoleCaseAssigneeOption(BaseModel):
     role: str
     branch_id: Optional[UUID] = None
     is_current: bool = False
+    open_case_count: int = 0
 
 
 class ConsoleCaseAssigneeListResponse(BaseModel):

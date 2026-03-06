@@ -231,6 +231,8 @@ def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> No
     assert _has_string_type(assignee_props.get("agent_name") or {})
     assert "is_current" in assignee_props
     assert (assignee_props.get("is_current") or {}).get("type") == "boolean"
+    assert "open_case_count" in assignee_props
+    assert _has_integer_type(assignee_props.get("open_case_count") or {})
 
     assignee_list_schema = schemas.get("ConsoleCaseAssigneeListResponse") or {}
     assert "items" in (assignee_list_schema.get("properties") or {})

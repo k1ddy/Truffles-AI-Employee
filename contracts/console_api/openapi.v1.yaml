@@ -10174,6 +10174,10 @@ components:
           type: boolean
           title: Is Current
           default: false
+        open_case_count:
+          type: integer
+          title: Open Case Count
+          default: 0
       type: object
       required:
       - agent_id
