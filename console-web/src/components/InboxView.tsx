@@ -509,6 +509,7 @@ export default function InboxView({ initialCaseId, initialSidePanel = null }: In
                         workspaceScope={workspaceScope}
                         onCaseIdsChange={setVisibleCaseIds}
                         canBulkManage={canWriteInbox}
+                        viewerRole={role}
                     />
                 </section>
 

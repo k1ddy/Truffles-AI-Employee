@@ -15,6 +15,9 @@ import {
 import {
     type InboxCaseFilters,
     type InboxCaseListPrefs,
+    type InboxCaseVisibleField,
+    type InboxCaseVisibleFields,
+    type InboxQueueViewId,
     readInboxCaseListPrefs,
     writeInboxCaseListPrefs,
 } from "@/lib/inbox-workspace";
@@ -38,6 +41,16 @@ interface CasesResponse {
 
 type CaseListVariant = "table" | "compact";
 type BulkActionMode = "reassign" | "snooze" | null;
+type QueueViewDefinition = {
+    id: InboxQueueViewId;
+    label: string;
+    description: string;
+    privileged?: boolean;
+    applyFilters: (prev: CaseFilters) => CaseFilters;
+    matchesFilters: (filters: CaseFilters) => boolean;
+    localPredicate?: (caseItem: Case) => boolean;
+    localHint?: string;
+};
 
 interface CaseListProps {
     variant?: CaseListVariant;
@@ -48,6 +61,7 @@ interface CaseListProps {
     workspaceScope?: string | null;
     onCaseIdsChange?: (caseIds: string[]) => void;
     canBulkManage?: boolean;
+    viewerRole?: string;
 }
 
 interface BulkSummary {
@@ -67,6 +81,23 @@ const DEFAULT_FILTERS: CaseFilters = {
     dateFrom: undefined,
     dateTo: undefined,
     sortBy: "activity",
+};
+
+const DEFAULT_VISIBLE_FIELDS: InboxCaseVisibleFields = {
+    branch: true,
+    owner: false,
+    channel: false,
+    activity: true,
+    priority: false,
+};
+
+const FIELD_ORDER: InboxCaseVisibleField[] = ["branch", "owner", "channel", "activity", "priority"];
+const FIELD_LABELS: Record<InboxCaseVisibleField, string> = {
+    branch: "Филиал",
+    owner: "Менеджер",
+    channel: "Канал",
+    activity: "Активность",
+    priority: "Приоритет",
 };
 
 const BULK_SNOOZE_PRESETS = [30, 60, 120];
@@ -123,6 +154,190 @@ function getPriorityChip(tier?: string | null): { label: string; className: stri
     return { label: normalized, className: "bg-muted text-muted-foreground" };
 }
 
+function isPrivilegedQueueRole(role?: string): boolean {
+    return role === "owner" || role === "admin" || role === "platform_admin";
+}
+
+function matchesGovernedFilters(filters: CaseFilters, target: Partial<CaseFilters>): boolean {
+    return (
+        (target.status ?? DEFAULT_FILTERS.status) === filters.status
+        && (target.assignedToMe ?? DEFAULT_FILTERS.assignedToMe) === filters.assignedToMe
+        && (target.hasDeliveryError ?? DEFAULT_FILTERS.hasDeliveryError) === filters.hasDeliveryError
+        && (target.hasPendingOutbox ?? DEFAULT_FILTERS.hasPendingOutbox) === filters.hasPendingOutbox
+        && (target.hasHumanLock ?? DEFAULT_FILTERS.hasHumanLock) === filters.hasHumanLock
+        && (target.sortBy ?? DEFAULT_FILTERS.sortBy) === filters.sortBy
+    );
+}
+
+function normalizeVisibleFields(raw?: InboxCaseVisibleFields | null): InboxCaseVisibleFields {
+    if (!raw || typeof raw !== "object") {
+        return { ...DEFAULT_VISIBLE_FIELDS };
+    }
+    return {
+        branch: typeof raw.branch === "boolean" ? raw.branch : DEFAULT_VISIBLE_FIELDS.branch,
+        owner: typeof raw.owner === "boolean" ? raw.owner : DEFAULT_VISIBLE_FIELDS.owner,
+        channel: typeof raw.channel === "boolean" ? raw.channel : DEFAULT_VISIBLE_FIELDS.channel,
+        activity: typeof raw.activity === "boolean" ? raw.activity : DEFAULT_VISIBLE_FIELDS.activity,
+        priority: typeof raw.priority === "boolean" ? raw.priority : DEFAULT_VISIBLE_FIELDS.priority,
+    };
+}
+
+function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
+    const sharedViews: QueueViewDefinition[] = [
+        {
+            id: "all_open",
+            label: "Все открытые",
+            description: "Базовая очередь для менеджера.",
+            applyFilters: (prev) => ({
+                ...prev,
+                status: "open",
+                assignedToMe: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: "activity",
+            }),
+            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+                status: "open",
+                assignedToMe: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: "activity",
+            }),
+        },
+        {
+            id: "mine",
+            label: "Мои",
+            description: "Только заявки текущего менеджера.",
+            applyFilters: (prev) => ({
+                ...prev,
+                status: "open",
+                assignedToMe: true,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: "activity",
+            }),
+            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+                status: "open",
+                assignedToMe: true,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: "activity",
+            }),
+        },
+        {
+            id: "needs_reply",
+            label: "Требуют ответа",
+            description: "Срочный фокус на кейсах, где клиент ждёт менеджера.",
+            applyFilters: (prev) => ({
+                ...prev,
+                status: "open",
+                assignedToMe: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: "sla",
+            }),
+            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+                status: "open",
+                assignedToMe: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: "sla",
+            }),
+            localPredicate: (caseItem) => Boolean(
+                caseItem.needs_reply
+                || caseItem.sla_action_state === "reply_due"
+                || caseItem.sla_action_state === "overdue"
+            ),
+            localHint: "Режим скрывает лишние заявки только в текущей выборке. Для полного охвата можно догрузить ещё.",
+        },
+        {
+            id: "paused",
+            label: "Пауза",
+            description: "Диалоги, где бот выключен и нужен контроль менеджера.",
+            applyFilters: (prev) => ({
+                ...prev,
+                status: "open",
+                assignedToMe: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: true,
+                sortBy: "activity",
+            }),
+            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+                status: "open",
+                assignedToMe: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: true,
+                sortBy: "activity",
+            }),
+        },
+        {
+            id: "delivery",
+            label: "Проблемы доставки",
+            description: "Ошибки отправки и зависшие исходящие.",
+            applyFilters: (prev) => ({
+                ...prev,
+                status: "open",
+                assignedToMe: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: "activity",
+            }),
+            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+                status: "open",
+                assignedToMe: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: "activity",
+            }),
+            localPredicate: (caseItem) => Boolean(caseItem.has_delivery_error || caseItem.has_pending_outbox),
+            localHint: "Режим собирает ошибки и зависшие исходящие в текущей выборке очереди.",
+        },
+    ];
+
+    if (!privileged) {
+        return sharedViews;
+    }
+
+    return [
+        ...sharedViews,
+        {
+            id: "unassigned",
+            label: "Без владельца",
+            description: "Быстрый срез для супервизора по кейсам без ответственного.",
+            privileged: true,
+            applyFilters: (prev) => ({
+                ...prev,
+                status: "open",
+                assignedToMe: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: "activity",
+            }),
+            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+                status: "open",
+                assignedToMe: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: "activity",
+            }),
+            localPredicate: (caseItem) => !caseItem.assigned_to_id,
+            localHint: "Режим показывает кейсы без владельца в текущей выборке. Если нужно больше, догрузите очередь.",
+        },
+    ];
+}
+
 function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPrefs | null {
     if (!raw || typeof raw !== "object") {
         return null;
@@ -152,6 +367,10 @@ function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPref
         showAdvancedFilters: Boolean(raw.showAdvancedFilters),
         filtersCollapsed: Boolean(raw.filtersCollapsed),
         autoRefreshEnabled: typeof raw.autoRefreshEnabled === "boolean" ? raw.autoRefreshEnabled : true,
+        activeViewId: raw.activeViewId && ["all_open", "mine", "needs_reply", "paused", "delivery", "unassigned"].includes(raw.activeViewId)
+            ? raw.activeViewId
+            : "all_open",
+        visibleFields: normalizeVisibleFields(raw.visibleFields),
     };
 }
 
@@ -181,6 +400,7 @@ export default function CaseList({
     workspaceScope,
     onCaseIdsChange,
     canBulkManage = false,
+    viewerRole = "manager",
 }: CaseListProps) {
     const { data: session } = useSession();
     const api = useAuthenticatedApi();
@@ -195,6 +415,9 @@ export default function CaseList({
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const [filtersCollapsed, setFiltersCollapsed] = useState(false);
     const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+    const [activeViewId, setActiveViewId] = useState<InboxQueueViewId>("all_open");
+    const [visibleFields, setVisibleFields] = useState<InboxCaseVisibleFields>(DEFAULT_VISIBLE_FIELDS);
+    const [fieldPanelOpen, setFieldPanelOpen] = useState(false);
     const [documentVisible, setDocumentVisible] = useState(true);
     const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
     const [bulkActionMode, setBulkActionMode] = useState<BulkActionMode>(null);
@@ -205,6 +428,14 @@ export default function CaseList({
     const isCompact = variant === "compact";
     const filtersCompact = isCompact && !!selectedCaseId;
     const headingLabel = isCompact ? "Очередь" : "Заявки";
+    const queueViews = useMemo(
+        () => buildQueueViews(isPrivilegedQueueRole(viewerRole)),
+        [viewerRole],
+    );
+    const queueViewMap = useMemo(
+        () => new Map(queueViews.map((view) => [view.id, view])),
+        [queueViews],
+    );
     const sortOptions: { id: CaseFilters["sortBy"]; label: string }[] = [
         { id: "activity", label: "Активные" },
         { id: "created_at", label: "Новые" },
@@ -227,11 +458,20 @@ export default function CaseList({
             setShowAdvancedFilters(restored.showAdvancedFilters);
             setFiltersCollapsed(restored.filtersCollapsed);
             setAutoRefreshEnabled(restored.autoRefreshEnabled);
+            setActiveViewId(restored.activeViewId ?? "all_open");
+            setVisibleFields(normalizeVisibleFields(restored.visibleFields));
             setCursor(undefined);
             setCaseItems([]);
         }
         setStateReady(true);
     }, [workspaceScope]);
+
+    useEffect(() => {
+        if (queueViewMap.has(activeViewId)) {
+            return;
+        }
+        setActiveViewId("all_open");
+    }, [activeViewId, queueViewMap]);
 
     useEffect(() => {
         const handle = setTimeout(() => {
@@ -271,6 +511,8 @@ export default function CaseList({
         selectableBranches.map((branch) => [branch.id as string, branch.name ?? branch.id as string])
     );
     const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
+    const activeQueueView = queueViewMap.get(activeViewId) ?? queueViewMap.get("all_open") ?? queueViews[0];
+    const queueViewHasManualOverrides = activeQueueView ? !activeQueueView.matchesFilters(filters) : false;
     const statusFilterActive = filters.status !== "open";
     const advancedFiltersActive = Boolean(
         filters.branchId
@@ -316,6 +558,7 @@ export default function CaseList({
                 : "border-border/60 text-muted-foreground hover:text-foreground"
         }`
     );
+    const enabledFieldCount = FIELD_ORDER.filter((field) => visibleFields[field]).length;
 
     useEffect(() => {
         if (!filtersCompact) {
@@ -422,10 +665,13 @@ export default function CaseList({
                 }
                 return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
             });
+    const visibleCases = activeQueueView?.localPredicate
+        ? sortedCases.filter((caseItem) => activeQueueView.localPredicate?.(caseItem))
+        : sortedCases;
     const selectedCaseIdSet = useMemo(() => new Set(selectedCaseIds), [selectedCaseIds]);
     const selectedCases = useMemo(
-        () => sortedCases.filter((item) => selectedCaseIdSet.has(item.id)),
-        [selectedCaseIdSet, sortedCases],
+        () => visibleCases.filter((item) => selectedCaseIdSet.has(item.id)),
+        [selectedCaseIdSet, visibleCases],
     );
     const selectedBranchIds = useMemo(
         () => Array.from(
@@ -443,7 +689,7 @@ export default function CaseList({
     const bulkBranchLabel = selectedBranchIds.length === 1
         ? branchMap.get(selectedBranchIds[0]) || selectedBranchIds[0]
         : null;
-    const allVisibleSelected = sortedCases.length > 0 && sortedCases.every((item) => selectedCaseIdSet.has(item.id));
+    const allVisibleSelected = visibleCases.length > 0 && visibleCases.every((item) => selectedCaseIdSet.has(item.id));
     const bulkReassignDisabledReason = selectedCases.length === 0
         ? "Выберите заявки"
         : selectedBranchIds.length > 1
@@ -522,12 +768,12 @@ export default function CaseList({
     });
 
     useEffect(() => {
-        const visibleIds = new Set(sortedCases.map((item) => item.id));
+        const visibleIds = new Set(visibleCases.map((item) => item.id));
         setSelectedCaseIds((prev) => {
             const next = prev.filter((caseId) => visibleIds.has(caseId));
             return next.length === prev.length ? prev : next;
         });
-    }, [sortedCases]);
+    }, [visibleCases]);
 
     useEffect(() => {
         if (selectedCaseIds.length > 0) {
@@ -553,19 +799,21 @@ export default function CaseList({
             showAdvancedFilters,
             filtersCollapsed,
             autoRefreshEnabled,
+            activeViewId,
+            visibleFields,
         });
-    }, [workspaceScope, stateReady, filters, searchValue, showAdvancedFilters, filtersCollapsed, autoRefreshEnabled]);
+    }, [workspaceScope, stateReady, filters, searchValue, showAdvancedFilters, filtersCollapsed, autoRefreshEnabled, activeViewId, visibleFields]);
 
     useEffect(() => {
         if (!onCaseIdsChange) {
             return;
         }
         onCaseIdsChange(
-            sortedCases
+            visibleCases
                 .map((item) => item.id)
                 .filter((item): item is string => Boolean(item))
         );
-    }, [onCaseIdsChange, sortedCases]);
+    }, [onCaseIdsChange, visibleCases]);
 
     const loadMore = () => {
         if (data?.cursor) {
@@ -575,6 +823,25 @@ export default function CaseList({
 
     const resetPagination = () => {
         setCursor(undefined);
+    };
+
+    const applyQueueView = (viewId: InboxQueueViewId) => {
+        const nextView = queueViewMap.get(viewId);
+        if (!nextView) {
+            return;
+        }
+        setBulkSummary(null);
+        resetPagination();
+        setSelectedCaseIds([]);
+        setActiveViewId(viewId);
+        setFilters((prev) => nextView.applyFilters(prev));
+    };
+
+    const updateVisibleField = (field: InboxCaseVisibleField, enabled: boolean) => {
+        setVisibleFields((prev) => ({
+            ...prev,
+            [field]: enabled,
+        }));
     };
 
     const clearBulkSelection = () => {
@@ -595,7 +862,7 @@ export default function CaseList({
 
     const toggleSelectAllVisible = () => {
         setBulkSummary(null);
-        const visibleIds = sortedCases.map((item) => item.id);
+        const visibleIds = visibleCases.map((item) => item.id);
         if (visibleIds.length === 0) {
             return;
         }
@@ -612,6 +879,15 @@ export default function CaseList({
             });
             return next;
         });
+    };
+
+    const resetAllFilters = () => {
+        setSearchValue("");
+        setShowAdvancedFilters(false);
+        setSelectedCaseIds([]);
+        setBulkSummary(null);
+        setFieldPanelOpen(false);
+        applyQueueView("all_open");
     };
 
     if (!session) {
@@ -654,11 +930,13 @@ export default function CaseList({
         );
     }
 
-    const loadedCases = sortedCases.length;
+    const loadedCases = visibleCases.length;
     const totalCases = typeof data?.total === "number" && data.total >= 0 ? data.total : loadedCases;
-    const countBaseLabel = totalCases > loadedCases
-        ? `Показано ${loadedCases} из ${totalCases} ${caseNoun(totalCases)}`
-        : `${loadedCases} ${caseNoun(loadedCases)}`;
+    const countBaseLabel = activeQueueView?.localPredicate
+        ? `${loadedCases} ${caseNoun(loadedCases)} на экране`
+        : totalCases > loadedCases
+            ? `Показано ${loadedCases} из ${totalCases} ${caseNoun(totalCases)}`
+            : `${loadedCases} ${caseNoun(loadedCases)}`;
     const casesCountLabel = `${countBaseLabel}${data?.has_more ? " (есть ещё)" : ""}`;
 
     return (
@@ -673,7 +951,15 @@ export default function CaseList({
                     )}
                 </div>
                 <div className="flex items-center gap-3">
-                    {canBulkManage && sortedCases.length > 0 && (
+                    <button
+                        type="button"
+                        onClick={() => setFieldPanelOpen((prev) => !prev)}
+                        className="text-xs font-semibold text-muted-foreground hover:text-foreground"
+                        data-testid="cases-field-toggle"
+                    >
+                        Поля {enabledFieldCount}/{FIELD_ORDER.length}
+                    </button>
+                    {canBulkManage && visibleCases.length > 0 && (
                         <button
                             type="button"
                             onClick={toggleSelectAllVisible}
@@ -728,6 +1014,22 @@ export default function CaseList({
                 className={filterContainerClass}
                 data-testid="cases-filters"
             >
+                <div className="flex w-full flex-wrap items-center gap-2 border-b border-border/60 pb-2" data-testid="cases-queue-views">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                        Режимы
+                    </span>
+                    {queueViews.map((view) => (
+                        <button
+                            key={view.id}
+                            type="button"
+                            onClick={() => applyQueueView(view.id)}
+                            className={pillClass(activeViewId === view.id)}
+                            data-testid={`cases-queue-view-${view.id}`}
+                        >
+                            {view.label}
+                        </button>
+                    ))}
+                </div>
                 <div className="flex w-full items-center gap-2 overflow-x-auto pb-1">
                     <input
                         type="text"
@@ -804,14 +1106,9 @@ export default function CaseList({
                             {advancedToggleLabel}
                         </button>
                     )}
-                    {(statusFilterActive || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox || filters.hasHumanLock) && (
+                    {(activeViewId !== "all_open" || statusFilterActive || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox || filters.hasHumanLock) && (
                         <button
-                            onClick={() => {
-                                setSearchValue("");
-                                resetPagination();
-                                setShowAdvancedFilters(false);
-                                setFilters({ ...DEFAULT_FILTERS });
-                            }}
+                            onClick={resetAllFilters}
                             className="text-xs text-muted-foreground hover:text-destructive whitespace-nowrap"
                             data-testid="cases-filter-clear"
                         >
@@ -819,6 +1116,40 @@ export default function CaseList({
                         </button>
                     )}
                 </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px]" data-testid="cases-queue-view-summary">
+                    <span className="rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary">
+                        {activeQueueView?.label ?? "Все открытые"}
+                    </span>
+                    <span className="text-muted-foreground">
+                        {activeQueueView?.description ?? "Базовая очередь для менеджера."}
+                    </span>
+                    {queueViewHasManualOverrides && (
+                        <span className="font-semibold text-amber-700">
+                            Есть ручные фильтры поверх режима
+                        </span>
+                    )}
+                </div>
+                {activeQueueView?.localHint && (
+                    <div className="text-[11px] text-muted-foreground" data-testid="cases-queue-view-hint">
+                        {activeQueueView.localHint}
+                    </div>
+                )}
+                {fieldPanelOpen && (
+                    <div className="flex w-full flex-wrap items-center gap-3 border-t border-border/60 pt-2" data-testid="cases-field-panel">
+                        {FIELD_ORDER.map((field) => (
+                            <label key={field} className="flex items-center gap-2 text-xs text-foreground/80">
+                                <input
+                                    type="checkbox"
+                                    checked={visibleFields[field]}
+                                    onChange={(event) => updateVisibleField(field, event.target.checked)}
+                                    className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                    data-testid={`cases-field-${field}`}
+                                />
+                                {FIELD_LABELS[field]}
+                            </label>
+                        ))}
+                    </div>
+                )}
                 {showAdvancedFiltersRow && (
                     <div
                         className="flex w-full flex-wrap items-center gap-3 border-t border-border/60 pt-2"
@@ -1075,7 +1406,7 @@ export default function CaseList({
 
             {isCompact ? (
                 <div className="flex-1 overflow-y-auto pr-1 mt-3 flex flex-col gap-2" data-testid="cases-table">
-                    {sortedCases.map((c) => {
+                    {visibleCases.map((c) => {
                         const sla = getCaseSlaIndicator(c);
                         const branchName = branchMap.get(c.branch_id || "") || "-";
                         const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
@@ -1110,22 +1441,33 @@ export default function CaseList({
                                     <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${statusClass}`}>
                                         {getStatusLabel(c.status)}
                                     </span>
-                                    {priorityChip && (
-                                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${priorityChip.className}`}>
-                                            {priorityChip.label}
-                                        </span>
-                                    )}
                                 </div>
                                 <p className="text-xs text-muted-foreground mb-2">
                                     {preview}
                                 </p>
                                 <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-                                    <span>{branchName}</span>
-                                    <span>•</span>
-                                    <span>{new Date(lastActivity).toLocaleString("ru-RU")}</span>
+                                    {visibleFields.branch && <span>{branchName}</span>}
+                                    {visibleFields.owner && (
+                                        <span className={`px-2 py-0.5 rounded font-semibold ${
+                                            c.assigned_to_name ? "bg-muted text-muted-foreground" : "bg-amber-100 text-amber-800"
+                                        }`}>
+                                            {c.assigned_to_name || "Без владельца"}
+                                        </span>
+                                    )}
+                                    {visibleFields.channel && (
+                                        <span className="px-2 py-0.5 rounded font-semibold bg-slate-100 text-slate-700">
+                                            {c.channel}
+                                        </span>
+                                    )}
+                                    {visibleFields.activity && <span>{new Date(lastActivity).toLocaleString("ru-RU")}</span>}
                                     <span className={`px-2 py-0.5 rounded font-semibold ${sla.className}`}>
                                         {sla.label}
                                     </span>
+                                    {visibleFields.priority && priorityChip && (
+                                        <span className={`px-2 py-0.5 rounded font-semibold ${priorityChip.className}`}>
+                                            {priorityChip.label}
+                                        </span>
+                                    )}
                                     {isLive && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-green-100 text-green-800">
                                             Недавний диалог
@@ -1180,7 +1522,7 @@ export default function CaseList({
                             </div>
                         );
                     })}
-                    {sortedCases.length === 0 && (
+                    {visibleCases.length === 0 && (
                         <div className="text-center text-muted-foreground py-6" data-testid="cases-empty">
                             Заявки не найдены по указанным фильтрам.
                         </div>
@@ -1205,16 +1547,27 @@ export default function CaseList({
                                 <th className="p-4 text-sm font-medium text-muted-foreground">ID</th>
                                 <th className="p-4 text-sm font-medium text-muted-foreground">Статус</th>
                                 <th className="p-4 text-sm font-medium text-muted-foreground">SLA</th>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">Филиал</th>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">Канал</th>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">Назначено</th>
+                                {visibleFields.branch && (
+                                    <th className="p-4 text-sm font-medium text-muted-foreground">Филиал</th>
+                                )}
+                                {visibleFields.channel && (
+                                    <th className="p-4 text-sm font-medium text-muted-foreground">Канал</th>
+                                )}
+                                {visibleFields.owner && (
+                                    <th className="p-4 text-sm font-medium text-muted-foreground">Назначено</th>
+                                )}
+                                {visibleFields.priority && (
+                                    <th className="p-4 text-sm font-medium text-muted-foreground">Приоритет</th>
+                                )}
                                 <th className="p-4 text-sm font-medium text-muted-foreground">Сообщение</th>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">Активность</th>
+                                {visibleFields.activity && (
+                                    <th className="p-4 text-sm font-medium text-muted-foreground">Активность</th>
+                                )}
                                 <th className="p-4 text-sm font-medium text-muted-foreground">Действия</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {sortedCases.map((c) => {
+                            {visibleCases.map((c) => {
                                 const sla = getCaseSlaIndicator(c);
                                 const branchName = branchMap.get(c.branch_id || "") || "-";
                                 const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
@@ -1270,9 +1623,20 @@ export default function CaseList({
                                                 {sla.label}
                                             </span>
                                         </td>
-                                        <td className="p-4 text-sm">{branchName}</td>
-                                        <td className="p-4 text-sm">{c.channel}</td>
-                                        <td className="p-4 text-sm">{c.assigned_to_name || "-"}</td>
+                                        {visibleFields.branch && <td className="p-4 text-sm">{branchName}</td>}
+                                        {visibleFields.channel && <td className="p-4 text-sm">{c.channel}</td>}
+                                        {visibleFields.owner && <td className="p-4 text-sm">{c.assigned_to_name || "Без владельца"}</td>}
+                                        {visibleFields.priority && (
+                                            <td className="p-4 text-sm">
+                                                {priorityChip ? (
+                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${priorityChip.className}`}>
+                                                        {priorityChip.label}
+                                                    </span>
+                                                ) : (
+                                                    "-"
+                                                )}
+                                            </td>
+                                        )}
                                         <td className="p-4 text-sm max-w-xs">
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="truncate max-w-[180px]">{c.last_message_preview || c.user_message || "-"}</span>
@@ -1293,14 +1657,16 @@ export default function CaseList({
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="p-4 text-sm text-muted-foreground">
-                                            <div className="flex flex-col">
-                                                <span>{new Date(lastActivity).toLocaleString("ru-RU")}</span>
-                                                <span className="text-xs text-muted-foreground">
-                                                    {c.last_activity_channel || "—"}
-                                                </span>
-                                            </div>
-                                        </td>
+                                        {visibleFields.activity && (
+                                            <td className="p-4 text-sm text-muted-foreground">
+                                                <div className="flex flex-col">
+                                                    <span>{new Date(lastActivity).toLocaleString("ru-RU")}</span>
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {c.last_activity_channel || "—"}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                        )}
                                         <td className="p-4">
                                             <Link
                                                 href={`/cases/${c.id}`}
@@ -1313,9 +1679,13 @@ export default function CaseList({
                                     </tr>
                                 );
                             })}
-                            {sortedCases.length === 0 && (
+                            {visibleCases.length === 0 && (
                                 <tr>
-                                    <td colSpan={canBulkManage ? 10 : 9} className="p-8 text-center text-muted-foreground" data-testid="cases-empty">
+                                    <td
+                                        colSpan={1 + (canBulkManage ? 1 : 0) + (visibleFields.branch ? 1 : 0) + (visibleFields.channel ? 1 : 0) + (visibleFields.owner ? 1 : 0) + (visibleFields.priority ? 1 : 0) + (visibleFields.activity ? 1 : 0) + 4}
+                                        className="p-8 text-center text-muted-foreground"
+                                        data-testid="cases-empty"
+                                    >
                                         Заявки не найдены по указанным фильтрам.
                                     </td>
                                 </tr>

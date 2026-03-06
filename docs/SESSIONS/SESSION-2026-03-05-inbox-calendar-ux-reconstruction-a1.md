@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -75,8 +75,12 @@
   - Wave8 Part A committed (`5d459211`) and pushed to the existing PR `#932`.
   - Wave8 Part B TP created as the next active block for context preservation between inbox workspace and full calendar route.
   - Wave8 Part B implemented in branch: panel mode and calendar case-context prefs now persist via `inbox-workspace`, full calendar links restore `?panel=bookings`, and case-mode calendar no longer hides linked bookings behind the default today filter.
+  - Wave9 TP created as the next active block for supervisor/admin queue governance in the existing inbox queue surface.
+  - Wave9 Part A implemented in branch: `CaseList` now exposes role-aware queue views, active view summary, persisted visible-field toggles, and preserves bulk/select behavior inside the current inbox workspace.
+  - `inspect_case` deterministic lane expanded for Wave9 Part A: mocked queue now covers `needs_reply/paused/delivery/unassigned` slices, queue governance controls, and persisted field toggles without regressing bookings/calendar return flow.
 - next:
-  - Push Wave8 Part B into PR `#932` and, after green checks, open Wave9 TP for supervisor/admin queue governance.
+  - Run `scripts/session_check.sh`, then push Wave9 Part A into PR `#932`.
+  - After green PR checks, open Wave9 Part B TP for routing/admin views.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -170,10 +174,13 @@
   - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_inbox_macros.py tests/test_console_openapi_calendar_contract.py` (`pass`)
   - `cd console-web && npm run lint -- --file src/components/InboxMacros.tsx --file src/lib/api-client.ts --file src/components/InboxView.tsx --file src/components/CaseView.tsx --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`)
+  - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file src/lib/inbox-workspace.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave9 Part A mock lane)
   - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title "feat(console): add executable inbox action-macros" ...` (`PR #932`)
   - `cd console-web && npm run build` (`pass`)
   - `git push origin HEAD` (`updated PR #932`)
   - `cd console-web && npm run lint -- --file src/lib/inbox-workspace.ts --file src/components/InboxView.tsx --file src/components/CaseConversation.tsx --file src/components/CaseBookingsPanel.tsx --file src/app/calendar/page.tsx --file src/app/cases/[id]/page.tsx --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && npm run build` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`)
-- last_updated: 2026-03-06T11:04:47+05:00
+- last_updated: 2026-03-06T11:27:45+05:00

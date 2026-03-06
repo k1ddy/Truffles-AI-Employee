@@ -74,7 +74,7 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             agent: {
                 id: AGENT_ID,
                 name: 'Manager',
-                role: 'manager',
+                role: 'admin',
                 client_id: CLIENT_ID,
                 branch_id: BRANCH_ID,
                 is_active: true,
@@ -138,6 +138,62 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
         snoozed_reason: null,
         snoozed_by: null,
     } as Record<string, unknown>;
+    const pausedCaseState = {
+        ...caseState,
+        id: '56565656-5656-4565-8565-565656565656',
+        conversation_id: '78787878-7878-4787-8787-787878787878',
+        customer_name: 'Мадина',
+        customer_phone: '+77001112233',
+        user_message: 'Хорошо, жду подтверждение.',
+        last_message_preview: 'Жду подтверждение менеджера.',
+        created_at: '2026-03-05T08:40:00+05:00',
+        last_inbound_at: '2026-03-05T08:50:00+05:00',
+        last_activity_at: '2026-03-05T08:50:00+05:00',
+        needs_reply: false,
+        human_lock_active: true,
+        sla_action_state: 'waiting_client',
+        target_response_at: null,
+    } as Record<string, unknown>;
+    const deliveryCaseState = {
+        ...caseState,
+        id: '57575757-5757-4575-8575-575757575757',
+        conversation_id: '79797979-7979-4797-8797-797979797979',
+        customer_name: 'Сабина',
+        customer_phone: '+77002223344',
+        user_message: 'Уточните, дошло ли сообщение.',
+        last_message_preview: 'Сообщение не отправилось клиенту.',
+        created_at: '2026-03-05T08:30:00+05:00',
+        last_inbound_at: '2026-03-05T08:45:00+05:00',
+        last_activity_at: '2026-03-05T08:45:00+05:00',
+        assigned_to_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        assigned_to_name: 'Manager Two',
+        needs_reply: false,
+        has_delivery_error: true,
+        has_pending_outbox: true,
+        attention_reason: 'Проверьте отправку',
+        sla_action_state: 'delivery_issue',
+        target_response_at: null,
+    } as Record<string, unknown>;
+    const unassignedCaseState = {
+        ...caseState,
+        id: '58585858-5858-4585-8585-585858585858',
+        conversation_id: '80808080-8080-4808-8808-808080808080',
+        customer_name: 'Нургуль',
+        customer_phone: '+77003334455',
+        user_message: 'Нужна запись на выходные.',
+        last_message_preview: 'Новая заявка без ответственного.',
+        created_at: '2026-03-05T08:20:00+05:00',
+        last_inbound_at: '2026-03-05T08:35:00+05:00',
+        last_activity_at: '2026-03-05T08:35:00+05:00',
+        assigned_to_id: null,
+        assigned_to_name: null,
+        needs_reply: false,
+        status: 'pending',
+        attention_reason: 'Назначьте ответственного',
+        sla_action_state: 'waiting_client',
+        target_response_at: null,
+    } as Record<string, unknown>;
+    const queueCases = [caseState, pausedCaseState, deliveryCaseState, unassignedCaseState];
     const bookingState = {
         id: '99999999-9999-4999-8999-999999999999',
         specialist_id: SPECIALIST_ID,
@@ -188,11 +244,62 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             await route.fallback();
             return;
         }
+        const url = new URL(route.request().url());
+        const status = url.searchParams.get('status');
+        const assignedToMe = url.searchParams.get('assigned_to_me') === 'true';
+        const hasDeliveryError = url.searchParams.get('has_delivery_error') === 'true';
+        const hasPendingOutbox = url.searchParams.get('has_pending_outbox') === 'true';
+        const hasHumanLock = url.searchParams.get('has_human_lock') === 'true';
+        const query = (url.searchParams.get('q') || '').trim().toLowerCase();
+        const sortBy = url.searchParams.get('sort_by');
+        let items = queueCases.filter((item) => {
+            const caseStatus = String(item.status || '');
+            if (status === 'open' && caseStatus === 'resolved') {
+                return false;
+            }
+            if (status && status !== 'open' && caseStatus !== status) {
+                return false;
+            }
+            if (assignedToMe && item.assigned_to_id !== AGENT_ID) {
+                return false;
+            }
+            if (hasDeliveryError && !item.has_delivery_error) {
+                return false;
+            }
+            if (hasPendingOutbox && !item.has_pending_outbox) {
+                return false;
+            }
+            if (hasHumanLock && !item.human_lock_active) {
+                return false;
+            }
+            if (query) {
+                const haystack = [
+                    item.id,
+                    item.customer_name,
+                    item.customer_phone,
+                    item.last_message_preview,
+                ]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase();
+                if (!haystack.includes(query)) {
+                    return false;
+                }
+            }
+            return true;
+        });
+        if (sortBy === 'created_at') {
+            items = [...items].sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
+        } else if (sortBy === 'sla') {
+            items = [...items].sort((left, right) => String(left.target_response_at || '').localeCompare(String(right.target_response_at || '')));
+        } else {
+            items = [...items].sort((left, right) => String(right.last_activity_at || '').localeCompare(String(left.last_activity_at || '')));
+        }
         await toJsonResponse(route, {
-            items: [{ ...caseState }],
+            items: items.map((item) => ({ ...item })),
             cursor: null,
             has_more: false,
-            total: 1,
+            total: items.length,
         });
     });
     await page.route(`**/api/proxy/cases/${CASE_ID}/messages**`, async (route) => {
@@ -815,10 +922,30 @@ test('inspect first case', async ({ page }) => {
     await expect(caseActionBadge).toBeVisible({ timeout: 15000 });
     await expect(caseActionBadge).not.toContainText('SLA:', { timeout: 15000 });
     if (useRouteMocks) {
+        await expect(page.getByTestId('cases-queue-views')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-queue-view-unassigned')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('cases-field-toggle').click();
+        await page.getByTestId('cases-field-owner').check();
+        await page.getByTestId('cases-field-channel').check();
+        await expect(page.getByTestId('cases-field-toggle')).toContainText('Поля 4/5', { timeout: 15000 });
+
+        await page.getByTestId('cases-queue-view-unassigned').click();
+        await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Без владельца', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Нургуль', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Без владельца', { timeout: 15000 });
+
+        await page.getByTestId('cases-queue-view-needs_reply').click();
+        await expect(page.getByTestId('cases-queue-view-hint')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Айгуль', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Manager', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('whatsapp', { timeout: 15000 });
+
+        await page.getByTestId('cases-queue-view-all_open').click();
+        await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Все открытые', { timeout: 15000 });
         await expect(caseActionBadge).toContainText('Ответить до', { timeout: 15000 });
         await expect(page.getByTestId('case-reassign-toggle')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('case-snooze-toggle')).toBeVisible({ timeout: 15000 });
-        await page.getByTestId('cases-bulk-select').check();
+        await page.getByTestId('cases-bulk-select').first().check();
         await expect(page.getByTestId('cases-bulk-toolbar')).toBeVisible({ timeout: 15000 });
         await page.getByTestId('cases-bulk-toggle-snooze').click();
         await expect(page.getByTestId('cases-bulk-snooze-minutes')).toBeVisible({ timeout: 15000 });

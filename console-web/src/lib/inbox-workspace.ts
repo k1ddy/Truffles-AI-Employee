@@ -11,6 +11,8 @@ const CALENDAR_PREFS_KEY_PREFIX = "console:calendar:prefs:v1:";
 
 export type InboxSortBy = "created_at" | "sla" | "activity";
 export type InboxSidePanelMode = "details" | "bookings";
+export type InboxQueueViewId = "all_open" | "mine" | "needs_reply" | "paused" | "delivery" | "unassigned";
+export type InboxCaseVisibleField = "branch" | "owner" | "channel" | "activity" | "priority";
 
 export interface InboxCaseFilters {
     status?: string;
@@ -25,12 +27,22 @@ export interface InboxCaseFilters {
     sortBy: InboxSortBy;
 }
 
+export interface InboxCaseVisibleFields {
+    branch: boolean;
+    owner: boolean;
+    channel: boolean;
+    activity: boolean;
+    priority: boolean;
+}
+
 export interface InboxCaseListPrefs {
     filters: InboxCaseFilters;
     searchValue: string;
     showAdvancedFilters: boolean;
     filtersCollapsed: boolean;
     autoRefreshEnabled: boolean;
+    activeViewId?: InboxQueueViewId;
+    visibleFields?: InboxCaseVisibleFields;
 }
 
 export interface CalendarWorkspacePrefs {
