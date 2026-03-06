@@ -44,6 +44,54 @@ def test_parse_case_status_param_rejects_invalid():
         console_router._parse_case_status_param("status", "oops")
 
 
+def test_parse_case_owner_filters_accepts_assignee_id():
+    agent_id = uuid4()
+
+    parsed_assignee_id, unassigned = console_router._parse_case_owner_filters(
+        assigned_to_me=False,
+        assignee_id=str(agent_id),
+        unassigned=False,
+    )
+
+    assert parsed_assignee_id == agent_id
+    assert unassigned is False
+
+
+def test_parse_case_owner_filters_accepts_unassigned():
+    parsed_assignee_id, unassigned = console_router._parse_case_owner_filters(
+        assigned_to_me=False,
+        assignee_id=None,
+        unassigned=True,
+    )
+
+    assert parsed_assignee_id is None
+    assert unassigned is True
+
+
+@pytest.mark.parametrize(
+    ("assigned_to_me", "assignee_id", "unassigned"),
+    [
+        (True, str(uuid4()), False),
+        (True, None, True),
+        (False, str(uuid4()), True),
+    ],
+)
+def test_parse_case_owner_filters_rejects_conflicts(
+    assigned_to_me: bool,
+    assignee_id: str | None,
+    unassigned: bool,
+):
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._parse_case_owner_filters(
+            assigned_to_me=assigned_to_me,
+            assignee_id=assignee_id,
+            unassigned=unassigned,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
 def test_normalize_search_query():
     assert console_router._normalize_search_query("q", None) is None
     assert console_router._normalize_search_query("q", "   ") is None

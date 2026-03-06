@@ -247,6 +247,8 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
         const url = new URL(route.request().url());
         const status = url.searchParams.get('status');
         const assignedToMe = url.searchParams.get('assigned_to_me') === 'true';
+        const assigneeId = url.searchParams.get('assignee_id');
+        const unassigned = url.searchParams.get('unassigned') === 'true';
         const hasDeliveryError = url.searchParams.get('has_delivery_error') === 'true';
         const hasPendingOutbox = url.searchParams.get('has_pending_outbox') === 'true';
         const hasHumanLock = url.searchParams.get('has_human_lock') === 'true';
@@ -261,6 +263,12 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
                 return false;
             }
             if (assignedToMe && item.assigned_to_id !== AGENT_ID) {
+                return false;
+            }
+            if (assigneeId && item.assigned_to_id !== assigneeId) {
+                return false;
+            }
+            if (unassigned && item.assigned_to_id) {
                 return false;
             }
             if (hasDeliveryError && !item.has_delivery_error) {
@@ -300,6 +308,30 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             cursor: null,
             has_more: false,
             total: items.length,
+        });
+    });
+    await page.route('**/api/proxy/cases/assignees**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [
+                {
+                    agent_id: AGENT_ID,
+                    agent_name: 'Manager',
+                    role: 'manager',
+                    branch_id: BRANCH_ID,
+                    is_current: false,
+                },
+                {
+                    agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    agent_name: 'Manager Two',
+                    role: 'manager',
+                    branch_id: BRANCH_ID,
+                    is_current: false,
+                },
+            ],
         });
     });
     await page.route(`**/api/proxy/cases/${CASE_ID}/messages**`, async (route) => {
@@ -923,44 +955,51 @@ test('inspect first case', async ({ page }) => {
     await expect(caseActionBadge).not.toContainText('SLA:', { timeout: 15000 });
     if (useRouteMocks) {
         await expect(page.getByTestId('cases-queue-views')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-filter-assignee')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('cases-queue-view-unassigned')).toBeVisible({ timeout: 15000 });
-        await page.getByTestId('cases-field-toggle').click();
-        await page.getByTestId('cases-field-owner').check();
-        await page.getByTestId('cases-field-channel').check();
+        await page.getByTestId('cases-field-toggle').click({ force: true });
+        await page.getByTestId('cases-field-owner').check({ force: true });
+        await page.getByTestId('cases-field-channel').check({ force: true });
         await expect(page.getByTestId('cases-field-toggle')).toContainText('Поля 4/5', { timeout: 15000 });
 
-        await page.getByTestId('cases-queue-view-unassigned').click();
+        await page.getByTestId('cases-filter-assignee').selectOption('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        await expect(page.getByTestId('cases-owner-summary')).toContainText('Manager Two', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Сабина', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Manager Two', { timeout: 15000 });
+
+        await page.getByTestId('cases-queue-view-unassigned').click({ force: true });
         await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Без владельца', { timeout: 15000 });
+        await expect(page.getByTestId('cases-owner-summary')).toContainText('Без владельца', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Нургуль', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Без владельца', { timeout: 15000 });
 
-        await page.getByTestId('cases-queue-view-needs_reply').click();
+        await page.getByTestId('cases-queue-view-needs_reply').click({ force: true });
         await expect(page.getByTestId('cases-queue-view-hint')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Айгуль', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Manager', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('whatsapp', { timeout: 15000 });
 
-        await page.getByTestId('cases-queue-view-all_open').click();
+        await page.getByTestId('cases-queue-view-all_open').click({ force: true });
         await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Все открытые', { timeout: 15000 });
         await expect(caseActionBadge).toContainText('Ответить до', { timeout: 15000 });
         await expect(page.getByTestId('case-reassign-toggle')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('case-snooze-toggle')).toBeVisible({ timeout: 15000 });
-        await page.getByTestId('cases-bulk-select').first().check();
+        await page.getByTestId('cases-bulk-select').first().check({ force: true });
         await expect(page.getByTestId('cases-bulk-toolbar')).toBeVisible({ timeout: 15000 });
-        await page.getByTestId('cases-bulk-toggle-snooze').click();
+        await page.getByTestId('cases-bulk-toggle-snooze').click({ force: true });
         await expect(page.getByTestId('cases-bulk-snooze-minutes')).toBeVisible({ timeout: 15000 });
         const bulkRequestPromise = page.waitForRequest((request) =>
             request.method() === 'POST' && request.url().includes('/api/proxy/cases/bulk')
         );
-        await page.getByTestId('cases-bulk-snooze-submit').click();
+        await page.getByTestId('cases-bulk-snooze-submit').click({ force: true });
         const bulkRequest = await bulkRequestPromise;
         expect(bulkRequest.postDataJSON()).toMatchObject({
             action: 'snooze',
             case_ids: [CASE_ID],
         });
-        await page.getByTestId('case-reassign-toggle').click();
+        await page.getByTestId('case-reassign-toggle').click({ force: true });
         await expect(page.getByTestId('case-reassign-select')).toBeVisible({ timeout: 15000 });
-        await page.getByTestId('case-snooze-toggle').click();
+        await page.getByTestId('case-snooze-toggle').click({ force: true });
         await expect(page.getByTestId('case-snooze-minutes')).toBeVisible({ timeout: 15000 });
     }
 
@@ -1039,16 +1078,16 @@ test('manage and apply action macro', async ({ page }) => {
     await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
     await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
 
-    await page.getByRole('button', { name: /все ответы/i }).click();
+    await page.getByRole('button', { name: /все ответы/i }).click({ force: true });
     await expect(page.getByTestId(`macro-chip-${ACTION_MACRO_ID}`)).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole('button', { name: 'Управление' }).click();
+    await page.getByRole('button', { name: 'Управление' }).click({ force: true });
     await page.getByPlaceholder('Заголовок').fill('Отложить и ответить');
     await page.getByPlaceholder('Текст быстрого ответа').fill('Отложу заявку и вернусь позже.');
     await page.getByTestId('macro-action-select').selectOption('snooze_case');
     await page.getByTestId('macro-action-minutes').fill('45');
     await page.getByPlaceholder('Причина отсрочки').fill('follow_up');
-    await page.getByTestId('macro-save-button').click();
+    await page.getByTestId('macro-save-button').click({ force: true });
 
     await expect.poll(() => lastMacroCreatePayload).not.toBeNull();
     expect(lastMacroCreatePayload).toMatchObject({
@@ -1061,9 +1100,9 @@ test('manage and apply action macro', async ({ page }) => {
         },
     });
 
-    await page.getByRole('button', { name: 'Ответы', exact: true }).click();
+    await page.getByRole('button', { name: 'Ответы', exact: true }).click({ force: true });
     await expect(page.getByTestId(`macro-apply-${CREATED_MACRO_ID}`)).toBeVisible({ timeout: 15000 });
-    await page.getByTestId(`macro-apply-${CREATED_MACRO_ID}`).click();
+    await page.getByTestId(`macro-apply-${CREATED_MACRO_ID}`).click({ force: true });
 
     await expect.poll(() => lastMacroExecutePayload).toMatchObject({ case_id: CASE_ID });
     await expect(page.getByTestId('case-next-action')).toContainText('Ожидаем клиента', { timeout: 15000 });

@@ -18,6 +18,8 @@ export interface InboxCaseFilters {
     status?: string;
     branchId?: string;
     assignedToMe: boolean;
+    assigneeId?: string;
+    unassigned: boolean;
     query?: string;
     hasDeliveryError: boolean;
     hasPendingOutbox: boolean;

@@ -74,6 +74,8 @@ const DEFAULT_FILTERS: CaseFilters = {
     status: "open",
     branchId: undefined,
     assignedToMe: false,
+    assigneeId: undefined,
+    unassigned: false,
     query: undefined,
     hasDeliveryError: false,
     hasPendingOutbox: false,
@@ -162,6 +164,8 @@ function matchesGovernedFilters(filters: CaseFilters, target: Partial<CaseFilter
     return (
         (target.status ?? DEFAULT_FILTERS.status) === filters.status
         && (target.assignedToMe ?? DEFAULT_FILTERS.assignedToMe) === filters.assignedToMe
+        && (target.assigneeId ?? DEFAULT_FILTERS.assigneeId) === filters.assigneeId
+        && (target.unassigned ?? DEFAULT_FILTERS.unassigned) === filters.unassigned
         && (target.hasDeliveryError ?? DEFAULT_FILTERS.hasDeliveryError) === filters.hasDeliveryError
         && (target.hasPendingOutbox ?? DEFAULT_FILTERS.hasPendingOutbox) === filters.hasPendingOutbox
         && (target.hasHumanLock ?? DEFAULT_FILTERS.hasHumanLock) === filters.hasHumanLock
@@ -192,6 +196,8 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
                 ...prev,
                 status: "open",
                 assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -200,6 +206,8 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             matchesFilters: (filters) => matchesGovernedFilters(filters, {
                 status: "open",
                 assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -214,6 +222,8 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
                 ...prev,
                 status: "open",
                 assignedToMe: true,
+                assigneeId: undefined,
+                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -222,6 +232,8 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             matchesFilters: (filters) => matchesGovernedFilters(filters, {
                 status: "open",
                 assignedToMe: true,
+                assigneeId: undefined,
+                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -236,6 +248,8 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
                 ...prev,
                 status: "open",
                 assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -244,6 +258,8 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             matchesFilters: (filters) => matchesGovernedFilters(filters, {
                 status: "open",
                 assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -264,6 +280,8 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
                 ...prev,
                 status: "open",
                 assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: true,
@@ -272,6 +290,8 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             matchesFilters: (filters) => matchesGovernedFilters(filters, {
                 status: "open",
                 assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: true,
@@ -286,6 +306,8 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
                 ...prev,
                 status: "open",
                 assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -294,6 +316,8 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             matchesFilters: (filters) => matchesGovernedFilters(filters, {
                 status: "open",
                 assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -319,6 +343,8 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
                 ...prev,
                 status: "open",
                 assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: true,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -327,13 +353,13 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             matchesFilters: (filters) => matchesGovernedFilters(filters, {
                 status: "open",
                 assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: true,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
                 sortBy: "activity",
             }),
-            localPredicate: (caseItem) => !caseItem.assigned_to_id,
-            localHint: "Режим показывает кейсы без владельца в текущей выборке. Если нужно больше, догрузите очередь.",
         },
     ];
 }
@@ -355,6 +381,8 @@ function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPref
             status: filters.status,
             branchId: filters.branchId,
             assignedToMe: Boolean(filters.assignedToMe),
+            assigneeId: typeof filters.assigneeId === "string" ? filters.assigneeId : undefined,
+            unassigned: Boolean(filters.unassigned),
             query: filters.query,
             hasDeliveryError: Boolean(filters.hasDeliveryError),
             hasPendingOutbox: Boolean(filters.hasPendingOutbox),
@@ -510,12 +538,20 @@ export default function CaseList({
     const branchMap = new Map(
         selectableBranches.map((branch) => [branch.id as string, branch.name ?? branch.id as string])
     );
+    const privilegedOwnerFilterVisible = isPrivilegedQueueRole(viewerRole);
     const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
     const activeQueueView = queueViewMap.get(activeViewId) ?? queueViewMap.get("all_open") ?? queueViews[0];
     const queueViewHasManualOverrides = activeQueueView ? !activeQueueView.matchesFilters(filters) : false;
+    const ownerFilterLabel = filters.unassigned
+        ? "Без владельца"
+        : filters.assigneeId
+            ? null
+            : "Все владельцы";
     const statusFilterActive = filters.status !== "open";
     const advancedFiltersActive = Boolean(
         filters.branchId
+        || filters.assigneeId
+        || filters.unassigned
         || filters.dateFrom
         || filters.dateTo
         || filters.hasDeliveryError
@@ -588,6 +624,8 @@ export default function CaseList({
                 if (filters.status) params.append("status", filters.status);
                 if (filters.branchId) params.append("branch_id", filters.branchId);
                 if (filters.assignedToMe) params.append("assigned_to_me", "true");
+                if (filters.assigneeId) params.append("assignee_id", filters.assigneeId);
+                if (filters.unassigned) params.append("unassigned", "true");
                 if (filters.query) params.append("q", filters.query);
                 if (filters.hasDeliveryError) params.append("has_delivery_error", "true");
                 if (filters.hasPendingOutbox) params.append("has_pending_outbox", "true");
@@ -708,6 +746,18 @@ export default function CaseList({
         enabled: canBulkManage && bulkActionMode === "reassign" && !!bulkAssigneeSourceCaseId,
     });
     const bulkAssignees = bulkAssigneesData?.items ?? [];
+    const { data: queueAssigneesData, isFetching: queueAssigneesLoading } = useQuery({
+        queryKey: ["case-assignees-queue", filters.branchId || "all", viewerRole],
+        queryFn: async () => {
+            const response = await casesApi.listQueueAssignees(filters.branchId);
+            return response.data;
+        },
+        enabled: privilegedOwnerFilterVisible,
+    });
+    const queueAssignees = queueAssigneesData?.items ?? [];
+    const selectedAssigneeLabel = filters.assigneeId
+        ? queueAssignees.find((item) => String(item.agent_id) === filters.assigneeId)?.agent_name ?? filters.assigneeId
+        : ownerFilterLabel;
 
     const bulkActionMutation = useMutation({
         mutationFn: async () => {
@@ -887,7 +937,9 @@ export default function CaseList({
         setSelectedCaseIds([]);
         setBulkSummary(null);
         setFieldPanelOpen(false);
-        applyQueueView("all_open");
+        resetPagination();
+        setActiveViewId("all_open");
+        setFilters({ ...DEFAULT_FILTERS });
     };
 
     if (!session) {
@@ -1088,13 +1140,44 @@ export default function CaseList({
                         type="button"
                         onClick={() => {
                             resetPagination();
-                            setFilters({ ...filters, assignedToMe: !filters.assignedToMe });
+                            setFilters({
+                                ...filters,
+                                assignedToMe: !filters.assignedToMe,
+                                assigneeId: undefined,
+                                unassigned: false,
+                            });
                         }}
                         className={pillClass(filters.assignedToMe)}
                         data-testid="cases-filter-assigned"
                     >
                         Мои
                     </button>
+                    {privilegedOwnerFilterVisible && (
+                        <select
+                            value={filters.unassigned ? "__unassigned__" : filters.assigneeId || ""}
+                            onChange={(event) => {
+                                const nextValue = event.target.value;
+                                resetPagination();
+                                setFilters({
+                                    ...filters,
+                                    assignedToMe: false,
+                                    assigneeId: nextValue && nextValue !== "__unassigned__" ? nextValue : undefined,
+                                    unassigned: nextValue === "__unassigned__",
+                                });
+                            }}
+                            className={selectClass}
+                            disabled={queueAssigneesLoading}
+                            data-testid="cases-filter-assignee"
+                        >
+                            <option value="">Все владельцы</option>
+                            <option value="__unassigned__">Без владельца</option>
+                            {queueAssignees.map((option) => (
+                                <option key={option.agent_id} value={String(option.agent_id)}>
+                                    {option.agent_name}
+                                </option>
+                            ))}
+                        </select>
+                    )}
                     {!filtersCollapsed && (
                         <button
                             type="button"
@@ -1106,7 +1189,7 @@ export default function CaseList({
                             {advancedToggleLabel}
                         </button>
                     )}
-                    {(activeViewId !== "all_open" || statusFilterActive || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox || filters.hasHumanLock) && (
+                    {(activeViewId !== "all_open" || statusFilterActive || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.assigneeId || filters.unassigned || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox || filters.hasHumanLock) && (
                         <button
                             onClick={resetAllFilters}
                             className="text-xs text-muted-foreground hover:text-destructive whitespace-nowrap"
@@ -1126,6 +1209,11 @@ export default function CaseList({
                     {queueViewHasManualOverrides && (
                         <span className="font-semibold text-amber-700">
                             Есть ручные фильтры поверх режима
+                        </span>
+                    )}
+                    {(filters.assigneeId || filters.unassigned) && (
+                        <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700" data-testid="cases-owner-summary">
+                            {selectedAssigneeLabel}
                         </span>
                     )}
                 </div>

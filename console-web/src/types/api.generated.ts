@@ -89,6 +89,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/cases/assignees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Queue Case Assignees */
+        get: operations["list_queue_case_assignees_console_v1_cases_assignees_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/cases/{case_id}/assignees": {
         parameters: {
             query?: never;
@@ -9036,6 +9053,8 @@ export interface operations {
                 q?: string | null;
                 branch_id?: string | null;
                 assigned_to_me?: boolean;
+                assignee_id?: string | null;
+                unassigned?: boolean;
                 phone?: string | null;
                 has_delivery_error?: boolean;
                 has_pending_outbox?: boolean;
@@ -9102,6 +9121,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleCaseBulkActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_queue_case_assignees_console_v1_cases_assignees_get: {
+        parameters: {
+            query?: {
+                branch_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseAssigneeListResponse"];
                 };
             };
             /** @description Validation Error */

@@ -141,6 +141,21 @@ paths:
           type: boolean
           default: false
           title: Assigned To Me
+      - name: assignee_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assignee Id
+      - name: unassigned
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Unassigned
       - name: phone
         in: query
         required: false
@@ -255,6 +270,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleCaseBulkActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/assignees:
+    get:
+      tags:
+      - console
+      summary: List Queue Case Assignees
+      operationId: list_queue_case_assignees_console_v1_cases_assignees_get
+      parameters:
+      - name: branch_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Branch Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseAssigneeListResponse'
         '422':
           description: Validation Error
           content:

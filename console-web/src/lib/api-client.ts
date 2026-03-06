@@ -1243,6 +1243,11 @@ export const casesApi = {
     get: (caseId: string) =>
         apiClient.get<Case>(`/cases/${caseId}`),
 
+    listQueueAssignees: (branchId?: string) =>
+        apiClient.get<CaseAssigneeListResponse>("/cases/assignees", {
+            params: branchId ? { branch_id: branchId } : undefined,
+        }),
+
     listAssignees: (caseId: string) =>
         apiClient.get<CaseAssigneeListResponse>(`/cases/${caseId}/assignees`),
 

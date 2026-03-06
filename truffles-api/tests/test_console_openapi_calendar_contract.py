@@ -184,6 +184,8 @@ def test_console_case_action_paths_expose_wave6_single_case_actions() -> None:
 
     assert _find_path(paths, "/cases/bulk") is not None
     assert "post" in ((_find_path(paths, "/cases/bulk") or {}).keys())
+    assert _find_path(paths, "/cases/assignees") is not None
+    assert "get" in ((_find_path(paths, "/cases/assignees") or {}).keys())
     assert _find_path(paths, "/cases/{case_id}/assignees") is not None
     assert "get" in ((_find_path(paths, "/cases/{case_id}/assignees") or {}).keys())
     assert _find_path(paths, "/cases/{case_id}/reassign") is not None
@@ -240,6 +242,17 @@ def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> No
     snooze_props = snooze_schema.get("properties") or {}
     assert _has_integer_type(snooze_props.get("minutes") or {})
     assert _has_string_type(snooze_props.get("reason") or {})
+
+
+def test_console_case_list_contract_exposes_owner_filters() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+    path_item = _find_path(paths, "/cases") or {}
+    get_op = path_item.get("get") or {}
+    params = get_op.get("parameters") or []
+
+    assert any((param or {}).get("name") == "assignee_id" for param in params)
+    assert any((param or {}).get("name") == "unassigned" for param in params)
 
 
 def test_console_macro_contract_exposes_action_macros_and_execute_path() -> None:

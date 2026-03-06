@@ -8594,6 +8594,22 @@ def _parse_case_status_param(name: str, value: Optional[str]) -> Optional[list[s
     raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
 
 
+def _parse_case_owner_filters(
+    *,
+    assigned_to_me: bool,
+    assignee_id: Optional[str],
+    unassigned: bool,
+) -> tuple[Optional[UUID], bool]:
+    parsed_assignee_id = _parse_uuid_param("assignee_id", assignee_id) if assignee_id else None
+    if assigned_to_me and parsed_assignee_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "assigned_to_me cannot be combined with assignee_id")
+    if assigned_to_me and unassigned:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "assigned_to_me cannot be combined with unassigned")
+    if parsed_assignee_id and unassigned:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "assignee_id cannot be combined with unassigned")
+    return parsed_assignee_id, unassigned
+
+
 def _resolve_case_sort_cursor(
     *,
     sort_by: str,
@@ -10372,6 +10388,8 @@ async def list_cases(
     q: Optional[str] = None,
     branch_id: Optional[str] = None,
     assigned_to_me: bool = False,
+    assignee_id: Optional[str] = None,
+    unassigned: bool = False,
     phone: Optional[str] = None,
     has_delivery_error: bool = False,
     has_pending_outbox: bool = False,
@@ -10393,6 +10411,8 @@ async def list_cases(
             "q",
             "branch_id",
             "assigned_to_me",
+            "assignee_id",
+            "unassigned",
             "phone",
             "has_delivery_error",
             "has_pending_outbox",
@@ -10411,6 +10431,11 @@ async def list_cases(
         request.query_params.get("assigned_to_me"),
         default=assigned_to_me,
     )
+    unassigned = _parse_bool_param(
+        "unassigned",
+        request.query_params.get("unassigned"),
+        default=unassigned,
+    )
     has_delivery_error = _parse_bool_param(
         "has_delivery_error",
         request.query_params.get("has_delivery_error"),
@@ -10428,6 +10453,11 @@ async def list_cases(
     )
     last_activity_since_dt = _parse_datetime_param("last_activity_since", last_activity_since)
     sort_by_value = _parse_sort_param("sort_by", request.query_params.get("sort_by"))
+    assignee_filter_id, unassigned_filter = _parse_case_owner_filters(
+        assigned_to_me=assigned_to_me,
+        assignee_id=request.query_params.get("assignee_id") or assignee_id,
+        unassigned=unassigned,
+    )
 
     # Base query with common filters used by both count and item fetch.
     base_query = (
@@ -10483,6 +10513,30 @@ async def list_cases(
                     Handover.assigned_to_name == context.agent.name,
                 ),
             )
+        )
+    elif assignee_filter_id:
+        assignee_options = _list_case_assignee_options(
+            db,
+            client_id=context.client.id,
+            branch_id=_parse_uuid_param("branch_id", branch_id) if branch_id else None,
+            current_assignee_id=None,
+        )
+        assignee_option = next((item for item in assignee_options if item.agent_id == assignee_filter_id), None)
+        if not assignee_option:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid assignee_id")
+        base_query = base_query.filter(
+            or_(
+                Handover.assigned_to == str(assignee_filter_id),
+                and_(
+                    Handover.assigned_to.is_(None),
+                    Handover.assigned_to_name == assignee_option.agent_name,
+                ),
+            )
+        )
+    elif unassigned_filter:
+        base_query = base_query.filter(
+            Handover.assigned_to.is_(None),
+            func.coalesce(Handover.assigned_to_name, "") == "",
         )
 
     # Search filters
@@ -11166,6 +11220,36 @@ async def bulk_case_action(
         if idempotency and idempotency.record:
             release_idempotency(db, record=idempotency.record)
         raise
+
+
+@router.get(
+    "/cases/assignees",
+    response_model=ConsoleCaseAssigneeListResponse,
+)
+async def list_queue_case_assignees(
+    request: Request,
+    branch_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseAssigneeListResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "read")
+
+    requested_branch_id = _parse_uuid_param("branch_id", branch_id) if branch_id else None
+    if requested_branch_id:
+        _require_branch_access(context, requested_branch_id, message="Access to this branch denied")
+
+    if requested_branch_id is None and context.branch_restricted:
+        allowed_branch_ids = [branch.id for branch in context.branches if branch.id]
+        if len(allowed_branch_ids) == 1:
+            requested_branch_id = allowed_branch_ids[0]
+
+    items = _list_case_assignee_options(
+        db,
+        client_id=context.client.id,
+        branch_id=requested_branch_id,
+        current_assignee_id=None,
+    )
+    return ConsoleCaseAssigneeListResponse(items=items)
 
 
 @router.get(
