@@ -1191,7 +1191,7 @@ test('inspect first case', async ({ page }) => {
         await page.getByTestId('cases-field-toggle').click({ force: true });
         await page.getByTestId('cases-field-owner').check({ force: true });
         await page.getByTestId('cases-field-channel').check({ force: true });
-        await expect(page.getByTestId('cases-field-toggle')).toContainText('Поля 4/5', { timeout: 15000 });
+        await expect(page.getByTestId('cases-field-toggle')).toContainText('Вид 4/5', { timeout: 15000 });
 
         await page.getByTestId('cases-filter-assignee').selectOption('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
         await expect(page.getByTestId('cases-owner-summary')).toContainText('Manager Two', { timeout: 15000 });
@@ -1268,11 +1268,10 @@ test('inspect first case', async ({ page }) => {
         });
         await page.getByTestId('case-reassign-toggle').click();
         await expect(page.getByTestId('case-reassign-select')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByTestId('case-reassign-select').locator('option').nth(0)).toContainText('Manager · 2 в работе · текущий');
-        await expect(page.getByTestId('case-reassign-select').locator('option').nth(1)).toContainText('Manager Two · Manager · 1 в работе');
-        await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Назначить Manager Two: 1 в работе вместо Manager · 2.', { timeout: 15000 });
-        await page.getByTestId('case-reassign-recommend-button').click({ force: true });
-        await expect(page.getByTestId('case-reassign-select')).toHaveValue('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        await expect(page.getByTestId('case-reassign-select')).toContainText('Manager Two', { timeout: 15000 });
+        await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Сейчас у Manager 2 в работе.', { timeout: 15000 });
+        await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Лучше передать Manager Two, у него 1 в работе.', { timeout: 15000 });
+        await expect(page.getByTestId('case-reassign-recommend-submit')).toContainText('Передать Manager Two');
         const caseRouteRequestPromise = page.waitForRequest((request) =>
             request.method() === 'POST' && request.url().includes(`/api/proxy/cases/${CASE_ID}/reassign`)
         );
@@ -1284,6 +1283,10 @@ test('inspect first case', async ({ page }) => {
         });
         await page.getByTestId('case-snooze-toggle').click();
         await expect(page.getByTestId('case-snooze-minutes')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('case-snooze-close').click({ force: true });
+        await expect(page.getByTestId('case-snooze-panel')).toHaveCount(0);
+        await page.getByTestId('case-reassign-toggle').click();
+        await expect(page.getByTestId('case-reassign-panel')).toBeVisible({ timeout: 15000 });
     }
 
     let content = '';
@@ -1421,4 +1424,71 @@ test('action feedback hides raw sync reason codes and keeps reopen internal-only
     await expect(page.getByTestId('case-business-status')).toContainText('В работе', { timeout: 15000 });
     await expect(page.getByText('chatflow_failed')).toHaveCount(0);
     await expect(page.getByText('Не удалось отправить системное уведомление клиенту.')).toHaveCount(0);
+});
+
+test('live action feedback validation requires explicit safe case and hides raw sync codes', async ({ page }) => {
+    test.skip(useRouteMocks, 'Wave15 live validation runs only without route mocks');
+    test.setTimeout(90000);
+
+    if (!HAS_EXPLICIT_LIVE_CASE_ID) {
+        test.skip(true, 'Set INSPECT_CASE_LIVE_CASE_ID to a safe resolved case for Wave15 live validation.');
+    }
+
+    await ensureLoggedIn(page);
+    const opened = await openCaseDirectly(page, LIVE_CASE_ID);
+    if (!opened) {
+        test.skip(true, `Explicit live case_id=${LIVE_CASE_ID} is not accessible.`);
+    }
+
+    const reopenButton = page.getByTestId('case-reopen');
+    if (!(await reopenButton.isVisible().catch(() => false))) {
+        test.skip(true, `Explicit live case_id=${LIVE_CASE_ID} does not expose reopen control.`);
+    }
+
+    const reopenResponsePromise = page.waitForResponse((response) =>
+        response.request().method() === 'POST'
+        && response.url().includes(`/api/proxy/cases/${LIVE_CASE_ID}/reopen`)
+    );
+    await reopenButton.click({ force: true });
+    const reopenResponse = await reopenResponsePromise;
+    expect(reopenResponse.ok()).toBeTruthy();
+
+    const reopenPayload = await reopenResponse.json().catch(() => null) as {
+        sync?: {
+            telegram?: { status?: string; detail?: string | null };
+            client_notify?: { status?: string; detail?: string | null };
+        };
+    } | null;
+    expect(reopenPayload?.sync?.telegram?.status).toBe('skipped');
+    expect(reopenPayload?.sync?.telegram?.detail).toBe('reopen_internal_only');
+    expect(reopenPayload?.sync?.client_notify?.status).toBe('skipped');
+    expect(reopenPayload?.sync?.client_notify?.detail).toBe('reopen_internal_only');
+    await expect(page.getByText('chatflow_failed')).toHaveCount(0);
+    await expect(page.getByText('telegram_edit_failed')).toHaveCount(0);
+
+    const returnToBotButton = page.getByRole('button', { name: 'Вернуть боту', exact: true });
+    if (!(await returnToBotButton.isVisible().catch(() => false))) {
+        test.skip(true, `Explicit live case_id=${LIVE_CASE_ID} does not expose a sync-bearing return action after reopen.`);
+    }
+
+    const returnResponsePromise = page.waitForResponse((response) =>
+        response.request().method() === 'POST'
+        && response.url().includes(`/api/proxy/cases/${LIVE_CASE_ID}/return`)
+    );
+    await returnToBotButton.click({ force: true });
+    const returnResponse = await returnResponsePromise;
+    expect(returnResponse.ok()).toBeTruthy();
+
+    const returnPayload = await returnResponse.json().catch(() => null) as {
+        sync?: {
+            telegram?: { detail?: string | null };
+            client_notify?: { detail?: string | null };
+        };
+    } | null;
+    if (returnPayload?.sync?.telegram?.detail) {
+        await expect(page.getByText(returnPayload.sync.telegram.detail)).toHaveCount(0);
+    }
+    if (returnPayload?.sync?.client_notify?.detail) {
+        await expect(page.getByText(returnPayload.sync.client_notify.detail)).toHaveCount(0);
+    }
 });

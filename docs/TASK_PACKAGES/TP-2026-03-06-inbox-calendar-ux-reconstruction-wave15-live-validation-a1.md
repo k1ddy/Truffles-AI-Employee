@@ -27,6 +27,7 @@
 - Wave15 is required first; live validation is not valid against pre-Wave15 UX.
 - Previous live lanes could not safely prove mutation paths without an explicit case/scenario.
 - This TP exists to prevent false `pass` and to keep real-backend evidence separate from deterministic mock proof.
+- Current blocker (fact, 2026-03-06): `INSPECT_CASE_LIVE_CASE_ID` is still unset in the live E2E environment, so the new dedicated mutation test skips with a precise reason and the generic live lane only reaches no-case fallback evidence.
 
 ## One web search (mandatory before implementation)
 - **Query (exact):** `site:support.zendesk.com Defining SLA policies due soon overdue paused`

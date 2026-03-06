@@ -2,12 +2,15 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave16-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
 - done:
+  - PR `#937` merged into `main` on 2026-03-06; Wave15 operator-safe feedback is now shipped.
+  - Wave15 live validation executed as a precise blocker, not a fake pass: the dedicated no-mocks mutation lane now requires explicit `INSPECT_CASE_LIVE_CASE_ID` and skipped because no safe case is configured in the current live scope.
+  - Wave16 implementation started in branch: the case action area now separates utility controls from case actions, `Передать` no longer turns into `Скрыть передачу`, the reassign panel was reduced to recommendation + one explicit confirm path, and the left inbox rail was widened with denser controls/cards reduced.
   - PR `#937` opened for Wave15: `fix(console): harden operator action feedback`.
   - Wave15 implemented in branch: `ConsoleSyncStatus` now exposes operator-safe `operator_message`, direct case actions no longer leak raw sync detail strings in default UI, and action-macros use the same follow-up warning model.
   - `inspect_case` deterministic lane now proves the new contract: sync-bearing macro shows friendly warning copy instead of `chatflow_failed`, and direct `reopen` stays internal-only with no warning leak.
