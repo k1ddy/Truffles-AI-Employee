@@ -1066,10 +1066,27 @@ class ConsoleCaseActionSync(BaseModel):
     client_notify: Optional[ConsoleSyncStatus] = None
 
 
+ConsoleCaseRoutingPolicyType = Literal["least_open_cases"]
+
+
+class ConsoleCaseRoutingDecision(BaseModel):
+    policy: ConsoleCaseRoutingPolicyType
+    recommended_agent_id: UUID
+    recommended_agent_name: str
+    recommended_open_case_count: int = 0
+    current_agent_id: Optional[UUID] = None
+    current_agent_name: Optional[str] = None
+    current_open_case_count: Optional[int] = None
+    will_reassign: bool = True
+    reason_code: str
+    reason_summary: str
+
+
 class ConsoleCaseActionResponse(BaseModel):
     success: bool
     case: ConsoleCase
     sync: Optional[ConsoleCaseActionSync] = None
+    routing: Optional[ConsoleCaseRoutingDecision] = None
 
 
 class ConsoleMacroExecuteRequest(ConsoleRequestModel):
@@ -1094,10 +1111,13 @@ class ConsoleCaseAssigneeOption(BaseModel):
 
 class ConsoleCaseAssigneeListResponse(BaseModel):
     items: list[ConsoleCaseAssigneeOption]
+    routing: Optional[ConsoleCaseRoutingDecision] = None
 
 
 class ConsoleCaseReassignRequest(ConsoleRequestModel):
-    agent_id: UUID
+    agent_id: Optional[UUID] = None
+    mode: Literal["manual", "policy"] = "manual"
+    policy: Optional[ConsoleCaseRoutingPolicyType] = None
 
 
 class ConsoleCaseSnoozeRequest(ConsoleRequestModel):
@@ -1105,13 +1125,14 @@ class ConsoleCaseSnoozeRequest(ConsoleRequestModel):
     reason: Optional[StrictStr] = None
 
 
-ConsoleCaseBulkActionType = Literal["reassign", "snooze"]
+ConsoleCaseBulkActionType = Literal["reassign", "snooze", "route"]
 
 
 class ConsoleCaseBulkActionRequest(ConsoleRequestModel):
     action: ConsoleCaseBulkActionType
     case_ids: list[UUID]
     agent_id: Optional[UUID] = None
+    policy: Optional[ConsoleCaseRoutingPolicyType] = None
     minutes: Optional[int] = None
     reason: Optional[StrictStr] = None
 
@@ -1122,6 +1143,7 @@ class ConsoleCaseBulkActionResult(BaseModel):
     code: str
     message: Optional[str] = None
     case: Optional[ConsoleCase] = None
+    routing: Optional[ConsoleCaseRoutingDecision] = None
 
 
 class ConsoleCaseBulkActionResponse(BaseModel):

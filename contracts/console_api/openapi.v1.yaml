@@ -10124,6 +10124,10 @@ components:
           anyOf:
           - $ref: '#/components/schemas/ConsoleCaseActionSync'
           - type: 'null'
+        routing:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCaseRoutingDecision'
+          - type: 'null'
       type: object
       required:
       - success
@@ -10148,6 +10152,10 @@ components:
             $ref: '#/components/schemas/ConsoleCaseAssigneeOption'
           type: array
           title: Items
+        routing:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCaseRoutingDecision'
+          - type: 'null'
       type: object
       required:
       - items
@@ -10191,6 +10199,7 @@ components:
           enum:
           - reassign
           - snooze
+          - route
           title: Action
         case_ids:
           items:
@@ -10204,6 +10213,11 @@ components:
             format: uuid
           - type: 'null'
           title: Agent Id
+        policy:
+          anyOf:
+          - const: least_open_cases
+          - type: 'null'
+          title: Policy
         minutes:
           anyOf:
           - type: integer
@@ -10230,6 +10244,7 @@ components:
           enum:
           - reassign
           - snooze
+          - route
           title: Action
         requested_count:
           type: integer
@@ -10283,6 +10298,10 @@ components:
           anyOf:
           - $ref: '#/components/schemas/ConsoleCase'
           - type: 'null'
+        routing:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCaseRoutingDecision'
+          - type: 'null'
       type: object
       required:
       - case_id
@@ -10317,14 +10336,76 @@ components:
     ConsoleCaseReassignRequest:
       properties:
         agent_id:
-          type: string
-          format: uuid
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
           title: Agent Id
+        mode:
+          type: string
+          enum:
+          - manual
+          - policy
+          title: Mode
+          default: manual
+        policy:
+          anyOf:
+          - const: least_open_cases
+          - type: 'null'
+          title: Policy
       additionalProperties: false
       type: object
-      required:
-      - agent_id
       title: ConsoleCaseReassignRequest
+    ConsoleCaseRoutingDecision:
+      properties:
+        policy:
+          const: least_open_cases
+          title: Policy
+        recommended_agent_id:
+          type: string
+          format: uuid
+          title: Recommended Agent Id
+        recommended_agent_name:
+          type: string
+          title: Recommended Agent Name
+        recommended_open_case_count:
+          type: integer
+          title: Recommended Open Case Count
+          default: 0
+        current_agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Current Agent Id
+        current_agent_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Current Agent Name
+        current_open_case_count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Current Open Case Count
+        will_reassign:
+          type: boolean
+          title: Will Reassign
+          default: true
+        reason_code:
+          type: string
+          title: Reason Code
+        reason_summary:
+          type: string
+          title: Reason Summary
+      type: object
+      required:
+      - policy
+      - recommended_agent_id
+      - recommended_agent_name
+      - reason_code
+      - reason_summary
+      title: ConsoleCaseRoutingDecision
     ConsoleCaseSnoozeRequest:
       properties:
         minutes:

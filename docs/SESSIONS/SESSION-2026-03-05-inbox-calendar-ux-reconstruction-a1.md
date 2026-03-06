@@ -2,12 +2,15 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave11-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
 - done:
+  - PR `#933` merged into `main` on 2026-03-06; Wave11 reopen-sync correctness and inbox left-rail usability fixes are now shipped.
+  - Wave12 TP created for policy-based routing automation as the next active block.
+  - Wave12 implemented in branch: backend now owns routing recommendation/apply (`least_open_cases`) for single-case and bulk reassignment, while UI adds one-click `Назначить по политике` and `Распределить по политике` without new routes.
   - Worktree created and baseline rollback completed.
   - Task Package restored with mandatory gates and one web search evidence.
   - Backend calendar contract expanded with `conversation_id`/`case_id` linkage and `conversation_id` filter.

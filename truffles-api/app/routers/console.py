@@ -143,6 +143,7 @@ from app.schemas.console import (
     ConsoleCaseBulkActionResult,
     ConsoleCaseListResponse,
     ConsoleCaseReassignRequest,
+    ConsoleCaseRoutingDecision,
     ConsoleCaseSnoozeRequest,
     ConsoleClient,
     ConsoleClientCreateRequest,
@@ -816,6 +817,7 @@ _CASE_DUE_SOON_MINUTES = 15
 _CASE_ASSIGNABLE_ROLES = {"owner", "admin", "manager"}
 _CASE_SNOOZE_DEFAULT_REASON = "case_snooze"
 _CASE_BULK_MAX_ITEMS = 50
+_CASE_ROUTING_POLICY_DEFAULT = "least_open_cases"
 _CASE_SNOOZE_META_KEYS = (
     "snoozed_until",
     "snoozed_at",
@@ -1081,11 +1083,13 @@ def _build_case_action_response(
     handover: Handover,
     branch_id: UUID | None,
     sync: Optional[ConsoleCaseActionSync] = None,
+    routing: Optional[ConsoleCaseRoutingDecision] = None,
 ) -> ConsoleCaseActionResponse:
     return ConsoleCaseActionResponse(
         success=True,
         case=_build_case_action_case(handover=handover, branch_id=branch_id),
         sync=sync,
+        routing=routing,
     )
 
 
@@ -1544,6 +1548,7 @@ def _build_case_bulk_result(
     message: Optional[str] = None,
     handover: Optional[Handover] = None,
     branch_id: UUID | None = None,
+    routing: Optional[ConsoleCaseRoutingDecision] = None,
 ) -> ConsoleCaseBulkActionResult:
     case_snapshot = None
     if handover is not None:
@@ -1554,6 +1559,7 @@ def _build_case_bulk_result(
         code=code,
         message=message,
         case=case_snapshot,
+        routing=routing,
     )
 
 
@@ -5801,6 +5807,182 @@ def _map_case_assignee_loads(
             load_map[resolved_agent_id] = load_map.get(resolved_agent_id, 0) + open_case_count
 
     return load_map
+
+
+def _normalize_case_routing_policy(policy: Optional[str]) -> str:
+    normalized = (policy or _CASE_ROUTING_POLICY_DEFAULT).strip().lower()
+    if normalized != _CASE_ROUTING_POLICY_DEFAULT:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported routing policy")
+    return normalized
+
+
+def _resolve_assignee_load(
+    option: ConsoleCaseAssigneeOption,
+    load_overrides: Optional[dict[UUID, int]] = None,
+) -> int:
+    if load_overrides is None:
+        return int(option.open_case_count or 0)
+    return int(load_overrides.get(option.agent_id, option.open_case_count or 0))
+
+
+def _build_case_routing_decision(
+    *,
+    assignee_options: list[ConsoleCaseAssigneeOption],
+    current_assignee_id: Optional[str],
+    policy: str,
+    load_overrides: Optional[dict[UUID, int]] = None,
+) -> tuple[Optional[ConsoleCaseRoutingDecision], Optional[ConsoleCaseAssigneeOption]]:
+    if not assignee_options:
+        return None, None
+
+    current_option = next(
+        (
+            option
+            for option in assignee_options
+            if current_assignee_id and str(option.agent_id) == current_assignee_id
+        ),
+        None,
+    )
+    recommended_option = min(
+        assignee_options,
+        key=lambda option: (
+            _resolve_assignee_load(option, load_overrides),
+            0 if current_assignee_id and str(option.agent_id) == current_assignee_id else 1,
+            option.agent_name.lower(),
+            str(option.agent_id),
+        ),
+    )
+    recommended_load = _resolve_assignee_load(recommended_option, load_overrides)
+    current_load = _resolve_assignee_load(current_option, load_overrides) if current_option else None
+    will_reassign = not current_assignee_id or str(recommended_option.agent_id) != current_assignee_id
+
+    if not current_assignee_id:
+        reason_code = "unassigned_case"
+        reason_summary = (
+            f"Назначить {recommended_option.agent_name}: меньше всего открытых заявок "
+            f"({recommended_load}) в доступной очереди."
+        )
+    elif current_option is None:
+        reason_code = "current_owner_unavailable"
+        reason_summary = (
+            f"Назначить {recommended_option.agent_name}: текущий владелец недоступен для этой очереди, "
+            f"у выбранного {recommended_load} в работе."
+        )
+    elif not will_reassign:
+        reason_code = "current_owner_kept"
+        reason_summary = (
+            f"Текущий владелец {recommended_option.agent_name} уже соответствует политике: "
+            f"{recommended_load} в работе."
+        )
+    else:
+        reason_code = "least_open_cases"
+        reason_summary = (
+            f"Назначить {recommended_option.agent_name}: {recommended_load} в работе "
+            f"вместо {current_option.agent_name} · {current_load or 0}."
+        )
+
+    return (
+        ConsoleCaseRoutingDecision(
+            policy=policy,
+            recommended_agent_id=recommended_option.agent_id,
+            recommended_agent_name=recommended_option.agent_name,
+            recommended_open_case_count=recommended_load,
+            current_agent_id=current_option.agent_id if current_option else None,
+            current_agent_name=current_option.agent_name if current_option else None,
+            current_open_case_count=current_load,
+            will_reassign=will_reassign,
+            reason_code=reason_code,
+            reason_summary=reason_summary,
+        ),
+        recommended_option,
+    )
+
+
+def _adjust_case_routing_loads(
+    load_overrides: dict[UUID, int],
+    *,
+    previous_assignee_id: Optional[str],
+    next_assignee_id: str,
+) -> None:
+    if previous_assignee_id:
+        try:
+            previous_uuid = UUID(previous_assignee_id)
+        except (TypeError, ValueError):
+            previous_uuid = None
+        if previous_uuid and previous_uuid in load_overrides:
+            load_overrides[previous_uuid] = max(0, int(load_overrides.get(previous_uuid, 0)) - 1)
+
+    try:
+        next_uuid = UUID(next_assignee_id)
+    except (TypeError, ValueError):
+        return
+    load_overrides[next_uuid] = int(load_overrides.get(next_uuid, 0)) + 1
+
+
+def _execute_case_reassign(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    case: Handover,
+    conversation: Conversation,
+    target_option: ConsoleCaseAssigneeOption,
+    routing: Optional[ConsoleCaseRoutingDecision] = None,
+) -> ConsoleCaseActionResponse:
+    branch_id = conversation.branch_id
+    target_id = str(target_option.agent_id)
+    previous_assignee_id = str(case.assigned_to) if case.assigned_to else None
+    previous_assignee_name = case.assigned_to_name
+    if previous_assignee_id == target_id:
+        if routing is not None:
+            record_audit_event(
+                db,
+                actor=context.agent,
+                event_type="case_routed_policy_kept",
+                entity_type="handover",
+                entity_id=case.id,
+                payload={"routing": routing.model_dump(mode="json")},
+                branch_id=branch_id,
+            )
+        return _build_case_action_response(
+            handover=case,
+            branch_id=branch_id,
+            routing=routing,
+        )
+
+    result = state_manager_reassign(
+        db,
+        conversation,
+        case,
+        manager_id=target_id,
+        manager_name=target_option.agent_name,
+    )
+    if not result.ok:
+        raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", result.error or "Case must be active to reassign")
+
+    event_type = "case_routed_policy" if routing else "case_reassigned"
+    payload = {
+        "previous_assignee_id": previous_assignee_id,
+        "previous_assignee_name": previous_assignee_name,
+        "assigned_to_id": target_id,
+        "assigned_to_name": target_option.agent_name,
+    }
+    if routing is not None:
+        payload["routing"] = routing.model_dump(mode="json")
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type=event_type,
+        entity_type="handover",
+        entity_id=case.id,
+        payload=payload,
+        branch_id=branch_id,
+    )
+    db.flush()
+    return _build_case_action_response(
+        handover=case,
+        branch_id=branch_id,
+        routing=routing,
+    )
 
 
 def _resolve_membership_target(
@@ -11001,6 +11183,7 @@ async def bulk_case_action(
     idempotency_key = _get_idempotency_key(request)
 
     target_agent_id: Optional[UUID] = None
+    routing_policy: Optional[str] = None
     snooze_minutes: Optional[int] = None
     snooze_reason: Optional[str] = None
 
@@ -11008,6 +11191,8 @@ async def bulk_case_action(
         if body.agent_id is None:
             raise ConsoleAPIError(400, "INVALID_PARAM", "agent_id is required for reassign")
         target_agent_id = body.agent_id
+    elif action == "route":
+        routing_policy = _normalize_case_routing_policy(body.policy)
     elif action == "snooze":
         snooze_minutes = _normalize_pause_minutes(body.minutes, default=30, allow_zero=False)
         snooze_reason = _normalize_optional_text(body.reason) or _CASE_SNOOZE_DEFAULT_REASON
@@ -11022,6 +11207,7 @@ async def bulk_case_action(
             "action": action,
             "case_ids": [str(case_id) for case_id in case_ids],
             "agent_id": str(target_agent_id) if target_agent_id else None,
+            "policy": routing_policy,
             "minutes": snooze_minutes,
             "reason": snooze_reason,
         },
@@ -11053,6 +11239,7 @@ async def bulk_case_action(
         conversations_by_id = {conversation.id: conversation for conversation in conversations}
 
         assignee_cache: dict[UUID | None, list[ConsoleCaseAssigneeOption]] = {}
+        policy_load_cache: dict[UUID | None, dict[UUID, int]] = {}
         results: list[ConsoleCaseBulkActionResult] = []
         processed_count = 0
         skipped_count = 0
@@ -11091,7 +11278,7 @@ async def bulk_case_action(
                 _require_branch_access(context, branch_id, message="Access to this case denied")
                 _require_case_operator_access(context=context, handover=handover)
 
-                if action == "reassign":
+                if action in {"reassign", "route"}:
                     if handover.status == "resolved":
                         skipped_count += 1
                         results.append(
@@ -11112,7 +11299,7 @@ async def bulk_case_action(
                                 case_id=case_id,
                                 status="skipped",
                                 code="CASE_NOT_ACTIVE",
-                                message="Case must be active to reassign",
+                                message="Case must be active to route" if action == "route" else "Case must be active to reassign",
                                 handover=handover,
                                 branch_id=branch_id,
                             )
@@ -11124,88 +11311,113 @@ async def bulk_case_action(
                             db,
                             client_id=context.client.id,
                             branch_id=branch_id,
-                            current_assignee_id=str(handover.assigned_to) if handover.assigned_to else None,
+                            current_assignee_id=None,
                         )
-                    target_option = next(
-                        (
-                            option
-                            for option in assignee_cache[branch_id]
-                            if option.agent_id == target_agent_id
-                        ),
-                        None,
-                    )
-                    if target_option is None:
-                        skipped_count += 1
-                        results.append(
-                            _build_case_bulk_result(
-                                case_id=case_id,
-                                status="skipped",
-                                code="NOT_FOUND",
-                                message="Assignee not available for this case",
-                                handover=handover,
-                                branch_id=branch_id,
-                            )
-                        )
-                        continue
-
                     current_assignee_id = str(handover.assigned_to) if handover.assigned_to else None
-                    if current_assignee_id == str(target_agent_id):
-                        skipped_count += 1
-                        results.append(
-                            _build_case_bulk_result(
-                                case_id=case_id,
-                                status="skipped",
-                                code="ALREADY_ASSIGNED",
-                                message="Case already assigned to target manager",
-                                handover=handover,
-                                branch_id=branch_id,
-                            )
+                    routing: Optional[ConsoleCaseRoutingDecision] = None
+                    if action == "route":
+                        if branch_id not in policy_load_cache:
+                            policy_load_cache[branch_id] = {
+                                option.agent_id: int(option.open_case_count or 0)
+                                for option in assignee_cache[branch_id]
+                            }
+                        routing, target_option = _build_case_routing_decision(
+                            assignee_options=assignee_cache[branch_id],
+                            current_assignee_id=current_assignee_id,
+                            policy=routing_policy or _CASE_ROUTING_POLICY_DEFAULT,
+                            load_overrides=policy_load_cache[branch_id],
                         )
-                        continue
-
-                    result = state_manager_reassign(
-                        db,
-                        conversation,
-                        handover,
-                        manager_id=str(target_option.agent_id),
-                        manager_name=target_option.agent_name,
-                    )
-                    if not result.ok:
-                        failed_count += 1
-                        results.append(
-                            _build_case_bulk_result(
-                                case_id=case_id,
-                                status="failed",
-                                code="CASE_NOT_ACTIVE",
-                                message=result.error or "Case must be active to reassign",
-                                handover=handover,
-                                branch_id=branch_id,
+                        if target_option is None or routing is None:
+                            skipped_count += 1
+                            results.append(
+                                _build_case_bulk_result(
+                                    case_id=case_id,
+                                    status="skipped",
+                                    code="NOT_FOUND",
+                                    message="Assignee not available for this case",
+                                    handover=handover,
+                                    branch_id=branch_id,
+                                )
                             )
+                            continue
+                        if not routing.will_reassign:
+                            skipped_count += 1
+                            results.append(
+                                _build_case_bulk_result(
+                                    case_id=case_id,
+                                    status="skipped",
+                                    code="ALREADY_POLICY_ASSIGNED",
+                                    message=routing.reason_summary,
+                                    handover=handover,
+                                    branch_id=branch_id,
+                                    routing=routing,
+                                )
+                            )
+                            continue
+                    else:
+                        target_option = next(
+                            (
+                                option
+                                for option in assignee_cache[branch_id]
+                                if option.agent_id == target_agent_id
+                            ),
+                            None,
                         )
-                        continue
+                        if target_option is None:
+                            skipped_count += 1
+                            results.append(
+                                _build_case_bulk_result(
+                                    case_id=case_id,
+                                    status="skipped",
+                                    code="NOT_FOUND",
+                                    message="Assignee not available for this case",
+                                    handover=handover,
+                                    branch_id=branch_id,
+                                )
+                            )
+                            continue
+                        if current_assignee_id == str(target_agent_id):
+                            skipped_count += 1
+                            results.append(
+                                _build_case_bulk_result(
+                                    case_id=case_id,
+                                    status="skipped",
+                                    code="ALREADY_ASSIGNED",
+                                    message="Case already assigned to target manager",
+                                    handover=handover,
+                                    branch_id=branch_id,
+                                )
+                            )
+                            continue
 
-                    record_audit_event(
-                        db,
-                        actor=context.agent,
-                        event_type="case_bulk_reassigned",
-                        entity_type="handover",
-                        entity_id=handover.id,
-                        payload={
-                            "action": action,
-                            "assigned_to_id": str(target_option.agent_id),
-                            "assigned_to_name": target_option.agent_name,
-                        },
-                        branch_id=branch_id,
+                    response = _execute_case_reassign(
+                        db=db,
+                        context=context,
+                        case=handover,
+                        conversation=conversation,
+                        target_option=target_option,
+                        routing=routing,
                     )
+                    if action == "route" and routing is not None and branch_id in policy_load_cache:
+                        _adjust_case_routing_loads(
+                            policy_load_cache[branch_id],
+                            previous_assignee_id=current_assignee_id,
+                            next_assignee_id=str(target_option.agent_id),
+                        )
                     processed_count += 1
                     results.append(
                         _build_case_bulk_result(
                             case_id=case_id,
                             status="processed",
-                            code="REASSIGNED",
-                            message=f"Assigned to {target_option.agent_name}",
+                            code="ROUTED" if action == "route" else "REASSIGNED",
+                            message=(
+                                routing.reason_summary
+                                if action == "route" and routing is not None
+                                else f"Assigned to {target_option.agent_name}"
+                            ),
                             handover=handover,
                             branch_id=branch_id,
+                            routing=response.routing,
                         )
                     )
                     continue
@@ -11374,7 +11586,12 @@ async def list_case_assignees(
         branch_id=conversation.branch_id,
         current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
     )
-    return ConsoleCaseAssigneeListResponse(items=items)
+    routing, _recommended_option = _build_case_routing_decision(
+        assignee_options=items,
+        current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+        policy=_CASE_ROUTING_POLICY_DEFAULT,
+    )
+    return ConsoleCaseAssigneeListResponse(items=items, routing=routing)
 
 
 @router.post(
@@ -11389,6 +11606,8 @@ async def reassign_case(
 ) -> ConsoleCaseActionResponse:
     context = get_console_context(request, db)
     require_console_permission(context, "inbox", "write")
+    mode = (body.mode or "manual").strip().lower()
+    policy = _normalize_case_routing_policy(body.policy) if mode == "policy" else None
     idempotency_key = _get_idempotency_key(request)
     idempotency = start_idempotency(
         db,
@@ -11396,7 +11615,12 @@ async def reassign_case(
         agent_id=context.agent.id,
         idempotency_key=idempotency_key,
         scope="console.case.reassign",
-        payload={"case_id": str(case_id), "agent_id": str(body.agent_id)},
+        payload={
+            "case_id": str(case_id),
+            "mode": mode,
+            "agent_id": str(body.agent_id) if body.agent_id else None,
+            "policy": policy,
+        },
     )
     if idempotency and idempotency.replay:
         return JSONResponse(
@@ -11426,55 +11650,35 @@ async def reassign_case(
             branch_id=branch_id,
             current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
         )
-        target_option = next(
-            (option for option in assignee_options if option.agent_id == body.agent_id),
-            None,
-        )
-        if target_option is None:
-            raise ConsoleAPIError(404, "NOT_FOUND", "Assignee not found")
+        routing: Optional[ConsoleCaseRoutingDecision] = None
+        if mode == "policy":
+            routing, target_option = _build_case_routing_decision(
+                assignee_options=assignee_options,
+                current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+                policy=policy or _CASE_ROUTING_POLICY_DEFAULT,
+            )
+            if target_option is None:
+                raise ConsoleAPIError(404, "NOT_FOUND", "Assignee not found")
+        else:
+            if body.agent_id is None:
+                raise ConsoleAPIError(400, "INVALID_PARAM", "agent_id is required for manual reassign")
+            target_option = next(
+                (option for option in assignee_options if option.agent_id == body.agent_id),
+                None,
+            )
+            if target_option is None:
+                raise ConsoleAPIError(404, "NOT_FOUND", "Assignee not found")
 
-        target_id = str(target_option.agent_id)
-        previous_assignee_id = str(case.assigned_to) if case.assigned_to else None
-        previous_assignee_name = case.assigned_to_name
-        if previous_assignee_id == target_id:
-            response = _build_case_action_response(handover=case, branch_id=branch_id)
-            if idempotency and idempotency.record:
-                finalize_idempotency(
-                    db,
-                    record=idempotency.record,
-                    response_status=200,
-                    response_body=response.model_dump(mode="json"),
-                )
-            return response
-
-        result = state_manager_reassign(
-            db,
-            conversation,
-            case,
-            manager_id=target_id,
-            manager_name=target_option.agent_name,
-        )
-        if not result.ok:
-            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", result.error or "Case must be active to reassign")
-
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="case_reassigned",
-            entity_type="handover",
-            entity_id=case.id,
-            payload={
-                "previous_assignee_id": previous_assignee_id,
-                "previous_assignee_name": previous_assignee_name,
-                "assigned_to_id": target_id,
-                "assigned_to_name": target_option.agent_name,
-            },
-            branch_id=branch_id,
+        response = _execute_case_reassign(
+            db=db,
+            context=context,
+            case=case,
+            conversation=conversation,
+            target_option=target_option,
+            routing=routing,
         )
         db.commit()
         db.refresh(case)
-
-        response = _build_case_action_response(handover=case, branch_id=branch_id)
         if idempotency and idempotency.record:
             finalize_idempotency(
                 db,
