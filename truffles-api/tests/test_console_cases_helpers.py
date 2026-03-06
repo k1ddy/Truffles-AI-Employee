@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from app.routers import console as console_router
+from app.schemas.console import ConsoleCaseAssigneeOption
 from app.services.console_errors import ConsoleAPIError
 
 
@@ -42,6 +43,119 @@ def test_case_status_open_param():
 def test_parse_case_status_param_rejects_invalid():
     with pytest.raises(ConsoleAPIError):
         console_router._parse_case_status_param("status", "oops")
+
+
+def test_parse_case_owner_filters_accepts_assignee_id():
+    agent_id = uuid4()
+
+    parsed_assignee_id, unassigned = console_router._parse_case_owner_filters(
+        assigned_to_me=False,
+        assignee_id=str(agent_id),
+        unassigned=False,
+    )
+
+    assert parsed_assignee_id == agent_id
+    assert unassigned is False
+
+
+def test_parse_case_owner_filters_accepts_unassigned():
+    parsed_assignee_id, unassigned = console_router._parse_case_owner_filters(
+        assigned_to_me=False,
+        assignee_id=None,
+        unassigned=True,
+    )
+
+    assert parsed_assignee_id is None
+    assert unassigned is True
+
+
+def test_map_case_assignee_loads_prefers_direct_agent_id() -> None:
+    agent_id = uuid4()
+    options = {
+        agent_id: ConsoleCaseAssigneeOption(
+            agent_id=agent_id,
+            agent_name="Manager",
+            role="manager",
+            open_case_count=0,
+        ),
+    }
+
+    load_map = console_router._map_case_assignee_loads(
+        options,
+        [(str(agent_id), "Manager", 3)],
+    )
+
+    assert load_map[agent_id] == 3
+
+
+def test_map_case_assignee_loads_uses_unique_legacy_name_fallback() -> None:
+    agent_id = uuid4()
+    options = {
+        agent_id: ConsoleCaseAssigneeOption(
+            agent_id=agent_id,
+            agent_name="Manager Two",
+            role="manager",
+            open_case_count=0,
+        ),
+    }
+
+    load_map = console_router._map_case_assignee_loads(
+        options,
+        [(None, "Manager Two", 2)],
+    )
+
+    assert load_map[agent_id] == 2
+
+
+def test_map_case_assignee_loads_ignores_ambiguous_legacy_name() -> None:
+    agent_one_id = uuid4()
+    agent_two_id = uuid4()
+    options = {
+        agent_one_id: ConsoleCaseAssigneeOption(
+            agent_id=agent_one_id,
+            agent_name="Manager",
+            role="manager",
+            open_case_count=0,
+        ),
+        agent_two_id: ConsoleCaseAssigneeOption(
+            agent_id=agent_two_id,
+            agent_name="Manager",
+            role="admin",
+            open_case_count=0,
+        ),
+    }
+
+    load_map = console_router._map_case_assignee_loads(
+        options,
+        [(None, "Manager", 4)],
+    )
+
+    assert load_map[agent_one_id] == 0
+    assert load_map[agent_two_id] == 0
+
+
+@pytest.mark.parametrize(
+    ("assigned_to_me", "assignee_id", "unassigned"),
+    [
+        (True, str(uuid4()), False),
+        (True, None, True),
+        (False, str(uuid4()), True),
+    ],
+)
+def test_parse_case_owner_filters_rejects_conflicts(
+    assigned_to_me: bool,
+    assignee_id: str | None,
+    unassigned: bool,
+):
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._parse_case_owner_filters(
+            assigned_to_me=assigned_to_me,
+            assignee_id=assignee_id,
+            unassigned=unassigned,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"
 
 
 def test_normalize_search_query():

@@ -1,11 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
-import { casesApi, outreachApi, type CaseActionResponse } from "@/lib/api-client";
+import {
+    casesApi,
+    outreachApi,
+    type CaseActionResponse,
+    type CaseAssigneeOption,
+} from "@/lib/api-client";
 import type { Case, Message } from "@/types";
 import ChatInterface from "./ChatInterface";
 import { getCaseSlaIndicator, getStatusLabel } from "@/utils/labels";
@@ -28,6 +33,9 @@ interface CaseConversationProps {
     composerBefore?: ReactNode;
     detailsOpen?: boolean;
     onToggleDetails?: () => void;
+    bookingsOpen?: boolean;
+    onToggleBookings?: () => void;
+    canReadCalendar?: boolean;
     onNextCase?: () => void;
     canGoNextCase?: boolean;
     chatFrame?: "card" | "plain";
@@ -101,6 +109,57 @@ function formatHumanLockLabel(value?: string | null, lookup?: Record<string, str
     return value;
 }
 
+function formatAssigneeLoadLabel(option: CaseAssigneeOption) {
+    return `${option.open_case_count ?? 0} в работе`;
+}
+
+function formatAssigneeRoleLabel(option: CaseAssigneeOption) {
+    const roleLabel = ASSIGNEE_ROLE_LABELS[option.role];
+    if (!roleLabel) {
+        return null;
+    }
+    return roleLabel.toLowerCase() === option.agent_name.toLowerCase() ? null : roleLabel;
+}
+
+function sortAssigneeOptionsByLoad(options: CaseAssigneeOption[]) {
+    return [...options].sort((left, right) => {
+        if (left.is_current !== right.is_current) {
+            return left.is_current ? -1 : 1;
+        }
+        const leftLoad = left.open_case_count ?? 0;
+        const rightLoad = right.open_case_count ?? 0;
+        if (leftLoad !== rightLoad) {
+            return leftLoad - rightLoad;
+        }
+        return left.agent_name.localeCompare(right.agent_name, "ru");
+    });
+}
+
+function resolveRecommendedAssignee(
+    options: CaseAssigneeOption[],
+    currentAssigneeId?: string | null,
+) {
+    const currentOption = currentAssigneeId
+        ? options.find((item) => String(item.agent_id) === currentAssigneeId)
+        : null;
+    const candidateOptions = options.filter((item) => String(item.agent_id) !== (currentAssigneeId ?? ""));
+    if (candidateOptions.length === 0) {
+        return null;
+    }
+    const bestCandidate = [...candidateOptions].sort((left, right) => {
+        const leftLoad = left.open_case_count ?? 0;
+        const rightLoad = right.open_case_count ?? 0;
+        if (leftLoad !== rightLoad) {
+            return leftLoad - rightLoad;
+        }
+        return left.agent_name.localeCompare(right.agent_name, "ru");
+    })[0];
+    if (!currentOption) {
+        return bestCandidate;
+    }
+    return (bestCandidate.open_case_count ?? 0) < (currentOption.open_case_count ?? 0) ? bestCandidate : null;
+}
+
 export default function CaseConversation({
     caseDetail,
     caseId,
@@ -119,6 +178,9 @@ export default function CaseConversation({
     composerBefore,
     detailsOpen = false,
     onToggleDetails,
+    bookingsOpen = false,
+    onToggleBookings,
+    canReadCalendar = false,
     onNextCase,
     canGoNextCase = false,
     chatFrame = "card",
@@ -432,6 +494,14 @@ export default function CaseConversation({
 
     const caseActionBusy =
         reassignMutation.isPending || snoozeMutation.isPending || reopenMutation.isPending;
+    const sortedAssigneeOptions = useMemo(
+        () => sortAssigneeOptionsByLoad(assigneeOptionsQuery.data?.items ?? []),
+        [assigneeOptionsQuery.data?.items],
+    );
+    const recommendedAssignee = useMemo(
+        () => resolveRecommendedAssignee(sortedAssigneeOptions, caseDetail.assigned_to_id),
+        [sortedAssigneeOptions, caseDetail.assigned_to_id],
+    );
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
     const compactContextLimit = layout === "inbox" ? 110 : 180;
     const contextTitle = caseDetail.context_summary ? "Суть запроса" : "Последнее сообщение";
@@ -441,6 +511,8 @@ export default function CaseConversation({
     const assignedLabel = caseDetail.assigned_to_name ?? "Не назначен";
     const showDetailsToggle = typeof onToggleDetails === "function";
     const detailsLabel = detailsOpen ? "Скрыть детали" : "Детали";
+    const showBookingsToggle = canReadCalendar;
+    const bookingsLabel = bookingsOpen ? "Скрыть записи" : "Записи по заявке";
     const isInboxLayout = layout === "inbox";
     const contextCanExpand = isInboxLayout && contextText.length > compactContextLimit;
     const contextBody = contextCanExpand && !contextExpanded
@@ -554,6 +626,9 @@ export default function CaseConversation({
     ) : (
         replyPauseControls
     );
+    const calendarHref = caseDetail.conversation_id
+        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}&return_panel=bookings`
+        : `/calendar?case_id=${encodeURIComponent(caseId)}&return_panel=bookings`;
     const humanLockPanel = (
         <div
             className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${
@@ -617,7 +692,7 @@ export default function CaseConversation({
             <div className="mt-3 space-y-3">
                 {assigneeOptionsQuery.isLoading ? (
                     <p className="text-xs text-muted-foreground">Загружаем список менеджеров...</p>
-                ) : assigneeOptionsQuery.data?.items.length ? (
+                ) : sortedAssigneeOptions.length ? (
                     <label className="block space-y-1">
                         <span className="text-xs text-muted-foreground">Новый ответственный</span>
                         <select
@@ -626,14 +701,27 @@ export default function CaseConversation({
                             className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
                             data-testid="case-reassign-select"
                         >
-                            {assigneeOptionsQuery.data.items.map((item) => (
+                            {sortedAssigneeOptions.map((item) => (
                                 <option key={item.agent_id} value={item.agent_id}>
                                     {item.agent_name}
-                                    {ASSIGNEE_ROLE_LABELS[item.role] ? ` · ${ASSIGNEE_ROLE_LABELS[item.role]}` : ""}
+                                    {formatAssigneeRoleLabel(item) ? ` · ${formatAssigneeRoleLabel(item)}` : ""}
+                                    {` · ${formatAssigneeLoadLabel(item)}`}
                                     {item.is_current ? " · текущий" : ""}
                                 </option>
                             ))}
                         </select>
+                        <span className="text-[11px] text-muted-foreground">
+                            После текущего ответственного список отсортирован по открытым заявкам.
+                        </span>
+                        {recommendedAssignee && (
+                            <span
+                                className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900"
+                                data-testid="case-reassign-recommendation"
+                            >
+                                Рекомендуем: {recommendedAssignee.agent_name} · {formatAssigneeLoadLabel(recommendedAssignee)}.
+                                Ниже текущая нагрузка в этой очереди.
+                            </span>
+                        )}
                     </label>
                 ) : (
                     <p className="text-xs text-muted-foreground">
@@ -641,13 +729,26 @@ export default function CaseConversation({
                     </p>
                 )}
                 <div className="flex flex-wrap gap-2">
+                    {recommendedAssignee && (
+                        <button
+                            type="button"
+                            onClick={() => setSelectedAssigneeId(String(recommendedAssignee.agent_id))}
+                            disabled={caseActionBusy || selectedAssigneeId === String(recommendedAssignee.agent_id)}
+                            className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 disabled:opacity-50"
+                            data-testid="case-reassign-recommend-button"
+                        >
+                            {selectedAssigneeId === String(recommendedAssignee.agent_id)
+                                ? "Рекомендация выбрана"
+                                : "Выбрать рекомендацию"}
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => reassignMutation.mutate()}
                         disabled={
                             caseActionBusy
                             || assigneeOptionsQuery.isLoading
-                            || !assigneeOptionsQuery.data?.items.length
+                            || !sortedAssigneeOptions.length
                             || !selectedAssigneeId
                         }
                         className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
@@ -799,14 +900,28 @@ export default function CaseConversation({
                                     {outreachExpanded ? "Скрыть блок связи" : "Связаться с клиентом"}
                                 </button>
                             )}
-                            {caseDetail.conversation_id && (
-                                <Link
-                                    href={`/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}`}
-                                    className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
-                                    data-testid="case-open-calendar"
-                                >
-                                    Записи по заявке
-                                </Link>
+                            {showBookingsToggle && (
+                                typeof onToggleBookings === "function" ? (
+                                    <button
+                                        type="button"
+                                        onClick={onToggleBookings}
+                                        className={`rounded border border-border/60 px-4 py-2 text-sm font-semibold ${
+                                            bookingsOpen ? "bg-muted text-foreground" : "text-foreground hover:bg-muted"
+                                        }`}
+                                        aria-pressed={bookingsOpen}
+                                        data-testid="case-open-calendar"
+                                    >
+                                        {bookingsLabel}
+                                    </button>
+                                ) : (
+                                    <Link
+                                        href={calendarHref}
+                                        className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
+                                        data-testid="case-open-calendar"
+                                    >
+                                        {bookingsLabel}
+                                    </Link>
+                                )
                             )}
                             {canGoNextCase && (
                                 <button

@@ -15,6 +15,7 @@
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE7-A1`
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE8-A1`
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE9-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE10-A1`
 
 ## Название/цель
 Обновить ТЗ в формат исполнимой программы: закрыть требования по вкладкам `Заявки` и `Записи` не набором разрозненных правок, а полной последовательностью атомарных wave/part блоков с явной бизнес-логикой, строгой связью между TP/PR и без дублирования действий в интерфейсе.
@@ -32,6 +33,12 @@
 - `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md`
 
 ## FACT pre-check (before implementation)
 - `Implemented and merged (fact)`:
@@ -97,6 +104,12 @@
 ## Touch-list
 - `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md`
 - `docs/SESSIONS/SESSION-2026-03-05-inbox-calendar-ux-reconstruction-a1.md`
 - `docs/SESSION_INDEX.md`
 - `STRUCTURE.md`
@@ -122,9 +135,10 @@
 | Closeout | `TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md` | PR-5 | Canary/go-no-go/rollback discipline для wave4. | Done |
 | Wave5 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md` | One PR preferred; split only into `Part A backend contract` then `Part B frontend surfaces` | Action-driven SLA contract вместо абстрактных статусов. | Implemented in branch |
 | Wave6 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md` | Split allowed and expected: `Part A single-case actions`, `Part B bulk/supervisor actions` | Добавить `reassign/snooze/reopen/bulk` и operator case control. | Implemented in branch (`Part A`, `Part B1`, `Part B2` in PR `#931`) |
-| Wave7 | `TBD follow-up TP` | Split allowed and expected: `Part A action-macro backend`, `Part B macro UI/integration` | Превратить макросы из текстовых в executable operator actions. | Planned |
-| Wave8 | `TBD follow-up TP` | Split allowed and expected: `Part A workspace shell`, `Part B queue position/context preservation` | Довести `Заявки/Записи` до единого workspace без потери контекста. | Planned |
-| Wave9 | `TBD follow-up TP` | Split allowed and expected: `Part A queue governance`, `Part B routing/admin views` | Supervisor/admin-grade queue governance: team views, columns, routing controls. | Planned |
+| Wave7 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-partb-a1.md` | Split allowed and expected: `Part A action-macro backend`, `Part B macro UI/integration` | Превратить макросы из текстовых в executable operator actions. | In PR `#932` |
+| Wave8 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md` | Split allowed and expected: `Part A workspace shell`, `Part B queue position/context preservation` | Довести `Заявки/Записи` до единого workspace без потери контекста. | In PR `#932` (`Part A` + `Part B`) |
+| Wave9 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md` | Split allowed and expected: `Part A queue governance`, `Part B routing/admin views` | Supervisor/admin-grade queue governance: team views, columns, routing controls. | In PR `#932` (`Part A` + `Part B`) |
+| Wave10 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md` | Split allowed and expected: `Part A factual load signals`, `Part B recommended routing action` | Сделать reassignment менее слепым: factual workload hints before any automation. | In PR `#932` (`Part A` + `Part B`) |
 
 ## Wave-by-wave closure contract (mandatory)
 1. `Wave5` closes only when SLA перестает быть абстрактным и становится action-driven на сервере и в ключевых UI surface.
@@ -132,6 +146,7 @@
 3. `Wave7` closes only when макрос может менять не только текст, но и состояние/operator action.
 4. `Wave8` closes only when переход `кейс -> запись -> кейс` перестает быть route-friction сценарием и становится единым рабочим экраном.
 5. `Wave9` closes only when очередь становится управляемой для supervisor/admin на масштабе, а не только удобной для одного менеджера.
+6. `Wave10` closes only when reassignment stops being a blind name-pick and shows factual workload signals in the current operator surfaces.
 
 ## TP/PR linkage rules (mandatory)
 - Если wave не помещается в один PR, split обязан быть зафиксирован прямо в wave TP до начала part-реализации.
@@ -187,11 +202,11 @@
 - `Current residuals accepted in this block`: SLA action contract, case actions, action macros, unified workspace, supervisor governance еще не завершены.
 - `Why not in this block`: master TP задает программу и не заменяет собой реализацию product blocks.
 - `Risk if deferred`: визуально улучшенная console останется частично operator-grade и не закроет ТЗ пользователя полностью.
-- `Linked follow-up Task Package(s)`: `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md`, `TBD wave7`, `TBD wave8`, `TBD wave9`.
+- `Linked follow-up Task Package(s)`: `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md`, `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md`.
 - `Expiry/trigger to stop deferral`: любой новый merge по `Заявки/Записи`, который не уменьшает один из этих residual gaps, требует отдельного owner-approved waiver.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: закрыть wave6 `Part A` через bounded PR, затем открыть follow-up TP для wave6 `Part B` bulk/supervisor actions.
-- `First deterministic check command`: `cd truffles-api && pytest -q tests/test_state_service.py tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py`
-- `Blocked-by conditions`: wave5 SLA contract должен оставаться зелёным; single-case actions не должны регрессировать first-screen clarity или live inspect fallback.
+- `Next block objective`: открыть bounded closeout review после Wave10 Part B и подтвердить, что текущий inbox-routing assist уже достаточно закрывает user ТЗ, либо зафиксировать отдельный follow-up только на policy-based routing automation.
+- `First deterministic check command`: `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line`
+- `Blocked-by conditions`: PR `#932` must keep Wave6-Wave9 behavior intact; new routing signals must not regress selection, bulk actions, current case focus or default manager readability.
 - `Owner role for closure`: Brain / Top Architect.

@@ -184,6 +184,8 @@ def test_console_case_action_paths_expose_wave6_single_case_actions() -> None:
 
     assert _find_path(paths, "/cases/bulk") is not None
     assert "post" in ((_find_path(paths, "/cases/bulk") or {}).keys())
+    assert _find_path(paths, "/cases/assignees") is not None
+    assert "get" in ((_find_path(paths, "/cases/assignees") or {}).keys())
     assert _find_path(paths, "/cases/{case_id}/assignees") is not None
     assert "get" in ((_find_path(paths, "/cases/{case_id}/assignees") or {}).keys())
     assert _find_path(paths, "/cases/{case_id}/reassign") is not None
@@ -229,6 +231,8 @@ def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> No
     assert _has_string_type(assignee_props.get("agent_name") or {})
     assert "is_current" in assignee_props
     assert (assignee_props.get("is_current") or {}).get("type") == "boolean"
+    assert "open_case_count" in assignee_props
+    assert _has_integer_type(assignee_props.get("open_case_count") or {})
 
     assignee_list_schema = schemas.get("ConsoleCaseAssigneeListResponse") or {}
     assert "items" in (assignee_list_schema.get("properties") or {})
@@ -240,6 +244,58 @@ def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> No
     snooze_props = snooze_schema.get("properties") or {}
     assert _has_integer_type(snooze_props.get("minutes") or {})
     assert _has_string_type(snooze_props.get("reason") or {})
+
+
+def test_console_case_list_contract_exposes_owner_filters() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+    path_item = _find_path(paths, "/cases") or {}
+    get_op = path_item.get("get") or {}
+    params = get_op.get("parameters") or []
+
+    assert any((param or {}).get("name") == "assignee_id" for param in params)
+    assert any((param or {}).get("name") == "unassigned" for param in params)
+
+
+def test_console_macro_contract_exposes_action_macros_and_execute_path() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+
+    execute_path = _find_path(paths, "/inbox/macros/{macro_id}/execute") or {}
+    assert "post" in execute_path
+
+    macro_schema = schemas.get("ConsoleMacro") or {}
+    macro_props = macro_schema.get("properties") or {}
+    assert "action" in macro_props
+
+    macro_action_schema = schemas.get("ConsoleMacroAction") or {}
+    macro_action_props = macro_action_schema.get("properties") or {}
+    assert (macro_action_props.get("type") or {}).get("enum") == [
+        "take_case",
+        "resolve_case",
+        "return_to_bot",
+        "reopen_case",
+        "snooze_case",
+    ]
+    assert _has_integer_type(macro_action_props.get("minutes") or {})
+    assert _has_string_type(macro_action_props.get("reason") or {})
+
+    macro_create_schema = schemas.get("ConsoleMacroCreateRequest") or {}
+    assert "action" in (macro_create_schema.get("properties") or {})
+
+    macro_update_schema = schemas.get("ConsoleMacroUpdateRequest") or {}
+    assert "action" in (macro_update_schema.get("properties") or {})
+
+    execute_request_schema = schemas.get("ConsoleMacroExecuteRequest") or {}
+    assert _has_string_type(((execute_request_schema.get("properties") or {}).get("case_id") or {}))
+
+    execute_response_schema = schemas.get("ConsoleMacroExecuteResponse") or {}
+    execute_response_props = execute_response_schema.get("properties") or {}
+    assert (execute_response_props.get("success") or {}).get("type") == "boolean"
+    assert "macro" in execute_response_props
+    assert "case" in execute_response_props
+    assert "sync" in execute_response_props
 
 
 def test_no_show_followup_request_contract_exposes_result_and_rebook_link() -> None:

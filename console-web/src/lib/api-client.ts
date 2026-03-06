@@ -547,6 +547,8 @@ export type InboxMacroListResponse = components["schemas"]["ConsoleMacroListResp
 export type InboxMacroCreateRequest = components["schemas"]["ConsoleMacroCreateRequest"];
 export type InboxMacroCreateResponse = components["schemas"]["ConsoleMacroCreateResponse"];
 export type InboxMacroUpdateRequest = components["schemas"]["ConsoleMacroUpdateRequest"];
+export type InboxMacroExecuteRequest = components["schemas"]["ConsoleMacroExecuteRequest"];
+export type InboxMacroExecuteResponse = components["schemas"]["ConsoleMacroExecuteResponse"];
 export type Client = components["schemas"]["ConsoleClient"];
 export type MeResponse = components["schemas"]["ConsoleMeResponse"];
 export type Agent = components["schemas"]["ConsoleAgent"];
@@ -1241,6 +1243,11 @@ export const casesApi = {
     get: (caseId: string) =>
         apiClient.get<Case>(`/cases/${caseId}`),
 
+    listQueueAssignees: (branchId?: string) =>
+        apiClient.get<CaseAssigneeListResponse>("/cases/assignees", {
+            params: branchId ? { branch_id: branchId } : undefined,
+        }),
+
     listAssignees: (caseId: string) =>
         apiClient.get<CaseAssigneeListResponse>(`/cases/${caseId}/assignees`),
 
@@ -1282,6 +1289,10 @@ export const inboxApi = {
         }),
     updateMacro: (macroId: string, data: InboxMacroUpdateRequest, branchId?: string | null) =>
         apiClient.patch<InboxMacro>(`/inbox/macros/${macroId}`, data, {
+            headers: branchId ? { "X-Branch-Id": branchId } : undefined,
+        }),
+    executeMacro: (macroId: string, data: InboxMacroExecuteRequest, branchId?: string | null) =>
+        apiClient.post<InboxMacroExecuteResponse>(`/inbox/macros/${macroId}/execute`, data, {
             headers: branchId ? { "X-Branch-Id": branchId } : undefined,
         }),
 };

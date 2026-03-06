@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -65,8 +65,31 @@
   - Wave6 Part B2 implemented: `CaseList` now supports queue selection, `Выбрать все`, bounded bulk `reassign/snooze` toolbar and payload submission to `/cases/bulk`.
   - Fixed inbox queue state bug: empty search debounce no longer clears visible cases without changing the actual query, which had hidden queue rows in the mock/workspace lane.
   - `inspect_case` mock lane now validates bulk selection and `/cases/bulk` payload without breaking the existing case/calendar scenario.
+  - PR `#931` merged into `main` on 2026-03-06; branch synced forward to `origin/main` and Wave7 Part A opened as next active block.
+  - Wave7 Part A implemented and verified: executable macro action contract persisted in `console_macros.action_config`, `/inbox/macros/{macro_id}/execute` added, targeted macro/OpenAPI checks green, canonical contract synced to `openapi.v1.yaml`, and frontend API types regenerated.
+  - Wave7 Part B TP created as the next active block for macro UI builder/apply flow.
+  - Wave7 Part B implemented in frontend: `InboxMacros` now supports action builder/apply flow, `executeMacro` wired into composer-side apply, action hints are visible in use/manage cards, and `inspect_case` mock lane now covers create + apply for action-macros.
+  - PR `#932` opened for Wave7: `feat(console): add executable inbox action-macros`.
+  - Wave8 TP created as the next active block with mandatory one-web-search and bounded split `Part A workspace shell -> Part B context preservation`.
+  - Wave8 Part A implemented in branch: embedded `CaseBookingsPanel` added to Inbox/Case workspace, shared booking helpers extracted from `calendar/page.tsx`, and `ConsoleShell` now keeps `/calendar` in the same wide workspace frame.
+  - Wave8 Part A committed (`5d459211`) and pushed to the existing PR `#932`.
+  - Wave8 Part B TP created as the next active block for context preservation between inbox workspace and full calendar route.
+  - Wave8 Part B implemented in branch: panel mode and calendar case-context prefs now persist via `inbox-workspace`, full calendar links restore `?panel=bookings`, and case-mode calendar no longer hides linked bookings behind the default today filter.
+  - Wave9 TP created as the next active block for supervisor/admin queue governance in the existing inbox queue surface.
+  - Wave9 Part A implemented in branch: `CaseList` now exposes role-aware queue views, active view summary, persisted visible-field toggles, and preserves bulk/select behavior inside the current inbox workspace.
+  - `inspect_case` deterministic lane expanded for Wave9 Part A: mocked queue now covers `needs_reply/paused/delivery/unassigned` slices, queue governance controls, and persisted field toggles without regressing bookings/calendar return flow.
+  - Wave9 Part B TP created as the next active block for server-backed owner/unassigned governance inside the current inbox queue.
+  - Wave9 Part B implemented in branch: backend `GET /cases` now supports `assignee_id`/`unassigned`, queue-level `GET /cases/assignees` added, and privileged owner filter is wired into `CaseList` with workspace persistence and conflict-safe behavior.
+  - `inspect_case` deterministic lane expanded for Wave9 Part B: admin queue lane now validates server-backed owner filtering, `Без владельца` view, and preserved bulk/governance controls without breaking the existing workspace loop.
+  - Wave10 TP created as the next active block for factual assignee workload signals in reassignment surfaces, keeping the current inbox tabs as the only operator workspace.
+  - Wave10 Part A implemented in branch: assignee contracts now expose `open_case_count`, backend load mapping is calculated from scoped open cases, and `CaseConversation`/bulk owner selects now show factual workload hints instead of a flat blind list.
+  - Wave10 Part B TP created as the next active block for one-click recommended routing inside current reassignment panels, without hidden automation.
+  - Wave10 Part B implemented in branch: `CaseConversation` and bulk reassign panels now expose `Выбрать рекомендацию`, prefill the least-loaded assignee deterministically, and explain the choice in plain operator copy.
+  - `inspect_case` deterministic lane expanded for Wave10 Part B: recommendation CTA is now asserted in both single-case and bulk reassignment flow without breaking macro/bookings coverage.
+  - `inspect_case` deterministic lane expanded for Wave10 Part A: mocked assignee options now carry workload counts and assertions verify those hints in queue owner and reassign surfaces.
 - next:
-  - Watch PR `#931` checks after the new Wave6 Part B2 commits and then move to Wave7 Part A (`action-macro backend`) after merge.
+  - Run `scripts/session_check.sh`, commit Wave10 Part B, and push the routing-assist slice into PR `#932`.
+  - After push, open a bounded closeout review to decide whether current inbox routing assistance already satisfies the user TЗ or whether a separate policy-routing follow-up is still required.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -152,4 +175,42 @@
   - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file src/lib/api-client.ts --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
   - `scripts/session_check.sh` (`Session OK`)
-- last_updated: 2026-03-06T09:09:03+05:00
+  - `cd truffles-api && pytest -q tests/test_console_inbox_macros.py tests/test_console_openapi_calendar_contract.py` (`23 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_inbox_macros.py tests/test_console_openapi_calendar_contract.py` (`pass`)
+  - `cd console-web && npm run lint -- --file src/components/InboxMacros.tsx --file src/lib/api-client.ts --file src/components/InboxView.tsx --file src/components/CaseView.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`)
+  - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file src/lib/inbox-workspace.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave9 Part A mock lane)
+  - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title "feat(console): add executable inbox action-macros" ...` (`PR #932`)
+  - `cd console-web && npm run build` (`pass`)
+  - `git push origin HEAD` (`updated PR #932`)
+  - `cd console-web && npm run lint -- --file src/lib/inbox-workspace.ts --file src/components/InboxView.tsx --file src/components/CaseConversation.tsx --file src/components/CaseBookingsPanel.tsx --file src/app/calendar/page.tsx --file src/app/cases/[id]/page.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`)
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`44 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/lib/inbox-workspace.ts --file src/lib/api-client.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave9 Part B mock lane)
+  - `console-web/case_inspection.png`
+  - `console-web/calendar_case_context.png`
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`47 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd console-web && npm run lint -- --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file src/lib/api-client.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave10 Part A mock lane)
+  - `console-web/case_inspection.png`
+  - `console-web/calendar_case_context.png`
+  - `cd console-web && npm run lint -- --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave10 Part B mock lane)
+  - `console-web/case_inspection.png`
+  - `console-web/calendar_case_context.png`
+- last_updated: 2026-03-06T13:20:45+05:00

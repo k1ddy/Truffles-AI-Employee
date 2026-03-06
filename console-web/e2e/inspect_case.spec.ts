@@ -15,6 +15,11 @@ const CASE_ID = '55555555-5555-4555-8555-555555555555';
 const LIVE_CASE_ID = process.env.INSPECT_CASE_LIVE_CASE_ID ?? CASE_ID;
 const CONVERSATION_ID = '66666666-6666-4666-8666-666666666666';
 const SPECIALIST_ID = '77777777-7777-4777-8777-777777777777';
+const TEXT_MACRO_ID = 'abababab-abab-4bab-8bab-abababababab';
+const ACTION_MACRO_ID = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+const CREATED_MACRO_ID = 'efefefef-efef-4fef-8fef-efefefefefef';
+let lastMacroCreatePayload: unknown = null;
+let lastMacroExecutePayload: unknown = null;
 
 function toJsonResponse(route: import('@playwright/test').Route, payload: unknown) {
     return route.fulfill({
@@ -25,6 +30,8 @@ function toJsonResponse(route: import('@playwright/test').Route, payload: unknow
 }
 
 async function installConsoleMocks(page: import('@playwright/test').Page) {
+    lastMacroCreatePayload = null;
+    lastMacroExecutePayload = null;
     await page.route('**/api/auth/session**', async (route) => {
         if (route.request().method() !== 'GET') {
             await route.fallback();
@@ -67,7 +74,7 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             agent: {
                 id: AGENT_ID,
                 name: 'Manager',
-                role: 'manager',
+                role: 'admin',
                 client_id: CLIENT_ID,
                 branch_id: BRANCH_ID,
                 is_active: true,
@@ -101,7 +108,209 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             selected_branch_id: BRANCH_ID,
         });
     });
+    const caseState = {
+        id: CASE_ID,
+        conversation_id: CONVERSATION_ID,
+        branch_id: BRANCH_ID,
+        status: 'active',
+        trigger_type: 'message',
+        trigger_value: null,
+        context_summary: 'Клиент хочет маникюр и уточняет свободное время.',
+        user_message: 'Здравствуйте, можно записаться на завтра?',
+        created_at: '2026-03-05T09:00:00+05:00',
+        assigned_to_id: AGENT_ID,
+        assigned_to_name: 'Manager',
+        channel: 'whatsapp',
+        sla_status: 'warning',
+        sla_action_state: 'reply_due',
+        sla_overdue_minutes: null,
+        target_response_at: '2026-03-05T10:00:00+05:00',
+        customer_name: 'Айгуль',
+        customer_phone: '+77001234567',
+        last_inbound_at: '2026-03-05T09:10:00+05:00',
+        last_activity_at: '2026-03-05T09:10:00+05:00',
+        last_message_preview: 'Здравствуйте, можно записаться на завтра?',
+        needs_reply: true,
+        has_delivery_error: false,
+        has_pending_outbox: false,
+        human_lock_active: false,
+        snoozed_until: null,
+        snoozed_reason: null,
+        snoozed_by: null,
+    } as Record<string, unknown>;
+    const pausedCaseState = {
+        ...caseState,
+        id: '56565656-5656-4565-8565-565656565656',
+        conversation_id: '78787878-7878-4787-8787-787878787878',
+        customer_name: 'Мадина',
+        customer_phone: '+77001112233',
+        user_message: 'Хорошо, жду подтверждение.',
+        last_message_preview: 'Жду подтверждение менеджера.',
+        created_at: '2026-03-05T08:40:00+05:00',
+        last_inbound_at: '2026-03-05T08:50:00+05:00',
+        last_activity_at: '2026-03-05T08:50:00+05:00',
+        needs_reply: false,
+        human_lock_active: true,
+        sla_action_state: 'waiting_client',
+        target_response_at: null,
+    } as Record<string, unknown>;
+    const deliveryCaseState = {
+        ...caseState,
+        id: '57575757-5757-4575-8575-575757575757',
+        conversation_id: '79797979-7979-4797-8797-797979797979',
+        customer_name: 'Сабина',
+        customer_phone: '+77002223344',
+        user_message: 'Уточните, дошло ли сообщение.',
+        last_message_preview: 'Сообщение не отправилось клиенту.',
+        created_at: '2026-03-05T08:30:00+05:00',
+        last_inbound_at: '2026-03-05T08:45:00+05:00',
+        last_activity_at: '2026-03-05T08:45:00+05:00',
+        assigned_to_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        assigned_to_name: 'Manager Two',
+        needs_reply: false,
+        has_delivery_error: true,
+        has_pending_outbox: true,
+        attention_reason: 'Проверьте отправку',
+        sla_action_state: 'delivery_issue',
+        target_response_at: null,
+    } as Record<string, unknown>;
+    const unassignedCaseState = {
+        ...caseState,
+        id: '58585858-5858-4585-8585-585858585858',
+        conversation_id: '80808080-8080-4808-8808-808080808080',
+        customer_name: 'Нургуль',
+        customer_phone: '+77003334455',
+        user_message: 'Нужна запись на выходные.',
+        last_message_preview: 'Новая заявка без ответственного.',
+        created_at: '2026-03-05T08:20:00+05:00',
+        last_inbound_at: '2026-03-05T08:35:00+05:00',
+        last_activity_at: '2026-03-05T08:35:00+05:00',
+        assigned_to_id: null,
+        assigned_to_name: null,
+        needs_reply: false,
+        status: 'pending',
+        attention_reason: 'Назначьте ответственного',
+        sla_action_state: 'waiting_client',
+        target_response_at: null,
+    } as Record<string, unknown>;
+    const queueCases = [caseState, pausedCaseState, deliveryCaseState, unassignedCaseState];
+    const bookingState = {
+        id: '99999999-9999-4999-8999-999999999999',
+        specialist_id: SPECIALIST_ID,
+        specialist_name: 'Мастер Айжан',
+        start_at: '2026-03-06T10:00:00+05:00',
+        end_at: '2026-03-06T11:00:00+05:00',
+        customer_name: 'Айгуль',
+        customer_phone: '+77001234567',
+        service_type: 'Маникюр',
+        status: 'PENDING_CONFIRMATION',
+        no_show_followup_done: false,
+        no_show_followup_result: null,
+        no_show_followup_closed_at: null,
+        no_show_followup_closed_by: null,
+        no_show_followup_rebooked_appointment_id: null,
+        conversation_id: CONVERSATION_ID,
+        case_id: CASE_ID,
+        needs_action: true,
+        attention_reason: 'Нужно подтвердить визит',
+        created_at: '2026-03-05T09:20:00+05:00',
+    } as Record<string, unknown>;
+    const macroStore = [
+        {
+            id: ACTION_MACRO_ID,
+            scope: 'team',
+            label: 'Закрыть и ответить',
+            body: 'Заявку закрываю, если понадобится — напишите снова.',
+            action: {
+                type: 'resolve_case',
+            },
+            is_active: true,
+            created_at: '2026-03-05T09:12:00+05:00',
+            updated_at: '2026-03-05T09:12:00+05:00',
+        },
+        {
+            id: TEXT_MACRO_ID,
+            scope: 'personal',
+            label: 'Уточняю время',
+            body: 'Уточняю свободное время и скоро отвечу.',
+            action: null,
+            is_active: true,
+            created_at: '2026-03-05T09:11:00+05:00',
+            updated_at: '2026-03-05T09:11:00+05:00',
+        },
+    ];
     await page.route(/.*\/api\/proxy\/cases\/?(?:\?.*)?$/, async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        const url = new URL(route.request().url());
+        const status = url.searchParams.get('status');
+        const assignedToMe = url.searchParams.get('assigned_to_me') === 'true';
+        const assigneeId = url.searchParams.get('assignee_id');
+        const unassigned = url.searchParams.get('unassigned') === 'true';
+        const hasDeliveryError = url.searchParams.get('has_delivery_error') === 'true';
+        const hasPendingOutbox = url.searchParams.get('has_pending_outbox') === 'true';
+        const hasHumanLock = url.searchParams.get('has_human_lock') === 'true';
+        const query = (url.searchParams.get('q') || '').trim().toLowerCase();
+        const sortBy = url.searchParams.get('sort_by');
+        let items = queueCases.filter((item) => {
+            const caseStatus = String(item.status || '');
+            if (status === 'open' && caseStatus === 'resolved') {
+                return false;
+            }
+            if (status && status !== 'open' && caseStatus !== status) {
+                return false;
+            }
+            if (assignedToMe && item.assigned_to_id !== AGENT_ID) {
+                return false;
+            }
+            if (assigneeId && item.assigned_to_id !== assigneeId) {
+                return false;
+            }
+            if (unassigned && item.assigned_to_id) {
+                return false;
+            }
+            if (hasDeliveryError && !item.has_delivery_error) {
+                return false;
+            }
+            if (hasPendingOutbox && !item.has_pending_outbox) {
+                return false;
+            }
+            if (hasHumanLock && !item.human_lock_active) {
+                return false;
+            }
+            if (query) {
+                const haystack = [
+                    item.id,
+                    item.customer_name,
+                    item.customer_phone,
+                    item.last_message_preview,
+                ]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase();
+                if (!haystack.includes(query)) {
+                    return false;
+                }
+            }
+            return true;
+        });
+        if (sortBy === 'created_at') {
+            items = [...items].sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
+        } else if (sortBy === 'sla') {
+            items = [...items].sort((left, right) => String(left.target_response_at || '').localeCompare(String(right.target_response_at || '')));
+        } else {
+            items = [...items].sort((left, right) => String(right.last_activity_at || '').localeCompare(String(left.last_activity_at || '')));
+        }
+        await toJsonResponse(route, {
+            items: items.map((item) => ({ ...item })),
+            cursor: null,
+            has_more: false,
+            total: items.length,
+        });
+    });
+    await page.route('**/api/proxy/cases/assignees**', async (route) => {
         if (route.request().method() !== 'GET') {
             await route.fallback();
             return;
@@ -109,39 +318,22 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
         await toJsonResponse(route, {
             items: [
                 {
-                    id: CASE_ID,
-                    conversation_id: CONVERSATION_ID,
+                    agent_id: AGENT_ID,
+                    agent_name: 'Manager',
+                    role: 'manager',
                     branch_id: BRANCH_ID,
-                    status: 'active',
-                    trigger_type: 'message',
-                    trigger_value: null,
-                    context_summary: 'Клиент хочет маникюр и уточняет свободное время.',
-                    user_message: 'Здравствуйте, можно записаться на завтра?',
-                    created_at: '2026-03-05T09:00:00+05:00',
-                    assigned_to_id: AGENT_ID,
-                    assigned_to_name: 'Manager',
-                    channel: 'whatsapp',
-                    sla_status: 'warning',
-                    sla_action_state: 'reply_due',
-                    sla_overdue_minutes: null,
-                    target_response_at: '2026-03-05T10:00:00+05:00',
-                    customer_name: 'Айгуль',
-                    customer_phone: '+77001234567',
-                    last_inbound_at: '2026-03-05T09:10:00+05:00',
-                    last_activity_at: '2026-03-05T09:10:00+05:00',
-                    last_message_preview: 'Здравствуйте, можно записаться на завтра?',
-                    needs_reply: true,
-                    has_delivery_error: false,
-                    has_pending_outbox: false,
-                    human_lock_active: false,
-                    snoozed_until: null,
-                    snoozed_reason: null,
-                    snoozed_by: null,
+                    is_current: false,
+                    open_case_count: 2,
+                },
+                {
+                    agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    agent_name: 'Manager Two',
+                    role: 'manager',
+                    branch_id: BRANCH_ID,
+                    is_current: false,
+                    open_case_count: 1,
                 },
             ],
-            cursor: null,
-            has_more: false,
-            total: 1,
         });
     });
     await page.route(`**/api/proxy/cases/${CASE_ID}/messages**`, async (route) => {
@@ -167,35 +359,107 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             await route.fallback();
             return;
         }
+        await toJsonResponse(route, { ...caseState });
+    });
+    await page.route(/.*\/api\/proxy\/inbox\/macros(?:\?.*)?$/, async (route) => {
+        if (route.request().method() === 'GET') {
+            await toJsonResponse(route, {
+                items: macroStore.map((macro) => ({ ...macro })),
+            });
+            return;
+        }
+        if (route.request().method() === 'POST') {
+            const payload = route.request().postDataJSON() as {
+                scope?: 'personal' | 'team';
+                label?: string;
+                body?: string;
+                action?: Record<string, unknown> | null;
+                is_active?: boolean;
+            } | null;
+            lastMacroCreatePayload = payload;
+            const createdMacro = {
+                id: CREATED_MACRO_ID,
+                scope: payload?.scope === 'team' ? 'team' : 'personal',
+                label: payload?.label ?? 'Новый макрос',
+                body: payload?.body ?? '',
+                action: payload?.action ?? null,
+                is_active: payload?.is_active ?? true,
+                created_at: '2026-03-05T09:30:00+05:00',
+                updated_at: '2026-03-05T09:30:00+05:00',
+            };
+            macroStore.unshift(createdMacro);
+            await toJsonResponse(route, { macro: createdMacro });
+            return;
+        }
+        await route.fallback();
+    });
+    await page.route(/.*\/api\/proxy\/inbox\/macros\/[^/]+$/, async (route) => {
+        if (route.request().method() !== 'PATCH') {
+            await route.fallback();
+            return;
+        }
+        const macroId = route.request().url().split('/').pop() ?? '';
+        const payload = route.request().postDataJSON() as {
+            label?: string;
+            body?: string;
+            action?: Record<string, unknown> | null;
+            is_active?: boolean;
+        } | null;
+        const macro = macroStore.find((item) => item.id === macroId);
+        if (!macro) {
+            await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { code: 'NOT_FOUND' } }) });
+            return;
+        }
+        if (typeof payload?.label === 'string') {
+            macro.label = payload.label;
+        }
+        if (typeof payload?.body === 'string') {
+            macro.body = payload.body;
+        }
+        if (payload && Object.prototype.hasOwnProperty.call(payload, 'action')) {
+            macro.action = payload.action ?? null;
+        }
+        if (typeof payload?.is_active === 'boolean') {
+            macro.is_active = payload.is_active;
+        }
+        macro.updated_at = '2026-03-05T09:31:00+05:00';
+        await toJsonResponse(route, { ...macro });
+    });
+    await page.route(/.*\/api\/proxy\/inbox\/macros\/[^/]+\/execute$/, async (route) => {
+        if (route.request().method() !== 'POST') {
+            await route.fallback();
+            return;
+        }
+        const payload = route.request().postDataJSON() as { case_id?: string } | null;
+        lastMacroExecutePayload = payload;
+        const urlParts = route.request().url().split('/');
+        const macroId = urlParts[urlParts.length - 2] ?? '';
+        const macro = macroStore.find((item) => item.id === macroId);
+        if (!macro) {
+            await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { code: 'NOT_FOUND' } }) });
+            return;
+        }
+        if (macro.action?.type === 'resolve_case') {
+            caseState.status = 'resolved';
+            caseState.sla_status = 'ok';
+            caseState.sla_action_state = 'resolved';
+            caseState.target_response_at = null;
+            caseState.needs_reply = false;
+        }
+        if (macro.action?.type === 'snooze_case') {
+            caseState.snoozed_until = '2026-03-05T10:15:00+05:00';
+            caseState.snoozed_reason = (macro.action as { reason?: string | null }).reason ?? 'follow_up';
+            caseState.snoozed_by = 'Manager';
+            caseState.sla_action_state = 'waiting_client';
+        }
         await toJsonResponse(route, {
-            id: CASE_ID,
-            conversation_id: CONVERSATION_ID,
-            branch_id: BRANCH_ID,
-            status: 'active',
-            trigger_type: 'message',
-            trigger_value: null,
-            context_summary: 'Клиент хочет маникюр и уточняет свободное время.',
-            user_message: 'Здравствуйте, можно записаться на завтра?',
-            created_at: '2026-03-05T09:00:00+05:00',
-            assigned_to_id: AGENT_ID,
-            assigned_to_name: 'Manager',
-            channel: 'whatsapp',
-            sla_status: 'warning',
-            sla_action_state: 'reply_due',
-            sla_overdue_minutes: null,
-            target_response_at: '2026-03-05T10:00:00+05:00',
-            customer_name: 'Айгуль',
-            customer_phone: '+77001234567',
-            last_inbound_at: '2026-03-05T09:10:00+05:00',
-            last_activity_at: '2026-03-05T09:10:00+05:00',
-            last_message_preview: 'Здравствуйте, можно записаться на завтра?',
-            needs_reply: true,
-            has_delivery_error: false,
-            has_pending_outbox: false,
-            human_lock_active: false,
-            snoozed_until: null,
-            snoozed_reason: null,
-            snoozed_by: null,
+            success: true,
+            macro: { ...macro },
+            case: { ...caseState },
+            sync: {
+                telegram: { status: 'ok' },
+                client_notify: { status: 'ok' },
+            },
         });
     });
     await page.route(`**/api/proxy/cases/${CASE_ID}/assignees**`, async (route) => {
@@ -211,6 +475,7 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
                     role: 'manager',
                     branch_id: BRANCH_ID,
                     is_current: true,
+                    open_case_count: 2,
                 },
                 {
                     agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -218,6 +483,7 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
                     role: 'manager',
                     branch_id: BRANCH_ID,
                     is_current: false,
+                    open_case_count: 1,
                 },
             ],
         });
@@ -306,31 +572,38 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             return;
         }
         await toJsonResponse(route, {
-            items: [
-                {
-                    id: '99999999-9999-4999-8999-999999999999',
-                    specialist_id: SPECIALIST_ID,
-                    specialist_name: 'Мастер Айжан',
-                    start_at: '2026-03-06T10:00:00+05:00',
-                    end_at: '2026-03-06T11:00:00+05:00',
-                    customer_name: 'Айгуль',
-                    customer_phone: '+77001234567',
-                    service_type: 'Маникюр',
-                    status: 'PENDING_CONFIRMATION',
-                    no_show_followup_done: false,
-                    no_show_followup_result: null,
-                    no_show_followup_closed_at: null,
-                    no_show_followup_closed_by: null,
-                    no_show_followup_rebooked_appointment_id: null,
-                    conversation_id: CONVERSATION_ID,
-                    case_id: CASE_ID,
-                    needs_action: true,
-                    attention_reason: 'Нужно подтвердить визит',
-                    created_at: '2026-03-05T09:20:00+05:00',
-                },
-            ],
+            items: [{ ...bookingState }],
             cursor: null,
             has_more: false,
+        });
+    });
+    await page.route(`**/api/proxy/calendar/bookings/${bookingState.id}/status`, async (route) => {
+        if (route.request().method() !== 'POST') {
+            await route.fallback();
+            return;
+        }
+        const payload = route.request().postDataJSON() as { status?: 'COMPLETED' | 'NO_SHOW' } | null;
+        bookingState.status = payload?.status === 'NO_SHOW' ? 'NO_SHOW' : 'COMPLETED';
+        bookingState.needs_action = bookingState.status === 'NO_SHOW';
+        bookingState.attention_reason = bookingState.status === 'NO_SHOW' ? 'Связаться после неявки' : null;
+        await toJsonResponse(route, {
+            success: true,
+            booking: { ...bookingState },
+        });
+    });
+    await page.route(`**/api/proxy/calendar/bookings/${bookingState.id}/no-show-followup`, async (route) => {
+        if (route.request().method() !== 'POST') {
+            await route.fallback();
+            return;
+        }
+        const payload = route.request().postDataJSON() as { result?: 'contacted' | 'rebooked' } | null;
+        bookingState.no_show_followup_done = true;
+        bookingState.no_show_followup_result = payload?.result ?? 'contacted';
+        bookingState.needs_action = false;
+        bookingState.attention_reason = null;
+        await toJsonResponse(route, {
+            success: true,
+            booking: { ...bookingState },
         });
     });
 }
@@ -685,25 +958,63 @@ test('inspect first case', async ({ page }) => {
     await expect(caseActionBadge).toBeVisible({ timeout: 15000 });
     await expect(caseActionBadge).not.toContainText('SLA:', { timeout: 15000 });
     if (useRouteMocks) {
+        await expect(page.getByTestId('cases-queue-views')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-filter-assignee')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-filter-assignee').locator('option').nth(2)).toContainText('Manager · 2 в работе');
+        await expect(page.getByTestId('cases-filter-assignee').locator('option').nth(3)).toContainText('Manager Two · 1 в работе');
+        await expect(page.getByTestId('cases-queue-view-unassigned')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('cases-field-toggle').click({ force: true });
+        await page.getByTestId('cases-field-owner').check({ force: true });
+        await page.getByTestId('cases-field-channel').check({ force: true });
+        await expect(page.getByTestId('cases-field-toggle')).toContainText('Поля 4/5', { timeout: 15000 });
+
+        await page.getByTestId('cases-filter-assignee').selectOption('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        await expect(page.getByTestId('cases-owner-summary')).toContainText('Manager Two', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Сабина', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Manager Two', { timeout: 15000 });
+
+        await page.getByTestId('cases-queue-view-unassigned').click({ force: true });
+        await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Без владельца', { timeout: 15000 });
+        await expect(page.getByTestId('cases-owner-summary')).toContainText('Без владельца', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Нургуль', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Без владельца', { timeout: 15000 });
+
+        await page.getByTestId('cases-queue-view-needs_reply').click({ force: true });
+        await expect(page.getByTestId('cases-queue-view-hint')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Айгуль', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Manager', { timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('whatsapp', { timeout: 15000 });
+
+        await page.getByTestId('cases-queue-view-all_open').click({ force: true });
+        await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Все открытые', { timeout: 15000 });
         await expect(caseActionBadge).toContainText('Ответить до', { timeout: 15000 });
         await expect(page.getByTestId('case-reassign-toggle')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('case-snooze-toggle')).toBeVisible({ timeout: 15000 });
-        await page.getByTestId('cases-bulk-select').check();
+        await page.getByTestId('cases-bulk-select').first().check({ force: true });
         await expect(page.getByTestId('cases-bulk-toolbar')).toBeVisible({ timeout: 15000 });
-        await page.getByTestId('cases-bulk-toggle-snooze').click();
+        await page.getByTestId('cases-bulk-toggle-reassign').click({ force: true });
+        await expect(page.getByTestId('cases-bulk-reassign-recommendation')).toContainText('Manager Two · 1 в работе', { timeout: 15000 });
+        await page.getByTestId('cases-bulk-reassign-recommend').click({ force: true });
+        await expect(page.getByTestId('cases-bulk-reassign-select')).toHaveValue('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        await page.getByTestId('cases-bulk-toggle-snooze').click({ force: true });
         await expect(page.getByTestId('cases-bulk-snooze-minutes')).toBeVisible({ timeout: 15000 });
         const bulkRequestPromise = page.waitForRequest((request) =>
             request.method() === 'POST' && request.url().includes('/api/proxy/cases/bulk')
         );
-        await page.getByTestId('cases-bulk-snooze-submit').click();
+        await page.getByTestId('cases-bulk-snooze-submit').click({ force: true });
         const bulkRequest = await bulkRequestPromise;
         expect(bulkRequest.postDataJSON()).toMatchObject({
             action: 'snooze',
             case_ids: [CASE_ID],
         });
-        await page.getByTestId('case-reassign-toggle').click();
+        await page.getByTestId('case-reassign-toggle').click({ force: true });
         await expect(page.getByTestId('case-reassign-select')).toBeVisible({ timeout: 15000 });
-        await page.getByTestId('case-snooze-toggle').click();
+        await expect(page.getByTestId('case-reassign-select').locator('option').nth(0)).toContainText('Manager · 2 в работе · текущий');
+        await expect(page.getByTestId('case-reassign-select').locator('option').nth(1)).toContainText('Manager Two · Manager · 1 в работе');
+        await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Manager Two · 1 в работе', { timeout: 15000 });
+        await page.getByTestId('case-reassign-recommend-button').click({ force: true });
+        await expect(page.getByTestId('case-reassign-select')).toHaveValue('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        await page.getByTestId('case-snooze-toggle').click({ force: true });
         await expect(page.getByTestId('case-snooze-minutes')).toBeVisible({ timeout: 15000 });
     }
 
@@ -731,15 +1042,28 @@ test('inspect first case', async ({ page }) => {
 
     const openCalendarButton = page.getByTestId('case-open-calendar');
     if (await openCalendarButton.isVisible().catch(() => false)) {
-        const calendarHref = await openCalendarButton.getAttribute('href');
-        if (!calendarHref) {
-            throw new Error('case-open-calendar link does not contain href');
+        await openCalendarButton.click();
+        const visibleBookingsPanel = page.locator('[data-testid=\"case-bookings-panel\"]:visible').first();
+        await expect(visibleBookingsPanel).toBeVisible({ timeout: 20000 });
+        expect(page.url()).not.toContain('/calendar');
+        if (useRouteMocks) {
+            await expect(visibleBookingsPanel.locator('[data-testid=\"case-booking-card\"]').first()).toBeVisible({ timeout: 20000 });
+            await visibleBookingsPanel.getByRole('button', { name: 'Пришел', exact: true }).click();
+            await expect(visibleBookingsPanel.getByText('пришел', { exact: true }).first()).toBeVisible({ timeout: 20000 });
         }
+
+        const openFullCalendar = visibleBookingsPanel.getByTestId('case-bookings-open-full-calendar');
+        const calendarHref = await openFullCalendar.getAttribute('href');
+        if (!calendarHref) {
+            throw new Error('case-bookings-open-full-calendar link does not contain href');
+        }
+        expect(calendarHref).toContain('return_panel=bookings');
         await gotoWithRetry(page, `${baseURL}${calendarHref}`);
         await expect(page.getByTestId('calendar-page')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-controls')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-lane-attention')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-lane-all')).toBeVisible({ timeout: 20000 });
+        await expect(page.getByTestId('calendar-case-all-dates-hint')).toBeVisible({ timeout: 20000 });
 
         await page.getByTestId('calendar-queue-lane-all').click();
         await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
@@ -752,8 +1076,52 @@ test('inspect first case', async ({ page }) => {
         if (await openLinkedCase.isVisible().catch(() => false)) {
             await openLinkedCase.click();
             await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
+            await expect(page.locator('[data-testid=\"case-bookings-panel\"]:visible').first()).toBeVisible({ timeout: 20000 });
+            await expect(page).toHaveURL(new RegExp(`/cases/${CASE_ID}\\?panel=bookings$`));
         }
     } else {
         console.log('case-open-calendar button is not visible for this case.');
     }
+});
+
+test('manage and apply action macro', async ({ page }) => {
+    test.skip(!useRouteMocks, 'action-macro UI is covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page);
+    await ensureLoggedIn(page);
+    await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
+    await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
+
+    await page.getByRole('button', { name: /все ответы/i }).click({ force: true });
+    await expect(page.getByTestId(`macro-chip-${ACTION_MACRO_ID}`)).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole('button', { name: 'Управление' }).click({ force: true });
+    await page.getByPlaceholder('Заголовок').fill('Отложить и ответить');
+    await page.getByPlaceholder('Текст быстрого ответа').fill('Отложу заявку и вернусь позже.');
+    await page.getByTestId('macro-action-select').selectOption('snooze_case');
+    await page.getByTestId('macro-action-minutes').fill('45');
+    await page.getByPlaceholder('Причина отсрочки').fill('follow_up');
+    await page.getByTestId('macro-save-button').click({ force: true });
+
+    await expect.poll(() => lastMacroCreatePayload).not.toBeNull();
+    expect(lastMacroCreatePayload).toMatchObject({
+        label: 'Отложить и ответить',
+        body: 'Отложу заявку и вернусь позже.',
+        action: {
+            type: 'snooze_case',
+            minutes: 45,
+            reason: 'follow_up',
+        },
+    });
+
+    await page.getByRole('button', { name: 'Ответы', exact: true }).click({ force: true });
+    await expect(page.getByTestId(`macro-apply-${CREATED_MACRO_ID}`)).toBeVisible({ timeout: 15000 });
+    await page.getByTestId(`macro-apply-${CREATED_MACRO_ID}`).click({ force: true });
+
+    await expect.poll(() => lastMacroExecutePayload).toMatchObject({ case_id: CASE_ID });
+    await expect(page.getByTestId('case-next-action')).toContainText('Ожидаем клиента', { timeout: 15000 });
+    await expect(
+        page.getByPlaceholder('Введите сообщение или подпись к файлу. Enter — отправить.')
+    ).toHaveValue(/Отложу заявку и вернусь позже\./, { timeout: 15000 });
 });

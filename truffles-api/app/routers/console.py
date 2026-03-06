@@ -203,6 +203,8 @@ from app.schemas.console import (
     ConsoleLearningCandidateListResponse,
     ConsoleMacroCreateRequest,
     ConsoleMacroCreateResponse,
+    ConsoleMacroExecuteRequest,
+    ConsoleMacroExecuteResponse,
     ConsoleMacroListResponse,
     ConsoleMacroUpdateRequest,
     ConsoleManagerMessageRequest,
@@ -337,6 +339,9 @@ from app.schemas.console import (
 )
 from app.schemas.console import (
     ConsoleMacro as ConsoleMacroSchema,
+)
+from app.schemas.console import (
+    ConsoleMacroAction as ConsoleMacroActionSchema,
 )
 from app.schemas.onboarding_contract import (
     ONBOARDING_CONTRACT_SCHEMA_VERSION,
@@ -1084,6 +1089,402 @@ def _build_case_action_response(
     )
 
 
+def _build_macro_execute_response(
+    *,
+    macro: ConsoleMacroModel,
+    handover: Handover,
+    branch_id: UUID | None,
+    sync: Optional[ConsoleCaseActionSync] = None,
+) -> ConsoleMacroExecuteResponse:
+    case_response = _build_case_action_response(
+        handover=handover,
+        branch_id=branch_id,
+        sync=sync,
+    )
+    return ConsoleMacroExecuteResponse(
+        success=case_response.success,
+        macro=_serialize_macro(macro),
+        case=case_response.case,
+        sync=case_response.sync,
+    )
+
+
+def _finalize_case_connected_sync(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    conversation: Conversation,
+    handover: Handover,
+    branch_id: UUID | None,
+    manager_name: str,
+    reason: Optional[str] = None,
+) -> ConsoleCaseActionSync:
+    telegram_status = _sync_telegram_after_take(
+        db,
+        conversation=conversation,
+        handover=handover,
+        manager_name=manager_name,
+    )
+    client_notify = _notify_client_status(
+        db=db,
+        conversation=conversation,
+        handover=handover,
+        status="connected",
+        manager_name=manager_name,
+    )
+    payload = {
+        "telegram_status": telegram_status.status,
+        "client_notify_status": client_notify.status,
+    }
+    if reason:
+        payload["reason"] = reason
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="manager_connected",
+        entity_type="handover",
+        entity_id=handover.id,
+        payload=payload,
+        branch_id=branch_id,
+    )
+    db.commit()
+    return ConsoleCaseActionSync(
+        telegram=telegram_status,
+        client_notify=client_notify,
+    )
+
+
+def _finalize_case_disconnected_sync(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    conversation: Conversation,
+    handover: Handover,
+    branch_id: UUID | None,
+    manager_name: str,
+    action: Literal["resolve", "return"],
+    reason: Optional[str] = None,
+) -> ConsoleCaseActionSync:
+    telegram_status = _sync_telegram_after_close(
+        db,
+        conversation=conversation,
+        handover=handover,
+        manager_name=manager_name,
+        action=action,
+    )
+    client_notify = _notify_client_status(
+        db=db,
+        conversation=conversation,
+        handover=handover,
+        status="disconnected",
+        manager_name=manager_name,
+    )
+    payload = {
+        "telegram_status": telegram_status.status,
+        "client_notify_status": client_notify.status,
+    }
+    if reason:
+        payload["reason"] = reason
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="manager_disconnected",
+        entity_type="handover",
+        entity_id=handover.id,
+        payload=payload,
+        branch_id=branch_id,
+    )
+    db.commit()
+    return ConsoleCaseActionSync(
+        telegram=telegram_status,
+        client_notify=client_notify,
+    )
+
+
+def _execute_macro_case_action(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    macro: ConsoleMacroModel,
+    action_config: dict[str, Any],
+    handover: Handover,
+    conversation: Conversation,
+) -> ConsoleMacroExecuteResponse:
+    branch_id = conversation.branch_id
+    manager_name = context.agent.name or "Менеджер"
+    actor_id = str(context.agent.id)
+    action_type = action_config["type"]
+
+    if action_type == "take_case":
+        if handover.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+
+        if handover.status == "active":
+            current_assignee = handover.assigned_to_name
+            if handover.assigned_to and str(handover.assigned_to) != actor_id:
+                raise ConsoleAPIError(
+                    409,
+                    "CASE_ALREADY_TAKEN",
+                    "Case already taken",
+                    details={"current_assignee": current_assignee},
+                )
+            if current_assignee and current_assignee != context.agent.name:
+                raise ConsoleAPIError(
+                    409,
+                    "CASE_ALREADY_TAKEN",
+                    "Case already taken",
+                    details={"current_assignee": current_assignee},
+                )
+            return _build_macro_execute_response(
+                macro=macro,
+                handover=handover,
+                branch_id=branch_id,
+                sync=ConsoleCaseActionSync(
+                    telegram=_build_sync_status("skipped", "already_taken"),
+                    client_notify=_build_sync_status("skipped", "already_taken"),
+                ),
+            )
+
+        previous_status = handover.status
+        result = state_manager_take(db, conversation, handover, actor_id, manager_name)
+        if not result.ok:
+            raise ConsoleAPIError(409, "CASE_ALREADY_TAKEN", result.error or "Case already taken")
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_taken",
+            entity_type="handover",
+            entity_id=handover.id,
+            payload={"previous_status": previous_status},
+            branch_id=branch_id,
+        )
+        db.commit()
+        db.refresh(handover)
+        sync = _finalize_case_connected_sync(
+            db=db,
+            context=context,
+            conversation=conversation,
+            handover=handover,
+            branch_id=branch_id,
+            manager_name=manager_name,
+            reason="macro_take_case",
+        )
+        return _build_macro_execute_response(
+            macro=macro,
+            handover=handover,
+            branch_id=branch_id,
+            sync=sync,
+        )
+
+    if action_type == "resolve_case":
+        if handover.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+
+        _require_case_operator_access(context=context, handover=handover)
+        _clear_case_snooze_meta(handover)
+        result = state_manager_resolve(
+            db,
+            conversation,
+            handover,
+            actor_id,
+            manager_name,
+            preserve_context=True,
+        )
+        if not result.ok:
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", result.error or "Case already resolved")
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_resolved",
+            entity_type="handover",
+            entity_id=handover.id,
+            branch_id=branch_id,
+        )
+        remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+        released_lock = release_human_lock(
+            db,
+            client_id=context.client.id,
+            remote_jid=remote_jid,
+            conversation_id=conversation.id,
+            now=datetime.now(timezone.utc),
+        )
+        if released_lock:
+            record_audit_event(
+                db,
+                actor=context.agent,
+                event_type="human_lock_release_auto",
+                entity_type="conversation",
+                entity_id=conversation.id,
+                payload={"reason": "case_resolved"},
+                branch_id=branch_id,
+            )
+        db.commit()
+        db.refresh(handover)
+        sync = _finalize_case_disconnected_sync(
+            db=db,
+            context=context,
+            conversation=conversation,
+            handover=handover,
+            branch_id=branch_id,
+            manager_name=manager_name,
+            action="resolve",
+            reason="macro_resolve_case",
+        )
+        return _build_macro_execute_response(
+            macro=macro,
+            handover=handover,
+            branch_id=branch_id,
+            sync=sync,
+        )
+
+    if action_type == "return_to_bot":
+        if handover.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+
+        _require_case_operator_access(context=context, handover=handover)
+        _clear_case_snooze_meta(handover)
+        result = state_manager_return(
+            db,
+            conversation,
+            handover,
+            actor_id,
+            manager_name,
+        )
+        if not result.ok:
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", result.error or "Case already resolved")
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_returned",
+            entity_type="handover",
+            entity_id=handover.id,
+            branch_id=branch_id,
+        )
+        remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+        released_lock = release_human_lock(
+            db,
+            client_id=context.client.id,
+            remote_jid=remote_jid,
+            conversation_id=conversation.id,
+            now=datetime.now(timezone.utc),
+        )
+        if released_lock:
+            record_audit_event(
+                db,
+                actor=context.agent,
+                event_type="human_lock_release_auto",
+                entity_type="conversation",
+                entity_id=conversation.id,
+                payload={"reason": "case_returned"},
+                branch_id=branch_id,
+            )
+        db.commit()
+        db.refresh(handover)
+        sync = _finalize_case_disconnected_sync(
+            db=db,
+            context=context,
+            conversation=conversation,
+            handover=handover,
+            branch_id=branch_id,
+            manager_name=manager_name,
+            action="return",
+            reason="macro_return_to_bot",
+        )
+        return _build_macro_execute_response(
+            macro=macro,
+            handover=handover,
+            branch_id=branch_id,
+            sync=sync,
+        )
+
+    if action_type == "reopen_case":
+        if handover.status != "resolved":
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", "Case must be resolved to reopen")
+
+        _clear_case_snooze_meta(handover)
+        result = state_manager_reopen(
+            db,
+            conversation,
+            handover,
+            manager_id=actor_id,
+            manager_name=manager_name,
+        )
+        if not result.ok:
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", result.error or "Case must be resolved to reopen")
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_reopened",
+            entity_type="handover",
+            entity_id=handover.id,
+            payload={"assigned_to_id": actor_id, "assigned_to_name": manager_name},
+            branch_id=branch_id,
+        )
+        db.commit()
+        db.refresh(handover)
+        sync = _finalize_case_connected_sync(
+            db=db,
+            context=context,
+            conversation=conversation,
+            handover=handover,
+            branch_id=branch_id,
+            manager_name=manager_name,
+            reason="macro_reopen_case",
+        )
+        return _build_macro_execute_response(
+            macro=macro,
+            handover=handover,
+            branch_id=branch_id,
+            sync=sync,
+        )
+
+    if action_type == "snooze_case":
+        if handover.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+        if handover.status != "active":
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", "Case must be active to snooze")
+
+        _require_case_operator_access(context=context, handover=handover)
+        now_utc = datetime.now(timezone.utc)
+        minutes = int(action_config.get("minutes") or 30)
+        reason = action_config.get("reason") or _CASE_SNOOZE_DEFAULT_REASON
+        snoozed_until = now_utc + timedelta(minutes=minutes)
+        _set_case_snooze_meta(
+            handover,
+            snoozed_until=snoozed_until,
+            now_utc=now_utc,
+            reason=reason,
+            agent_id=context.agent.id,
+            agent_name=manager_name,
+        )
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_snoozed",
+            entity_type="handover",
+            entity_id=handover.id,
+            payload={
+                "minutes": minutes,
+                "snoozed_until": snoozed_until.isoformat(),
+                "reason": reason,
+            },
+            branch_id=branch_id,
+        )
+        db.commit()
+        db.refresh(handover)
+        return _build_macro_execute_response(
+            macro=macro,
+            handover=handover,
+            branch_id=branch_id,
+        )
+
+    raise ConsoleAPIError(409, "MACRO_ACTION_INVALID", "Macro action is not supported")
+
+
 def _normalize_case_bulk_ids(case_ids: list[UUID]) -> list[UUID]:
     if not case_ids:
         raise ConsoleAPIError(400, "INVALID_PARAM", "case_ids must contain at least one case")
@@ -1422,12 +1823,95 @@ def _normalize_branch_change_patch(
     )
 
 
+def _serialize_macro_action(action_config: Any) -> Optional[ConsoleMacroActionSchema]:
+    if not isinstance(action_config, dict):
+        return None
+
+    action_type = action_config.get("type")
+    if action_type not in {
+        "take_case",
+        "resolve_case",
+        "return_to_bot",
+        "reopen_case",
+        "snooze_case",
+    }:
+        return None
+
+    try:
+        return ConsoleMacroActionSchema(
+            type=action_type,
+            minutes=action_config.get("minutes"),
+            reason=action_config.get("reason"),
+        )
+    except ValidationError:
+        return None
+
+
+def _normalize_macro_action(
+    action: Optional[ConsoleMacroActionSchema],
+) -> Optional[dict[str, Any]]:
+    if action is None:
+        return None
+
+    action_type = _normalize_required_text(action.type, "action.type")
+    if action_type == "snooze_case":
+        minutes = _normalize_pause_minutes(action.minutes, default=30, allow_zero=False)
+        reason = _normalize_optional_text(action.reason) or _CASE_SNOOZE_DEFAULT_REASON
+        return {
+            "type": action_type,
+            "minutes": minutes,
+            "reason": reason,
+        }
+
+    if action.minutes is not None:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"action.minutes is not supported for {action_type}",
+        )
+    if action.reason is not None:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"action.reason is not supported for {action_type}",
+        )
+
+    return {"type": action_type}
+
+
+def _resolve_inbox_macro_for_context(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    branch_id: UUID,
+    macro_id: UUID,
+) -> ConsoleMacroModel:
+    macro = (
+        db.query(ConsoleMacroModel)
+        .filter(
+            ConsoleMacroModel.id == macro_id,
+            ConsoleMacroModel.client_id == context.client.id,
+            ConsoleMacroModel.branch_id == branch_id,
+        )
+        .first()
+    )
+    if not macro:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Macro not found")
+
+    is_privileged = context.role in ("platform_admin", "owner", "admin")
+    if macro.agent_id and macro.agent_id != context.agent.id and not is_privileged:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Cannot access another agent's macro")
+
+    return macro
+
+
 def _serialize_macro(macro: ConsoleMacroModel) -> ConsoleMacroSchema:
     return ConsoleMacroSchema(
         id=macro.id,
         scope=macro.scope,
         label=macro.label,
         body=macro.body,
+        action=_serialize_macro_action(getattr(macro, "action_config", None)),
         is_active=macro.is_active,
         created_at=macro.created_at.isoformat() if macro.created_at else None,
         updated_at=macro.updated_at.isoformat() if macro.updated_at else None,
@@ -5215,10 +5699,78 @@ def _list_case_assignee_options(
             is_current=str(agent.id) == (current_assignee_id or ""),
         )
 
+    load_rows_query = (
+        db.query(
+            Handover.assigned_to.label("assigned_to"),
+            Handover.assigned_to_name.label("assigned_to_name"),
+            func.count(Handover.id).label("open_case_count"),
+        )
+        .join(Conversation, Conversation.id == Handover.conversation_id)
+        .filter(
+            Handover.client_id == client_id,
+            Handover.status.in_(("pending", "active")),
+        )
+    )
+    if branch_id:
+        load_rows_query = load_rows_query.filter(Conversation.branch_id == branch_id)
+
+    load_rows = load_rows_query.group_by(Handover.assigned_to, Handover.assigned_to_name).all()
+    load_map = _map_case_assignee_loads(
+        options_by_agent_id,
+        [
+            (
+                row.assigned_to,
+                row.assigned_to_name,
+                int(row.open_case_count or 0),
+            )
+            for row in load_rows
+        ],
+    )
+    for agent_id, option in options_by_agent_id.items():
+        option.open_case_count = load_map.get(agent_id, 0)
+
     return sorted(
         options_by_agent_id.values(),
         key=lambda item: (not item.is_current, item.agent_name.lower(), str(item.agent_id)),
     )
+
+
+def _map_case_assignee_loads(
+    options_by_agent_id: dict[UUID, ConsoleCaseAssigneeOption],
+    rows: list[tuple[Optional[str], Optional[str], int]],
+) -> dict[UUID, int]:
+    load_map: dict[UUID, int] = {agent_id: 0 for agent_id in options_by_agent_id.keys()}
+    name_to_agent_ids: dict[str, set[UUID]] = {}
+
+    for agent_id, option in options_by_agent_id.items():
+        normalized_name = option.agent_name.strip().lower()
+        if normalized_name:
+            name_to_agent_ids.setdefault(normalized_name, set()).add(agent_id)
+        load_map.setdefault(agent_id, 0)
+
+    for assigned_to, assigned_to_name, open_case_count in rows:
+        if open_case_count <= 0:
+            continue
+
+        resolved_agent_id: UUID | None = None
+        if assigned_to:
+            try:
+                candidate_agent_id = UUID(str(assigned_to))
+            except ValueError:
+                candidate_agent_id = None
+            if candidate_agent_id in load_map:
+                resolved_agent_id = candidate_agent_id
+
+        if resolved_agent_id is None and assigned_to_name:
+            normalized_name = assigned_to_name.strip().lower()
+            candidate_agent_ids = name_to_agent_ids.get(normalized_name) or set()
+            if len(candidate_agent_ids) == 1:
+                resolved_agent_id = next(iter(candidate_agent_ids))
+
+        if resolved_agent_id is not None:
+            load_map[resolved_agent_id] = load_map.get(resolved_agent_id, 0) + open_case_count
+
+    return load_map
 
 
 def _resolve_membership_target(
@@ -8110,6 +8662,22 @@ def _parse_case_status_param(name: str, value: Optional[str]) -> Optional[list[s
     raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
 
 
+def _parse_case_owner_filters(
+    *,
+    assigned_to_me: bool,
+    assignee_id: Optional[str],
+    unassigned: bool,
+) -> tuple[Optional[UUID], bool]:
+    parsed_assignee_id = _parse_uuid_param("assignee_id", assignee_id) if assignee_id else None
+    if assigned_to_me and parsed_assignee_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "assigned_to_me cannot be combined with assignee_id")
+    if assigned_to_me and unassigned:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "assigned_to_me cannot be combined with unassigned")
+    if parsed_assignee_id and unassigned:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "assignee_id cannot be combined with unassigned")
+    return parsed_assignee_id, unassigned
+
+
 def _resolve_case_sort_cursor(
     *,
     sort_by: str,
@@ -9888,6 +10456,8 @@ async def list_cases(
     q: Optional[str] = None,
     branch_id: Optional[str] = None,
     assigned_to_me: bool = False,
+    assignee_id: Optional[str] = None,
+    unassigned: bool = False,
     phone: Optional[str] = None,
     has_delivery_error: bool = False,
     has_pending_outbox: bool = False,
@@ -9909,6 +10479,8 @@ async def list_cases(
             "q",
             "branch_id",
             "assigned_to_me",
+            "assignee_id",
+            "unassigned",
             "phone",
             "has_delivery_error",
             "has_pending_outbox",
@@ -9927,6 +10499,11 @@ async def list_cases(
         request.query_params.get("assigned_to_me"),
         default=assigned_to_me,
     )
+    unassigned = _parse_bool_param(
+        "unassigned",
+        request.query_params.get("unassigned"),
+        default=unassigned,
+    )
     has_delivery_error = _parse_bool_param(
         "has_delivery_error",
         request.query_params.get("has_delivery_error"),
@@ -9944,6 +10521,11 @@ async def list_cases(
     )
     last_activity_since_dt = _parse_datetime_param("last_activity_since", last_activity_since)
     sort_by_value = _parse_sort_param("sort_by", request.query_params.get("sort_by"))
+    assignee_filter_id, unassigned_filter = _parse_case_owner_filters(
+        assigned_to_me=assigned_to_me,
+        assignee_id=request.query_params.get("assignee_id") or assignee_id,
+        unassigned=unassigned,
+    )
 
     # Base query with common filters used by both count and item fetch.
     base_query = (
@@ -9999,6 +10581,30 @@ async def list_cases(
                     Handover.assigned_to_name == context.agent.name,
                 ),
             )
+        )
+    elif assignee_filter_id:
+        assignee_options = _list_case_assignee_options(
+            db,
+            client_id=context.client.id,
+            branch_id=_parse_uuid_param("branch_id", branch_id) if branch_id else None,
+            current_assignee_id=None,
+        )
+        assignee_option = next((item for item in assignee_options if item.agent_id == assignee_filter_id), None)
+        if not assignee_option:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid assignee_id")
+        base_query = base_query.filter(
+            or_(
+                Handover.assigned_to == str(assignee_filter_id),
+                and_(
+                    Handover.assigned_to.is_(None),
+                    Handover.assigned_to_name == assignee_option.agent_name,
+                ),
+            )
+        )
+    elif unassigned_filter:
+        base_query = base_query.filter(
+            Handover.assigned_to.is_(None),
+            func.coalesce(Handover.assigned_to_name, "") == "",
         )
 
     # Search filters
@@ -10682,6 +11288,36 @@ async def bulk_case_action(
         if idempotency and idempotency.record:
             release_idempotency(db, record=idempotency.record)
         raise
+
+
+@router.get(
+    "/cases/assignees",
+    response_model=ConsoleCaseAssigneeListResponse,
+)
+async def list_queue_case_assignees(
+    request: Request,
+    branch_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseAssigneeListResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "read")
+
+    requested_branch_id = _parse_uuid_param("branch_id", branch_id) if branch_id else None
+    if requested_branch_id:
+        _require_branch_access(context, requested_branch_id, message="Access to this branch denied")
+
+    if requested_branch_id is None and context.branch_restricted:
+        allowed_branch_ids = [branch.id for branch in context.branches if branch.id]
+        if len(allowed_branch_ids) == 1:
+            requested_branch_id = allowed_branch_ids[0]
+
+    items = _list_case_assignee_options(
+        db,
+        client_id=context.client.id,
+        branch_id=requested_branch_id,
+        current_assignee_id=None,
+    )
+    return ConsoleCaseAssigneeListResponse(items=items)
 
 
 @router.get(
@@ -11784,6 +12420,7 @@ async def create_inbox_macro(
 
     branch = _resolve_branch_from_context(context)
     now = datetime.now(timezone.utc)
+    action_config = _normalize_macro_action(body.action)
     macro = ConsoleMacroModel(
         id=uuid4(),
         client_id=context.client.id,
@@ -11792,6 +12429,7 @@ async def create_inbox_macro(
         scope=scope,
         label=_normalize_required_text(body.label, "label"),
         body=_normalize_required_text(body.body, "body"),
+        action_config=action_config,
         is_active=body.is_active if body.is_active is not None else True,
         created_at=now,
         updated_at=now,
@@ -11821,27 +12459,20 @@ async def update_inbox_macro(
     require_console_permission(context, "inbox", "write")
 
     branch = _resolve_branch_from_context(context)
-    macro = (
-        db.query(ConsoleMacroModel)
-        .filter(
-            ConsoleMacroModel.id == macro_id,
-            ConsoleMacroModel.client_id == context.client.id,
-            ConsoleMacroModel.branch_id == branch.id,
-        )
-        .first()
+    macro = _resolve_inbox_macro_for_context(
+        db,
+        context=context,
+        branch_id=branch.id,
+        macro_id=macro_id,
     )
-    if not macro:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Macro not found")
-
-    is_privileged = context.role in ("platform_admin", "owner", "admin")
-    if macro.agent_id and macro.agent_id != context.agent.id and not is_privileged:
-        raise ConsoleAPIError(403, "ACCESS_DENIED", "Cannot edit another agent's macro")
 
     fields_set = body.model_fields_set
     if "label" in fields_set:
         macro.label = _normalize_required_text(body.label, "label")
     if "body" in fields_set:
         macro.body = _normalize_required_text(body.body, "body")
+    if "action" in fields_set:
+        macro.action_config = _normalize_macro_action(body.action)
     if "is_active" in fields_set:
         macro.is_active = bool(body.is_active)
 
@@ -11850,6 +12481,107 @@ async def update_inbox_macro(
         db.commit()
 
     return _serialize_macro(macro)
+
+
+@router.post(
+    "/inbox/macros/{macro_id}/execute",
+    response_model=ConsoleMacroExecuteResponse,
+    responses={
+        401: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+        409: {"model": ConsoleErrorResponse},
+    },
+)
+async def execute_inbox_macro(
+    macro_id: UUID,
+    body: ConsoleMacroExecuteRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleMacroExecuteResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+
+    branch = _resolve_branch_from_context(context)
+    idempotency_key = _get_idempotency_key(request)
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.inbox_macro.execute",
+        payload={"macro_id": str(macro_id), "case_id": str(body.case_id)},
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        macro = _resolve_inbox_macro_for_context(
+            db,
+            context=context,
+            branch_id=branch.id,
+            macro_id=macro_id,
+        )
+        if not macro.is_active:
+            raise ConsoleAPIError(409, "MACRO_INACTIVE", "Macro is inactive")
+
+        action_config = _normalize_macro_action(
+            _serialize_macro_action(getattr(macro, "action_config", None))
+        )
+        if action_config is None:
+            raise ConsoleAPIError(409, "MACRO_ACTION_MISSING", "Macro has no executable action")
+
+        handover, conversation = _resolve_case_action_context(
+            db,
+            context=context,
+            case_id=body.case_id,
+            lock=True,
+        )
+        if conversation.branch_id != macro.branch_id:
+            raise ConsoleAPIError(
+                409,
+                "MACRO_BRANCH_MISMATCH",
+                "Macro branch does not match case branch",
+            )
+
+        response = _execute_macro_case_action(
+            db=db,
+            context=context,
+            macro=macro,
+            action_config=action_config,
+            handover=handover,
+            conversation=conversation,
+        )
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="macro_executed",
+            entity_type="console_macro",
+            entity_id=macro.id,
+            payload={
+                "case_id": str(handover.id),
+                "action_type": action_config["type"],
+                "scope": macro.scope,
+            },
+            branch_id=conversation.branch_id,
+        )
+        db.commit()
+
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
 
 
 @router.get(

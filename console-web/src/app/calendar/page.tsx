@@ -1,12 +1,31 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
+import {
+    bookingNeedsAttention,
+    createBooking,
+    fetchBookings,
+    getBookingAttentionLabel,
+    getVisitActionOptions,
+    registerNoShowFollowUp,
+    type BookingQueueLane,
+    type BookingStatusFilter,
+    type BookingStatusUpdateRequest,
+    updateBookingStatus,
+} from "@/lib/calendar-bookings";
+import {
+    buildCalendarWorkspaceScope,
+    buildInboxWorkspaceScope,
+    readCalendarWorkspacePrefs,
+    type InboxSidePanelMode,
+    writeCalendarWorkspacePrefs,
+} from "@/lib/inbox-workspace";
 import { getBookingStatusLabel, getBookingStatusColor } from "@/utils/labels";
 import AccessDenied from "@/components/AccessDenied";
 import { authApi, canAccessConsole } from "@/lib/api-client";
@@ -28,65 +47,6 @@ interface TimeSlot {
     available: boolean;
 }
 
-interface Booking {
-    id: string;
-    specialist_id: string;
-    specialist_name: string;
-    start_at: string;
-    end_at: string;
-    customer_name: string | null;
-    customer_phone: string | null;
-    service_type: string | null;
-    status: string;
-    no_show_followup_done?: boolean;
-    no_show_followup_result?: "contacted" | "rebooked" | null;
-    no_show_followup_closed_at?: string | null;
-    no_show_followup_closed_by?: string | null;
-    no_show_followup_rebooked_appointment_id?: string | null;
-    conversation_id?: string | null;
-    case_id?: string | null;
-    needs_action?: boolean;
-    attention_reason?: string | null;
-    created_at: string;
-}
-
-interface BookingCreateRequest {
-    specialist_id: string;
-    start_at: string;
-    end_at: string;
-    customer_name?: string;
-    customer_phone?: string;
-    service_type?: string;
-    notes?: string;
-    conversation_id?: string;
-    case_id?: string;
-}
-
-interface BookingStatusUpdateRequest {
-    status: "COMPLETED" | "NO_SHOW";
-    reason?: string;
-}
-
-interface BookingNoShowFollowUpRequest {
-    result?: "contacted" | "rebooked";
-    rebooked_appointment_id?: string;
-    note?: string;
-}
-
-interface BookingActionResponse {
-    success: boolean;
-    booking: Booking;
-}
-
-interface BookingsListResponse {
-    items: Booking[];
-    cursor?: string | null;
-    has_more?: boolean;
-}
-
-type BookingQueueLane = "attention" | "all";
-type BookingStatusFilter = "all" | "scheduled" | "completed" | "no_show" | "cancelled";
-
 async function fetchSpecialists(): Promise<{ items: Specialist[] }> {
     const response = await api.get("/calendar/specialists");
     return response.data;
@@ -95,103 +55,6 @@ async function fetchSpecialists(): Promise<{ items: Specialist[] }> {
 async function fetchSlots(specialistId: string, date: string, duration: number): Promise<{ slots: TimeSlot[] }> {
     const response = await api.get(`/calendar/slots?specialist_id=${specialistId}&date=${date}&duration=${duration}`);
     return response.data;
-}
-
-async function fetchBookings(options?: {
-    date?: string;
-    conversationId?: string;
-    caseId?: string;
-    lane?: BookingQueueLane;
-    status?: BookingStatusFilter;
-    needsAction?: boolean;
-    cursor?: string;
-}): Promise<BookingsListResponse> {
-    const params = new URLSearchParams();
-    if (options?.date) {
-        params.set("date_from", options.date);
-        params.set("date_to", options.date);
-    }
-    if (options?.conversationId) {
-        params.set("conversation_id", options.conversationId);
-    }
-    if (options?.caseId) {
-        params.set("case_id", options.caseId);
-    }
-    if (options?.lane) {
-        params.set("lane", options.lane);
-    }
-    if (options?.status && options.status !== "all") {
-        params.set("status", options.status);
-    }
-    if (typeof options?.needsAction === "boolean") {
-        params.set("needs_action", String(options.needsAction));
-    }
-    if (options?.cursor) {
-        params.set("cursor", options.cursor);
-    }
-    const suffix = params.toString() ? `?${params.toString()}` : "";
-    const response = await api.get(`/calendar/bookings${suffix}`);
-    return response.data;
-}
-
-async function createBooking(data: BookingCreateRequest): Promise<BookingActionResponse> {
-    const response = await api.post("/calendar/bookings", data);
-    return response.data;
-}
-
-async function updateBookingStatus(bookingId: string, data: BookingStatusUpdateRequest): Promise<BookingActionResponse> {
-    const response = await api.post(`/calendar/bookings/${bookingId}/status`, data);
-    return response.data;
-}
-
-async function registerNoShowFollowUp(
-    bookingId: string,
-    data: BookingNoShowFollowUpRequest = {},
-): Promise<BookingActionResponse> {
-    const response = await api.post(`/calendar/bookings/${bookingId}/no-show-followup`, data);
-    return response.data;
-}
-
-function getVisitActionOptions(status: string): Array<{ status: BookingStatusUpdateRequest["status"]; label: string }> {
-    const normalized = status.toUpperCase();
-    if (["HOLD", "PENDING_CONFIRMATION", "CONFIRMED", "RESCHEDULE_REQUESTED", "CHECKED_IN"].includes(normalized)) {
-        return [
-            { status: "COMPLETED", label: "Пришел" },
-            { status: "NO_SHOW", label: "Не пришел" },
-        ];
-    }
-    return [];
-}
-
-function bookingNeedsAttention(booking: Booking): boolean {
-    if (typeof booking.needs_action === "boolean") {
-        return booking.needs_action;
-    }
-    const normalized = booking.status.toUpperCase();
-    if (normalized === "NO_SHOW" && !booking.no_show_followup_done) {
-        return true;
-    }
-    return ["PENDING_CONFIRMATION", "RESCHEDULE_REQUESTED", "NO_SHOW", "HOLD"].includes(normalized);
-}
-
-function getBookingAttentionLabel(booking: Booking): string | null {
-    if (booking.attention_reason && booking.attention_reason.trim()) {
-        return booking.attention_reason;
-    }
-    const normalized = booking.status.toUpperCase();
-    if (normalized === "PENDING_CONFIRMATION") {
-        return "Нужно подтвердить визит";
-    }
-    if (normalized === "RESCHEDULE_REQUESTED") {
-        return "Клиент просит перенос";
-    }
-    if (normalized === "HOLD") {
-        return "Нужно решение менеджера";
-    }
-    if (normalized === "NO_SHOW" && !booking.no_show_followup_done) {
-        return "Связаться после неявки";
-    }
-    return null;
 }
 
 function formatDate(date: Date): string {
@@ -208,6 +71,12 @@ export default function CalendarPage() {
     const today = formatDate(new Date());
     const focusedConversationId = searchParams.get("conversation_id") || "";
     const focusedCaseId = searchParams.get("case_id") || "";
+    const returnPanelParam = searchParams.get("return_panel");
+    const returnPanel: InboxSidePanelMode | null = returnPanelParam === "details"
+        ? "details"
+        : returnPanelParam === "bookings" || focusedConversationId || focusedCaseId
+            ? "bookings"
+            : null;
 
     const { data: meData } = useQuery({
         queryKey: ["console-me"],
@@ -221,10 +90,32 @@ export default function CalendarPage() {
     const role = meData?.agent?.role ?? "manager";
     const canReadCalendar = canAccessConsole(role, "calendar", "read");
     const canWriteCalendar = canAccessConsole(role, "calendar", "write");
+    const selectedBranchId = meData?.selected_branch_id ?? meData?.agent?.branch_id ?? "";
+    const inboxWorkspaceScope = useMemo(
+        () =>
+            buildInboxWorkspaceScope({
+                role,
+                agentId: meData?.agent?.id,
+                clientId: meData?.client?.id,
+                branchId: selectedBranchId,
+            }),
+        [role, meData?.agent?.id, meData?.client?.id, selectedBranchId],
+    );
+    const calendarWorkspaceScope = useMemo(
+        () =>
+            buildCalendarWorkspaceScope({
+                scope: inboxWorkspaceScope,
+                caseId: focusedCaseId || null,
+                conversationId: focusedConversationId || null,
+            }),
+        [inboxWorkspaceScope, focusedCaseId, focusedConversationId],
+    );
+    const restoredCalendarScopeRef = useRef<string | null>(null);
+    const defaultSelectedDate = focusedConversationId || focusedCaseId ? "" : today;
 
     // Form state
     const [selectedSpecialist, setSelectedSpecialist] = useState<string>("");
-    const [selectedDate, setSelectedDate] = useState<string>(today);
+    const [selectedDate, setSelectedDate] = useState<string>(defaultSelectedDate);
     const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
     const [selectedService, setSelectedService] = useState<{ name: string; duration_min: number; price: number } | null>(null);
     const [customerName, setCustomerName] = useState("");
@@ -237,6 +128,28 @@ export default function CalendarPage() {
     const [queueLane, setQueueLane] = useState<BookingQueueLane>(focusedConversationId ? "all" : "attention");
     const [queueStatusFilter, setQueueStatusFilter] = useState<BookingStatusFilter>("all");
     const [queueSearch, setQueueSearch] = useState("");
+
+    useEffect(() => {
+        if (!calendarWorkspaceScope || restoredCalendarScopeRef.current === calendarWorkspaceScope) {
+            return;
+        }
+        const prefs = readCalendarWorkspacePrefs(calendarWorkspaceScope);
+        setSelectedDate(prefs?.selectedDate ?? defaultSelectedDate);
+        setQueueLane(prefs?.queueLane ?? (focusedConversationId ? "all" : "attention"));
+        setQueueStatusFilter(prefs?.queueStatusFilter ?? "all");
+        restoredCalendarScopeRef.current = calendarWorkspaceScope;
+    }, [calendarWorkspaceScope, defaultSelectedDate, focusedConversationId]);
+
+    useEffect(() => {
+        if (!calendarWorkspaceScope || restoredCalendarScopeRef.current !== calendarWorkspaceScope) {
+            return;
+        }
+        writeCalendarWorkspacePrefs(calendarWorkspaceScope, {
+            selectedDate,
+            queueLane,
+            queueStatusFilter,
+        });
+    }, [calendarWorkspaceScope, selectedDate, queueLane, queueStatusFilter]);
 
     // Queries
     const { data: specialistsData, isError: specialistsError, error: specialistsErrorData } = useQuery({
@@ -262,7 +175,7 @@ export default function CalendarPage() {
         queryKey: ["bookings", selectedDate, focusedConversationId, focusedCaseId, queueLane, queueStatusFilter],
         queryFn: () =>
             fetchBookings({
-                date: selectedDate,
+                date: selectedDate || undefined,
                 conversationId: focusedConversationId || undefined,
                 caseId: focusedCaseId || undefined,
                 lane: queueLane,
@@ -419,6 +332,12 @@ export default function CalendarPage() {
         });
     };
 
+    const buildCaseHref = (caseId: string) =>
+        returnPanel
+            ? `/cases/${encodeURIComponent(caseId)}?panel=${returnPanel}`
+            : `/cases/${encodeURIComponent(caseId)}`;
+    const backToCasesHref = focusedCaseId ? buildCaseHref(focusedCaseId) : "/";
+
     if (!session) {
         return (
             <div className="p-8 text-center text-muted-foreground">
@@ -449,7 +368,7 @@ export default function CalendarPage() {
                     )}
                 </div>
                 <Link
-                    href={focusedCaseId ? `/cases/${encodeURIComponent(focusedCaseId)}` : "/"}
+                    href={backToCasesHref}
                     className="btn-ghost"
                     data-testid="calendar-back-to-cases"
                 >
@@ -466,13 +385,13 @@ export default function CalendarPage() {
                         <div>
                             <p className="text-sm font-semibold">Режим по заявке включен</p>
                             <p className="text-xs text-muted-foreground">
-                                Показываются записи, связанные с выбранной заявкой.
+                                Показываются записи, связанные с выбранной заявкой. Дата по умолчанию не ограничивает список, пока вы не выберете её вручную.
                             </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
                             {focusedCaseId && (
                                 <Link
-                                    href={`/cases/${encodeURIComponent(focusedCaseId)}`}
+                                    href={buildCaseHref(focusedCaseId)}
                                     className="rounded border border-border/60 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-background"
                                     data-testid="calendar-open-linked-case"
                                 >
@@ -582,6 +501,11 @@ export default function CalendarPage() {
                                     min={showPastDates ? undefined : today}
                                     className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
                                 />
+                                {focusedConversationId && !selectedDate && (
+                                    <p className="mt-2 text-xs text-muted-foreground" data-testid="calendar-case-all-dates-hint">
+                                        Сейчас показываем все даты по этой заявке. Выберите дату, только если хотите сузить список.
+                                    </p>
+                                )}
                                 <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                                     <input
                                         type="checkbox"
@@ -604,7 +528,7 @@ export default function CalendarPage() {
                     </div>
 
                     {/* Slots Grid */}
-                    {selectedSpecialist && (
+                    {selectedSpecialist && selectedDate && (
                         <div className="card-surface p-4">
                             <h2 className="font-semibold text-lg mb-4">
                                 Доступные слоты на {new Date(selectedDate).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
@@ -657,6 +581,11 @@ export default function CalendarPage() {
                                     Выбрано
                                 </span>
                             </div>
+                        </div>
+                    )}
+                    {selectedSpecialist && !selectedDate && (
+                        <div className="card-surface p-4 text-sm text-muted-foreground" data-testid="calendar-select-date-hint">
+                            Выберите дату, чтобы посмотреть слоты по мастеру. Очередь справа уже показывает все связанные записи по заявке.
                         </div>
                     )}
 
@@ -868,7 +797,7 @@ export default function CalendarPage() {
                                         {booking.case_id && (
                                             <div className="mt-2 flex items-center gap-2">
                                                 <Link
-                                                    href={`/cases/${encodeURIComponent(booking.case_id)}`}
+                                                    href={buildCaseHref(booking.case_id)}
                                                     className="rounded border border-border/60 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-background"
                                                     data-testid="calendar-booking-open-case"
                                                 >

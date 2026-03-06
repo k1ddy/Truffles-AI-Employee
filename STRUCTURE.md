@@ -165,6 +165,14 @@
 | `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md` | Wave5 Task Package for action-driven SLA contract in Inbox (`backend contract -> frontend surfaces`) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md` | Wave6 Task Package for bounded single-case Inbox actions (`reassign/snooze/reopen`) before bulk scope | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md` | Wave6 Part B Task Package for backend-first bulk/supervisor Inbox actions (`bulk reassign/snooze` -> queue selection UI) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-a1.md` | Wave7 Task Package for backend action-macro contract in Inbox (`structured macro action + execute endpoint`) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-partb-a1.md` | Wave7 Part B Task Package for macro UI builder/apply flow in Inbox workspace | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md` | Wave8 Task Package for unified inbox+bookings workspace shell (`Part A`) with embedded case-linked bookings panel | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md` | Wave8 Part B Task Package for context/panel preservation between inbox workspace and full calendar route | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md` | Wave9 Part A Task Package for supervisor/admin queue governance in Inbox (`role-aware views + visible fields`, no new route) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md` | Wave9 Part B Task Package for server-backed owner/unassigned governance in Inbox (`assignee filter + queue assignee endpoint`, no new route) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md` | Wave10 Part A Task Package for factual assignee workload signals in Inbox reassignment surfaces (`load counts in reassign selects`, no fake availability) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md` | Wave10 Part B Task Package for one-click recommended routing in current reassignment surfaces (`recommendation CTA`, no hidden automation) | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |
