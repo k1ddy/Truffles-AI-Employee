@@ -136,7 +136,14 @@ from app.schemas.console import (
     ConsoleCase,
     ConsoleCaseActionResponse,
     ConsoleCaseActionSync,
+    ConsoleCaseAssigneeListResponse,
+    ConsoleCaseAssigneeOption,
+    ConsoleCaseBulkActionRequest,
+    ConsoleCaseBulkActionResponse,
+    ConsoleCaseBulkActionResult,
     ConsoleCaseListResponse,
+    ConsoleCaseReassignRequest,
+    ConsoleCaseSnoozeRequest,
     ConsoleClient,
     ConsoleClientCreateRequest,
     ConsoleClientCreateResponse,
@@ -721,6 +728,8 @@ from app.services.sla_profile_registry_service import (
     resolve_effective_profile_version,
     rollback_profile_version,
 )
+from app.services.state_service import manager_reassign as state_manager_reassign
+from app.services.state_service import manager_reopen as state_manager_reopen
 from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_return as state_manager_return
 from app.services.state_service import manager_take as state_manager_take
@@ -797,51 +806,324 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
     )
 
 
-def _calculate_sla_status(created_at: datetime) -> str:
-    time_since_creation = (datetime.now(timezone.utc) - created_at).total_seconds()
-    if time_since_creation > 7200:  # 2 hours
+_CASE_REPLY_WINDOW_MINUTES = 60
+_CASE_DUE_SOON_MINUTES = 15
+_CASE_ASSIGNABLE_ROLES = {"owner", "admin", "manager"}
+_CASE_SNOOZE_DEFAULT_REASON = "case_snooze"
+_CASE_BULK_MAX_ITEMS = 50
+_CASE_SNOOZE_META_KEYS = (
+    "snoozed_until",
+    "snoozed_at",
+    "snooze_reason",
+    "snoozed_by_id",
+    "snoozed_by_name",
+)
+
+
+def _resolve_case_reply_deadline(created_at: datetime) -> datetime:
+    return created_at + timedelta(minutes=_CASE_REPLY_WINDOW_MINUTES)
+
+
+def _calculate_sla_status(*, deadline_at: datetime, now_utc: datetime) -> str:
+    remaining_seconds = (deadline_at - now_utc).total_seconds()
+    if remaining_seconds <= 0:
         return "breached"
-    if time_since_creation > 3600:  # 1 hour
+    if remaining_seconds <= _CASE_DUE_SOON_MINUTES * 60:
         return "warning"
     return "ok"
+
+
+def _parse_case_snooze_datetime(value: object) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return _coerce_utc_datetime(value)
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return _coerce_utc_datetime(parsed)
+
+
+def _resolve_case_snooze_state(
+    *,
+    handover_meta: object,
+    last_inbound_at: Optional[datetime],
+    now_utc: datetime,
+) -> dict[str, object | None]:
+    if not isinstance(handover_meta, dict):
+        return {
+            "active": False,
+            "snoozed_until": None,
+            "snoozed_reason": None,
+            "snoozed_by": None,
+        }
+
+    snoozed_until = _parse_case_snooze_datetime(handover_meta.get("snoozed_until"))
+    snoozed_at = _parse_case_snooze_datetime(handover_meta.get("snoozed_at"))
+    if not snoozed_until or snoozed_until <= now_utc:
+        return {
+            "active": False,
+            "snoozed_until": None,
+            "snoozed_reason": None,
+            "snoozed_by": None,
+        }
+    if last_inbound_at and snoozed_at and last_inbound_at > snoozed_at:
+        return {
+            "active": False,
+            "snoozed_until": None,
+            "snoozed_reason": None,
+            "snoozed_by": None,
+        }
+
+    return {
+        "active": True,
+        "snoozed_until": snoozed_until.isoformat(),
+        "snoozed_reason": _normalize_optional_text(handover_meta.get("snooze_reason")),
+        "snoozed_by": _normalize_optional_text(handover_meta.get("snoozed_by_name")),
+    }
 
 
 def _build_case_queue_signals(
     *,
     created_at: datetime,
+    status: str,
     needs_reply: bool,
     has_delivery_error: bool,
     has_pending_outbox: bool,
     human_lock_active: bool,
-) -> dict[str, Optional[str]]:
-    sla_status = _calculate_sla_status(created_at)
-    target_response_at = (created_at + timedelta(hours=1)).isoformat()
+    human_lock_reason: Optional[str] = None,
+    last_inbound_at: Optional[datetime] = None,
+    last_outbound_at: Optional[datetime] = None,
+    first_response_at: Optional[datetime] = None,
+    handover_meta: object = None,
+    now_utc: Optional[datetime] = None,
+) -> dict[str, object | None]:
+    effective_now = now_utc or datetime.now(timezone.utc)
+    deadline_at = _resolve_case_reply_deadline(created_at)
+    target_response_at = deadline_at.isoformat()
+    sla_status = _calculate_sla_status(deadline_at=deadline_at, now_utc=effective_now) if needs_reply else "ok"
+    sla_action_state = "waiting_client"
+    sla_overdue_minutes: Optional[int] = None
     priority_tier = "low"
     attention_reason = None
+    waiting_for_customer = (
+        not needs_reply
+        and status != "resolved"
+        and (
+            human_lock_active
+            or (last_outbound_at is not None and (last_inbound_at is None or last_outbound_at >= last_inbound_at))
+            or first_response_at is not None
+        )
+    )
+    snooze_state = _resolve_case_snooze_state(
+        handover_meta=handover_meta,
+        last_inbound_at=last_inbound_at,
+        now_utc=effective_now,
+    )
+
     if has_delivery_error:
         priority_tier = "urgent"
         attention_reason = "Ошибка доставки: проверьте отправку"
-    elif needs_reply and sla_status == "breached":
-        priority_tier = "urgent"
-        attention_reason = "SLA просрочен: нужен ответ менеджера"
-    elif needs_reply and sla_status == "warning":
-        priority_tier = "high"
-        attention_reason = "SLA на подходе: ответьте клиенту"
+        sla_action_state = "delivery_issue"
     elif has_pending_outbox:
         priority_tier = "high"
         attention_reason = "Есть ожидающие отправки сообщения"
-    elif needs_reply:
-        priority_tier = "normal"
+        sla_action_state = "pending_outbox"
+    elif bool(snooze_state["active"]):
+        priority_tier = "low"
+        attention_reason = "Диалог отложен менеджером"
+        sla_action_state = "snoozed"
+    elif needs_reply and sla_status == "breached":
+        sla_overdue_minutes = max(
+            1,
+            int((effective_now - deadline_at).total_seconds() // 60),
+        )
+        priority_tier = "urgent"
         attention_reason = "Клиент ожидает ответ"
-    elif human_lock_active:
+        sla_action_state = "overdue"
+    elif needs_reply:
+        priority_tier = "high" if sla_status == "warning" else "normal"
+        attention_reason = "Клиент ожидает ответ"
+        sla_action_state = "reply_due"
+    elif waiting_for_customer:
         priority_tier = "normal"
-        attention_reason = "Диалог на ручном контроле менеджера"
+        attention_reason = "Ожидаем ответ клиента"
+        sla_action_state = "waiting_client"
+    elif status == "resolved":
+        sla_action_state = "resolved"
+
     return {
         "sla_status": sla_status,
+        "sla_action_state": sla_action_state,
+        "sla_overdue_minutes": sla_overdue_minutes,
         "priority_tier": priority_tier,
         "attention_reason": attention_reason,
         "target_response_at": target_response_at,
+        "snoozed_until": snooze_state["snoozed_until"],
+        "snoozed_reason": snooze_state["snoozed_reason"],
+        "snoozed_by": snooze_state["snoozed_by"],
     }
+
+
+def _build_case_action_case(
+    *,
+    handover: Handover,
+    branch_id: UUID | None,
+    now_utc: Optional[datetime] = None,
+) -> ConsoleCase:
+    effective_now = now_utc or datetime.now(timezone.utc)
+    snooze_state = _resolve_case_snooze_state(
+        handover_meta=handover.meta,
+        last_inbound_at=None,
+        now_utc=effective_now,
+    )
+    return ConsoleCase(
+        id=handover.id,
+        conversation_id=handover.conversation_id,
+        status=handover.status,
+        trigger_type=handover.trigger_type,
+        created_at=handover.created_at.isoformat(),
+        assigned_to_id=str(handover.assigned_to) if handover.assigned_to else None,
+        assigned_to_name=handover.assigned_to_name,
+        branch_id=branch_id,
+        **_format_case_metrics(handover),
+        snoozed_until=snooze_state["snoozed_until"],
+        snoozed_reason=snooze_state["snoozed_reason"],
+        snoozed_by=snooze_state["snoozed_by"],
+    )
+
+
+def _set_case_snooze_meta(
+    handover: Handover,
+    *,
+    snoozed_until: datetime,
+    now_utc: datetime,
+    reason: Optional[str],
+    agent_id: UUID,
+    agent_name: str,
+) -> None:
+    raw_meta = getattr(handover, "meta", None)
+    meta = dict(raw_meta) if isinstance(raw_meta, dict) else {}
+    meta["snoozed_until"] = snoozed_until.isoformat()
+    meta["snoozed_at"] = now_utc.isoformat()
+    meta["snooze_reason"] = reason
+    meta["snoozed_by_id"] = str(agent_id)
+    meta["snoozed_by_name"] = agent_name
+    handover.meta = meta
+
+
+def _clear_case_snooze_meta(handover: Handover) -> None:
+    raw_meta = getattr(handover, "meta", None)
+    if not isinstance(raw_meta, dict):
+        return
+    meta = dict(raw_meta)
+    changed = False
+    for key in _CASE_SNOOZE_META_KEYS:
+        if key in meta:
+            meta.pop(key, None)
+            changed = True
+    if changed:
+        handover.meta = meta
+
+
+def _resolve_case_action_context(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    case_id: UUID,
+    lock: bool = True,
+) -> tuple[Handover, Conversation]:
+    case_query = db.query(Handover).filter(
+        Handover.id == case_id,
+        Handover.client_id == context.client.id,
+    )
+    if lock:
+        case_query = case_query.with_for_update()
+    handover = case_query.first()
+    if not handover:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Case not found")
+
+    conversation_query = db.query(Conversation).filter(Conversation.id == handover.conversation_id)
+    if lock:
+        conversation_query = conversation_query.with_for_update()
+    conversation = conversation_query.first()
+    if not conversation:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+
+    _require_branch_access(context, conversation.branch_id, message="Access to this case denied")
+    return handover, conversation
+
+
+def _require_case_operator_access(
+    *,
+    context: ConsoleAuthContext,
+    handover: Handover,
+) -> None:
+    if context.role in ("platform_admin", "owner", "admin"):
+        return
+
+    actor_id = str(context.agent.id)
+    if handover.assigned_to and str(handover.assigned_to) != actor_id:
+        raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+
+    if not handover.assigned_to and handover.assigned_to_name and handover.assigned_to_name != context.agent.name:
+        raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+
+
+def _build_case_action_response(
+    *,
+    handover: Handover,
+    branch_id: UUID | None,
+    sync: Optional[ConsoleCaseActionSync] = None,
+) -> ConsoleCaseActionResponse:
+    return ConsoleCaseActionResponse(
+        success=True,
+        case=_build_case_action_case(handover=handover, branch_id=branch_id),
+        sync=sync,
+    )
+
+
+def _normalize_case_bulk_ids(case_ids: list[UUID]) -> list[UUID]:
+    if not case_ids:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "case_ids must contain at least one case")
+
+    deduped: list[UUID] = []
+    seen: set[UUID] = set()
+    for case_id in case_ids:
+        if case_id in seen:
+            continue
+        seen.add(case_id)
+        deduped.append(case_id)
+
+    if len(deduped) > _CASE_BULK_MAX_ITEMS:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"case_ids must contain at most {_CASE_BULK_MAX_ITEMS} cases",
+        )
+    return deduped
+
+
+def _build_case_bulk_result(
+    *,
+    case_id: UUID,
+    status: Literal["processed", "skipped", "failed"],
+    code: str,
+    message: Optional[str] = None,
+    handover: Optional[Handover] = None,
+    branch_id: UUID | None = None,
+) -> ConsoleCaseBulkActionResult:
+    case_snapshot = None
+    if handover is not None:
+        case_snapshot = _build_case_action_case(handover=handover, branch_id=branch_id)
+    return ConsoleCaseBulkActionResult(
+        case_id=case_id,
+        status=status,
+        code=code,
+        message=message,
+        case=case_snapshot,
+    )
 
 
 def _format_telegram_timestamp(value: Optional[int]) -> Optional[str]:
@@ -4872,6 +5154,70 @@ def _serialize_membership(
         is_active=membership.is_active,
         created_at=membership.created_at.isoformat() if membership.created_at else None,
         updated_at=membership.updated_at.isoformat() if membership.updated_at else None,
+    )
+
+
+def _list_case_assignee_options(
+    db: Session,
+    *,
+    client_id: UUID,
+    branch_id: UUID | None,
+    current_assignee_id: Optional[str],
+) -> list[ConsoleCaseAssigneeOption]:
+    client = db.query(Client).filter(Client.id == client_id).first()
+    company_id = client.company_id if client else None
+
+    options_by_agent_id: dict[UUID, ConsoleCaseAssigneeOption] = {}
+    membership_query = (
+        db.query(AgentMembership, Agent)
+        .join(Agent, Agent.id == AgentMembership.agent_id)
+        .filter(
+            Agent.is_active.is_(True),
+            AgentMembership.is_active.is_(True),
+            AgentMembership.role.in_(tuple(_CASE_ASSIGNABLE_ROLES)),
+        )
+    )
+
+    scope_filters = [and_(AgentMembership.scope == "client", AgentMembership.client_id == client_id)]
+    if branch_id:
+        scope_filters.append(and_(AgentMembership.scope == "branch", AgentMembership.branch_id == branch_id))
+    if company_id:
+        scope_filters.append(and_(AgentMembership.scope == "company", AgentMembership.company_id == company_id))
+
+    memberships = membership_query.filter(or_(*scope_filters)).order_by(AgentMembership.created_at.desc()).all()
+    for membership, agent in memberships:
+        if agent.role == "platform_admin":
+            continue
+        options_by_agent_id[agent.id] = ConsoleCaseAssigneeOption(
+            agent_id=agent.id,
+            agent_name=agent.name or "Менеджер",
+            role=membership.role,
+            branch_id=membership.branch_id or agent.branch_id,
+            is_current=str(agent.id) == (current_assignee_id or ""),
+        )
+
+    legacy_query = db.query(Agent).filter(
+        Agent.client_id == client_id,
+        Agent.is_active.is_(True),
+        Agent.role.in_(tuple(_CASE_ASSIGNABLE_ROLES)),
+    )
+    if branch_id:
+        legacy_query = legacy_query.filter(or_(Agent.branch_id == branch_id, Agent.branch_id.is_(None)))
+    legacy_agents = legacy_query.order_by(Agent.name.asc().nullslast()).all()
+    for agent in legacy_agents:
+        if agent.id in options_by_agent_id:
+            continue
+        options_by_agent_id[agent.id] = ConsoleCaseAssigneeOption(
+            agent_id=agent.id,
+            agent_name=agent.name or "Менеджер",
+            role=agent.role,
+            branch_id=agent.branch_id,
+            is_current=str(agent.id) == (current_assignee_id or ""),
+        )
+
+    return sorted(
+        options_by_agent_id.values(),
+        key=lambda item: (not item.is_current, item.agent_name.lower(), str(item.agent_id)),
     )
 
 
@@ -9919,12 +10265,15 @@ async def list_cases(
                 trigger_value=handover.trigger_value,
                 context_summary=handover.context_summary,
                 user_message=handover.user_message,
+                assigned_to_id=str(handover.assigned_to) if handover.assigned_to else None,
                 assigned_to_name=handover.assigned_to_name,
                 branch_id=conversation.branch_id,
                 channel=handover.channel,
                 created_at=handover.created_at.isoformat(),
                 **_format_case_metrics(handover),
                 sla_status=queue_signals["sla_status"],
+                sla_action_state=queue_signals["sla_action_state"],
+                sla_overdue_minutes=queue_signals["sla_overdue_minutes"],
                 priority_tier=queue_signals["priority_tier"],
                 attention_reason=queue_signals["attention_reason"],
                 target_response_at=queue_signals["target_response_at"],
@@ -9951,6 +10300,9 @@ async def list_cases(
                 human_lock_source=lock_source,
                 human_lock_reason=lock_reason,
                 human_lock_by=lock_by_name,
+                snoozed_until=queue_signals["snoozed_until"],
+                snoozed_reason=queue_signals["snoozed_reason"],
+                snoozed_by=queue_signals["snoozed_by"],
             )
             for (
                 handover,
@@ -9978,10 +10330,16 @@ async def list_cases(
             for queue_signals in [
                 _build_case_queue_signals(
                     created_at=handover.created_at,
+                    status=handover.status,
                     needs_reply=needs_reply,
                     has_delivery_error=has_delivery_error,
                     has_pending_outbox=has_pending_outbox,
                     human_lock_active=human_lock_active,
+                    human_lock_reason=lock_reason,
+                    last_inbound_at=last_inbound_at,
+                    last_outbound_at=last_outbound_at,
+                    first_response_at=handover.first_response_at,
+                    handover_meta=handover.meta,
                 )
             ]
         ],
@@ -9989,6 +10347,679 @@ async def list_cases(
         has_more=has_more,
         total=total_count,
     )
+
+
+@router.post(
+    "/cases/bulk",
+    response_model=ConsoleCaseBulkActionResponse,
+)
+async def bulk_case_action(
+    body: ConsoleCaseBulkActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseBulkActionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+    action = body.action
+    case_ids = _normalize_case_bulk_ids(body.case_ids)
+    idempotency_key = _get_idempotency_key(request)
+
+    target_agent_id: Optional[UUID] = None
+    snooze_minutes: Optional[int] = None
+    snooze_reason: Optional[str] = None
+
+    if action == "reassign":
+        if body.agent_id is None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "agent_id is required for reassign")
+        target_agent_id = body.agent_id
+    elif action == "snooze":
+        snooze_minutes = _normalize_pause_minutes(body.minutes, default=30, allow_zero=False)
+        snooze_reason = _normalize_optional_text(body.reason) or _CASE_SNOOZE_DEFAULT_REASON
+
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.bulk",
+        payload={
+            "action": action,
+            "case_ids": [str(case_id) for case_id in case_ids],
+            "agent_id": str(target_agent_id) if target_agent_id else None,
+            "minutes": snooze_minutes,
+            "reason": snooze_reason,
+        },
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        handovers = (
+            db.query(Handover)
+            .filter(
+                Handover.client_id == context.client.id,
+                Handover.id.in_(case_ids),
+            )
+            .with_for_update()
+            .all()
+        )
+        handovers_by_id = {handover.id: handover for handover in handovers}
+        conversation_ids = [handover.conversation_id for handover in handovers]
+        conversations = (
+            db.query(Conversation)
+            .filter(Conversation.id.in_(conversation_ids))
+            .with_for_update()
+            .all()
+        ) if conversation_ids else []
+        conversations_by_id = {conversation.id: conversation for conversation in conversations}
+
+        assignee_cache: dict[UUID | None, list[ConsoleCaseAssigneeOption]] = {}
+        results: list[ConsoleCaseBulkActionResult] = []
+        processed_count = 0
+        skipped_count = 0
+        failed_count = 0
+        actor_name = context.agent.name or "Менеджер"
+
+        for case_id in case_ids:
+            handover = handovers_by_id.get(case_id)
+            if handover is None:
+                skipped_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="skipped",
+                        code="NOT_FOUND",
+                        message="Case not found",
+                    )
+                )
+                continue
+
+            conversation = conversations_by_id.get(handover.conversation_id)
+            if conversation is None:
+                failed_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="failed",
+                        code="NOT_FOUND",
+                        message="Conversation not found",
+                    )
+                )
+                continue
+
+            branch_id = conversation.branch_id
+            try:
+                _require_branch_access(context, branch_id, message="Access to this case denied")
+                _require_case_operator_access(context=context, handover=handover)
+
+                if action == "reassign":
+                    if handover.status == "resolved":
+                        skipped_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="skipped",
+                                code="CASE_ALREADY_RESOLVED",
+                                message="Case already resolved",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+                    if handover.status != "active":
+                        skipped_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="skipped",
+                                code="CASE_NOT_ACTIVE",
+                                message="Case must be active to reassign",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+
+                    if branch_id not in assignee_cache:
+                        assignee_cache[branch_id] = _list_case_assignee_options(
+                            db,
+                            client_id=context.client.id,
+                            branch_id=branch_id,
+                            current_assignee_id=str(handover.assigned_to) if handover.assigned_to else None,
+                        )
+                    target_option = next(
+                        (
+                            option
+                            for option in assignee_cache[branch_id]
+                            if option.agent_id == target_agent_id
+                        ),
+                        None,
+                    )
+                    if target_option is None:
+                        skipped_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="skipped",
+                                code="NOT_FOUND",
+                                message="Assignee not available for this case",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+
+                    current_assignee_id = str(handover.assigned_to) if handover.assigned_to else None
+                    if current_assignee_id == str(target_agent_id):
+                        skipped_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="skipped",
+                                code="ALREADY_ASSIGNED",
+                                message="Case already assigned to target manager",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+
+                    result = state_manager_reassign(
+                        db,
+                        conversation,
+                        handover,
+                        manager_id=str(target_option.agent_id),
+                        manager_name=target_option.agent_name,
+                    )
+                    if not result.ok:
+                        failed_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="failed",
+                                code="CASE_NOT_ACTIVE",
+                                message=result.error or "Case must be active to reassign",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+
+                    record_audit_event(
+                        db,
+                        actor=context.agent,
+                        event_type="case_bulk_reassigned",
+                        entity_type="handover",
+                        entity_id=handover.id,
+                        payload={
+                            "action": action,
+                            "assigned_to_id": str(target_option.agent_id),
+                            "assigned_to_name": target_option.agent_name,
+                        },
+                        branch_id=branch_id,
+                    )
+                    processed_count += 1
+                    results.append(
+                        _build_case_bulk_result(
+                            case_id=case_id,
+                            status="processed",
+                            code="REASSIGNED",
+                            message=f"Assigned to {target_option.agent_name}",
+                            handover=handover,
+                            branch_id=branch_id,
+                        )
+                    )
+                    continue
+
+                if handover.status == "resolved":
+                    skipped_count += 1
+                    results.append(
+                        _build_case_bulk_result(
+                            case_id=case_id,
+                            status="skipped",
+                            code="CASE_ALREADY_RESOLVED",
+                            message="Case already resolved",
+                            handover=handover,
+                            branch_id=branch_id,
+                        )
+                    )
+                    continue
+                if handover.status != "active":
+                    skipped_count += 1
+                    results.append(
+                        _build_case_bulk_result(
+                            case_id=case_id,
+                            status="skipped",
+                            code="CASE_NOT_ACTIVE",
+                            message="Case must be active to snooze",
+                            handover=handover,
+                            branch_id=branch_id,
+                        )
+                    )
+                    continue
+
+                now_utc = datetime.now(timezone.utc)
+                _set_case_snooze_meta(
+                    handover,
+                    snoozed_until=now_utc + timedelta(minutes=snooze_minutes or 30),
+                    now_utc=now_utc,
+                    reason=snooze_reason,
+                    agent_id=context.agent.id,
+                    agent_name=actor_name,
+                )
+                record_audit_event(
+                    db,
+                    actor=context.agent,
+                    event_type="case_bulk_snoozed",
+                    entity_type="handover",
+                    entity_id=handover.id,
+                    payload={
+                        "action": action,
+                        "minutes": snooze_minutes,
+                        "reason": snooze_reason,
+                    },
+                    branch_id=branch_id,
+                )
+                processed_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="processed",
+                        code="SNOOZED",
+                        message="Case snoozed",
+                        handover=handover,
+                        branch_id=branch_id,
+                    )
+                )
+            except ConsoleAPIError as exc:
+                skipped_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="skipped",
+                        code=exc.code,
+                        message=exc.message,
+                        handover=handover,
+                        branch_id=branch_id,
+                    )
+                )
+            except Exception as exc:
+                failed_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="failed",
+                        code="SERVER_ERROR",
+                        message=str(exc),
+                        handover=handover,
+                        branch_id=branch_id,
+                    )
+                )
+
+        db.commit()
+        response = ConsoleCaseBulkActionResponse(
+            success=failed_count == 0,
+            action=action,
+            requested_count=len(case_ids),
+            processed_count=processed_count,
+            skipped_count=skipped_count,
+            failed_count=failed_count,
+            items=results,
+        )
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        db.rollback()
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
+
+
+@router.get(
+    "/cases/{case_id}/assignees",
+    response_model=ConsoleCaseAssigneeListResponse,
+)
+async def list_case_assignees(
+    case_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseAssigneeListResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+
+    case, conversation = _resolve_case_action_context(
+        db,
+        context=context,
+        case_id=case_id,
+        lock=False,
+    )
+    items = _list_case_assignee_options(
+        db,
+        client_id=context.client.id,
+        branch_id=conversation.branch_id,
+        current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+    )
+    return ConsoleCaseAssigneeListResponse(items=items)
+
+
+@router.post(
+    "/cases/{case_id}/reassign",
+    response_model=ConsoleCaseActionResponse,
+)
+async def reassign_case(
+    case_id: UUID,
+    body: ConsoleCaseReassignRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseActionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+    idempotency_key = _get_idempotency_key(request)
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.reassign",
+        payload={"case_id": str(case_id), "agent_id": str(body.agent_id)},
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        case, conversation = _resolve_case_action_context(
+            db,
+            context=context,
+            case_id=case_id,
+            lock=True,
+        )
+        branch_id = conversation.branch_id
+
+        if case.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+        if case.status != "active":
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", "Case must be active to reassign")
+
+        _require_case_operator_access(context=context, handover=case)
+
+        assignee_options = _list_case_assignee_options(
+            db,
+            client_id=context.client.id,
+            branch_id=branch_id,
+            current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+        )
+        target_option = next(
+            (option for option in assignee_options if option.agent_id == body.agent_id),
+            None,
+        )
+        if target_option is None:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Assignee not found")
+
+        target_id = str(target_option.agent_id)
+        previous_assignee_id = str(case.assigned_to) if case.assigned_to else None
+        previous_assignee_name = case.assigned_to_name
+        if previous_assignee_id == target_id:
+            response = _build_case_action_response(handover=case, branch_id=branch_id)
+            if idempotency and idempotency.record:
+                finalize_idempotency(
+                    db,
+                    record=idempotency.record,
+                    response_status=200,
+                    response_body=response.model_dump(mode="json"),
+                )
+            return response
+
+        result = state_manager_reassign(
+            db,
+            conversation,
+            case,
+            manager_id=target_id,
+            manager_name=target_option.agent_name,
+        )
+        if not result.ok:
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", result.error or "Case must be active to reassign")
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_reassigned",
+            entity_type="handover",
+            entity_id=case.id,
+            payload={
+                "previous_assignee_id": previous_assignee_id,
+                "previous_assignee_name": previous_assignee_name,
+                "assigned_to_id": target_id,
+                "assigned_to_name": target_option.agent_name,
+            },
+            branch_id=branch_id,
+        )
+        db.commit()
+        db.refresh(case)
+
+        response = _build_case_action_response(handover=case, branch_id=branch_id)
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
+
+
+@router.post(
+    "/cases/{case_id}/snooze",
+    response_model=ConsoleCaseActionResponse,
+)
+async def snooze_case(
+    case_id: UUID,
+    body: ConsoleCaseSnoozeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseActionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+    idempotency_key = _get_idempotency_key(request)
+    minutes = _normalize_pause_minutes(body.minutes, default=30, allow_zero=False)
+    reason = _normalize_optional_text(body.reason) or _CASE_SNOOZE_DEFAULT_REASON
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.snooze",
+        payload={"case_id": str(case_id), "minutes": minutes, "reason": reason},
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        case, conversation = _resolve_case_action_context(
+            db,
+            context=context,
+            case_id=case_id,
+            lock=True,
+        )
+        branch_id = conversation.branch_id
+
+        if case.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+        if case.status != "active":
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", "Case must be active to snooze")
+
+        _require_case_operator_access(context=context, handover=case)
+
+        now_utc = datetime.now(timezone.utc)
+        snoozed_until = now_utc + timedelta(minutes=minutes)
+        _set_case_snooze_meta(
+            case,
+            snoozed_until=snoozed_until,
+            now_utc=now_utc,
+            reason=reason,
+            agent_id=context.agent.id,
+            agent_name=context.agent.name or "Менеджер",
+        )
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_snoozed",
+            entity_type="handover",
+            entity_id=case.id,
+            payload={
+                "minutes": minutes,
+                "snoozed_until": snoozed_until.isoformat(),
+                "reason": reason,
+            },
+            branch_id=branch_id,
+        )
+        db.commit()
+        db.refresh(case)
+
+        response = _build_case_action_response(handover=case, branch_id=branch_id)
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
+
+
+@router.post(
+    "/cases/{case_id}/reopen",
+    response_model=ConsoleCaseActionResponse,
+)
+async def reopen_case(
+    case_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseActionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+    idempotency_key = _get_idempotency_key(request)
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.reopen",
+        payload={"case_id": str(case_id)},
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        case, conversation = _resolve_case_action_context(
+            db,
+            context=context,
+            case_id=case_id,
+            lock=True,
+        )
+        branch_id = conversation.branch_id
+        manager_name = context.agent.name or "Менеджер"
+
+        if case.status != "resolved":
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", "Case must be resolved to reopen")
+
+        _clear_case_snooze_meta(case)
+        result = state_manager_reopen(
+            db,
+            conversation,
+            case,
+            manager_id=str(context.agent.id),
+            manager_name=manager_name,
+        )
+        if not result.ok:
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", result.error or "Case must be resolved to reopen")
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_reopened",
+            entity_type="handover",
+            entity_id=case.id,
+            payload={"assigned_to_id": str(context.agent.id), "assigned_to_name": manager_name},
+            branch_id=branch_id,
+        )
+
+        db.commit()
+        db.refresh(case)
+        telegram_status = _sync_telegram_after_take(
+            db,
+            conversation=conversation,
+            handover=case,
+            manager_name=manager_name,
+        )
+        client_notify = _notify_client_status(
+            db=db,
+            conversation=conversation,
+            handover=case,
+            status="connected",
+            manager_name=manager_name,
+        )
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="manager_connected",
+            entity_type="handover",
+            entity_id=case.id,
+            payload={
+                "telegram_status": telegram_status.status,
+                "client_notify_status": client_notify.status,
+                "reason": "case_reopened",
+            },
+            branch_id=branch_id,
+        )
+        db.commit()
+
+        response = _build_case_action_response(
+            handover=case,
+            branch_id=branch_id,
+            sync=ConsoleCaseActionSync(
+                telegram=telegram_status,
+                client_notify=client_notify,
+            ),
+        )
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
 
 
 @router.post(
@@ -10223,6 +11254,7 @@ async def resolve_case(
                 release_idempotency(db, record=idempotency.record)
             raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
 
+    _clear_case_snooze_meta(case)
     result = state_manager_resolve(
         db,
         conversation,
@@ -10383,6 +11415,7 @@ async def return_case(
                 release_idempotency(db, record=idempotency.record)
             raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
 
+    _clear_case_snooze_meta(case)
     result = state_manager_return(
         db,
         conversation,
@@ -10909,10 +11942,16 @@ async def get_case(
     human_lock_active = bool(human_lock_snapshot.get("human_lock_active"))
     queue_signals = _build_case_queue_signals(
         created_at=case.created_at,
+        status=case.status,
         needs_reply=needs_reply,
         has_delivery_error=has_delivery_error,
         has_pending_outbox=has_pending_outbox,
         human_lock_active=human_lock_active,
+        human_lock_reason=human_lock_snapshot.get("human_lock_reason"),
+        last_inbound_at=case_health.get("last_inbound_at"),
+        last_outbound_at=case_health.get("last_outbound_at"),
+        first_response_at=case.first_response_at,
+        handover_meta=handover_meta,
     )
     
     return ConsoleCase(
@@ -10923,12 +11962,15 @@ async def get_case(
         trigger_value=case.trigger_value,
         context_summary=case.context_summary,
         user_message=case.user_message,
+        assigned_to_id=str(case.assigned_to) if case.assigned_to else None,
         assigned_to_name=case.assigned_to_name,
         branch_id=branch_id,
         channel=case.channel,
         created_at=case.created_at.isoformat(),
         **_format_case_metrics(case),
         sla_status=queue_signals["sla_status"],
+        sla_action_state=queue_signals["sla_action_state"],
+        sla_overdue_minutes=queue_signals["sla_overdue_minutes"],
         priority_tier=queue_signals["priority_tier"],
         attention_reason=queue_signals["attention_reason"],
         target_response_at=queue_signals["target_response_at"],
@@ -10947,6 +11989,9 @@ async def get_case(
         needs_reply=needs_reply,
         has_delivery_error=has_delivery_error,
         has_pending_outbox=has_pending_outbox,
+        snoozed_until=queue_signals["snoozed_until"],
+        snoozed_reason=queue_signals["snoozed_reason"],
+        snoozed_by=queue_signals["snoozed_by"],
         **human_lock_snapshot,
         telegram_trail=telegram_trail,
     )
@@ -11050,6 +12095,7 @@ async def send_manager_message(
             case.first_response_at = datetime.now(timezone.utc)
         if not case.assigned_to_name and context.agent.name:
             case.assigned_to_name = context.agent.name
+        _clear_case_snooze_meta(case)
 
         # Audit
         record_audit_event(

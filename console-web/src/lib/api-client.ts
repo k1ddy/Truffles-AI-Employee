@@ -496,6 +496,13 @@ const apiClient = createApiClient();
 export type Case = components["schemas"]["ConsoleCase"];
 export type CaseListResponse = components["schemas"]["ConsoleCaseListResponse"];
 export type CaseActionResponse = components["schemas"]["ConsoleCaseActionResponse"];
+export type CaseAssigneeOption = components["schemas"]["ConsoleCaseAssigneeOption"];
+export type CaseAssigneeListResponse = components["schemas"]["ConsoleCaseAssigneeListResponse"];
+export type CaseBulkActionRequest = components["schemas"]["ConsoleCaseBulkActionRequest"];
+export type CaseBulkActionResponse = components["schemas"]["ConsoleCaseBulkActionResponse"];
+export type CaseBulkActionResult = components["schemas"]["ConsoleCaseBulkActionResult"];
+export type CaseReassignRequest = components["schemas"]["ConsoleCaseReassignRequest"];
+export type CaseSnoozeRequest = components["schemas"]["ConsoleCaseSnoozeRequest"];
 export type Message = components["schemas"]["ConsoleMessage"];
 export type MessageListResponse = components["schemas"]["ConsoleMessageListResponse"];
 export type OutreachDeliveryStatus = "queued" | "delivered" | "failed";
@@ -1234,11 +1241,26 @@ export const casesApi = {
     get: (caseId: string) =>
         apiClient.get<Case>(`/cases/${caseId}`),
 
+    listAssignees: (caseId: string) =>
+        apiClient.get<CaseAssigneeListResponse>(`/cases/${caseId}/assignees`),
+
     take: (caseId: string) =>
         apiClient.post<CaseActionResponse>(`/cases/${caseId}/take`),
 
+    reassign: (caseId: string, data: CaseReassignRequest) =>
+        apiClient.post<CaseActionResponse>(`/cases/${caseId}/reassign`, data),
+
+    snooze: (caseId: string, data: CaseSnoozeRequest) =>
+        apiClient.post<CaseActionResponse>(`/cases/${caseId}/snooze`, data),
+
+    bulkAction: (data: CaseBulkActionRequest) =>
+        apiClient.post<CaseBulkActionResponse>("/cases/bulk", data),
+
     resolve: (caseId: string) =>
         apiClient.post<CaseActionResponse>(`/cases/${caseId}/resolve`),
+
+    reopen: (caseId: string) =>
+        apiClient.post<CaseActionResponse>(`/cases/${caseId}/reopen`),
 
     returnToBot: (caseId: string) =>
         apiClient.post<CaseActionResponse>(`/cases/${caseId}/return`),

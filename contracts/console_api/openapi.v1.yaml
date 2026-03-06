@@ -236,6 +236,151 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/bulk:
+    post:
+      tags:
+      - console
+      summary: Bulk Case Action
+      operationId: bulk_case_action_console_v1_cases_bulk_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleCaseBulkActionRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseBulkActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/{case_id}/assignees:
+    get:
+      tags:
+      - console
+      summary: List Case Assignees
+      operationId: list_case_assignees_console_v1_cases__case_id__assignees_get
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Case Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseAssigneeListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/{case_id}/reassign:
+    post:
+      tags:
+      - console
+      summary: Reassign Case
+      operationId: reassign_case_console_v1_cases__case_id__reassign_post
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Case Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleCaseReassignRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/{case_id}/snooze:
+    post:
+      tags:
+      - console
+      summary: Snooze Case
+      operationId: snooze_case_console_v1_cases__case_id__snooze_post
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Case Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleCaseSnoozeRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/{case_id}/reopen:
+    post:
+      tags:
+      - console
+      summary: Reopen Case
+      operationId: reopen_case_console_v1_cases__case_id__reopen_post
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Case Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/cases/{case_id}/take:
     post:
       tags:
@@ -9660,6 +9805,11 @@ components:
           - type: string
           - type: 'null'
           title: User Message
+        assigned_to_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assigned To Id
         assigned_to_name:
           anyOf:
           - type: string
@@ -9700,6 +9850,16 @@ components:
           - type: 'null'
           title: Sla Status
           default: ok
+        sla_action_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sla Action State
+        sla_overdue_minutes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Sla Overdue Minutes
         priority_tier:
           anyOf:
           - type: string
@@ -9826,6 +9986,21 @@ components:
           - type: string
           - type: 'null'
           title: Human Lock By
+        snoozed_until:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Snoozed Until
+        snoozed_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Snoozed Reason
+        snoozed_by:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Snoozed By
         telegram_trail:
           anyOf:
           - $ref: '#/components/schemas/ConsoleTelegramTrail'
@@ -9866,6 +10041,150 @@ components:
           - type: 'null'
       type: object
       title: ConsoleCaseActionSync
+    ConsoleCaseAssigneeListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleCaseAssigneeOption'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: ConsoleCaseAssigneeListResponse
+    ConsoleCaseAssigneeOption:
+      properties:
+        agent_id:
+          type: string
+          format: uuid
+          title: Agent Id
+        agent_name:
+          type: string
+          title: Agent Name
+        role:
+          type: string
+          title: Role
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        is_current:
+          type: boolean
+          title: Is Current
+          default: false
+      type: object
+      required:
+      - agent_id
+      - agent_name
+      - role
+      title: ConsoleCaseAssigneeOption
+    ConsoleCaseBulkActionRequest:
+      properties:
+        action:
+          type: string
+          enum:
+          - reassign
+          - snooze
+          title: Action
+        case_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Case Ids
+        agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Id
+        minutes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Minutes
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      required:
+      - action
+      - case_ids
+      title: ConsoleCaseBulkActionRequest
+    ConsoleCaseBulkActionResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        action:
+          type: string
+          enum:
+          - reassign
+          - snooze
+          title: Action
+        requested_count:
+          type: integer
+          title: Requested Count
+        processed_count:
+          type: integer
+          title: Processed Count
+        skipped_count:
+          type: integer
+          title: Skipped Count
+        failed_count:
+          type: integer
+          title: Failed Count
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleCaseBulkActionResult'
+          type: array
+          title: Items
+      type: object
+      required:
+      - success
+      - action
+      - requested_count
+      - processed_count
+      - skipped_count
+      - failed_count
+      - items
+      title: ConsoleCaseBulkActionResponse
+    ConsoleCaseBulkActionResult:
+      properties:
+        case_id:
+          type: string
+          format: uuid
+          title: Case Id
+        status:
+          type: string
+          enum:
+          - processed
+          - skipped
+          - failed
+          title: Status
+        code:
+          type: string
+          title: Code
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+        case:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCase'
+          - type: 'null'
+      type: object
+      required:
+      - case_id
+      - status
+      - code
+      title: ConsoleCaseBulkActionResult
     ConsoleCaseListResponse:
       properties:
         items:
@@ -9891,6 +10210,31 @@ components:
       - items
       - has_more
       title: ConsoleCaseListResponse
+    ConsoleCaseReassignRequest:
+      properties:
+        agent_id:
+          type: string
+          format: uuid
+          title: Agent Id
+      additionalProperties: false
+      type: object
+      required:
+      - agent_id
+      title: ConsoleCaseReassignRequest
+    ConsoleCaseSnoozeRequest:
+      properties:
+        minutes:
+          type: integer
+          title: Minutes
+          default: 30
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      title: ConsoleCaseSnoozeRequest
     ConsoleClient:
       properties:
         id:

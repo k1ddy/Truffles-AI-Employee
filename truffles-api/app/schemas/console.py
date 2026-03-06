@@ -984,6 +984,7 @@ class ConsoleCase(BaseModel):
     trigger_value: Optional[str] = None
     context_summary: Optional[str] = None
     user_message: Optional[str] = None
+    assigned_to_id: Optional[str] = None
     assigned_to_name: Optional[str] = None
     first_response_at: Optional[str] = None
     resolved_at: Optional[str] = None
@@ -992,6 +993,8 @@ class ConsoleCase(BaseModel):
     channel: Optional[str] = None
     created_at: str
     sla_status: Optional[str] = "ok"  # ok, warning, breached
+    sla_action_state: Optional[str] = None  # reply_due, overdue, waiting_client, delivery_issue, pending_outbox, resolved
+    sla_overdue_minutes: Optional[int] = None
     priority_tier: Optional[str] = None  # low, normal, high, urgent
     attention_reason: Optional[str] = None
     target_response_at: Optional[str] = None
@@ -1020,6 +1023,10 @@ class ConsoleCase(BaseModel):
     human_lock_source: Optional[str] = None
     human_lock_reason: Optional[str] = None
     human_lock_by: Optional[str] = None
+    # Case snooze
+    snoozed_until: Optional[str] = None
+    snoozed_reason: Optional[str] = None
+    snoozed_by: Optional[str] = None
     # Telegram trail (for escalation visibility)
     telegram_trail: Optional[ConsoleTelegramTrail] = None
 
@@ -1045,6 +1052,56 @@ class ConsoleCaseActionResponse(BaseModel):
     success: bool
     case: ConsoleCase
     sync: Optional[ConsoleCaseActionSync] = None
+
+
+class ConsoleCaseAssigneeOption(BaseModel):
+    agent_id: UUID
+    agent_name: str
+    role: str
+    branch_id: Optional[UUID] = None
+    is_current: bool = False
+
+
+class ConsoleCaseAssigneeListResponse(BaseModel):
+    items: list[ConsoleCaseAssigneeOption]
+
+
+class ConsoleCaseReassignRequest(ConsoleRequestModel):
+    agent_id: UUID
+
+
+class ConsoleCaseSnoozeRequest(ConsoleRequestModel):
+    minutes: int = 30
+    reason: Optional[StrictStr] = None
+
+
+ConsoleCaseBulkActionType = Literal["reassign", "snooze"]
+
+
+class ConsoleCaseBulkActionRequest(ConsoleRequestModel):
+    action: ConsoleCaseBulkActionType
+    case_ids: list[UUID]
+    agent_id: Optional[UUID] = None
+    minutes: Optional[int] = None
+    reason: Optional[StrictStr] = None
+
+
+class ConsoleCaseBulkActionResult(BaseModel):
+    case_id: UUID
+    status: Literal["processed", "skipped", "failed"]
+    code: str
+    message: Optional[str] = None
+    case: Optional[ConsoleCase] = None
+
+
+class ConsoleCaseBulkActionResponse(BaseModel):
+    success: bool
+    action: ConsoleCaseBulkActionType
+    requested_count: int
+    processed_count: int
+    skipped_count: int
+    failed_count: int
+    items: list[ConsoleCaseBulkActionResult]
 
 
 class ConsoleMessageListResponse(BaseModel):

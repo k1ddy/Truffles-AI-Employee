@@ -442,6 +442,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                         showBranchFilter={showBranchFilter}
                         workspaceScope={workspaceScope}
                         onCaseIdsChange={setVisibleCaseIds}
+                        canBulkManage={canWriteInbox}
                     />
                 </section>
 

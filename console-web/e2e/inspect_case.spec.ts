@@ -101,13 +101,8 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             selected_branch_id: BRANCH_ID,
         });
     });
-    await page.route('**/api/proxy/cases**', async (route) => {
+    await page.route(/.*\/api\/proxy\/cases\/?(?:\?.*)?$/, async (route) => {
         if (route.request().method() !== 'GET') {
-            await route.fallback();
-            return;
-        }
-        const url = new URL(route.request().url());
-        if (url.pathname !== '/api/proxy/cases' && url.pathname !== '/api/proxy/cases/') {
             await route.fallback();
             return;
         }
@@ -123,9 +118,13 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
                     context_summary: 'Клиент хочет маникюр и уточняет свободное время.',
                     user_message: 'Здравствуйте, можно записаться на завтра?',
                     created_at: '2026-03-05T09:00:00+05:00',
+                    assigned_to_id: AGENT_ID,
                     assigned_to_name: 'Manager',
                     channel: 'whatsapp',
                     sla_status: 'warning',
+                    sla_action_state: 'reply_due',
+                    sla_overdue_minutes: null,
+                    target_response_at: '2026-03-05T10:00:00+05:00',
                     customer_name: 'Айгуль',
                     customer_phone: '+77001234567',
                     last_inbound_at: '2026-03-05T09:10:00+05:00',
@@ -135,6 +134,9 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
                     has_delivery_error: false,
                     has_pending_outbox: false,
                     human_lock_active: false,
+                    snoozed_until: null,
+                    snoozed_reason: null,
+                    snoozed_by: null,
                 },
             ],
             cursor: null,
@@ -175,9 +177,13 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             context_summary: 'Клиент хочет маникюр и уточняет свободное время.',
             user_message: 'Здравствуйте, можно записаться на завтра?',
             created_at: '2026-03-05T09:00:00+05:00',
+            assigned_to_id: AGENT_ID,
             assigned_to_name: 'Manager',
             channel: 'whatsapp',
             sla_status: 'warning',
+            sla_action_state: 'reply_due',
+            sla_overdue_minutes: null,
+            target_response_at: '2026-03-05T10:00:00+05:00',
             customer_name: 'Айгуль',
             customer_phone: '+77001234567',
             last_inbound_at: '2026-03-05T09:10:00+05:00',
@@ -187,6 +193,60 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             has_delivery_error: false,
             has_pending_outbox: false,
             human_lock_active: false,
+            snoozed_until: null,
+            snoozed_reason: null,
+            snoozed_by: null,
+        });
+    });
+    await page.route(`**/api/proxy/cases/${CASE_ID}/assignees**`, async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [
+                {
+                    agent_id: AGENT_ID,
+                    agent_name: 'Manager',
+                    role: 'manager',
+                    branch_id: BRANCH_ID,
+                    is_current: true,
+                },
+                {
+                    agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    agent_name: 'Manager Two',
+                    role: 'manager',
+                    branch_id: BRANCH_ID,
+                    is_current: false,
+                },
+            ],
+        });
+    });
+    await page.route('**/api/proxy/cases/bulk', async (route) => {
+        if (route.request().method() !== 'POST') {
+            await route.fallback();
+            return;
+        }
+        const payload = route.request().postDataJSON() as {
+            action?: 'reassign' | 'snooze';
+            case_ids?: string[];
+        } | null;
+        const caseIds = Array.isArray(payload?.case_ids) ? payload.case_ids : [];
+        const action = payload?.action === 'reassign' ? 'reassign' : 'snooze';
+        await toJsonResponse(route, {
+            success: true,
+            action,
+            requested_count: caseIds.length,
+            processed_count: caseIds.length,
+            skipped_count: 0,
+            failed_count: 0,
+            items: caseIds.map((caseId) => ({
+                case_id: caseId,
+                status: 'processed',
+                code: action === 'reassign' ? 'REASSIGNED' : 'SNOOZED',
+                message: action === 'reassign' ? 'Assigned to Manager Two' : 'Case snoozed',
+                case: null,
+            })),
         });
     });
     await page.route(`**/api/proxy/conversations/${CONVERSATION_ID}/human-lock**`, async (route) => {
@@ -426,10 +486,8 @@ async function resolveTenantSelection(page: import('@playwright/test').Page) {
 
 async function ensureLoggedIn(page: import('@playwright/test').Page) {
     await gotoWithRetry(page, baseURL);
-    if (!useRouteMocks) {
-        await clearInboxWorkspaceStorage(page);
-        await gotoWithRetry(page, baseURL);
-    }
+    await clearInboxWorkspaceStorage(page);
+    await gotoWithRetry(page, baseURL);
     const casesTitle = page.getByTestId('cases-title');
     if (await casesTitle.isVisible().catch(() => false)) {
         return;
@@ -622,6 +680,32 @@ test('inspect first case', async ({ page }) => {
         await expect(casePane.first()).toBeVisible({ timeout: 15000 });
     }
     console.log(`Current URL: ${page.url()}`);
+
+    const caseActionBadge = page.getByTestId('case-next-action');
+    await expect(caseActionBadge).toBeVisible({ timeout: 15000 });
+    await expect(caseActionBadge).not.toContainText('SLA:', { timeout: 15000 });
+    if (useRouteMocks) {
+        await expect(caseActionBadge).toContainText('Ответить до', { timeout: 15000 });
+        await expect(page.getByTestId('case-reassign-toggle')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('case-snooze-toggle')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('cases-bulk-select').check();
+        await expect(page.getByTestId('cases-bulk-toolbar')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('cases-bulk-toggle-snooze').click();
+        await expect(page.getByTestId('cases-bulk-snooze-minutes')).toBeVisible({ timeout: 15000 });
+        const bulkRequestPromise = page.waitForRequest((request) =>
+            request.method() === 'POST' && request.url().includes('/api/proxy/cases/bulk')
+        );
+        await page.getByTestId('cases-bulk-snooze-submit').click();
+        const bulkRequest = await bulkRequestPromise;
+        expect(bulkRequest.postDataJSON()).toMatchObject({
+            action: 'snooze',
+            case_ids: [CASE_ID],
+        });
+        await page.getByTestId('case-reassign-toggle').click();
+        await expect(page.getByTestId('case-reassign-select')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('case-snooze-toggle').click();
+        await expect(page.getByTestId('case-snooze-minutes')).toBeVisible({ timeout: 15000 });
+    }
 
     let content = '';
     const contentCandidates = [

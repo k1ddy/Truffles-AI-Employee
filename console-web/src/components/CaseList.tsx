@@ -1,18 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthenticatedApi } from "@/hooks/useAuthenticatedApi";
 import Link from "next/link";
 import { Case } from "@/types";
-import { getStatusLabel, getSlaIndicator } from "@/utils/labels";
+import { getCaseSlaIndicator, getStatusLabel } from "@/utils/labels";
+import {
+    casesApi,
+    type CaseAssigneeOption,
+    type CaseBulkActionResponse,
+} from "@/lib/api-client";
 import {
     type InboxCaseFilters,
     type InboxCaseListPrefs,
     readInboxCaseListPrefs,
     writeInboxCaseListPrefs,
 } from "@/lib/inbox-workspace";
+import toast from "react-hot-toast";
 
 // Filter state interface
 type CaseFilters = InboxCaseFilters;
@@ -31,6 +37,7 @@ interface CasesResponse {
 }
 
 type CaseListVariant = "table" | "compact";
+type BulkActionMode = "reassign" | "snooze" | null;
 
 interface CaseListProps {
     variant?: CaseListVariant;
@@ -40,6 +47,13 @@ interface CaseListProps {
     showBranchFilter?: boolean;
     workspaceScope?: string | null;
     onCaseIdsChange?: (caseIds: string[]) => void;
+    canBulkManage?: boolean;
+}
+
+interface BulkSummary {
+    tone: "success" | "warning" | "error";
+    label: string;
+    detail: string;
 }
 
 const DEFAULT_FILTERS: CaseFilters = {
@@ -54,6 +68,40 @@ const DEFAULT_FILTERS: CaseFilters = {
     dateTo: undefined,
     sortBy: "activity",
 };
+
+const BULK_SNOOZE_PRESETS = [30, 60, 120];
+
+function caseNoun(count: number) {
+    if (count === 1) {
+        return "заявка";
+    }
+    return count < 5 ? "заявки" : "заявок";
+}
+
+function buildBulkSummary(response: CaseBulkActionResponse): BulkSummary {
+    const parts: string[] = [];
+    if (response.processed_count > 0) {
+        parts.push(`обновили ${response.processed_count}`);
+    }
+    if (response.skipped_count > 0) {
+        parts.push(`без изменений ${response.skipped_count}`);
+    }
+    if (response.failed_count > 0) {
+        parts.push(`ошибки ${response.failed_count}`);
+    }
+    const tone = response.failed_count > 0
+        ? "error"
+        : response.skipped_count > 0
+            ? "warning"
+            : "success";
+    return {
+        tone,
+        label: parts.length > 0
+            ? `${parts.join(", ")} ${caseNoun(response.requested_count)}`
+            : "Изменений нет",
+        detail: "Необработанные заявки остаются отмеченными, чтобы их можно было разобрать отдельно.",
+    };
+}
 
 function getPriorityChip(tier?: string | null): { label: string; className: string } | null {
     const normalized = (tier || "").toLowerCase();
@@ -132,9 +180,11 @@ export default function CaseList({
     showBranchFilter = false,
     workspaceScope,
     onCaseIdsChange,
+    canBulkManage = false,
 }: CaseListProps) {
     const { data: session } = useSession();
     const api = useAuthenticatedApi();
+    const queryClient = useQueryClient();
     const storageEnabled = Boolean(workspaceScope);
     const [stateReady, setStateReady] = useState(!storageEnabled);
 
@@ -146,6 +196,12 @@ export default function CaseList({
     const [filtersCollapsed, setFiltersCollapsed] = useState(false);
     const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
     const [documentVisible, setDocumentVisible] = useState(true);
+    const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
+    const [bulkActionMode, setBulkActionMode] = useState<BulkActionMode>(null);
+    const [bulkAssigneeId, setBulkAssigneeId] = useState("");
+    const [bulkSnoozeMinutes, setBulkSnoozeMinutes] = useState(60);
+    const [bulkSnoozeReason, setBulkSnoozeReason] = useState("");
+    const [bulkSummary, setBulkSummary] = useState<BulkSummary | null>(null);
     const isCompact = variant === "compact";
     const filtersCompact = isCompact && !!selectedCaseId;
     const headingLabel = isCompact ? "Очередь" : "Заявки";
@@ -179,16 +235,19 @@ export default function CaseList({
 
     useEffect(() => {
         const handle = setTimeout(() => {
-            const trimmed = searchValue.trim();
-            setFilters((prev) => ({
-                ...prev,
-                query: trimmed || undefined,
-            }));
+            const nextQuery = searchValue.trim() || undefined;
+            if (filters.query === nextQuery) {
+                return;
+            }
             setCursor(undefined);
             setCaseItems([]);
+            setFilters((prev) => ({
+                ...prev,
+                query: nextQuery,
+            }));
         }, 300);
         return () => clearTimeout(handle);
-    }, [searchValue]);
+    }, [filters.query, searchValue]);
 
     useEffect(() => {
         if (typeof document === "undefined") {
@@ -363,6 +422,126 @@ export default function CaseList({
                 }
                 return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
             });
+    const selectedCaseIdSet = useMemo(() => new Set(selectedCaseIds), [selectedCaseIds]);
+    const selectedCases = useMemo(
+        () => sortedCases.filter((item) => selectedCaseIdSet.has(item.id)),
+        [selectedCaseIdSet, sortedCases],
+    );
+    const selectedBranchIds = useMemo(
+        () => Array.from(
+            new Set(
+                selectedCases
+                    .map((item) => item.branch_id)
+                    .filter((branchId): branchId is string => Boolean(branchId))
+            )
+        ),
+        [selectedCases],
+    );
+    const bulkAssigneeSourceCaseId = selectedBranchIds.length === 1
+        ? selectedCases.find((item) => item.branch_id === selectedBranchIds[0])?.id
+        : undefined;
+    const bulkBranchLabel = selectedBranchIds.length === 1
+        ? branchMap.get(selectedBranchIds[0]) || selectedBranchIds[0]
+        : null;
+    const allVisibleSelected = sortedCases.length > 0 && sortedCases.every((item) => selectedCaseIdSet.has(item.id));
+    const bulkReassignDisabledReason = selectedCases.length === 0
+        ? "Выберите заявки"
+        : selectedBranchIds.length > 1
+            ? "Для передачи выберите заявки одного филиала"
+            : null;
+
+    const { data: bulkAssigneesData, isFetching: assigneesLoading } = useQuery({
+        queryKey: ["case-assignees-bulk", bulkAssigneeSourceCaseId],
+        queryFn: async () => {
+            if (!bulkAssigneeSourceCaseId) {
+                return { items: [] as CaseAssigneeOption[] };
+            }
+            const response = await casesApi.listAssignees(bulkAssigneeSourceCaseId);
+            return response.data;
+        },
+        enabled: canBulkManage && bulkActionMode === "reassign" && !!bulkAssigneeSourceCaseId,
+    });
+    const bulkAssignees = bulkAssigneesData?.items ?? [];
+
+    const bulkActionMutation = useMutation({
+        mutationFn: async () => {
+            if (selectedCaseIds.length === 0 || !bulkActionMode) {
+                throw new Error("Выберите заявки и действие");
+            }
+            if (bulkActionMode === "reassign") {
+                const agentId = bulkAssigneeId.trim();
+                if (!agentId) {
+                    throw new Error("Выберите менеджера");
+                }
+                const response = await casesApi.bulkAction({
+                    action: "reassign",
+                    case_ids: selectedCaseIds,
+                    agent_id: agentId,
+                });
+                return response.data;
+            }
+            const minutes = Math.min(Math.max(Number(bulkSnoozeMinutes) || 0, 1), 1440);
+            const response = await casesApi.bulkAction({
+                action: "snooze",
+                case_ids: selectedCaseIds,
+                minutes,
+                reason: bulkSnoozeReason.trim() || undefined,
+            });
+            return response.data;
+        },
+        onSuccess: (response) => {
+            const summary = buildBulkSummary(response);
+            const remainingIds = response.items
+                .filter((item) => item.status !== "processed")
+                .map((item) => item.case_id);
+            setBulkSummary(summary);
+            setSelectedCaseIds(remainingIds);
+            setBulkActionMode(remainingIds.length > 0 ? bulkActionMode : null);
+            setBulkAssigneeId("");
+            if (response.processed_count > 0) {
+                resetPagination();
+            }
+            void queryClient.invalidateQueries({ queryKey: ["cases"] });
+            if (selectedCaseId && selectedCaseIdSet.has(selectedCaseId)) {
+                void queryClient.invalidateQueries({ queryKey: ["case", selectedCaseId] });
+            }
+            if (summary.tone === "error") {
+                toast.error(summary.label);
+            } else if (summary.tone === "warning") {
+                toast(summary.label);
+            } else {
+                toast.success(summary.label);
+            }
+        },
+        onError: (error) => {
+            const message = (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
+                || (error as Error)?.message
+                || "Не удалось выполнить массовое действие";
+            toast.error(message);
+        },
+    });
+
+    useEffect(() => {
+        const visibleIds = new Set(sortedCases.map((item) => item.id));
+        setSelectedCaseIds((prev) => {
+            const next = prev.filter((caseId) => visibleIds.has(caseId));
+            return next.length === prev.length ? prev : next;
+        });
+    }, [sortedCases]);
+
+    useEffect(() => {
+        if (selectedCaseIds.length > 0) {
+            return;
+        }
+        setBulkActionMode(null);
+        setBulkAssigneeId("");
+    }, [selectedCaseIds.length]);
+
+    useEffect(() => {
+        if (bulkActionMode !== "reassign") {
+            setBulkAssigneeId("");
+        }
+    }, [bulkActionMode]);
 
     useEffect(() => {
         if (!workspaceScope || !stateReady) {
@@ -396,7 +575,43 @@ export default function CaseList({
 
     const resetPagination = () => {
         setCursor(undefined);
-        setCaseItems([]);
+    };
+
+    const clearBulkSelection = () => {
+        setSelectedCaseIds([]);
+        setBulkSummary(null);
+        setBulkActionMode(null);
+        setBulkAssigneeId("");
+    };
+
+    const toggleCaseSelection = (caseId: string) => {
+        setBulkSummary(null);
+        setSelectedCaseIds((prev) => (
+            prev.includes(caseId)
+                ? prev.filter((item) => item !== caseId)
+                : [...prev, caseId]
+        ));
+    };
+
+    const toggleSelectAllVisible = () => {
+        setBulkSummary(null);
+        const visibleIds = sortedCases.map((item) => item.id);
+        if (visibleIds.length === 0) {
+            return;
+        }
+        setSelectedCaseIds((prev) => {
+            const prevSet = new Set(prev);
+            if (visibleIds.every((caseId) => prevSet.has(caseId))) {
+                return prev.filter((caseId) => !visibleIds.includes(caseId));
+            }
+            const next = [...prev];
+            visibleIds.forEach((caseId) => {
+                if (!prevSet.has(caseId)) {
+                    next.push(caseId);
+                }
+            });
+            return next;
+        });
     };
 
     if (!session) {
@@ -439,7 +654,6 @@ export default function CaseList({
         );
     }
 
-    const caseNoun = (count: number) => (count === 1 ? "заявка" : count < 5 ? "заявки" : "заявок");
     const loadedCases = sortedCases.length;
     const totalCases = typeof data?.total === "number" && data.total >= 0 ? data.total : loadedCases;
     const countBaseLabel = totalCases > loadedCases
@@ -459,6 +673,16 @@ export default function CaseList({
                     )}
                 </div>
                 <div className="flex items-center gap-3">
+                    {canBulkManage && sortedCases.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={toggleSelectAllVisible}
+                            className="text-xs font-semibold text-muted-foreground hover:text-foreground"
+                            data-testid="cases-bulk-select-all"
+                        >
+                            {allVisibleSelected ? "Снять выбор" : "Выбрать все"}
+                        </button>
+                    )}
                     {filtersCompact && (
                         <button
                             type="button"
@@ -679,20 +903,190 @@ export default function CaseList({
                 )}
             </div>
 
+            {canBulkManage && selectedCases.length > 0 && (
+                <div
+                    className="mt-3 rounded-xl border border-border/60 bg-card p-3"
+                    data-testid="cases-bulk-toolbar"
+                >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-1">
+                            <p className="text-sm font-semibold" data-testid="cases-bulk-count">
+                                Выбрано {selectedCases.length} {caseNoun(selectedCases.length)}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                {bulkBranchLabel
+                                    ? `Передача доступна для филиала ${bulkBranchLabel}. Отсрочка работает для всей выборки.`
+                                    : "Для передачи выберите заявки одного филиала. Отсрочка доступна для всей выборки."}
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setBulkSummary(null);
+                                    setBulkActionMode((current) => current === "reassign" ? null : "reassign");
+                                }}
+                                disabled={!!bulkReassignDisabledReason || bulkActionMutation.isPending}
+                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                data-testid="cases-bulk-toggle-reassign"
+                            >
+                                Передать
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setBulkSummary(null);
+                                    setBulkActionMode((current) => current === "snooze" ? null : "snooze");
+                                }}
+                                disabled={bulkActionMutation.isPending}
+                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                data-testid="cases-bulk-toggle-snooze"
+                            >
+                                Отложить
+                            </button>
+                            <button
+                                type="button"
+                                onClick={clearBulkSelection}
+                                disabled={bulkActionMutation.isPending}
+                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                data-testid="cases-bulk-clear"
+                            >
+                                Снять выбор
+                            </button>
+                        </div>
+                    </div>
+
+                    {bulkActionMode === "reassign" && (
+                        <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="cases-bulk-reassign-panel">
+                            {bulkReassignDisabledReason ? (
+                                <p className="text-xs text-amber-700" data-testid="cases-bulk-reassign-hint">
+                                    {bulkReassignDisabledReason}
+                                </p>
+                            ) : (
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <select
+                                            value={bulkAssigneeId}
+                                            onChange={(event) => setBulkAssigneeId(event.target.value)}
+                                            className="min-w-[220px] rounded-lg border border-border/60 bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                            disabled={assigneesLoading || bulkActionMutation.isPending}
+                                            data-testid="cases-bulk-reassign-select"
+                                        >
+                                            <option value="">Выберите менеджера</option>
+                                            {bulkAssignees.map((option) => (
+                                                <option key={option.agent_id} value={option.agent_id}>
+                                                    {option.agent_name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={() => bulkActionMutation.mutate()}
+                                            disabled={!bulkAssigneeId || assigneesLoading || bulkActionMutation.isPending}
+                                            className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                            data-testid="cases-bulk-reassign-submit"
+                                        >
+                                            {bulkActionMutation.isPending ? "Передаём..." : "Подтвердить передачу"}
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                        Передача меняет ответственного только у активных заявок в выбранном филиале.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {bulkActionMode === "snooze" && (
+                        <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="cases-bulk-snooze-panel">
+                            <div className="flex flex-col gap-3">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={1440}
+                                        value={bulkSnoozeMinutes}
+                                        onChange={(event) => {
+                                            const next = Number(event.target.value);
+                                            const normalized = Number.isFinite(next)
+                                                ? Math.min(Math.max(next, 1), 1440)
+                                                : 30;
+                                            setBulkSnoozeMinutes(normalized);
+                                        }}
+                                        className="w-28 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        data-testid="cases-bulk-snooze-minutes"
+                                    />
+                                    <span className="text-xs text-muted-foreground">минут</span>
+                                    {BULK_SNOOZE_PRESETS.map((preset) => (
+                                        <button
+                                            key={preset}
+                                            type="button"
+                                            onClick={() => setBulkSnoozeMinutes(preset)}
+                                            className="rounded-full border border-border/60 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground"
+                                            data-testid={`cases-bulk-snooze-preset-${preset}`}
+                                        >
+                                            {preset}
+                                        </button>
+                                    ))}
+                                </div>
+                                <input
+                                    type="text"
+                                    value={bulkSnoozeReason}
+                                    onChange={(event) => setBulkSnoozeReason(event.target.value)}
+                                    className="rounded-lg border border-border/60 bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                    placeholder="Причина для команды, например: ждём подтверждение клиента"
+                                    data-testid="cases-bulk-snooze-reason"
+                                />
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => bulkActionMutation.mutate()}
+                                        disabled={bulkActionMutation.isPending}
+                                        className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                        data-testid="cases-bulk-snooze-submit"
+                                    >
+                                        {bulkActionMutation.isPending ? "Сохраняем..." : "Отложить выборку"}
+                                    </button>
+                                    <p className="text-xs text-muted-foreground">
+                                        Отсрочка убирает заявки из срочного фокуса, но не закрывает их.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {bulkSummary && (
+                        <div
+                            className={`mt-3 rounded-lg px-3 py-2 text-xs ${
+                                bulkSummary.tone === "success"
+                                    ? "bg-emerald-50 text-emerald-800"
+                                    : bulkSummary.tone === "warning"
+                                        ? "bg-amber-50 text-amber-800"
+                                        : "bg-red-50 text-red-800"
+                            }`}
+                            data-testid="cases-bulk-summary"
+                        >
+                            <p className="font-semibold">{bulkSummary.label}</p>
+                            <p>{bulkSummary.detail}</p>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {isCompact ? (
                 <div className="flex-1 overflow-y-auto pr-1 mt-3 flex flex-col gap-2" data-testid="cases-table">
                     {sortedCases.map((c) => {
-                        const sla = getSlaIndicator(c.created_at);
+                        const sla = getCaseSlaIndicator(c);
                         const branchName = branchMap.get(c.branch_id || "") || "-";
                         const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
                         const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
                         const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
-                        const needsReply = !!c.needs_reply;
                         const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
                         const contactName = c.customer_name || c.customer_phone || c.customer_remote_jid?.split("@")[0] || "Клиент";
                         const contactPhone = c.customer_phone || c.customer_remote_jid?.split("@")[0] || "";
                         const preview = c.last_message_preview || c.user_message || "-";
                         const isSelected = selectedCaseId === c.id;
+                        const isBulkSelected = selectedCaseIdSet.has(c.id);
                         const hasHumanLock = !!c.human_lock_active;
                         const priorityChip = getPriorityChip(c.priority_tier);
                         const statusClass = c.status === "active"
@@ -704,7 +1098,7 @@ export default function CaseList({
                             <div
                                 className={`rounded-xl border border-border/60 p-3 text-left transition ${
                                     isSelected ? "border-primary/60 bg-primary/5" : "bg-card hover:bg-muted/60"
-                                }`}
+                                } ${isBulkSelected && !isSelected ? "border-amber-300 bg-amber-50/70" : ""}`}
                             >
                                 <div className="flex items-start justify-between gap-3 mb-2">
                                     <div>
@@ -732,11 +1126,6 @@ export default function CaseList({
                                     <span className={`px-2 py-0.5 rounded font-semibold ${sla.className}`}>
                                         {sla.label}
                                     </span>
-                                    {needsReply && (
-                                        <span className="px-2 py-0.5 rounded font-semibold bg-yellow-100 text-yellow-800">
-                                            Нужно ответить
-                                        </span>
-                                    )}
                                     {isLive && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-green-100 text-green-800">
                                             Недавний диалог
@@ -752,7 +1141,7 @@ export default function CaseList({
                                             Ошибка
                                         </span>
                                     )}
-                                    {c.attention_reason && (
+                                    {c.attention_reason && !sla.state?.startsWith("reply") && sla.state !== "overdue" && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-primary/10 text-primary">
                                             {c.attention_reason}
                                         </span>
@@ -760,20 +1149,35 @@ export default function CaseList({
                                 </div>
                             </div>
                         );
-                        return onSelectCase ? (
+                        const rowContent = onSelectCase ? (
                             <button
-                                key={c.id}
                                 type="button"
                                 onClick={() => onSelectCase(c.id)}
-                                className="text-left"
+                                className="flex-1 text-left"
                                 data-testid="cases-row"
                             >
                                 {content}
                             </button>
                         ) : (
-                            <Link key={c.id} href={`/cases/${c.id}`} data-testid="cases-row">
+                            <Link key={c.id} href={`/cases/${c.id}`} className="flex-1" data-testid="cases-row">
                                 {content}
                             </Link>
+                        );
+                        return (
+                            <div key={c.id} className="flex items-start gap-2">
+                                {canBulkManage && (
+                                    <label className="mt-3 flex h-5 w-5 items-center justify-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={isBulkSelected}
+                                            onChange={() => toggleCaseSelection(c.id)}
+                                            className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                            data-testid="cases-bulk-select"
+                                        />
+                                    </label>
+                                )}
+                                {rowContent}
+                            </div>
                         );
                     })}
                     {sortedCases.length === 0 && (
@@ -787,6 +1191,17 @@ export default function CaseList({
                     <table className="w-full text-left border-collapse">
                         <thead className="bg-muted">
                             <tr>
+                                {canBulkManage && (
+                                    <th className="p-4 text-sm font-medium text-muted-foreground">
+                                        <input
+                                            type="checkbox"
+                                            checked={allVisibleSelected}
+                                            onChange={toggleSelectAllVisible}
+                                            className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                            data-testid="cases-bulk-select-all-table"
+                                        />
+                                    </th>
+                                )}
                                 <th className="p-4 text-sm font-medium text-muted-foreground">ID</th>
                                 <th className="p-4 text-sm font-medium text-muted-foreground">Статус</th>
                                 <th className="p-4 text-sm font-medium text-muted-foreground">SLA</th>
@@ -800,16 +1215,31 @@ export default function CaseList({
                         </thead>
                         <tbody>
                             {sortedCases.map((c) => {
-                                const sla = getSlaIndicator(c.created_at);
+                                const sla = getCaseSlaIndicator(c);
                                 const branchName = branchMap.get(c.branch_id || "") || "-";
                                 const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
                                 const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
                                 const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
-                                const needsReply = !!c.needs_reply;
                                 const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
                                 const priorityChip = getPriorityChip(c.priority_tier);
+                                const isBulkSelected = selectedCaseIdSet.has(c.id);
                                 return (
-                                    <tr key={c.id} className="border-b border-border/60 hover:bg-muted/60" data-testid="cases-row">
+                                    <tr
+                                        key={c.id}
+                                        className={`border-b border-border/60 hover:bg-muted/60 ${isBulkSelected ? "bg-amber-50/60" : ""}`}
+                                        data-testid="cases-row"
+                                    >
+                                        {canBulkManage && (
+                                            <td className="p-4">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isBulkSelected}
+                                                    onChange={() => toggleCaseSelection(c.id)}
+                                                    className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                                    data-testid="cases-bulk-select"
+                                                />
+                                            </td>
+                                        )}
                                         <td className="p-4 font-mono text-sm">{c.id.slice(0, 8)}...</td>
                                         <td className="p-4">
                                             <div className="flex flex-wrap items-center gap-2">
@@ -846,11 +1276,6 @@ export default function CaseList({
                                         <td className="p-4 text-sm max-w-xs">
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="truncate max-w-[180px]">{c.last_message_preview || c.user_message || "-"}</span>
-                                                {needsReply && (
-                                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-800">
-                                                        Нужно ответить
-                                                    </span>
-                                                )}
                                                 {isLive && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-800">
                                                         Недавний диалог
@@ -861,7 +1286,7 @@ export default function CaseList({
                                                         Ошибка
                                                     </span>
                                                 )}
-                                                {c.attention_reason && (
+                                                {c.attention_reason && !sla.state?.startsWith("reply") && sla.state !== "overdue" && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-primary/10 text-primary">
                                                         {c.attention_reason}
                                                     </span>
@@ -890,7 +1315,7 @@ export default function CaseList({
                             })}
                             {sortedCases.length === 0 && (
                                 <tr>
-                                    <td colSpan={9} className="p-8 text-center text-muted-foreground" data-testid="cases-empty">
+                                    <td colSpan={canBulkManage ? 10 : 9} className="p-8 text-center text-muted-foreground" data-testid="cases-empty">
                                         Заявки не найдены по указанным фильтрам.
                                     </td>
                                 </tr>

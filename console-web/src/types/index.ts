@@ -27,12 +27,15 @@ export interface Case {
     decision_trace?: DecisionTraceEntry[];
     user_message: string | null;
     created_at: string;
+    assigned_to_id?: string | null;
     assigned_to_name: string | null;
     first_response_at?: string | null;
     resolved_at?: string | null;
     resolution_time_seconds?: number | null;
     channel: string;
     sla_status?: string;
+    sla_action_state?: string | null;
+    sla_overdue_minutes?: number | null;
     priority_tier?: "low" | "normal" | "high" | "urgent" | string;
     attention_reason?: string | null;
     target_response_at?: string | null;
@@ -57,6 +60,9 @@ export interface Case {
     human_lock_source?: string | null;
     human_lock_reason?: string | null;
     human_lock_by?: string | null;
+    snoozed_until?: string | null;
+    snoozed_reason?: string | null;
+    snoozed_by?: string | null;
 }
 
 export interface Message {
