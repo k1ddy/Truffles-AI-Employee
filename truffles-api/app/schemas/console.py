@@ -1061,6 +1061,7 @@ class ConsoleCaseListResponse(BaseModel):
 class ConsoleSyncStatus(BaseModel):
     status: Literal["ok", "skipped", "failed"]
     detail: Optional[str] = None
+    operator_message: Optional[str] = None
 
 
 class ConsoleCaseActionSync(BaseModel):

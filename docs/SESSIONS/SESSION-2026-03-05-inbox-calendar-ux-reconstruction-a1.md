@@ -2,12 +2,16 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave14-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
 - done:
+  - Wave15 implemented in branch: `ConsoleSyncStatus` now exposes operator-safe `operator_message`, direct case actions no longer leak raw sync detail strings in default UI, and action-macros use the same follow-up warning model.
+  - `inspect_case` deterministic lane now proves the new contract: sync-bearing macro shows friendly warning copy instead of `chatflow_failed`, and direct `reopen` stays internal-only with no warning leak.
+  - Manual operator-eye analysis completed after Wave14 merge: raw sync reason leakage (`chatflow_failed`) and overloaded action/queue surfaces were confirmed from code + screenshot evidence.
+  - New full-scope follow-up TPs created: Wave15 (operator-safe action feedback), Wave15 live validation, and Wave16 (action surface + queue rail redesign).
   - Wave14 implemented in branch: `GET /cases` now supports bounded `queue_view` slices (`needs_reply`, `waiting_client`, `snoozed`, `delivery`, `unassigned`) with total-count semantics on the same filtered query.
   - Inbox queue views migrated from local predicates to server-owned semantics; legacy persisted `paused` view now normalizes into `waiting_client`, and local-only approximation hints are removed from the rail.
   - `inspect_case` mock lane now proves server-backed queue switching by asserting real row counts for `Требуют ответа`, `Ждём клиента`, and `Отложенные` without regressing the case workspace loop.
@@ -108,8 +112,9 @@
   - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
   - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - Open bounded PR for Wave14 queue-view contract + frontend migration.
-  - Keep Wave12 live validation blocker documented until a safe explicit live case ID is available for mutation proof.
+  - Open bounded PR for Wave15 operator-safe feedback contract.
+  - After Wave15 merge, execute Wave15 live validation on a safe explicit live case.
+  - Then execute Wave16 action surface + queue rail redesign in bounded parts if needed.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -250,4 +255,14 @@
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave14 queue-view lane)
   - `console-web/case_inspection.png`
   - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
-- last_updated: 2026-03-06T17:56:03+05:00
+  - `pytest -q truffles-api/tests/test_console_cases_helpers.py truffles-api/tests/test_console_inbox_macros.py` (`66 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py` (`13 passed`)
+  - `cd console-web && npm run lint -- --file src/components/CaseConversation.tsx --file src/components/InboxMacros.tsx --file src/utils/labels.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`3 passed`)
+  - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+- last_updated: 2026-03-06T18:53:24+05:00

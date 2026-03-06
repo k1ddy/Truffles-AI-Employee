@@ -67,6 +67,22 @@ def test_parse_case_queue_view_param_rejects_invalid():
         console_router._parse_case_queue_view_param("queue_view", "paused")
 
 
+def test_build_sync_status_maps_operator_message_for_client_notify_failure():
+    status = console_router._build_sync_status("failed", "chatflow_failed", target="client_notify")
+
+    assert status.status == "failed"
+    assert status.detail == "chatflow_failed"
+    assert status.operator_message == "Не удалось отправить системное уведомление клиенту."
+
+
+def test_build_sync_status_maps_operator_message_for_telegram_failure():
+    status = console_router._build_sync_status("failed", "telegram_edit_failed", target="telegram")
+
+    assert status.status == "failed"
+    assert status.detail == "telegram_edit_failed"
+    assert status.operator_message == "Не удалось обновить отметку заявки в Telegram."
+
+
 def test_parse_case_owner_filters_accepts_assignee_id():
     agent_id = uuid4()
 
@@ -708,8 +724,10 @@ async def test_reopen_case_skips_external_sync_side_effects(monkeypatch):
     assert response.sync is not None
     assert response.sync.telegram.status == "skipped"
     assert response.sync.telegram.detail == "reopen_internal_only"
+    assert response.sync.telegram.operator_message is None
     assert response.sync.client_notify.status == "skipped"
     assert response.sync.client_notify.detail == "reopen_internal_only"
+    assert response.sync.client_notify.operator_message is None
     telegram_sync.assert_not_called()
     client_notify.assert_not_called()
     assert "case_reopened" in audit_events

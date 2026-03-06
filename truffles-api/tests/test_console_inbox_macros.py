@@ -545,8 +545,10 @@ async def test_execute_inbox_macro_reopen_skips_external_sync(monkeypatch):
     assert response.sync is not None
     assert response.sync.telegram.status == "skipped"
     assert response.sync.telegram.detail == "reopen_internal_only"
+    assert response.sync.telegram.operator_message is None
     assert response.sync.client_notify.status == "skipped"
     assert response.sync.client_notify.detail == "reopen_internal_only"
+    assert response.sync.client_notify.operator_message is None
     telegram_sync.assert_not_called()
     client_notify.assert_not_called()
     assert "case_reopened" in audit_events

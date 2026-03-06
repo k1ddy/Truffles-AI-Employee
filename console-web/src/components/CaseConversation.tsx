@@ -13,7 +13,11 @@ import {
 } from "@/lib/api-client";
 import type { Case, Message } from "@/types";
 import ChatInterface from "./ChatInterface";
-import { getCaseBusinessStatusBadge, getCaseSlaIndicator } from "@/utils/labels";
+import {
+    collectCaseActionFollowupMessages,
+    getCaseBusinessStatusBadge,
+    getCaseSlaIndicator,
+} from "@/utils/labels";
 
 interface CaseConversationProps {
     caseDetail: Case;
@@ -66,15 +70,12 @@ function extractErrorCode(error: unknown): string | undefined {
     return (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
 }
 
-function collectSyncIssues(sync?: CaseActionResponse["sync"]) {
-    const issues: string[] = [];
-    if (sync?.telegram?.status === "failed") {
-        issues.push(`Telegram: ${sync.telegram.detail || "ошибка синхронизации"}`);
+function showActionFollowupWarnings(sync?: CaseActionResponse["sync"] | null) {
+    const messages = collectCaseActionFollowupMessages(sync);
+    if (messages.length === 0) {
+        return;
     }
-    if (sync?.client_notify?.status === "failed") {
-        issues.push(`Клиент: ${sync.client_notify.detail || "уведомление не доставлено"}`);
-    }
-    return issues;
+    toast(messages.join(" "), { icon: "⚠️" });
 }
 
 const HUMAN_LOCK_SOURCE_LABELS: Record<string, string> = {
@@ -194,10 +195,7 @@ export default function CaseConversation({
         mutationFn: () => takeCase(caseId),
         onSuccess: (response) => {
             toast.success("Заявка назначена на вас!");
-            const issues = collectSyncIssues(response.sync);
-            if (issues.length > 0) {
-                toast.error(issues.join(" · "));
-            }
+            showActionFollowupWarnings(response.sync);
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
         },
@@ -215,10 +213,7 @@ export default function CaseConversation({
         mutationFn: () => resolveCase(caseId),
         onSuccess: (response) => {
             toast.success("Заявка закрыта!");
-            const issues = collectSyncIssues(response.sync);
-            if (issues.length > 0) {
-                toast.error(issues.join(" · "));
-            }
+            showActionFollowupWarnings(response.sync);
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
             handleResolved();
@@ -239,10 +234,7 @@ export default function CaseConversation({
         mutationFn: () => returnCase(caseId),
         onSuccess: (response) => {
             toast.success("Заявка передана боту");
-            const issues = collectSyncIssues(response.sync);
-            if (issues.length > 0) {
-                toast.error(issues.join(" · "));
-            }
+            showActionFollowupWarnings(response.sync);
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
             handleResolved();
@@ -405,10 +397,7 @@ export default function CaseConversation({
         mutationFn: () => reopenCase(caseId),
         onSuccess: (response) => {
             toast.success(`Заявка возвращена в работу${response.case.assigned_to_name ? `: ${response.case.assigned_to_name}` : ""}`);
-            const issues = collectSyncIssues(response.sync);
-            if (issues.length > 0) {
-                toast.error(issues.join(" · "));
-            }
+            showActionFollowupWarnings(response.sync);
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
         },
