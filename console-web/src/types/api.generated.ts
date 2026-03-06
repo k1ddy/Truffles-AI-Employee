@@ -9104,6 +9104,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: string | null;
+                queue_view?: string | null;
                 q?: string | null;
                 branch_id?: string | null;
                 assigned_to_me?: boolean;

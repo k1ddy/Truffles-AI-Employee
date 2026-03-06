@@ -146,7 +146,8 @@
 | Closeout Review | `TP-2026-03-06-inbox-calendar-ux-reconstruction-closeout-review-a1.md` | No new PR; same `PR #932` decision gate | Explicitly classify original ТЗ closure and accepted residuals before merge. | Done |
 | Wave11 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave11-a1.md` | One PR preferred; split allowed into `Part A action-sync correctness` then `Part B queue rail UX` | Post-merge live hardening: reopen-safe sync semantics + readable inbox left rail. | Done (merged via `PR #933`) |
 | Wave12 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-live-validation-a1.md` | One PR preferred for feature + post-merge live-validation follow-up | Server-owned policy-based routing automation on current reassignment surfaces (`least_open_cases`, no hidden auto-routing) + precise live validation contract. | Done (merged via `PR #934`; live mutation path blocked without explicit safe `INSPECT_CASE_LIVE_CASE_ID`) |
-| Wave13 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave13-a1.md` | Split allowed and expected: `Part A backend business-status contract`, `Part B queue/header simplification` | Ввести один понятный operator business status и убрать лишний badge-noise в `Заявках`. | In progress |
+| Wave13 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave13-a1.md` | Split allowed and expected: `Part A backend business-status contract`, `Part B queue/header simplification` | Ввести один понятный operator business status и убрать лишний badge-noise в `Заявках`. | Done (merged via `PR #935`) |
+| Wave14 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave14-a1.md` | Split allowed and expected: `Part A backend queue-view contract`, `Part B frontend queue migration` | Перевести queue views на server-owned semantics и убрать local-only approximation из левой очереди. | Implemented in branch |
 
 ## Wave-by-wave closure contract (mandatory)
 1. `Wave5` closes only when SLA перестает быть абстрактным и становится action-driven на сервере и в ключевых UI surface.
@@ -158,6 +159,7 @@
 7. `Wave11` closes only when `Вернуть в работу` перестает порождать ложные external sync errors, а compact queue rail снова становится читаемым рабочим инструментом для менеджера.
 8. `Wave12` closes only when routing recommendation перестает быть клиентской подсказкой и становится серверным policy contract для single-case и bulk flows без скрытой автоматики.
 9. `Wave13` closes only when менеджер видит один понятный business status заявки вместо смеси raw status/secondary technical badges, а SLA остается отдельным next action.
+10. `Wave14` closes only when ключевые queue views больше не фильтруются локально по текущей странице, а используют server-owned semantics и честные counts.
 
 ## TP/PR linkage rules (mandatory)
 - Если wave не помещается в один PR, split обязан быть зафиксирован прямо в wave TP до начала part-реализации.
@@ -217,7 +219,7 @@
 - `Expiry/trigger to stop deferral`: любой новый merge по `Заявки/Записи`, который не уменьшает один из этих residual gaps, требует отдельного owner-approved waiver.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: выполнить Wave13 business-status contract и упростить inbox rail/header вокруг одного operator status + отдельного SLA next action.
+- `Next block objective`: выполнить Wave14 queue-view contract и убрать local-only queue approximation из текущей inbox rail.
 - `First deterministic check command`: `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py`
-- `Blocked-by conditions`: Wave13 must not regress existing SLA signals, manual/bulk actions, or inspect-case workspace flow.
+- `Blocked-by conditions`: Wave14 must not regress existing branch access, owner filters, bulk actions, or inspect-case workspace flow.
 - `Owner role for closure`: Brain / Top Architect.

@@ -46,6 +46,27 @@ def test_parse_case_status_param_rejects_invalid():
         console_router._parse_case_status_param("status", "oops")
 
 
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("needs_reply", "needs_reply"),
+        ("WAITING_CLIENT", "waiting_client"),
+        ("snoozed", "snoozed"),
+        ("delivery", "delivery"),
+        ("unassigned", "unassigned"),
+    ],
+)
+def test_parse_case_queue_view_param_accepts_supported_views(raw_value, expected):
+    assert console_router._parse_case_queue_view_param("queue_view", raw_value) == expected
+
+
+def test_parse_case_queue_view_param_rejects_invalid():
+    with pytest.raises(ConsoleAPIError):
+        console_router._parse_case_queue_view_param("queue_view", "paused")
+
+
 def test_parse_case_owner_filters_accepts_assignee_id():
     agent_id = uuid4()
 

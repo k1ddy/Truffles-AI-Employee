@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy import and_, case, delete, event, func, or_, text
+from sqlalchemy import DateTime, and_, case, cast, delete, event, func, or_, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
@@ -998,6 +998,90 @@ def _build_case_business_status(
     if status == "active":
         return {"business_status_code": "in_progress", "business_status_label": "В работе"}
     return {"business_status_code": "open", "business_status_label": "Открыта"}
+
+
+def _build_case_active_snooze_expr(
+    *,
+    last_inbound_col,
+    now_utc: datetime,
+):
+    snoozed_until_expr = cast(func.nullif(Handover.meta["snoozed_until"].astext, ""), DateTime(timezone=True))
+    snoozed_at_expr = cast(func.nullif(Handover.meta["snoozed_at"].astext, ""), DateTime(timezone=True))
+    return and_(
+        Handover.status.notin_(["resolved", "bot_handling"]),
+        snoozed_until_expr.is_not(None),
+        snoozed_until_expr > now_utc,
+        or_(
+            snoozed_at_expr.is_(None),
+            last_inbound_col.is_(None),
+            last_inbound_col <= snoozed_at_expr,
+        ),
+    )
+
+
+def _build_case_queue_view_expr(
+    *,
+    queue_view: str,
+    last_inbound_col,
+    last_outbound_col,
+    pending_count_col,
+    failed_count_col,
+    lock_until_col,
+    now_utc: datetime,
+):
+    has_owner_expr = or_(
+        Handover.assigned_to.is_not(None),
+        func.coalesce(Handover.assigned_to_name, "") != "",
+    )
+    delivery_expr = or_(
+        func.coalesce(failed_count_col, 0) > 0,
+        func.coalesce(pending_count_col, 0) > 0,
+    )
+    active_snooze_expr = _build_case_active_snooze_expr(
+        last_inbound_col=last_inbound_col,
+        now_utc=now_utc,
+    )
+    needs_reply_expr = and_(
+        Handover.status != "resolved",
+        Handover.status != "bot_handling",
+        ~delivery_expr,
+        ~active_snooze_expr,
+        last_inbound_col.is_not(None),
+        or_(last_outbound_col.is_(None), last_inbound_col > last_outbound_col),
+    )
+    waiting_client_expr = and_(
+        Handover.status != "resolved",
+        Handover.status != "bot_handling",
+        ~delivery_expr,
+        ~active_snooze_expr,
+        ~needs_reply_expr,
+        has_owner_expr,
+        or_(
+            lock_until_col.is_not(None),
+            and_(
+                last_outbound_col.is_not(None),
+                or_(last_inbound_col.is_(None), last_outbound_col >= last_inbound_col),
+            ),
+            Handover.first_response_at.is_not(None),
+        ),
+    )
+    unassigned_expr = and_(
+        Handover.status != "resolved",
+        Handover.status != "bot_handling",
+        ~has_owner_expr,
+    )
+
+    if queue_view == "needs_reply":
+        return needs_reply_expr
+    if queue_view == "waiting_client":
+        return waiting_client_expr
+    if queue_view == "snoozed":
+        return active_snooze_expr
+    if queue_view == "delivery":
+        return delivery_expr
+    if queue_view == "unassigned":
+        return unassigned_expr
+    raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid queue_view")
 
 
 def _build_case_action_case(
@@ -8912,6 +8996,15 @@ def _parse_case_status_param(name: str, value: Optional[str]) -> Optional[list[s
     raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
 
 
+def _parse_case_queue_view_param(name: str, value: Optional[str]) -> Optional[str]:
+    if value is None or str(value).strip() == "":
+        return None
+    normalized = str(value).strip().lower()
+    if normalized not in {"needs_reply", "waiting_client", "snoozed", "delivery", "unassigned"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
+    return normalized
+
+
 def _parse_case_owner_filters(
     *,
     assigned_to_me: bool,
@@ -10703,6 +10796,7 @@ async def link_agent_telegram(
 async def list_cases(
     request: Request,
     status: Optional[str] = None,
+    queue_view: Optional[str] = None,
     q: Optional[str] = None,
     branch_id: Optional[str] = None,
     assigned_to_me: bool = False,
@@ -10726,6 +10820,7 @@ async def list_cases(
         request,
         {
             "status",
+            "queue_view",
             "q",
             "branch_id",
             "assigned_to_me",
@@ -10771,6 +10866,7 @@ async def list_cases(
     )
     last_activity_since_dt = _parse_datetime_param("last_activity_since", last_activity_since)
     sort_by_value = _parse_sort_param("sort_by", request.query_params.get("sort_by"))
+    queue_view_value = _parse_case_queue_view_param("queue_view", request.query_params.get("queue_view") or queue_view)
     assignee_filter_id, unassigned_filter = _parse_case_owner_filters(
         assigned_to_me=assigned_to_me,
         assignee_id=request.query_params.get("assignee_id") or assignee_id,
@@ -10878,52 +10974,6 @@ async def list_cases(
                 func.regexp_replace(User.phone, r"\D", "", "g").ilike(f"%{digits}%")
             )
 
-    count_query = base_query
-    if has_delivery_error:
-        count_query = count_query.filter(
-            db.query(OutboxMessage.id)
-            .filter(
-                OutboxMessage.client_id == context.client.id,
-                OutboxMessage.conversation_id == Conversation.id,
-                OutboxMessage.status == "FAILED",
-            )
-            .exists()
-        )
-    if has_pending_outbox:
-        count_query = count_query.filter(
-            db.query(OutboxMessage.id)
-            .filter(
-                OutboxMessage.client_id == context.client.id,
-                OutboxMessage.conversation_id == Conversation.id,
-                OutboxMessage.status.in_(["PENDING", "PROCESSING"]),
-            )
-            .exists()
-        )
-    if has_human_lock:
-        now_utc = datetime.now(timezone.utc)
-        count_query = count_query.filter(
-            db.query(ConversationHumanLock.id)
-            .filter(
-                ConversationHumanLock.client_id == context.client.id,
-                ConversationHumanLock.conversation_id == Conversation.id,
-                ConversationHumanLock.lock_scope == HUMAN_LOCK_SCOPE_CONVERSATION,
-                ConversationHumanLock.active.is_(True),
-                ConversationHumanLock.lock_until > now_utc,
-            )
-            .exists()
-        )
-    if last_activity_since_dt:
-        count_query = count_query.filter(
-            db.query(Message.id)
-            .filter(
-                Message.client_id == context.client.id,
-                Message.conversation_id == Conversation.id,
-                Message.created_at >= last_activity_since_dt,
-            )
-            .exists()
-        )
-    # Full count for queue visibility (before cursor pagination).
-    total_count = count_query.order_by(None).count()
     now_utc = datetime.now(timezone.utc)
 
     latest_message_subq = (
@@ -11034,15 +11084,30 @@ async def list_cases(
     )
 
     if has_delivery_error:
-        query = query.filter(outbox_subq.c.failed_count > 0)
+        query = query.filter(func.coalesce(outbox_subq.c.failed_count, 0) > 0)
 
     if has_pending_outbox:
-        query = query.filter(outbox_subq.c.pending_count > 0)
+        query = query.filter(func.coalesce(outbox_subq.c.pending_count, 0) > 0)
 
     if last_activity_since_dt:
         query = query.filter(latest_message_subq.c.created_at >= last_activity_since_dt)
     if has_human_lock:
         query = query.filter(human_lock_subq.c.lock_until.is_not(None))
+    if queue_view_value:
+        query = query.filter(
+            _build_case_queue_view_expr(
+                queue_view=queue_view_value,
+                last_inbound_col=last_inbound_subq.c.last_inbound_at,
+                last_outbound_col=last_outbound_subq.c.last_outbound_at,
+                pending_count_col=outbox_subq.c.pending_count,
+                failed_count_col=outbox_subq.c.failed_count,
+                lock_until_col=human_lock_subq.c.lock_until,
+                now_utc=now_utc,
+            )
+        )
+
+    # Full count for queue visibility (before cursor pagination).
+    total_count = query.order_by(None).count()
 
     # Sorting & Pagination (Cursor based on selected sort)
     sort_expr = Handover.created_at

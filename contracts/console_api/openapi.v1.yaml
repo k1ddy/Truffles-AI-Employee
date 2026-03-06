@@ -118,6 +118,14 @@ paths:
           - type: string
           - type: 'null'
           title: Status
+      - name: queue_view
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Queue View
       - name: q
         in: query
         required: false
