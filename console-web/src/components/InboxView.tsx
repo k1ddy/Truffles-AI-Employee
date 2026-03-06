@@ -42,6 +42,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const [standaloneOutreachBranchId, setStandaloneOutreachBranchId] = useState("");
     const [standalonePauseEnabled, setStandalonePauseEnabled] = useState(true);
     const [standalonePauseMinutes, setStandalonePauseMinutes] = useState(30);
+    const [isDesktopViewport, setIsDesktopViewport] = useState(false);
 
     const { data: meData } = useQuery({
         queryKey: ["console-me"],
@@ -83,6 +84,21 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
             setSelectionHydrated(false);
         }
     }, [workspaceScope]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") {
+            return;
+        }
+        const media = window.matchMedia("(min-width: 1280px)");
+        const syncViewport = () => setIsDesktopViewport(media.matches);
+        syncViewport();
+        if (typeof media.addEventListener === "function") {
+            media.addEventListener("change", syncViewport);
+            return () => media.removeEventListener("change", syncViewport);
+        }
+        media.addListener(syncViewport);
+        return () => media.removeListener(syncViewport);
+    }, []);
 
     useEffect(() => {
         if (initialCaseId) {
@@ -557,7 +573,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                 )}
             </div>
 
-            {sidePanelMode && caseDetail && (
+            {sidePanelMode && caseDetail && !isDesktopViewport && (
                 <div className="fixed inset-0 z-40 xl:hidden">
                     <div
                         className="absolute inset-0 bg-foreground/20"

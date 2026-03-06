@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import CaseBookingsPanel from "./CaseBookingsPanel";
 import CaseConversation from "./CaseConversation";
 import CaseDetailsPanel from "./CaseDetailsPanel";
@@ -36,6 +36,7 @@ export default function CaseView({ caseId }: CaseViewProps) {
     const { data: session } = useSession();
     const [draft, setDraft] = useState("");
     const [sidePanelMode, setSidePanelMode] = useState<SidePanelMode>(null);
+    const [isDesktopViewport, setIsDesktopViewport] = useState(false);
     const {
         caseDetail,
         caseLoading,
@@ -67,6 +68,21 @@ export default function CaseView({ caseId }: CaseViewProps) {
     const canViewDiagnostics = role === "support" || role === "platform_admin" || role === "owner" || role === "admin";
     const detailsOpen = sidePanelMode === "details";
     const bookingsOpen = sidePanelMode === "bookings";
+
+    useEffect(() => {
+        if (typeof window === "undefined") {
+            return;
+        }
+        const media = window.matchMedia("(min-width: 1280px)");
+        const syncViewport = () => setIsDesktopViewport(media.matches);
+        syncViewport();
+        if (typeof media.addEventListener === "function") {
+            media.addEventListener("change", syncViewport);
+            return () => media.removeEventListener("change", syncViewport);
+        }
+        media.addListener(syncViewport);
+        return () => media.removeListener(syncViewport);
+    }, []);
 
     if (!canReadInbox) {
         return <AccessDenied message="Эта роль не имеет доступа к заявкам." />;
@@ -114,7 +130,7 @@ export default function CaseView({ caseId }: CaseViewProps) {
             data-testid="case-view"
         >
             <div className="flex flex-col gap-4">
-                {(detailsOpen || bookingsOpen) && (
+                {(detailsOpen || bookingsOpen) && !isDesktopViewport && (
                     <div className="xl:hidden">
                         {bookingsOpen ? (
                             <CaseBookingsPanel
