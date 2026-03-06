@@ -202,10 +202,15 @@ def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> No
 
     bulk_request_schema = schemas.get("ConsoleCaseBulkActionRequest") or {}
     bulk_request_props = bulk_request_schema.get("properties") or {}
-    assert (bulk_request_props.get("action") or {}).get("enum") == ["reassign", "snooze"]
+    assert (bulk_request_props.get("action") or {}).get("enum") == ["reassign", "snooze", "route"]
     assert "case_ids" in bulk_request_props
     assert "agent_id" in bulk_request_props
     assert _has_string_type(bulk_request_props.get("agent_id") or {})
+    assert "policy" in bulk_request_props
+    assert (bulk_request_props.get("policy") or {}).get("anyOf") == [
+        {"const": "least_open_cases"},
+        {"type": "null"},
+    ]
     assert "minutes" in bulk_request_props
     assert _has_integer_type(bulk_request_props.get("minutes") or {})
     assert "reason" in bulk_request_props
@@ -215,6 +220,7 @@ def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> No
     bulk_result_props = bulk_result_schema.get("properties") or {}
     assert (bulk_result_props.get("status") or {}).get("enum") == ["processed", "skipped", "failed"]
     assert _has_string_type(bulk_result_props.get("code") or {})
+    assert "routing" in bulk_result_props
 
     bulk_response_schema = schemas.get("ConsoleCaseBulkActionResponse") or {}
     bulk_response_props = bulk_response_schema.get("properties") or {}
@@ -235,10 +241,31 @@ def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> No
     assert _has_integer_type(assignee_props.get("open_case_count") or {})
 
     assignee_list_schema = schemas.get("ConsoleCaseAssigneeListResponse") or {}
-    assert "items" in (assignee_list_schema.get("properties") or {})
+    assignee_list_props = assignee_list_schema.get("properties") or {}
+    assert "items" in assignee_list_props
+    assert "routing" in assignee_list_props
+
+    routing_schema = schemas.get("ConsoleCaseRoutingDecision") or {}
+    routing_props = routing_schema.get("properties") or {}
+    assert (routing_props.get("policy") or {}).get("const") == "least_open_cases"
+    assert _has_string_type(routing_props.get("recommended_agent_id") or {})
+    assert _has_string_type(routing_props.get("recommended_agent_name") or {})
+    assert _has_integer_type(routing_props.get("recommended_open_case_count") or {})
+    assert (routing_props.get("will_reassign") or {}).get("type") == "boolean"
+    assert _has_string_type(routing_props.get("reason_code") or {})
+    assert _has_string_type(routing_props.get("reason_summary") or {})
 
     reassign_schema = schemas.get("ConsoleCaseReassignRequest") or {}
-    assert _has_string_type(((reassign_schema.get("properties") or {}).get("agent_id") or {}))
+    reassign_props = reassign_schema.get("properties") or {}
+    assert _has_string_type(reassign_props.get("agent_id") or {})
+    assert (reassign_props.get("mode") or {}).get("enum") == ["manual", "policy"]
+    assert (reassign_props.get("policy") or {}).get("anyOf") == [
+        {"const": "least_open_cases"},
+        {"type": "null"},
+    ]
+
+    action_response_schema = schemas.get("ConsoleCaseActionResponse") or {}
+    assert "routing" in (action_response_schema.get("properties") or {})
 
     snooze_schema = schemas.get("ConsoleCaseSnoozeRequest") or {}
     snooze_props = snooze_schema.get("properties") or {}

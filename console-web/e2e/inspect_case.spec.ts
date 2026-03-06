@@ -486,6 +486,54 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
                     open_case_count: 1,
                 },
             ],
+            routing: {
+                policy: 'least_open_cases',
+                recommended_agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                recommended_agent_name: 'Manager Two',
+                recommended_open_case_count: 1,
+                current_agent_id: AGENT_ID,
+                current_agent_name: 'Manager',
+                current_open_case_count: 2,
+                will_reassign: true,
+                reason_code: 'least_open_cases',
+                reason_summary: 'Назначить Manager Two: 1 в работе вместо Manager · 2.',
+            },
+        });
+    });
+    await page.route(`**/api/proxy/cases/${CASE_ID}/reassign`, async (route) => {
+        if (route.request().method() !== 'POST') {
+            await route.fallback();
+            return;
+        }
+        const payload = route.request().postDataJSON() as {
+            agent_id?: string;
+            mode?: 'manual' | 'policy';
+            policy?: string;
+        } | null;
+        const nextAssigneeId = payload?.mode === 'policy'
+            ? 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+            : payload?.agent_id ?? AGENT_ID;
+        const nextAssigneeName = nextAssigneeId === AGENT_ID ? 'Manager' : 'Manager Two';
+        caseState.assigned_to_id = nextAssigneeId;
+        caseState.assigned_to_name = nextAssigneeName;
+        await toJsonResponse(route, {
+            success: true,
+            case: { ...caseState },
+            sync: null,
+            routing: payload?.mode === 'policy'
+                ? {
+                    policy: 'least_open_cases',
+                    recommended_agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    recommended_agent_name: 'Manager Two',
+                    recommended_open_case_count: 1,
+                    current_agent_id: AGENT_ID,
+                    current_agent_name: 'Manager',
+                    current_open_case_count: 2,
+                    will_reassign: true,
+                    reason_code: 'least_open_cases',
+                    reason_summary: 'Назначить Manager Two: 1 в работе вместо Manager · 2.',
+                }
+                : null,
         });
     });
     await page.route('**/api/proxy/cases/bulk', async (route) => {
@@ -494,11 +542,15 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             return;
         }
         const payload = route.request().postDataJSON() as {
-            action?: 'reassign' | 'snooze';
+            action?: 'reassign' | 'snooze' | 'route';
             case_ids?: string[];
         } | null;
         const caseIds = Array.isArray(payload?.case_ids) ? payload.case_ids : [];
-        const action = payload?.action === 'reassign' ? 'reassign' : 'snooze';
+        const action = payload?.action === 'route'
+            ? 'route'
+            : payload?.action === 'reassign'
+                ? 'reassign'
+                : 'snooze';
         await toJsonResponse(route, {
             success: true,
             action,
@@ -509,9 +561,27 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             items: caseIds.map((caseId) => ({
                 case_id: caseId,
                 status: 'processed',
-                code: action === 'reassign' ? 'REASSIGNED' : 'SNOOZED',
-                message: action === 'reassign' ? 'Assigned to Manager Two' : 'Case snoozed',
+                code: action === 'route' ? 'ROUTED' : action === 'reassign' ? 'REASSIGNED' : 'SNOOZED',
+                message: action === 'route'
+                    ? 'Назначить Manager Two: 1 в работе вместо Manager · 2.'
+                    : action === 'reassign'
+                        ? 'Assigned to Manager Two'
+                        : 'Case snoozed',
                 case: null,
+                routing: action === 'route'
+                    ? {
+                        policy: 'least_open_cases',
+                        recommended_agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                        recommended_agent_name: 'Manager Two',
+                        recommended_open_case_count: 1,
+                        current_agent_id: AGENT_ID,
+                        current_agent_name: 'Manager',
+                        current_open_case_count: 2,
+                        will_reassign: true,
+                        reason_code: 'least_open_cases',
+                        reason_summary: 'Назначить Manager Two: 1 в работе вместо Manager · 2.',
+                    }
+                    : null,
             })),
         });
     });
@@ -997,6 +1067,20 @@ test('inspect first case', async ({ page }) => {
         await expect(page.getByTestId('case-snooze-toggle')).toBeVisible({ timeout: 15000 });
         await page.getByTestId('cases-bulk-select').first().check({ force: true });
         await expect(page.getByTestId('cases-bulk-toolbar')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('cases-bulk-toggle-route').click({ force: true });
+        await expect(page.getByTestId('cases-bulk-route-panel')).toBeVisible({ timeout: 15000 });
+        const bulkRouteRequestPromise = page.waitForRequest((request) =>
+            request.method() === 'POST' && request.url().includes('/api/proxy/cases/bulk')
+        );
+        await page.getByTestId('cases-bulk-route-submit').click({ force: true });
+        const bulkRouteRequest = await bulkRouteRequestPromise;
+        expect(bulkRouteRequest.postDataJSON()).toMatchObject({
+            action: 'route',
+            case_ids: [CASE_ID],
+            policy: 'least_open_cases',
+        });
+        await page.getByTestId('cases-bulk-select').first().check({ force: true });
+        await expect(page.getByTestId('cases-bulk-toolbar')).toBeVisible({ timeout: 15000 });
         await page.getByTestId('cases-bulk-toggle-reassign').click({ force: true });
         await expect(page.getByTestId('cases-bulk-reassign-recommendation')).toContainText('Manager Two · 1 в работе', { timeout: 15000 });
         await page.getByTestId('cases-bulk-reassign-recommend').click({ force: true });
@@ -1016,9 +1100,18 @@ test('inspect first case', async ({ page }) => {
         await expect(page.getByTestId('case-reassign-select')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('case-reassign-select').locator('option').nth(0)).toContainText('Manager · 2 в работе · текущий');
         await expect(page.getByTestId('case-reassign-select').locator('option').nth(1)).toContainText('Manager Two · Manager · 1 в работе');
-        await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Manager Two · 1 в работе', { timeout: 15000 });
+        await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Назначить Manager Two: 1 в работе вместо Manager · 2.', { timeout: 15000 });
         await page.getByTestId('case-reassign-recommend-button').click({ force: true });
         await expect(page.getByTestId('case-reassign-select')).toHaveValue('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        const caseRouteRequestPromise = page.waitForRequest((request) =>
+            request.method() === 'POST' && request.url().includes(`/api/proxy/cases/${CASE_ID}/reassign`)
+        );
+        await page.getByTestId('case-reassign-policy-submit').click({ force: true });
+        const caseRouteRequest = await caseRouteRequestPromise;
+        expect(caseRouteRequest.postDataJSON()).toMatchObject({
+            mode: 'policy',
+            policy: 'least_open_cases',
+        });
         await page.getByTestId('case-snooze-toggle').click();
         await expect(page.getByTestId('case-snooze-minutes')).toBeVisible({ timeout: 15000 });
     }

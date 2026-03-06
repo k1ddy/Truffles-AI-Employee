@@ -40,7 +40,7 @@ interface CasesResponse {
 }
 
 type CaseListVariant = "table" | "compact";
-type BulkActionMode = "reassign" | "snooze" | null;
+type BulkActionMode = "reassign" | "route" | "snooze" | null;
 type QueueViewDefinition = {
     id: InboxQueueViewId;
     label: string;
@@ -151,7 +151,12 @@ function resolveRecommendedAssignee(options: CaseAssigneeOption[]) {
 function buildBulkSummary(response: CaseBulkActionResponse): BulkSummary {
     const parts: string[] = [];
     if (response.processed_count > 0) {
-        parts.push(`обновили ${response.processed_count}`);
+        const processedVerb = response.action === "route"
+            ? "распределили"
+            : response.action === "snooze"
+                ? "отложили"
+                : "обновили";
+        parts.push(`${processedVerb} ${response.processed_count}`);
     }
     if (response.skipped_count > 0) {
         parts.push(`без изменений ${response.skipped_count}`);
@@ -785,6 +790,11 @@ export default function CaseList({
         : selectedBranchIds.length > 1
             ? "Для передачи выберите заявки одного филиала"
             : null;
+    const bulkRouteDisabledReason = selectedCases.length === 0
+        ? "Выберите заявки"
+        : selectedBranchIds.length > 1
+            ? "Для распределения выберите заявки одного филиала"
+            : null;
 
     const { data: bulkAssigneesData, isFetching: assigneesLoading } = useQuery({
         queryKey: ["case-assignees-bulk", bulkAssigneeSourceCaseId],
@@ -825,6 +835,14 @@ export default function CaseList({
         mutationFn: async () => {
             if (selectedCaseIds.length === 0 || !bulkActionMode) {
                 throw new Error("Выберите заявки и действие");
+            }
+            if (bulkActionMode === "route") {
+                const response = await casesApi.bulkAction({
+                    action: "route",
+                    case_ids: selectedCaseIds,
+                    policy: "least_open_cases",
+                });
+                return response.data;
             }
             if (bulkActionMode === "reassign") {
                 const agentId = bulkAssigneeId.trim();
@@ -1517,8 +1535,8 @@ export default function CaseList({
                             </p>
                             <p className="text-xs text-muted-foreground">
                                 {bulkBranchLabel
-                                    ? `Передача доступна для филиала ${bulkBranchLabel}. Отсрочка работает для всей выборки.`
-                                    : "Для передачи выберите заявки одного филиала. Отсрочка доступна для всей выборки."}
+                                    ? `Передача и распределение доступны для филиала ${bulkBranchLabel}. Отсрочка работает для всей выборки.`
+                                    : "Для передачи и распределения выберите заявки одного филиала. Отсрочка доступна для всей выборки."}
                             </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -1533,6 +1551,18 @@ export default function CaseList({
                                 data-testid="cases-bulk-toggle-reassign"
                             >
                                 Передать
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setBulkSummary(null);
+                                    setBulkActionMode((current) => current === "route" ? null : "route");
+                                }}
+                                disabled={!!bulkRouteDisabledReason || bulkActionMutation.isPending}
+                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                data-testid="cases-bulk-toggle-route"
+                            >
+                                Распределить
                             </button>
                             <button
                                 type="button"
@@ -1557,6 +1587,37 @@ export default function CaseList({
                             </button>
                         </div>
                     </div>
+
+                    {bulkActionMode === "route" && (
+                        <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="cases-bulk-route-panel">
+                            {bulkRouteDisabledReason ? (
+                                <p className="text-xs text-amber-700" data-testid="cases-bulk-route-hint">
+                                    {bulkRouteDisabledReason}
+                                </p>
+                            ) : (
+                                <div className="flex flex-col gap-3">
+                                    <p className="text-xs text-muted-foreground">
+                                        Сервер распределит выбранные заявки по политике меньшей нагрузки внутри одного филиала.
+                                        Текущий владелец сохраняется, если уже соответствует этой политике.
+                                    </p>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => bulkActionMutation.mutate()}
+                                            disabled={bulkActionMutation.isPending}
+                                            className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                            data-testid="cases-bulk-route-submit"
+                                        >
+                                            {bulkActionMutation.isPending ? "Распределяем..." : "Распределить по политике"}
+                                        </button>
+                                        <p className="text-xs text-muted-foreground">
+                                            Политика: меньше всего открытых заявок у доступных менеджеров.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {bulkActionMode === "reassign" && (
                         <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="cases-bulk-reassign-panel">

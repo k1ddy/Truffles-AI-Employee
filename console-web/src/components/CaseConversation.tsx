@@ -314,23 +314,36 @@ export default function CaseConversation({
             if (current && items.some((item) => item.agent_id === current)) {
                 return current;
             }
-            const preferred = items.find((item) => !item.is_current) ?? items[0];
+            const routedTargetId = assigneeOptionsQuery.data?.routing?.recommended_agent_id;
+            const preferred = items.find((item) => String(item.agent_id) === String(routedTargetId))
+                ?? items.find((item) => !item.is_current)
+                ?? items[0];
             return preferred.agent_id;
         });
-    }, [actionPanel, assigneeOptionsQuery.data?.items]);
+    }, [actionPanel, assigneeOptionsQuery.data]);
 
     const reassignMutation = useMutation({
-        mutationFn: async () => {
+        mutationFn: async (mode: "manual" | "policy") => {
+            if (mode === "policy") {
+                const policy = assigneeOptionsQuery.data?.routing?.policy ?? "least_open_cases";
+                const response = await casesApi.reassign(caseId, { mode: "policy", policy });
+                return { response: response.data, mode };
+            }
             const agentId = selectedAssigneeId.trim();
             if (!agentId) {
                 throw new Error("assignee_required");
             }
-            const response = await casesApi.reassign(caseId, { agent_id: agentId });
-            return response.data;
+            const response = await casesApi.reassign(caseId, { agent_id: agentId, mode: "manual" });
+            return { response: response.data, mode };
         },
-        onSuccess: (response) => {
+        onSuccess: ({ response, mode }) => {
+            const routingSummary = response.routing?.reason_summary;
             setActionPanel(null);
-            toast.success(`Заявка передана: ${response.case.assigned_to_name ?? "новый менеджер"}`);
+            if (mode === "policy" && routingSummary) {
+                toast.success(routingSummary);
+            } else {
+                toast.success(`Заявка передана: ${response.case.assigned_to_name ?? "новый менеджер"}`);
+            }
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
             queryClient.invalidateQueries({ queryKey: ["case-assignees", caseId] });
@@ -498,9 +511,21 @@ export default function CaseConversation({
         () => sortAssigneeOptionsByLoad(assigneeOptionsQuery.data?.items ?? []),
         [assigneeOptionsQuery.data?.items],
     );
-    const recommendedAssignee = useMemo(
+    const fallbackRecommendedAssignee = useMemo(
         () => resolveRecommendedAssignee(sortedAssigneeOptions, caseDetail.assigned_to_id),
         [sortedAssigneeOptions, caseDetail.assigned_to_id],
+    );
+    const routingRecommendation = assigneeOptionsQuery.data?.routing ?? null;
+    const recommendedAssignee = useMemo(
+        () => {
+            if (routingRecommendation?.recommended_agent_id) {
+                return sortedAssigneeOptions.find(
+                    (item) => String(item.agent_id) === String(routingRecommendation.recommended_agent_id),
+                ) ?? fallbackRecommendedAssignee;
+            }
+            return fallbackRecommendedAssignee;
+        },
+        [fallbackRecommendedAssignee, routingRecommendation?.recommended_agent_id, sortedAssigneeOptions],
     );
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
     const compactContextLimit = layout === "inbox" ? 110 : 180;
@@ -713,13 +738,13 @@ export default function CaseConversation({
                         <span className="text-[11px] text-muted-foreground">
                             После текущего ответственного список отсортирован по открытым заявкам.
                         </span>
-                        {recommendedAssignee && (
+                        {routingRecommendation && recommendedAssignee && (
                             <span
                                 className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900"
                                 data-testid="case-reassign-recommendation"
                             >
-                                Рекомендуем: {recommendedAssignee.agent_name} · {formatAssigneeLoadLabel(recommendedAssignee)}.
-                                Ниже текущая нагрузка в этой очереди.
+                                {routingRecommendation.reason_summary}
+                                {" "}Сейчас у {recommendedAssignee.agent_name} {formatAssigneeLoadLabel(recommendedAssignee)}.
                             </span>
                         )}
                     </label>
@@ -742,9 +767,20 @@ export default function CaseConversation({
                                 : "Выбрать рекомендацию"}
                         </button>
                     )}
+                    {routingRecommendation && (
+                        <button
+                            type="button"
+                            onClick={() => reassignMutation.mutate("policy")}
+                            disabled={caseActionBusy || assigneeOptionsQuery.isLoading || !sortedAssigneeOptions.length}
+                            className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 disabled:opacity-50"
+                            data-testid="case-reassign-policy-submit"
+                        >
+                            {reassignMutation.isPending ? "Распределяем..." : "Назначить по политике"}
+                        </button>
+                    )}
                     <button
                         type="button"
-                        onClick={() => reassignMutation.mutate()}
+                        onClick={() => reassignMutation.mutate("manual")}
                         disabled={
                             caseActionBusy
                             || assigneeOptionsQuery.isLoading

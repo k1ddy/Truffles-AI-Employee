@@ -135,6 +135,88 @@ def test_map_case_assignee_loads_ignores_ambiguous_legacy_name() -> None:
     assert load_map[agent_two_id] == 0
 
 
+def test_build_case_routing_decision_prefers_lowest_load() -> None:
+    current_agent_id = uuid4()
+    recommended_agent_id = uuid4()
+    decision, target_option = console_router._build_case_routing_decision(
+        assignee_options=[
+            ConsoleCaseAssigneeOption(
+                agent_id=current_agent_id,
+                agent_name="Manager",
+                role="manager",
+                is_current=True,
+                open_case_count=3,
+            ),
+            ConsoleCaseAssigneeOption(
+                agent_id=recommended_agent_id,
+                agent_name="Manager Two",
+                role="manager",
+                is_current=False,
+                open_case_count=1,
+            ),
+        ],
+        current_assignee_id=str(current_agent_id),
+        policy="least_open_cases",
+    )
+
+    assert target_option is not None
+    assert decision is not None
+    assert target_option.agent_id == recommended_agent_id
+    assert decision.recommended_agent_id == recommended_agent_id
+    assert decision.current_agent_id == current_agent_id
+    assert decision.will_reassign is True
+    assert decision.reason_code == "least_open_cases"
+
+
+def test_build_case_routing_decision_keeps_current_owner_on_tie() -> None:
+    current_agent_id = uuid4()
+    other_agent_id = uuid4()
+    decision, target_option = console_router._build_case_routing_decision(
+        assignee_options=[
+            ConsoleCaseAssigneeOption(
+                agent_id=current_agent_id,
+                agent_name="Manager",
+                role="manager",
+                is_current=True,
+                open_case_count=2,
+            ),
+            ConsoleCaseAssigneeOption(
+                agent_id=other_agent_id,
+                agent_name="Manager Two",
+                role="manager",
+                is_current=False,
+                open_case_count=2,
+            ),
+        ],
+        current_assignee_id=str(current_agent_id),
+        policy="least_open_cases",
+    )
+
+    assert target_option is not None
+    assert decision is not None
+    assert target_option.agent_id == current_agent_id
+    assert decision.will_reassign is False
+    assert decision.reason_code == "current_owner_kept"
+
+
+def test_adjust_case_routing_loads_rebalances_counts() -> None:
+    current_agent_id = uuid4()
+    next_agent_id = uuid4()
+    load_map = {
+        current_agent_id: 3,
+        next_agent_id: 1,
+    }
+
+    console_router._adjust_case_routing_loads(
+        load_map,
+        previous_assignee_id=str(current_agent_id),
+        next_assignee_id=str(next_agent_id),
+    )
+
+    assert load_map[current_agent_id] == 2
+    assert load_map[next_agent_id] == 2
+
+
 @pytest.mark.parametrize(
     ("assigned_to_me", "assignee_id", "unassigned"),
     [
@@ -575,3 +657,89 @@ async def test_reopen_case_skips_external_sync_side_effects(monkeypatch):
     client_notify.assert_not_called()
     assert "case_reopened" in audit_events
     assert "case_reopen_sync" in audit_events
+
+
+@pytest.mark.asyncio
+async def test_reassign_case_policy_uses_server_routing(monkeypatch):
+    branch_id = uuid4()
+    actor_id = uuid4()
+    current_agent_id = uuid4()
+    recommended_agent_id = uuid4()
+    case = SimpleNamespace(
+        id=uuid4(),
+        status="active",
+        assigned_to=current_agent_id,
+        assigned_to_name="Manager",
+        conversation_id=uuid4(),
+        created_at=datetime.now(timezone.utc),
+        trigger_type="message",
+        first_response_at=None,
+        resolved_at=None,
+        resolution_time_seconds=None,
+        meta=None,
+    )
+    conversation = SimpleNamespace(id=case.conversation_id, branch_id=branch_id)
+    context = SimpleNamespace(
+        agent=SimpleNamespace(id=actor_id, name="Supervisor"),
+        role="admin",
+        client=SimpleNamespace(id=uuid4()),
+        branches=[SimpleNamespace(id=branch_id)],
+    )
+    db = Mock()
+    audit_events: list[str] = []
+    options = [
+        ConsoleCaseAssigneeOption(
+            agent_id=current_agent_id,
+            agent_name="Manager",
+            role="manager",
+            branch_id=branch_id,
+            is_current=True,
+            open_case_count=4,
+        ),
+        ConsoleCaseAssigneeOption(
+            agent_id=recommended_agent_id,
+            agent_name="Manager Two",
+            role="manager",
+            branch_id=branch_id,
+            is_current=False,
+            open_case_count=1,
+        ),
+    ]
+
+    def fake_reassign(*_args, **kwargs):
+        case.assigned_to = kwargs["manager_id"]
+        case.assigned_to_name = kwargs["manager_name"]
+        return SimpleNamespace(ok=True, error=None)
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "start_idempotency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_case_action_context",
+        lambda *_args, **_kwargs: (case, conversation),
+    )
+    monkeypatch.setattr(console_router, "_require_case_operator_access", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_list_case_assignee_options", lambda *args, **kwargs: options)
+    monkeypatch.setattr(console_router, "state_manager_reassign", fake_reassign)
+    monkeypatch.setattr(
+        console_router,
+        "record_audit_event",
+        lambda *args, **kwargs: audit_events.append(kwargs["event_type"]),
+    )
+
+    response = await console_router.reassign_case(
+        case.id,
+        SimpleNamespace(agent_id=None, mode="policy", policy="least_open_cases"),
+        request=Mock(),
+        db=db,
+    )
+
+    assert response.success is True
+    assert response.case.assigned_to_id == str(recommended_agent_id)
+    assert response.case.assigned_to_name == "Manager Two"
+    assert response.routing is not None
+    assert response.routing.policy == "least_open_cases"
+    assert response.routing.recommended_agent_id == recommended_agent_id
+    assert response.routing.reason_code == "least_open_cases"
+    assert "case_routed_policy" in audit_events

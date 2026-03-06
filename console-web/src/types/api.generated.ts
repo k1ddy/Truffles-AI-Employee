@@ -4234,6 +4234,7 @@ export interface components {
             success: boolean;
             case: components["schemas"]["ConsoleCase"];
             sync?: components["schemas"]["ConsoleCaseActionSync"] | null;
+            routing?: components["schemas"]["ConsoleCaseRoutingDecision"] | null;
         };
         /** ConsoleCaseActionSync */
         ConsoleCaseActionSync: {
@@ -4244,6 +4245,7 @@ export interface components {
         ConsoleCaseAssigneeListResponse: {
             /** Items */
             items: components["schemas"]["ConsoleCaseAssigneeOption"][];
+            routing?: components["schemas"]["ConsoleCaseRoutingDecision"] | null;
         };
         /** ConsoleCaseAssigneeOption */
         ConsoleCaseAssigneeOption: {
@@ -4275,11 +4277,13 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "reassign" | "snooze";
+            action: "reassign" | "snooze" | "route";
             /** Case Ids */
             case_ids: string[];
             /** Agent Id */
             agent_id?: string | null;
+            /** Policy */
+            policy?: "least_open_cases" | null;
             /** Minutes */
             minutes?: number | null;
             /** Reason */
@@ -4293,7 +4297,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "reassign" | "snooze";
+            action: "reassign" | "snooze" | "route";
             /** Requested Count */
             requested_count: number;
             /** Processed Count */
@@ -4322,6 +4326,7 @@ export interface components {
             /** Message */
             message?: string | null;
             case?: components["schemas"]["ConsoleCase"] | null;
+            routing?: components["schemas"]["ConsoleCaseRoutingDecision"] | null;
         };
         /** ConsoleCaseListResponse */
         ConsoleCaseListResponse: {
@@ -4336,11 +4341,51 @@ export interface components {
         };
         /** ConsoleCaseReassignRequest */
         ConsoleCaseReassignRequest: {
+            /** Agent Id */
+            agent_id?: string | null;
             /**
-             * Agent Id
+             * Mode
+             * @default manual
+             * @enum {string}
+             */
+            mode: "manual" | "policy";
+            /** Policy */
+            policy?: "least_open_cases" | null;
+        };
+        /** ConsoleCaseRoutingDecision */
+        ConsoleCaseRoutingDecision: {
+            /**
+             * Policy
+             * @constant
+             */
+            policy: "least_open_cases";
+            /**
+             * Recommended Agent Id
              * Format: uuid
              */
-            agent_id: string;
+            recommended_agent_id: string;
+            /** Recommended Agent Name */
+            recommended_agent_name: string;
+            /**
+             * Recommended Open Case Count
+             * @default 0
+             */
+            recommended_open_case_count: number;
+            /** Current Agent Id */
+            current_agent_id?: string | null;
+            /** Current Agent Name */
+            current_agent_name?: string | null;
+            /** Current Open Case Count */
+            current_open_case_count?: number | null;
+            /**
+             * Will Reassign
+             * @default true
+             */
+            will_reassign: boolean;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Summary */
+            reason_summary: string;
         };
         /** ConsoleCaseSnoozeRequest */
         ConsoleCaseSnoozeRequest: {
