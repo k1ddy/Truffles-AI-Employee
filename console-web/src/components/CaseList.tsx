@@ -607,6 +607,20 @@ export default function CaseList({
         : advancedFiltersVisible
             ? "Скрыть фильтры"
             : "Расширенные фильтры";
+    const hasAnyFiltersApplied = Boolean(
+        activeViewId !== "all_open"
+        || statusFilterActive
+        || (branchFilterEnabled && filters.branchId)
+        || filters.dateFrom
+        || filters.dateTo
+        || filters.assignedToMe
+        || filters.assigneeId
+        || filters.unassigned
+        || filters.query
+        || filters.hasDeliveryError
+        || filters.hasPendingOutbox
+        || filters.hasHumanLock
+    );
     const headingClass = filtersCompact ? "text-base" : isCompact ? "text-lg" : "text-xl";
     const isTight = filtersCompact || filtersCollapsed;
     const autoRefreshLabel = autoRefreshEnabled ? "Автообновление: Вкл" : "Автообновление: Выкл";
@@ -623,6 +637,9 @@ export default function CaseList({
     const selectClass = `px-3 border border-border/60 rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 ${
         isTight ? "py-1.5 text-xs" : "py-2 text-xs"
     }`;
+    const compactSearchInputClass = "w-full rounded-xl border border-border/60 bg-card px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40";
+    const compactSelectClass = "w-full min-w-0 rounded-xl border border-border/60 bg-card px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40";
+    const compactPrimaryGridClass = "grid w-full gap-2 sm:grid-cols-2";
 
     const pillClass = (active: boolean) => (
         `rounded-full border px-3 py-1 text-xs font-semibold transition ${
@@ -638,12 +655,10 @@ export default function CaseList({
             setFiltersCollapsed(false);
             return;
         }
-        if (advancedFiltersActive) {
+        if (advancedFiltersActive && filtersCollapsed) {
             setFiltersCollapsed(false);
-            return;
         }
-        setFiltersCollapsed(true);
-    }, [filtersCompact, advancedFiltersActive]);
+    }, [filtersCompact, advancedFiltersActive, filtersCollapsed]);
 
     useEffect(() => {
         if (!branchFilterEnabled && filters.branchId) {
@@ -1129,123 +1144,244 @@ export default function CaseList({
                         </button>
                     ))}
                 </div>
-                <div className="flex w-full items-center gap-2 overflow-x-auto pb-1">
-                    <input
-                        type="text"
-                        value={searchValue}
-                        onChange={(e) => setSearchValue(e.target.value)}
-                        placeholder="Телефон / имя / ID"
-                        className={searchInputClass}
-                        data-testid="cases-filter-search"
-                    />
-                    <select
-                        value={filters.status || ""}
-                        onChange={(e) => { resetPagination(); setFilters({ ...filters, status: e.target.value || undefined }); }}
-                        className={selectClass}
-                        data-testid="cases-filter-status"
-                    >
-                        <option value="open">Открытые</option>
-                        <option value="">Все статусы</option>
-                        <option value="pending">Ожидает</option>
-                        <option value="active">В работе</option>
-                        <option value="resolved">Закрыта</option>
-                    </select>
-                    {filtersCollapsed ? (
-                        <select
-                            value={filters.sortBy}
-                            onChange={(e) => {
-                                resetPagination();
-                                setFilters({ ...filters, sortBy: e.target.value as CaseFilters["sortBy"] });
-                            }}
-                            className={selectClass}
-                            data-testid="cases-filter-sort-select"
-                        >
-                            {sortOptions.map((option) => (
-                                <option key={option.id} value={option.id}>
-                                    {option.label}
-                                </option>
-                            ))}
-                        </select>
-                    ) : (
-                        <div className="flex items-center gap-2" data-testid="cases-filter-sort">
-                            {sortOptions.map((option) => (
+                {isCompact ? (
+                    <div className="grid w-full gap-3" data-testid="cases-filter-compact-layout">
+                        <input
+                            type="text"
+                            value={searchValue}
+                            onChange={(e) => setSearchValue(e.target.value)}
+                            placeholder="Телефон / имя / ID"
+                            className={compactSearchInputClass}
+                            data-testid="cases-filter-search"
+                        />
+                        {!filtersCollapsed && (
+                            <div className={compactPrimaryGridClass}>
+                                <label className="space-y-1">
+                                    <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                        Статус
+                                    </span>
+                                    <select
+                                        value={filters.status || ""}
+                                        onChange={(e) => { resetPagination(); setFilters({ ...filters, status: e.target.value || undefined }); }}
+                                        className={compactSelectClass}
+                                        data-testid="cases-filter-status"
+                                    >
+                                        <option value="open">Открытые</option>
+                                        <option value="">Все статусы</option>
+                                        <option value="pending">Ожидает</option>
+                                        <option value="active">В работе</option>
+                                        <option value="resolved">Закрыта</option>
+                                    </select>
+                                </label>
+                                <label className="space-y-1">
+                                    <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                        Сортировка
+                                    </span>
+                                    <select
+                                        value={filters.sortBy}
+                                        onChange={(e) => {
+                                            resetPagination();
+                                            setFilters({ ...filters, sortBy: e.target.value as CaseFilters["sortBy"] });
+                                        }}
+                                        className={compactSelectClass}
+                                        data-testid="cases-filter-sort-select"
+                                    >
+                                        {sortOptions.map((option) => (
+                                            <option key={option.id} value={option.id}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                                {privilegedOwnerFilterVisible && (
+                                    <label className="space-y-1 sm:col-span-2">
+                                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                            Владелец
+                                        </span>
+                                        <select
+                                            value={filters.unassigned ? "__unassigned__" : filters.assigneeId || ""}
+                                            onChange={(event) => {
+                                                const nextValue = event.target.value;
+                                                resetPagination();
+                                                setFilters({
+                                                    ...filters,
+                                                    assignedToMe: false,
+                                                    assigneeId: nextValue && nextValue !== "__unassigned__" ? nextValue : undefined,
+                                                    unassigned: nextValue === "__unassigned__",
+                                                });
+                                            }}
+                                            className={compactSelectClass}
+                                            disabled={queueAssigneesLoading}
+                                            data-testid="cases-filter-assignee"
+                                        >
+                                            <option value="">Все владельцы</option>
+                                            <option value="__unassigned__">Без владельца</option>
+                                            {queueAssignees.map((option) => (
+                                                <option key={option.agent_id} value={String(option.agent_id)}>
+                                                    {formatQueueAssigneeOptionLabel(option)}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                )}
+                            </div>
+                        )}
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    resetPagination();
+                                    setFilters({
+                                        ...filters,
+                                        assignedToMe: !filters.assignedToMe,
+                                        assigneeId: undefined,
+                                        unassigned: false,
+                                    });
+                                }}
+                                className={pillClass(filters.assignedToMe)}
+                                data-testid="cases-filter-assigned"
+                            >
+                                Мои
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowAdvancedFilters((prev) => !prev)}
+                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                                data-testid="cases-filter-advanced-toggle"
+                                disabled={advancedFiltersActive}
+                            >
+                                {advancedToggleLabel}
+                            </button>
+                            {hasAnyFiltersApplied && (
                                 <button
-                                    key={option.id}
-                                    type="button"
-                                    onClick={() => {
-                                        resetPagination();
-                                        setFilters({ ...filters, sortBy: option.id });
-                                    }}
-                                    className={pillClass(filters.sortBy === option.id)}
+                                    onClick={resetAllFilters}
+                                    className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-destructive"
+                                    data-testid="cases-filter-clear"
                                 >
-                                    {option.label}
+                                    Сбросить
                                 </button>
-                            ))}
+                            )}
                         </div>
-                    )}
-                    <button
-                        type="button"
-                        onClick={() => {
-                            resetPagination();
-                            setFilters({
-                                ...filters,
-                                assignedToMe: !filters.assignedToMe,
-                                assigneeId: undefined,
-                                unassigned: false,
-                            });
-                        }}
-                        className={pillClass(filters.assignedToMe)}
-                        data-testid="cases-filter-assigned"
-                    >
-                        Мои
-                    </button>
-                    {privilegedOwnerFilterVisible && (
+                    </div>
+                ) : (
+                    <div className="flex w-full items-center gap-2 overflow-x-auto pb-1">
+                        <input
+                            type="text"
+                            value={searchValue}
+                            onChange={(e) => setSearchValue(e.target.value)}
+                            placeholder="Телефон / имя / ID"
+                            className={searchInputClass}
+                            data-testid="cases-filter-search"
+                        />
                         <select
-                            value={filters.unassigned ? "__unassigned__" : filters.assigneeId || ""}
-                            onChange={(event) => {
-                                const nextValue = event.target.value;
+                            value={filters.status || ""}
+                            onChange={(e) => { resetPagination(); setFilters({ ...filters, status: e.target.value || undefined }); }}
+                            className={selectClass}
+                            data-testid="cases-filter-status"
+                        >
+                            <option value="open">Открытые</option>
+                            <option value="">Все статусы</option>
+                            <option value="pending">Ожидает</option>
+                            <option value="active">В работе</option>
+                            <option value="resolved">Закрыта</option>
+                        </select>
+                        {filtersCollapsed ? (
+                            <select
+                                value={filters.sortBy}
+                                onChange={(e) => {
+                                    resetPagination();
+                                    setFilters({ ...filters, sortBy: e.target.value as CaseFilters["sortBy"] });
+                                }}
+                                className={selectClass}
+                                data-testid="cases-filter-sort-select"
+                            >
+                                {sortOptions.map((option) => (
+                                    <option key={option.id} value={option.id}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        ) : (
+                            <div className="flex items-center gap-2" data-testid="cases-filter-sort">
+                                {sortOptions.map((option) => (
+                                    <button
+                                        key={option.id}
+                                        type="button"
+                                        onClick={() => {
+                                            resetPagination();
+                                            setFilters({ ...filters, sortBy: option.id });
+                                        }}
+                                        className={pillClass(filters.sortBy === option.id)}
+                                    >
+                                        {option.label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => {
                                 resetPagination();
                                 setFilters({
                                     ...filters,
-                                    assignedToMe: false,
-                                    assigneeId: nextValue && nextValue !== "__unassigned__" ? nextValue : undefined,
-                                    unassigned: nextValue === "__unassigned__",
+                                    assignedToMe: !filters.assignedToMe,
+                                    assigneeId: undefined,
+                                    unassigned: false,
                                 });
                             }}
-                            className={selectClass}
-                            disabled={queueAssigneesLoading}
-                            data-testid="cases-filter-assignee"
+                            className={pillClass(filters.assignedToMe)}
+                            data-testid="cases-filter-assigned"
                         >
-                            <option value="">Все владельцы</option>
-                            <option value="__unassigned__">Без владельца</option>
-                            {queueAssignees.map((option) => (
-                                <option key={option.agent_id} value={String(option.agent_id)}>
-                                    {formatQueueAssigneeOptionLabel(option)}
-                                </option>
-                            ))}
-                        </select>
-                    )}
-                    {!filtersCollapsed && (
-                        <button
-                            type="button"
-                            onClick={() => setShowAdvancedFilters((prev) => !prev)}
-                            className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap"
-                            data-testid="cases-filter-advanced-toggle"
-                            disabled={advancedFiltersActive}
-                        >
-                            {advancedToggleLabel}
+                            Мои
                         </button>
-                    )}
-                    {(activeViewId !== "all_open" || statusFilterActive || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.assigneeId || filters.unassigned || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox || filters.hasHumanLock) && (
-                        <button
-                            onClick={resetAllFilters}
-                            className="text-xs text-muted-foreground hover:text-destructive whitespace-nowrap"
-                            data-testid="cases-filter-clear"
-                        >
-                            Сбросить
-                        </button>
-                    )}
-                </div>
+                        {privilegedOwnerFilterVisible && (
+                            <select
+                                value={filters.unassigned ? "__unassigned__" : filters.assigneeId || ""}
+                                onChange={(event) => {
+                                    const nextValue = event.target.value;
+                                    resetPagination();
+                                    setFilters({
+                                        ...filters,
+                                        assignedToMe: false,
+                                        assigneeId: nextValue && nextValue !== "__unassigned__" ? nextValue : undefined,
+                                        unassigned: nextValue === "__unassigned__",
+                                    });
+                                }}
+                                className={selectClass}
+                                disabled={queueAssigneesLoading}
+                                data-testid="cases-filter-assignee"
+                            >
+                                <option value="">Все владельцы</option>
+                                <option value="__unassigned__">Без владельца</option>
+                                {queueAssignees.map((option) => (
+                                    <option key={option.agent_id} value={String(option.agent_id)}>
+                                        {formatQueueAssigneeOptionLabel(option)}
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                        {!filtersCollapsed && (
+                            <button
+                                type="button"
+                                onClick={() => setShowAdvancedFilters((prev) => !prev)}
+                                className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap"
+                                data-testid="cases-filter-advanced-toggle"
+                                disabled={advancedFiltersActive}
+                            >
+                                {advancedToggleLabel}
+                            </button>
+                        )}
+                        {hasAnyFiltersApplied && (
+                            <button
+                                onClick={resetAllFilters}
+                                className="text-xs text-muted-foreground hover:text-destructive whitespace-nowrap"
+                                data-testid="cases-filter-clear"
+                            >
+                                Сбросить
+                            </button>
+                        )}
+                    </div>
+                )}
                 <div className="flex flex-wrap items-center gap-2 text-[11px]" data-testid="cases-queue-view-summary">
                     <span className="rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary">
                         {activeQueueView?.label ?? "Все открытые"}
@@ -1562,12 +1698,13 @@ export default function CaseList({
             )}
 
             {isCompact ? (
-                <div className="flex-1 overflow-y-auto pr-1 mt-3 flex flex-col gap-2" data-testid="cases-table">
+                <div className="mt-3 flex flex-1 flex-col gap-3 overflow-y-auto pr-1" data-testid="cases-table">
                     {visibleCases.map((c) => {
                         const sla = getCaseSlaIndicator(c);
                         const branchName = branchMap.get(c.branch_id || "") || "-";
                         const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
                         const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
+                        const activityLabel = new Date(lastActivity).toLocaleString("ru-RU");
                         const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
                         const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
                         const contactName = c.customer_name || c.customer_phone || c.customer_remote_jid?.split("@")[0] || "Клиент";
@@ -1582,70 +1719,78 @@ export default function CaseList({
                             : c.status === "pending"
                                 ? "bg-yellow-100 text-yellow-800"
                                 : "bg-muted text-muted-foreground";
+                        const secondaryAttention = c.attention_reason && !sla.state?.startsWith("reply") && sla.state !== "overdue"
+                            ? c.attention_reason
+                            : null;
                         const content = (
                             <div
-                                className={`rounded-xl border border-border/60 p-3 text-left transition ${
-                                    isSelected ? "border-primary/60 bg-primary/5" : "bg-card hover:bg-muted/60"
+                                className={`rounded-2xl border border-border/60 p-3.5 text-left transition ${
+                                    isSelected ? "border-primary/60 bg-primary/5 shadow-sm" : "bg-card hover:bg-muted/60"
                                 } ${isBulkSelected && !isSelected ? "border-amber-300 bg-amber-50/70" : ""}`}
                             >
-                                <div className="flex items-start justify-between gap-3 mb-2">
-                                    <div>
-                                        <p className="text-sm font-semibold">{contactName}</p>
+                                <div className="mb-2 flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <p className="text-sm font-semibold text-foreground">{contactName}</p>
+                                            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                                                {c.id.slice(0, 8)}
+                                            </span>
+                                        </div>
                                         <p className="text-xs text-muted-foreground">
                                             {contactPhone || branchName}
                                         </p>
                                     </div>
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${statusClass}`}>
+                                    <span className={`px-2 py-1 rounded-full text-[10px] font-semibold ${statusClass}`}>
                                         {getStatusLabel(c.status)}
                                     </span>
                                 </div>
-                                <p className="text-xs text-muted-foreground mb-2">
+                                <p className="mb-3 text-xs leading-relaxed text-foreground/80">
                                     {preview}
                                 </p>
-                                <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                                <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                                    <span className={`rounded-full px-2 py-1 font-semibold ${sla.className}`}>
+                                        {sla.label}
+                                    </span>
                                     {visibleFields.branch && <span>{branchName}</span>}
                                     {visibleFields.owner && (
-                                        <span className={`px-2 py-0.5 rounded font-semibold ${
+                                        <span className={`rounded-full px-2 py-1 font-semibold ${
                                             c.assigned_to_name ? "bg-muted text-muted-foreground" : "bg-amber-100 text-amber-800"
                                         }`}>
                                             {c.assigned_to_name || "Без владельца"}
                                         </span>
                                     )}
                                     {visibleFields.channel && (
-                                        <span className="px-2 py-0.5 rounded font-semibold bg-slate-100 text-slate-700">
+                                        <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
                                             {c.channel}
                                         </span>
                                     )}
-                                    {visibleFields.activity && <span>{new Date(lastActivity).toLocaleString("ru-RU")}</span>}
-                                    <span className={`px-2 py-0.5 rounded font-semibold ${sla.className}`}>
-                                        {sla.label}
-                                    </span>
+                                    {visibleFields.activity && <span>{activityLabel}</span>}
                                     {visibleFields.priority && priorityChip && (
-                                        <span className={`px-2 py-0.5 rounded font-semibold ${priorityChip.className}`}>
+                                        <span className={`rounded-full px-2 py-1 font-semibold ${priorityChip.className}`}>
                                             {priorityChip.label}
                                         </span>
                                     )}
                                     {isLive && (
-                                        <span className="px-2 py-0.5 rounded font-semibold bg-green-100 text-green-800">
+                                        <span className="rounded-full bg-green-100 px-2 py-1 font-semibold text-green-800">
                                             Недавний диалог
                                         </span>
                                     )}
                                     {hasHumanLock && (
-                                        <span className="px-2 py-0.5 rounded font-semibold bg-amber-100 text-amber-800">
+                                        <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-800">
                                             Пауза
                                         </span>
                                     )}
                                     {hasIssue && (
-                                        <span className="px-2 py-0.5 rounded font-semibold bg-red-100 text-red-800">
+                                        <span className="rounded-full bg-red-100 px-2 py-1 font-semibold text-red-800">
                                             Ошибка
                                         </span>
                                     )}
-                                    {c.attention_reason && !sla.state?.startsWith("reply") && sla.state !== "overdue" && (
-                                        <span className="px-2 py-0.5 rounded font-semibold bg-primary/10 text-primary">
-                                            {c.attention_reason}
-                                        </span>
-                                    )}
                                 </div>
+                                {secondaryAttention && (
+                                    <div className="mt-3 rounded-xl bg-primary/10 px-3 py-2 text-[11px] font-medium text-primary">
+                                        {secondaryAttention}
+                                    </div>
+                                )}
                             </div>
                         );
                         const rowContent = onSelectCase ? (

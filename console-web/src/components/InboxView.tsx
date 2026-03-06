@@ -227,11 +227,11 @@ export default function InboxView({ initialCaseId, initialSidePanel = null }: In
     const hasSelection = Boolean(selectedCaseId);
     const gridClass = showDetailsColumn
         ? hasSelection
-            ? "xl:grid-cols-[220px_minmax(0,1fr)_320px]"
-            : "xl:grid-cols-[280px_minmax(0,1fr)_320px]"
+            ? "xl:grid-cols-[320px_minmax(0,1fr)_320px] 2xl:grid-cols-[360px_minmax(0,1fr)_340px]"
+            : "xl:grid-cols-[360px_minmax(0,1fr)_320px] 2xl:grid-cols-[400px_minmax(0,1fr)_340px]"
         : hasSelection
-            ? "xl:grid-cols-[220px_minmax(0,1fr)]"
-            : "xl:grid-cols-[280px_minmax(0,1fr)]";
+            ? "xl:grid-cols-[340px_minmax(0,1fr)] 2xl:grid-cols-[380px_minmax(0,1fr)]"
+            : "xl:grid-cols-[380px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)]";
 
     const handleSelectCase = (caseId: string) => {
         setSelectedCaseId(caseId);

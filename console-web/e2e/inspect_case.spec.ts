@@ -959,10 +959,13 @@ test('inspect first case', async ({ page }) => {
     await expect(caseActionBadge).not.toContainText('SLA:', { timeout: 15000 });
     if (useRouteMocks) {
         await expect(page.getByTestId('cases-queue-views')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-filter-compact-layout')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('cases-filter-assignee')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('cases-filter-assignee').locator('option').nth(2)).toContainText('Manager · 2 в работе');
         await expect(page.getByTestId('cases-filter-assignee').locator('option').nth(3)).toContainText('Manager Two · 1 в работе');
         await expect(page.getByTestId('cases-queue-view-unassigned')).toBeVisible({ timeout: 15000 });
+        const inboxListBox = await page.getByTestId('inbox-list').boundingBox();
+        expect(inboxListBox?.width ?? 0).toBeGreaterThan(300);
         await page.getByTestId('cases-field-toggle').click({ force: true });
         await page.getByTestId('cases-field-owner').check({ force: true });
         await page.getByTestId('cases-field-channel').check({ force: true });
@@ -973,12 +976,14 @@ test('inspect first case', async ({ page }) => {
         await expect(page.getByTestId('cases-row').first()).toContainText('Сабина', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Manager Two', { timeout: 15000 });
 
-        await page.getByTestId('cases-queue-view-unassigned').click({ force: true });
-        await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Без владельца', { timeout: 15000 });
+        await page.getByTestId('cases-filter-clear').click({ force: true });
+        await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Все открытые', { timeout: 15000 });
+        await page.getByTestId('cases-filter-assignee').selectOption('__unassigned__');
         await expect(page.getByTestId('cases-owner-summary')).toContainText('Без владельца', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Нургуль', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Без владельца', { timeout: 15000 });
 
+        await page.getByTestId('cases-filter-clear').click({ force: true });
         await page.getByTestId('cases-queue-view-needs_reply').click({ force: true });
         await expect(page.getByTestId('cases-queue-view-hint')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Айгуль', { timeout: 15000 });
@@ -1007,14 +1012,14 @@ test('inspect first case', async ({ page }) => {
             action: 'snooze',
             case_ids: [CASE_ID],
         });
-        await page.getByTestId('case-reassign-toggle').click({ force: true });
+        await page.getByTestId('case-reassign-toggle').click();
         await expect(page.getByTestId('case-reassign-select')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('case-reassign-select').locator('option').nth(0)).toContainText('Manager · 2 в работе · текущий');
         await expect(page.getByTestId('case-reassign-select').locator('option').nth(1)).toContainText('Manager Two · Manager · 1 в работе');
         await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Manager Two · 1 в работе', { timeout: 15000 });
         await page.getByTestId('case-reassign-recommend-button').click({ force: true });
         await expect(page.getByTestId('case-reassign-select')).toHaveValue('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
-        await page.getByTestId('case-snooze-toggle').click({ force: true });
+        await page.getByTestId('case-snooze-toggle').click();
         await expect(page.getByTestId('case-snooze-minutes')).toBeVisible({ timeout: 15000 });
     }
 
