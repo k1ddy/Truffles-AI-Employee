@@ -458,6 +458,42 @@ def test_build_case_queue_signals_marks_snoozed_before_reply_due():
     assert signals["snoozed_until"] == snoozed_until.isoformat()
 
 
+def test_build_case_business_status_marks_unassigned_before_reply_due() -> None:
+    business_status = console_router._build_case_business_status(
+        status="pending",
+        assigned_to_id=None,
+        assigned_to_name=None,
+        queue_signals={"sla_action_state": "reply_due"},
+    )
+
+    assert business_status["business_status_code"] == "unassigned"
+    assert business_status["business_status_label"] == "Без владельца"
+
+
+def test_build_case_business_status_marks_waiting_client() -> None:
+    business_status = console_router._build_case_business_status(
+        status="active",
+        assigned_to_id=uuid4(),
+        assigned_to_name="Manager",
+        queue_signals={"sla_action_state": "waiting_client"},
+    )
+
+    assert business_status["business_status_code"] == "waiting_client"
+    assert business_status["business_status_label"] == "Ждем клиента"
+
+
+def test_build_case_business_status_marks_bot_handling() -> None:
+    business_status = console_router._build_case_business_status(
+        status="bot_handling",
+        assigned_to_id=None,
+        assigned_to_name=None,
+        queue_signals={"sla_action_state": None},
+    )
+
+    assert business_status["business_status_code"] == "bot_handling"
+    assert business_status["business_status_label"] == "Бот ведет"
+
+
 def test_normalize_case_bulk_ids_dedupes_and_preserves_order():
     case_1 = uuid4()
     case_2 = uuid4()

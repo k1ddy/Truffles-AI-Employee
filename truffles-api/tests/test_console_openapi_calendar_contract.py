@@ -170,6 +170,10 @@ def test_console_case_contract_exposes_action_sla_fields() -> None:
     assert _has_string_type(properties.get("target_response_at") or {})
     assert "assigned_to_id" in properties
     assert _has_string_type(properties.get("assigned_to_id") or {})
+    assert "business_status_code" in properties
+    assert _has_string_type(properties.get("business_status_code") or {})
+    assert "business_status_label" in properties
+    assert _has_string_type(properties.get("business_status_label") or {})
     assert "snoozed_until" in properties
     assert _has_string_type(properties.get("snoozed_until") or {})
     assert "snoozed_reason" in properties

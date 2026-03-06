@@ -4139,6 +4139,10 @@ export interface components {
             conversation_id: string;
             /** Status */
             status: string;
+            /** Business Status Code */
+            business_status_code?: string | null;
+            /** Business Status Label */
+            business_status_label?: string | null;
             /** Trigger Type */
             trigger_type: string;
             /** Trigger Value */

@@ -973,6 +973,33 @@ def _build_case_queue_signals(
     }
 
 
+def _build_case_business_status(
+    *,
+    status: str,
+    assigned_to_id: UUID | str | None,
+    assigned_to_name: Optional[str],
+    queue_signals: Optional[dict[str, object | None]] = None,
+) -> dict[str, str]:
+    action_state = str((queue_signals or {}).get("sla_action_state") or "").lower()
+    has_owner = bool(assigned_to_id or assigned_to_name)
+
+    if status == "resolved":
+        return {"business_status_code": "resolved", "business_status_label": "Закрыта"}
+    if status == "bot_handling":
+        return {"business_status_code": "bot_handling", "business_status_label": "Бот ведет"}
+    if action_state == "snoozed":
+        return {"business_status_code": "snoozed", "business_status_label": "Отложена"}
+    if not has_owner:
+        return {"business_status_code": "unassigned", "business_status_label": "Без владельца"}
+    if action_state in {"reply_due", "overdue"}:
+        return {"business_status_code": "needs_reply", "business_status_label": "Нужен ответ"}
+    if action_state == "waiting_client":
+        return {"business_status_code": "waiting_client", "business_status_label": "Ждем клиента"}
+    if status == "active":
+        return {"business_status_code": "in_progress", "business_status_label": "В работе"}
+    return {"business_status_code": "open", "business_status_label": "Открыта"}
+
+
 def _build_case_action_case(
     *,
     handover: Handover,
@@ -985,10 +1012,21 @@ def _build_case_action_case(
         last_inbound_at=None,
         now_utc=effective_now,
     )
+    queue_signals = {
+        "sla_action_state": "snoozed" if snooze_state["snoozed_until"] else None,
+    }
+    business_status = _build_case_business_status(
+        status=handover.status,
+        assigned_to_id=handover.assigned_to,
+        assigned_to_name=handover.assigned_to_name,
+        queue_signals=queue_signals,
+    )
     return ConsoleCase(
         id=handover.id,
         conversation_id=handover.conversation_id,
         status=handover.status,
+        business_status_code=business_status["business_status_code"],
+        business_status_label=business_status["business_status_label"],
         trigger_type=handover.trigger_type,
         created_at=handover.created_at.isoformat(),
         assigned_to_id=str(handover.assigned_to) if handover.assigned_to else None,
@@ -11079,6 +11117,8 @@ async def list_cases(
                 id=handover.id,
                 conversation_id=handover.conversation_id,
                 status=handover.status,
+                business_status_code=business_status["business_status_code"],
+                business_status_label=business_status["business_status_label"],
                 trigger_type=handover.trigger_type,
                 trigger_value=handover.trigger_value,
                 context_summary=handover.context_summary,
@@ -11158,6 +11198,14 @@ async def list_cases(
                     last_outbound_at=last_outbound_at,
                     first_response_at=handover.first_response_at,
                     handover_meta=handover.meta,
+                )
+            ]
+            for business_status in [
+                _build_case_business_status(
+                    status=handover.status,
+                    assigned_to_id=handover.assigned_to,
+                    assigned_to_name=handover.assigned_to_name,
+                    queue_signals=queue_signals,
                 )
             ]
         ],
@@ -12788,11 +12836,19 @@ async def get_case(
         first_response_at=case.first_response_at,
         handover_meta=handover_meta,
     )
+    business_status = _build_case_business_status(
+        status=case.status,
+        assigned_to_id=case.assigned_to,
+        assigned_to_name=case.assigned_to_name,
+        queue_signals=queue_signals,
+    )
     
     return ConsoleCase(
         id=case.id,
         conversation_id=case.conversation_id,
         status=case.status,
+        business_status_code=business_status["business_status_code"],
+        business_status_label=business_status["business_status_label"],
         trigger_type=case.trigger_type,
         trigger_value=case.trigger_value,
         context_summary=case.context_summary,

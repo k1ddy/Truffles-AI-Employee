@@ -13,6 +13,7 @@ const BRANCH_ID = '33333333-3333-4333-8333-333333333333';
 const AGENT_ID = '44444444-4444-4444-8444-444444444444';
 const CASE_ID = '55555555-5555-4555-8555-555555555555';
 const LIVE_CASE_ID = process.env.INSPECT_CASE_LIVE_CASE_ID ?? CASE_ID;
+const HAS_EXPLICIT_LIVE_CASE_ID = LIVE_CASE_ID !== CASE_ID;
 const CONVERSATION_ID = '66666666-6666-4666-8666-666666666666';
 const SPECIALIST_ID = '77777777-7777-4777-8777-777777777777';
 const TEXT_MACRO_ID = 'abababab-abab-4bab-8bab-abababababab';
@@ -113,6 +114,8 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
         conversation_id: CONVERSATION_ID,
         branch_id: BRANCH_ID,
         status: 'active',
+        business_status_code: 'needs_reply',
+        business_status_label: 'Нужен ответ',
         trigger_type: 'message',
         trigger_value: null,
         context_summary: 'Клиент хочет маникюр и уточняет свободное время.',
@@ -151,6 +154,8 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
         last_activity_at: '2026-03-05T08:50:00+05:00',
         needs_reply: false,
         human_lock_active: true,
+        business_status_code: 'waiting_client',
+        business_status_label: 'Ждем клиента',
         sla_action_state: 'waiting_client',
         target_response_at: null,
     } as Record<string, unknown>;
@@ -189,6 +194,8 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
         assigned_to_name: null,
         needs_reply: false,
         status: 'pending',
+        business_status_code: 'unassigned',
+        business_status_label: 'Без владельца',
         attention_reason: 'Назначьте ответственного',
         sla_action_state: 'waiting_client',
         target_response_at: null,
@@ -441,6 +448,8 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
         }
         if (macro.action?.type === 'resolve_case') {
             caseState.status = 'resolved';
+            caseState.business_status_code = 'resolved';
+            caseState.business_status_label = 'Закрыта';
             caseState.sla_status = 'ok';
             caseState.sla_action_state = 'resolved';
             caseState.target_response_at = null;
@@ -450,6 +459,8 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             caseState.snoozed_until = '2026-03-05T10:15:00+05:00';
             caseState.snoozed_reason = (macro.action as { reason?: string | null }).reason ?? 'follow_up';
             caseState.snoozed_by = 'Manager';
+            caseState.business_status_code = 'snoozed';
+            caseState.business_status_label = 'Отложена';
             caseState.sla_action_state = 'waiting_client';
         }
         await toJsonResponse(route, {
@@ -516,6 +527,8 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
         const nextAssigneeName = nextAssigneeId === AGENT_ID ? 'Manager' : 'Manager Two';
         caseState.assigned_to_id = nextAssigneeId;
         caseState.assigned_to_name = nextAssigneeName;
+        caseState.business_status_code = 'needs_reply';
+        caseState.business_status_label = 'Нужен ответ';
         await toJsonResponse(route, {
             success: true,
             case: { ...caseState },
@@ -790,6 +803,50 @@ async function assertCalendarQueueSurface(page: import('@playwright/test').Page)
     console.log(`Calendar no-cases screenshot saved to: ${screenshotPath}`);
 }
 
+async function maybeValidateLivePolicyRoutingMutation(page: import('@playwright/test').Page) {
+    if (useRouteMocks) {
+        return;
+    }
+    if (!HAS_EXPLICIT_LIVE_CASE_ID) {
+        console.log('Live mode: policy-routing mutation skipped; set INSPECT_CASE_LIVE_CASE_ID to a safe active case to validate the real mutation path.');
+        return;
+    }
+    if (!page.url().includes(`/cases/${LIVE_CASE_ID}`)) {
+        const opened = await openCaseDirectly(page, LIVE_CASE_ID);
+        if (!opened) {
+            console.log(`Live mode: policy-routing mutation blocked; explicit case_id=${LIVE_CASE_ID} is not accessible.`);
+            return;
+        }
+    }
+
+    const reassignToggle = page.getByTestId('case-reassign-toggle');
+    if (!(await reassignToggle.isVisible().catch(() => false))) {
+        console.log(`Live mode: policy-routing mutation blocked; case_id=${LIVE_CASE_ID} does not expose reassign controls.`);
+        return;
+    }
+    await reassignToggle.click();
+
+    const policyButton = page.getByTestId('case-reassign-policy-submit');
+    if (!(await policyButton.isVisible().catch(() => false))) {
+        console.log(`Live mode: policy-routing mutation blocked; policy button is unavailable for case_id=${LIVE_CASE_ID}.`);
+        return;
+    }
+
+    const responsePromise = page.waitForResponse((response) =>
+        response.request().method() === 'POST'
+        && response.url().includes(`/api/proxy/cases/${LIVE_CASE_ID}/reassign`)
+    );
+    await policyButton.click();
+    const response = await responsePromise;
+    expect(response.ok()).toBeTruthy();
+    const payload = await response.json().catch(() => null) as { routing?: { reason_summary?: string } } | null;
+    if (payload?.routing?.reason_summary) {
+        console.log(`Live mode: policy-routing mutation reached backend for case_id=${LIVE_CASE_ID}: ${payload.routing.reason_summary}`);
+    } else {
+        console.log(`Live mode: policy-routing mutation reached backend for case_id=${LIVE_CASE_ID}.`);
+    }
+}
+
 async function selectOptionIfNeeded(selector: import('@playwright/test').Locator) {
     if (!(await selector.isVisible().catch(() => false))) {
         return false;
@@ -913,11 +970,12 @@ test('inspect first case', async ({ page }) => {
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => null);
         console.log('Live mode: cases workspace unavailable, trying direct case fallback.');
         console.log(`Fallback screenshot: ${screenshotPath}`);
-        const opened = await openCaseDirectly(page, LIVE_CASE_ID);
+        const liveCaseId = await resolveLiveCaseId(page);
+        const opened = liveCaseId ? await openCaseDirectly(page, liveCaseId) : false;
         if (!opened) {
             await recoverAndValidateCalendarSurface(
                 page,
-                `Live mode: cases workspace unavailable and direct fallback failed for case_id=${LIVE_CASE_ID}.`,
+                `Live mode: cases workspace unavailable and direct fallback failed for case_id=${liveCaseId ?? LIVE_CASE_ID}.`,
             );
             return;
         }
@@ -1027,6 +1085,10 @@ test('inspect first case', async ({ page }) => {
     const caseActionBadge = page.getByTestId('case-next-action');
     await expect(caseActionBadge).toBeVisible({ timeout: 15000 });
     await expect(caseActionBadge).not.toContainText('SLA:', { timeout: 15000 });
+    await expect(page.getByTestId('case-business-status')).toContainText('Нужен ответ', { timeout: 15000 });
+    if (!useRouteMocks) {
+        await maybeValidateLivePolicyRoutingMutation(page);
+    }
     if (useRouteMocks) {
         await expect(page.getByTestId('cases-queue-views')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('cases-filter-compact-layout')).toBeVisible({ timeout: 15000 });
@@ -1219,6 +1281,7 @@ test('manage and apply action macro', async ({ page }) => {
 
     await expect.poll(() => lastMacroExecutePayload).toMatchObject({ case_id: CASE_ID });
     await expect(page.getByTestId('case-next-action')).toContainText('Ожидаем клиента', { timeout: 15000 });
+    await expect(page.getByTestId('case-business-status')).toContainText('Отложена', { timeout: 15000 });
     await expect(
         page.getByPlaceholder('Введите сообщение или подпись к файлу. Enter — отправить.')
     ).toHaveValue(/Отложу заявку и вернусь позже\./, { timeout: 15000 });

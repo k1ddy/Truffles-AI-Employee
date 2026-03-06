@@ -13,7 +13,7 @@ import {
 } from "@/lib/api-client";
 import type { Case, Message } from "@/types";
 import ChatInterface from "./ChatInterface";
-import { getCaseSlaIndicator, getStatusLabel } from "@/utils/labels";
+import { getCaseBusinessStatusBadge, getCaseSlaIndicator } from "@/utils/labels";
 
 interface CaseConversationProps {
     caseDetail: Case;
@@ -583,6 +583,7 @@ export default function CaseConversation({
         .filter(Boolean)
         .join(" · ");
     const slaIndicator = getCaseSlaIndicator(caseDetail);
+    const businessStatus = getCaseBusinessStatusBadge(caseDetail);
     const outreachBusy =
         sendOutreachMutation.isPending || pauseMutation.isPending || releasePauseMutation.isPending;
     const canSubmitOutreach = Boolean(outreachDestination.trim() && outreachContent.trim());
@@ -883,29 +884,16 @@ export default function CaseConversation({
                             <h1 className="text-2xl font-bold" data-testid="case-title">
                                 Заявка {caseDetail.id.slice(0, 8)}
                             </h1>
+                            <span className={`rounded px-2 py-1 text-[11px] font-semibold ${businessStatus.className}`} data-testid="case-business-status">
+                                {businessStatus.label}
+                            </span>
                             <span className={`rounded px-2 py-1 text-[11px] font-semibold ${slaIndicator.className}`} data-testid="case-next-action">
                                 {slaIndicator.label}
                             </span>
                         </div>
-                        <div className="flex flex-wrap gap-2 text-xs">
-                            <span
-                                className={`px-2 py-0.5 rounded font-semibold ${caseDetail.status === "resolved"
-                                    ? "bg-muted text-muted-foreground"
-                                    : isActive
-                                        ? "bg-green-100 text-green-800"
-                                        : isPending
-                                            ? "bg-yellow-100 text-yellow-800"
-                                            : "bg-muted text-muted-foreground"
-                                    }`}
-                            >
-                                {getStatusLabel(caseDetail.status)}
-                            </span>
-                            <span
-                                className={`px-2 py-0.5 rounded font-semibold ${
-                                    caseDetail.assigned_to_name ? "bg-secondary text-secondary-foreground" : "bg-muted text-muted-foreground"
-                                }`}
-                            >
-                                👤 {assignedLabel}
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                            <span data-testid="case-owner-label">
+                                Владелец: <span className="font-semibold text-foreground">{assignedLabel}</span>
                             </span>
                         </div>
                     </div>

@@ -9887,6 +9887,16 @@ components:
         status:
           type: string
           title: Status
+        business_status_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Business Status Code
+        business_status_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Business Status Label
         trigger_type:
           type: string
           title: Trigger Type

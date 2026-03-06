@@ -21,6 +21,8 @@ export interface Case {
     conversation_id: string;
     branch_id?: string;
     status: string;
+    business_status_code?: string | null;
+    business_status_label?: string | null;
     trigger_type: string;
     trigger_value?: string;
     context_summary?: string;

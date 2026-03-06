@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthenticatedApi } from "@/hooks/useAuthenticatedApi";
 import Link from "next/link";
 import { Case } from "@/types";
-import { getCaseSlaIndicator, getStatusLabel } from "@/utils/labels";
+import { getCaseBusinessStatusBadge, getCaseSlaIndicator } from "@/utils/labels";
 import {
     casesApi,
     type CaseAssigneeOption,
@@ -1762,24 +1762,16 @@ export default function CaseList({
                 <div className="mt-3 flex flex-1 flex-col gap-3 overflow-y-auto pr-1" data-testid="cases-table">
                     {visibleCases.map((c) => {
                         const sla = getCaseSlaIndicator(c);
+                        const businessStatus = getCaseBusinessStatusBadge(c);
                         const branchName = branchMap.get(c.branch_id || "") || "-";
-                        const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
                         const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
                         const activityLabel = new Date(lastActivity).toLocaleString("ru-RU");
-                        const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
-                        const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
                         const contactName = c.customer_name || c.customer_phone || c.customer_remote_jid?.split("@")[0] || "Клиент";
                         const contactPhone = c.customer_phone || c.customer_remote_jid?.split("@")[0] || "";
                         const preview = c.last_message_preview || c.user_message || "-";
                         const isSelected = selectedCaseId === c.id;
                         const isBulkSelected = selectedCaseIdSet.has(c.id);
-                        const hasHumanLock = !!c.human_lock_active;
                         const priorityChip = getPriorityChip(c.priority_tier);
-                        const statusClass = c.status === "active"
-                            ? "bg-green-100 text-green-800"
-                            : c.status === "pending"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-muted text-muted-foreground";
                         const secondaryAttention = c.attention_reason && !sla.state?.startsWith("reply") && sla.state !== "overdue"
                             ? c.attention_reason
                             : null;
@@ -1801,8 +1793,8 @@ export default function CaseList({
                                             {contactPhone || branchName}
                                         </p>
                                     </div>
-                                    <span className={`px-2 py-1 rounded-full text-[10px] font-semibold ${statusClass}`}>
-                                        {getStatusLabel(c.status)}
+                                    <span className={`px-2 py-1 rounded-full text-[10px] font-semibold ${businessStatus.className}`} data-testid="cases-business-status">
+                                        {businessStatus.label}
                                     </span>
                                 </div>
                                 <p className="mb-3 text-xs leading-relaxed text-foreground/80">
@@ -1813,13 +1805,7 @@ export default function CaseList({
                                         {sla.label}
                                     </span>
                                     {visibleFields.branch && <span>{branchName}</span>}
-                                    {visibleFields.owner && (
-                                        <span className={`rounded-full px-2 py-1 font-semibold ${
-                                            c.assigned_to_name ? "bg-muted text-muted-foreground" : "bg-amber-100 text-amber-800"
-                                        }`}>
-                                            {c.assigned_to_name || "Без владельца"}
-                                        </span>
-                                    )}
+                                    {visibleFields.owner && <span>Владелец: {c.assigned_to_name || "не назначен"}</span>}
                                     {visibleFields.channel && (
                                         <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
                                             {c.channel}
@@ -1829,21 +1815,6 @@ export default function CaseList({
                                     {visibleFields.priority && priorityChip && (
                                         <span className={`rounded-full px-2 py-1 font-semibold ${priorityChip.className}`}>
                                             {priorityChip.label}
-                                        </span>
-                                    )}
-                                    {isLive && (
-                                        <span className="rounded-full bg-green-100 px-2 py-1 font-semibold text-green-800">
-                                            Недавний диалог
-                                        </span>
-                                    )}
-                                    {hasHumanLock && (
-                                        <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-800">
-                                            Пауза
-                                        </span>
-                                    )}
-                                    {hasIssue && (
-                                        <span className="rounded-full bg-red-100 px-2 py-1 font-semibold text-red-800">
-                                            Ошибка
                                         </span>
                                     )}
                                 </div>
@@ -1932,6 +1903,7 @@ export default function CaseList({
                         <tbody>
                             {visibleCases.map((c) => {
                                 const sla = getCaseSlaIndicator(c);
+                                const businessStatus = getCaseBusinessStatusBadge(c);
                                 const branchName = branchMap.get(c.branch_id || "") || "-";
                                 const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
                                 const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
@@ -1958,27 +1930,13 @@ export default function CaseList({
                                         )}
                                         <td className="p-4 font-mono text-sm">{c.id.slice(0, 8)}...</td>
                                         <td className="p-4">
-                                            <div className="flex flex-wrap items-center gap-2">
+                                            <div className="flex flex-col gap-1">
                                                 <span
-                                                    className={`px-2 py-1 rounded text-xs font-medium ${c.status === "active"
-                                                        ? "bg-green-100 text-green-800"
-                                                        : c.status === "pending"
-                                                            ? "bg-yellow-100 text-yellow-800"
-                                                            : "bg-muted text-muted-foreground"
-                                                        }`}
+                                                    className={`inline-flex w-fit px-2 py-1 rounded text-xs font-medium ${businessStatus.className}`}
+                                                    data-testid="cases-business-status"
                                                 >
-                                                    {getStatusLabel(c.status)}
+                                                    {businessStatus.label}
                                                 </span>
-                                                {c.human_lock_active && (
-                                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
-                                                        Пауза
-                                                    </span>
-                                                )}
-                                                {priorityChip && (
-                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${priorityChip.className}`}>
-                                                        {priorityChip.label}
-                                                    </span>
-                                                )}
                                             </div>
                                         </td>
                                         <td className="p-4">
