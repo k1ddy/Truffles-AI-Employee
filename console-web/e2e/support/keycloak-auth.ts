@@ -41,6 +41,10 @@ function resolvePreferredOrigin(baseURL: string, actionOrigin: string, stayOnBas
     return stayOnBaseOrigin ? baseURL : actionOrigin;
 }
 
+function isConsoleAppUrl(urlString: string, consoleHostPattern: RegExp) {
+    return consoleHostPattern.test(urlString) && !urlString.includes('/api/auth');
+}
+
 async function waitForAuthTransition(page: Page, options: KeycloakAuthOptions) {
     const keycloakHostPattern = options.keycloakHostPattern ?? DEFAULT_KEYCLOAK_HOST_PATTERN;
     const consoleHostPattern = options.consoleHostPattern ?? DEFAULT_CONSOLE_HOST_PATTERN;
@@ -51,7 +55,7 @@ async function waitForAuthTransition(page: Page, options: KeycloakAuthOptions) {
         page.waitForURL(keycloakHostPattern, { timeout: authWaitTimeoutMs }),
         waitForConsoleApp
             ? waitForConsoleApp(page)
-            : page.waitForURL(consoleHostPattern, { timeout: authWaitTimeoutMs }),
+            : page.waitForURL((url) => isConsoleAppUrl(url.toString(), consoleHostPattern), { timeout: authWaitTimeoutMs }),
     ]);
 }
 
@@ -61,16 +65,9 @@ export async function startKeycloakLogin(page: Page, options: KeycloakAuthOption
     const providerWaitTimeoutMs = options.providerWaitTimeoutMs ?? 15000;
 
     await page.goto(buildSignInUrl(baseURL), { waitUntil: 'domcontentloaded' });
-    let providerForm = page.locator('form[action*="keycloak"]').first();
+    const providerForm = page.locator('form[action*="keycloak"]').first();
     const action = await providerForm.getAttribute('action');
     const actionOrigin = action ? new URL(action).origin : baseURL;
-
-    if (actionOrigin !== baseURL) {
-        const callbackOrigin = stayOnBaseOrigin ? baseURL : actionOrigin;
-        await page.goto(buildSignInUrl(actionOrigin, callbackOrigin), { waitUntil: 'domcontentloaded' });
-        providerForm = page.locator('form[action*="keycloak"]').first();
-    }
-
     const preferredOrigin = resolvePreferredOrigin(baseURL, actionOrigin, stayOnBaseOrigin);
     options.onResolvedOrigin?.(preferredOrigin);
 
@@ -117,7 +114,8 @@ export async function loginThroughKeycloak(page: Page, options: KeycloakLoginOpt
     if (waitForConsoleApp) {
         await waitForConsoleApp(page);
     } else {
-        await page.waitForURL(options.consoleHostPattern ?? DEFAULT_CONSOLE_HOST_PATTERN, {
+        const consoleHostPattern = options.consoleHostPattern ?? DEFAULT_CONSOLE_HOST_PATTERN;
+        await page.waitForURL((url) => isConsoleAppUrl(url.toString(), consoleHostPattern), {
             timeout: options.authWaitTimeoutMs ?? 20000,
         });
     }

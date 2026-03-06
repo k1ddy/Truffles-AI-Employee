@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import {
+    loginThroughKeycloak,
+    shouldStayOnBaseOrigin,
+} from "./support/keycloak-auth";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,7 +24,7 @@ const REPORT_ARTIFACTS_DIR = path.resolve(
 const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
 const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
-const stayOnBaseOrigin = /localhost|127\.0\.0\.1/.test(baseURL);
+const stayOnBaseOrigin = shouldStayOnBaseOrigin(baseURL);
 const loginUser = process.env.E2E_USERNAME ?? "admin";
 const loginPassword = process.env.E2E_PASSWORD ?? "admin";
 const failOnThresholds = process.env.A11Y_FAIL_ON_THRESHOLDS === "1";
@@ -48,14 +52,6 @@ type AxeSummary = {
         targets: string[];
     }>;
 };
-
-function buildSignInUrl(origin: string, callbackOrigin = origin) {
-    return `${origin}/api/auth/signin?callbackUrl=${encodeURIComponent(callbackOrigin)}`;
-}
-
-function resolvePreferredOrigin(actionOrigin: string) {
-    return stayOnBaseOrigin ? baseURL : actionOrigin;
-}
 
 function urlPathPattern(pathValue: string) {
     return new RegExp(`${pathValue.replace(/\//g, "\\/")}(\\?|$)`);
@@ -386,50 +382,29 @@ async function resolveSelectionGate(page: import("@playwright/test").Page) {
     await selectOptionIfNeeded(page.getByTestId("context-branch-select"));
 }
 
-async function startKeycloakLogin(page: import("@playwright/test").Page) {
-    await page.goto(buildSignInUrl(baseURL), { waitUntil: "domcontentloaded" });
-    let providerForm = page.locator('form[action*="keycloak"]').first();
-    const action = await providerForm.getAttribute("action");
-    const actionOrigin = action ? new URL(action).origin : baseURL;
-    if (actionOrigin !== baseURL) {
-        const callbackOrigin = stayOnBaseOrigin ? baseURL : actionOrigin;
-        await page.goto(buildSignInUrl(actionOrigin, callbackOrigin), { waitUntil: "domcontentloaded" });
-        providerForm = page.locator('form[action*="keycloak"]').first();
-    }
-    resolvedBaseURL = resolvePreferredOrigin(actionOrigin);
-    const providerButton = page.getByRole("button", { name: /sign in with keycloak/i });
-    if (await providerButton.isVisible().catch(() => false)) {
-        await providerButton.click();
-    } else if (await providerForm.isVisible().catch(() => false)) {
-        await providerForm.waitFor({ state: "visible", timeout: 15000 });
-        const submitButton = providerForm.locator('button[type="submit"], input[type="submit"]').first();
-        await submitButton.click();
-    } else {
-        return false;
-    }
-    await Promise.race([
-        page.waitForURL(keycloakHostPattern, { timeout: 15000 }),
-        page.waitForURL(consoleHostPattern, { timeout: 15000 }),
-    ]);
-    return true;
-}
-
-async function loginThroughKeycloak(page: import("@playwright/test").Page) {
-    const started = await startKeycloakLogin(page);
-    if (!started) {
-        return;
-    }
-    if (!(await page.locator("#username").isVisible().catch(() => false))) {
-        return;
-    }
-    await page.fill("#username", loginUser);
-    await page.fill("#password", loginPassword);
-    await page.click("#kc-login");
-    await page.waitForURL(consoleHostPattern);
-}
-
 async function gotoConsoleRoot(page: import("@playwright/test").Page) {
     await page.goto(resolvedBaseURL, { waitUntil: "domcontentloaded" });
+}
+
+function keycloakAuthOptions() {
+    return {
+        baseURL,
+        consoleHostPattern,
+        keycloakHostPattern,
+        stayOnBaseOrigin,
+        authWaitTimeoutMs: 15000,
+        onResolvedOrigin: (origin: string) => {
+            resolvedBaseURL = origin;
+        },
+    };
+}
+
+async function loginWithSharedHelper(page: import("@playwright/test").Page) {
+    await loginThroughKeycloak(page, {
+        ...keycloakAuthOptions(),
+        loginUser,
+        loginPassword,
+    });
 }
 
 async function ensureLoggedIn(page: import("@playwright/test").Page) {
@@ -443,7 +418,7 @@ async function ensureLoggedIn(page: import("@playwright/test").Page) {
     const logoutButton = page.getByTestId("logout-button");
     await page.waitForSelector('[data-testid="login-button"], [data-testid="logout-button"]', { timeout: 15000 });
     if (!(await logoutButton.isVisible().catch(() => false)) && (await loginButton.isVisible().catch(() => false))) {
-        await loginThroughKeycloak(page);
+        await loginWithSharedHelper(page);
         await gotoConsoleRoot(page);
     }
     await resolveSelectionGate(page);
