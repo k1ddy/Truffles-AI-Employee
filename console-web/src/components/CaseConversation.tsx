@@ -135,6 +135,31 @@ function sortAssigneeOptionsByLoad(options: CaseAssigneeOption[]) {
     });
 }
 
+function resolveRecommendedAssignee(
+    options: CaseAssigneeOption[],
+    currentAssigneeId?: string | null,
+) {
+    const currentOption = currentAssigneeId
+        ? options.find((item) => String(item.agent_id) === currentAssigneeId)
+        : null;
+    const candidateOptions = options.filter((item) => String(item.agent_id) !== (currentAssigneeId ?? ""));
+    if (candidateOptions.length === 0) {
+        return null;
+    }
+    const bestCandidate = [...candidateOptions].sort((left, right) => {
+        const leftLoad = left.open_case_count ?? 0;
+        const rightLoad = right.open_case_count ?? 0;
+        if (leftLoad !== rightLoad) {
+            return leftLoad - rightLoad;
+        }
+        return left.agent_name.localeCompare(right.agent_name, "ru");
+    })[0];
+    if (!currentOption) {
+        return bestCandidate;
+    }
+    return (bestCandidate.open_case_count ?? 0) < (currentOption.open_case_count ?? 0) ? bestCandidate : null;
+}
+
 export default function CaseConversation({
     caseDetail,
     caseId,
@@ -473,6 +498,10 @@ export default function CaseConversation({
         () => sortAssigneeOptionsByLoad(assigneeOptionsQuery.data?.items ?? []),
         [assigneeOptionsQuery.data?.items],
     );
+    const recommendedAssignee = useMemo(
+        () => resolveRecommendedAssignee(sortedAssigneeOptions, caseDetail.assigned_to_id),
+        [sortedAssigneeOptions, caseDetail.assigned_to_id],
+    );
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
     const compactContextLimit = layout === "inbox" ? 110 : 180;
     const contextTitle = caseDetail.context_summary ? "Суть запроса" : "Последнее сообщение";
@@ -684,6 +713,15 @@ export default function CaseConversation({
                         <span className="text-[11px] text-muted-foreground">
                             После текущего ответственного список отсортирован по открытым заявкам.
                         </span>
+                        {recommendedAssignee && (
+                            <span
+                                className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900"
+                                data-testid="case-reassign-recommendation"
+                            >
+                                Рекомендуем: {recommendedAssignee.agent_name} · {formatAssigneeLoadLabel(recommendedAssignee)}.
+                                Ниже текущая нагрузка в этой очереди.
+                            </span>
+                        )}
                     </label>
                 ) : (
                     <p className="text-xs text-muted-foreground">
@@ -691,6 +729,19 @@ export default function CaseConversation({
                     </p>
                 )}
                 <div className="flex flex-wrap gap-2">
+                    {recommendedAssignee && (
+                        <button
+                            type="button"
+                            onClick={() => setSelectedAssigneeId(String(recommendedAssignee.agent_id))}
+                            disabled={caseActionBusy || selectedAssigneeId === String(recommendedAssignee.agent_id)}
+                            className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 disabled:opacity-50"
+                            data-testid="case-reassign-recommend-button"
+                        >
+                            {selectedAssigneeId === String(recommendedAssignee.agent_id)
+                                ? "Рекомендация выбрана"
+                                : "Выбрать рекомендацию"}
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => reassignMutation.mutate()}

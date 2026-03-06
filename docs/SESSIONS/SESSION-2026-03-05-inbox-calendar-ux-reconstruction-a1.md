@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -83,10 +83,13 @@
   - `inspect_case` deterministic lane expanded for Wave9 Part B: admin queue lane now validates server-backed owner filtering, `Без владельца` view, and preserved bulk/governance controls without breaking the existing workspace loop.
   - Wave10 TP created as the next active block for factual assignee workload signals in reassignment surfaces, keeping the current inbox tabs as the only operator workspace.
   - Wave10 Part A implemented in branch: assignee contracts now expose `open_case_count`, backend load mapping is calculated from scoped open cases, and `CaseConversation`/bulk owner selects now show factual workload hints instead of a flat blind list.
+  - Wave10 Part B TP created as the next active block for one-click recommended routing inside current reassignment panels, without hidden automation.
+  - Wave10 Part B implemented in branch: `CaseConversation` and bulk reassign panels now expose `Выбрать рекомендацию`, prefill the least-loaded assignee deterministically, and explain the choice in plain operator copy.
+  - `inspect_case` deterministic lane expanded for Wave10 Part B: recommendation CTA is now asserted in both single-case and bulk reassignment flow without breaking macro/bookings coverage.
   - `inspect_case` deterministic lane expanded for Wave10 Part A: mocked assignee options now carry workload counts and assertions verify those hints in queue owner and reassign surfaces.
 - next:
-  - Run `scripts/session_check.sh`, commit Wave10 Part A, and push the routing-signal slice into PR `#932`.
-  - After push, decide whether the next atomic block is Wave10 Part B (`recommended routing action`) or a bounded Wave9/Wave10 closeout review.
+  - Run `scripts/session_check.sh`, commit Wave10 Part B, and push the routing-assist slice into PR `#932`.
+  - After push, open a bounded closeout review to decide whether current inbox routing assistance already satisfies the user TЗ or whether a separate policy-routing follow-up is still required.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -205,4 +208,9 @@
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave10 Part A mock lane)
   - `console-web/case_inspection.png`
   - `console-web/calendar_case_context.png`
-- last_updated: 2026-03-06T13:14:21+05:00
+  - `cd console-web && npm run lint -- --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave10 Part B mock lane)
+  - `console-web/case_inspection.png`
+  - `console-web/calendar_case_context.png`
+- last_updated: 2026-03-06T13:20:45+05:00

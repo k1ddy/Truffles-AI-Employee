@@ -992,6 +992,10 @@ test('inspect first case', async ({ page }) => {
         await expect(page.getByTestId('case-snooze-toggle')).toBeVisible({ timeout: 15000 });
         await page.getByTestId('cases-bulk-select').first().check({ force: true });
         await expect(page.getByTestId('cases-bulk-toolbar')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('cases-bulk-toggle-reassign').click({ force: true });
+        await expect(page.getByTestId('cases-bulk-reassign-recommendation')).toContainText('Manager Two · 1 в работе', { timeout: 15000 });
+        await page.getByTestId('cases-bulk-reassign-recommend').click({ force: true });
+        await expect(page.getByTestId('cases-bulk-reassign-select')).toHaveValue('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
         await page.getByTestId('cases-bulk-toggle-snooze').click({ force: true });
         await expect(page.getByTestId('cases-bulk-snooze-minutes')).toBeVisible({ timeout: 15000 });
         const bulkRequestPromise = page.waitForRequest((request) =>
@@ -1007,6 +1011,9 @@ test('inspect first case', async ({ page }) => {
         await expect(page.getByTestId('case-reassign-select')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('case-reassign-select').locator('option').nth(0)).toContainText('Manager · 2 в работе · текущий');
         await expect(page.getByTestId('case-reassign-select').locator('option').nth(1)).toContainText('Manager Two · Manager · 1 в работе');
+        await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Manager Two · 1 в работе', { timeout: 15000 });
+        await page.getByTestId('case-reassign-recommend-button').click({ force: true });
+        await expect(page.getByTestId('case-reassign-select')).toHaveValue('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
         await page.getByTestId('case-snooze-toggle').click({ force: true });
         await expect(page.getByTestId('case-snooze-minutes')).toBeVisible({ timeout: 15000 });
     }

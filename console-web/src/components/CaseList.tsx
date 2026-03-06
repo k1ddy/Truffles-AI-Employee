@@ -134,6 +134,20 @@ function formatBulkAssigneeOptionLabel(option: CaseAssigneeOption) {
     return `${option.agent_name} · ${option.open_case_count ?? 0} в работе`;
 }
 
+function resolveRecommendedAssignee(options: CaseAssigneeOption[]) {
+    if (options.length === 0) {
+        return null;
+    }
+    return [...options].sort((left, right) => {
+        const leftLoad = left.open_case_count ?? 0;
+        const rightLoad = right.open_case_count ?? 0;
+        if (leftLoad !== rightLoad) {
+            return leftLoad - rightLoad;
+        }
+        return left.agent_name.localeCompare(right.agent_name, "ru");
+    })[0];
+}
+
 function buildBulkSummary(response: CaseBulkActionResponse): BulkSummary {
     const parts: string[] = [];
     if (response.processed_count > 0) {
@@ -784,6 +798,10 @@ export default function CaseList({
         () => sortAssigneeOptionsByName(queueAssigneesData?.items ?? []),
         [queueAssigneesData?.items],
     );
+    const recommendedBulkAssignee = useMemo(
+        () => resolveRecommendedAssignee(bulkAssignees),
+        [bulkAssignees],
+    );
     const selectedAssigneeLabel = filters.assigneeId
         ? queueAssignees.find((item) => String(item.agent_id) === filters.assigneeId)?.agent_name ?? filters.assigneeId
         : ownerFilterLabel;
@@ -1413,6 +1431,19 @@ export default function CaseList({
                             ) : (
                                 <div className="flex flex-col gap-3">
                                     <div className="flex flex-wrap items-center gap-2">
+                                        {recommendedBulkAssignee && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setBulkAssigneeId(String(recommendedBulkAssignee.agent_id))}
+                                                className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900"
+                                                disabled={assigneesLoading || bulkActionMutation.isPending || bulkAssigneeId === String(recommendedBulkAssignee.agent_id)}
+                                                data-testid="cases-bulk-reassign-recommend"
+                                            >
+                                                {bulkAssigneeId === String(recommendedBulkAssignee.agent_id)
+                                                    ? "Рекомендация выбрана"
+                                                    : "Выбрать рекомендацию"}
+                                            </button>
+                                        )}
                                         <select
                                             value={bulkAssigneeId}
                                             onChange={(event) => setBulkAssigneeId(event.target.value)}
@@ -1440,6 +1471,15 @@ export default function CaseList({
                                     <p className="text-xs text-muted-foreground">
                                         Передача меняет ответственного только у активных заявок в выбранном филиале. Список отсортирован по открытым заявкам.
                                     </p>
+                                    {recommendedBulkAssignee && (
+                                        <p
+                                            className="text-xs text-emerald-900"
+                                            data-testid="cases-bulk-reassign-recommendation"
+                                        >
+                                            Рекомендуем: {recommendedBulkAssignee.agent_name} · {recommendedBulkAssignee.open_case_count ?? 0} в работе.
+                                            Это наименьшая текущая нагрузка в выбранном филиале.
+                                        </p>
+                                    )}
                                 </div>
                             )}
                         </div>

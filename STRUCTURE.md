@@ -172,6 +172,7 @@
 | `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md` | Wave9 Part A Task Package for supervisor/admin queue governance in Inbox (`role-aware views + visible fields`, no new route) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md` | Wave9 Part B Task Package for server-backed owner/unassigned governance in Inbox (`assignee filter + queue assignee endpoint`, no new route) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md` | Wave10 Part A Task Package for factual assignee workload signals in Inbox reassignment surfaces (`load counts in reassign selects`, no fake availability) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md` | Wave10 Part B Task Package for one-click recommended routing in current reassignment surfaces (`recommendation CTA`, no hidden automation) | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |
