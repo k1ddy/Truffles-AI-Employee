@@ -1201,6 +1201,38 @@ def _finalize_case_disconnected_sync(
     )
 
 
+def _finalize_case_reopened_sync(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    handover: Handover,
+    branch_id: UUID | None,
+    reason: Optional[str] = None,
+) -> ConsoleCaseActionSync:
+    telegram_status = _build_sync_status("skipped", "reopen_internal_only")
+    client_notify = _build_sync_status("skipped", "reopen_internal_only")
+    payload = {
+        "telegram_status": telegram_status.status,
+        "client_notify_status": client_notify.status,
+    }
+    if reason:
+        payload["reason"] = reason
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="case_reopen_sync",
+        entity_type="handover",
+        entity_id=handover.id,
+        payload=payload,
+        branch_id=branch_id,
+    )
+    db.commit()
+    return ConsoleCaseActionSync(
+        telegram=telegram_status,
+        client_notify=client_notify,
+    )
+
+
 def _execute_macro_case_action(
     *,
     db: Session,
@@ -1426,13 +1458,11 @@ def _execute_macro_case_action(
         )
         db.commit()
         db.refresh(handover)
-        sync = _finalize_case_connected_sync(
+        sync = _finalize_case_reopened_sync(
             db=db,
             context=context,
-            conversation=conversation,
             handover=handover,
             branch_id=branch_id,
-            manager_name=manager_name,
             reason="macro_reopen_case",
         )
         return _build_macro_execute_response(
@@ -11608,42 +11638,14 @@ async def reopen_case(
 
         db.commit()
         db.refresh(case)
-        telegram_status = _sync_telegram_after_take(
-            db,
-            conversation=conversation,
-            handover=case,
-            manager_name=manager_name,
-        )
-        client_notify = _notify_client_status(
+        sync = _finalize_case_reopened_sync(
             db=db,
-            conversation=conversation,
-            handover=case,
-            status="connected",
-            manager_name=manager_name,
-        )
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="manager_connected",
-            entity_type="handover",
-            entity_id=case.id,
-            payload={
-                "telegram_status": telegram_status.status,
-                "client_notify_status": client_notify.status,
-                "reason": "case_reopened",
-            },
-            branch_id=branch_id,
-        )
-        db.commit()
-
-        response = _build_case_action_response(
+            context=context,
             handover=case,
             branch_id=branch_id,
-            sync=ConsoleCaseActionSync(
-                telegram=telegram_status,
-                client_notify=client_notify,
-            ),
+            reason="case_reopened",
         )
+        response = _build_case_action_response(handover=case, branch_id=branch_id, sync=sync)
         if idempotency and idempotency.record:
             finalize_idempotency(
                 db,
@@ -11772,50 +11774,15 @@ async def take_case(
     try:
         db.commit()
         db.refresh(case)
-        telegram_status = _sync_telegram_after_take(
-            db,
-            conversation=conversation,
-            handover=case,
-            manager_name=manager_name,
-        )
-        client_notify = _notify_client_status(
+        sync = _finalize_case_connected_sync(
             db=db,
+            context=context,
             conversation=conversation,
             handover=case,
-            status="connected",
+            branch_id=branch_id,
             manager_name=manager_name,
         )
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="manager_connected",
-            entity_type="handover",
-            entity_id=case.id,
-            payload={
-                "telegram_status": telegram_status.status,
-                "client_notify_status": client_notify.status,
-            },
-            branch_id=branch_id,
-        )
-        db.commit()
-
-        response = ConsoleCaseActionResponse(
-            success=True,
-            case=ConsoleCase(
-                id=case.id,
-                conversation_id=case.conversation_id,
-                status=case.status,
-                trigger_type=case.trigger_type,
-                created_at=case.created_at.isoformat(),
-                assigned_to_name=case.assigned_to_name,
-                branch_id=branch_id,
-                **_format_case_metrics(case),
-            ),
-            sync=ConsoleCaseActionSync(
-                telegram=telegram_status,
-                client_notify=client_notify,
-            ),
-        )
+        response = _build_case_action_response(handover=case, branch_id=branch_id, sync=sync)
         if idempotency and idempotency.record:
             finalize_idempotency(
                 db,
@@ -11933,50 +11900,16 @@ async def resolve_case(
 
     try:
         db.commit()
-        telegram_status = _sync_telegram_after_close(
-            db,
+        sync = _finalize_case_disconnected_sync(
+            db=db,
+            context=context,
             conversation=conversation,
             handover=case,
+            branch_id=branch_id,
             manager_name=manager_name,
             action="resolve",
         )
-        client_notify = _notify_client_status(
-            db=db,
-            conversation=conversation,
-            handover=case,
-            status="disconnected",
-            manager_name=manager_name,
-        )
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="manager_disconnected",
-            entity_type="handover",
-            entity_id=case.id,
-            payload={
-                "telegram_status": telegram_status.status,
-                "client_notify_status": client_notify.status,
-            },
-            branch_id=branch_id,
-        )
-        db.commit()
-
-        response = ConsoleCaseActionResponse(
-            success=True,
-            case=ConsoleCase(
-                id=case.id,
-                conversation_id=case.conversation_id,
-                status=case.status,
-                trigger_type=case.trigger_type,
-                created_at=case.created_at.isoformat(),
-                branch_id=branch_id,
-                **_format_case_metrics(case),
-            ),
-            sync=ConsoleCaseActionSync(
-                telegram=telegram_status,
-                client_notify=client_notify,
-            ),
-        )
+        response = _build_case_action_response(handover=case, branch_id=branch_id, sync=sync)
         if idempotency and idempotency.record:
             finalize_idempotency(
                 db,
@@ -12093,50 +12026,16 @@ async def return_case(
 
     try:
         db.commit()
-        telegram_status = _sync_telegram_after_close(
-            db,
+        sync = _finalize_case_disconnected_sync(
+            db=db,
+            context=context,
             conversation=conversation,
             handover=case,
+            branch_id=branch_id,
             manager_name=manager_name,
             action="return",
         )
-        client_notify = _notify_client_status(
-            db=db,
-            conversation=conversation,
-            handover=case,
-            status="disconnected",
-            manager_name=manager_name,
-        )
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="manager_disconnected",
-            entity_type="handover",
-            entity_id=case.id,
-            payload={
-                "telegram_status": telegram_status.status,
-                "client_notify_status": client_notify.status,
-            },
-            branch_id=branch_id,
-        )
-        db.commit()
-
-        response = ConsoleCaseActionResponse(
-            success=True,
-            case=ConsoleCase(
-                id=case.id,
-                conversation_id=case.conversation_id,
-                status=case.status,
-                trigger_type=case.trigger_type,
-                created_at=case.created_at.isoformat(),
-                branch_id=branch_id,
-                **_format_case_metrics(case),
-            ),
-            sync=ConsoleCaseActionSync(
-                telegram=telegram_status,
-                client_notify=client_notify,
-            ),
-        )
+        response = _build_case_action_response(handover=case, branch_id=branch_id, sync=sync)
         if idempotency and idempotency.record:
             finalize_idempotency(
                 db,

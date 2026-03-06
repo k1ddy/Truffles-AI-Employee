@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave11-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -85,11 +85,17 @@
   - Wave10 Part A implemented in branch: assignee contracts now expose `open_case_count`, backend load mapping is calculated from scoped open cases, and `CaseConversation`/bulk owner selects now show factual workload hints instead of a flat blind list.
   - Wave10 Part B TP created as the next active block for one-click recommended routing inside current reassignment panels, without hidden automation.
   - Wave10 Part B implemented in branch: `CaseConversation` and bulk reassign panels now expose `Выбрать рекомендацию`, prefill the least-loaded assignee deterministically, and explain the choice in plain operator copy.
+  - Closeout-review TP created as the next active block to classify original ТЗ coverage, accepted residuals, and merge-go/no-go for `PR #932`.
   - `inspect_case` deterministic lane expanded for Wave10 Part B: recommendation CTA is now asserted in both single-case and bulk reassignment flow without breaking macro/bookings coverage.
   - `inspect_case` deterministic lane expanded for Wave10 Part A: mocked assignee options now carry workload counts and assertions verify those hints in queue owner and reassign surfaces.
+  - Wave11 TP opened as post-merge live hardening block after real-user feedback: fix `Вернуть в работу` reopen sync semantics and rebuild the cramped inbox left rail in the current workspace.
+  - Wave11 Part A implemented: `reopen` no longer reuses `take` external sync semantics; direct `reopen` and macro `reopen_case` now return explicit `skipped/reopen_internal_only` sync instead of false Telegram/client failures.
+  - Direct `take/resolve/return` endpoints now reuse the same finalize helpers as macros, so action-specific sync semantics live in one place instead of duplicated router branches.
+  - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
+  - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - Run `scripts/session_check.sh`, commit Wave10 Part B, and push the routing-assist slice into PR `#932`.
-  - After push, open a bounded closeout review to decide whether current inbox routing assistance already satisfies the user TЗ or whether a separate policy-routing follow-up is still required.
+  - Prepare PR for Wave11 and then repeat the same `resolved -> reopen` scenario on live backend without route mocks.
+  - If live still shows transport anomalies on `take/resolve/return`, open a separate RCA block instead of extending Wave11.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -213,4 +219,11 @@
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave10 Part B mock lane)
   - `console-web/case_inspection.png`
   - `console-web/calendar_case_context.png`
-- last_updated: 2026-03-06T13:20:45+05:00
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_inbox_macros.py` (`49 passed`)
+  - `cd truffles-api && ruff check app/routers/console.py tests/test_console_cases_helpers.py tests/test_console_inbox_macros.py` (`pass`)
+  - `cd console-web && npm run lint -- --file src/components/InboxView.tsx --file src/components/CaseList.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave11 rail + reopen pass)
+  - `console-web/case_inspection.png`
+  - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+- last_updated: 2026-03-06T17:34:00+05:00

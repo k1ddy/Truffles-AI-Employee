@@ -16,6 +16,7 @@
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE8-A1`
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE9-A1`
   - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE10-A1`
+  - `CONSOLE-INBOX-CALENDAR-UX-RECONSTRUCTION-WAVE11-A1`
 
 ## Название/цель
 Обновить ТЗ в формат исполнимой программы: закрыть требования по вкладкам `Заявки` и `Записи` не набором разрозненных правок, а полной последовательностью атомарных wave/part блоков с явной бизнес-логикой, строгой связью между TP/PR и без дублирования действий в интерфейсе.
@@ -53,6 +54,8 @@
   - Макросы остаются текстовыми; нет action-макросов (`assign/status/snooze/tag`).
   - Workspace между `Заявками` и `Записями` стал связным, но еще не доведен до single-workspace уровня без route-level трения.
   - Для supervisor/admin не хватает полноценных queue governance возможностей: team views, configurable columns, routing/admin actions.
+  - Post-merge live feedback выявил новый semantic bug: `reopen` reuse `take` sync side effects и может показывать ложные `telegram_edit_failed/chatflow_failed`.
+  - Compact inbox rail в `Заявках` слишком узкий для текущего количества queue controls и case cards; это уже operator-UX defect, а не косметика.
 
 ## One web search (mandatory before implementation)
 - **Query (exact):** `Dynamics 365 Customer Service unified routing queue prioritization assignment methods`
@@ -119,11 +122,11 @@
 |---|---|---|---|
 | `1. Нет связи между вкладками` | Done | Wave1 | split not allowed |
 | `2. Менеджер скроллит вниз, чтобы понять контекст` | Done (first-screen simplified) | Wave1 | split not allowed |
-| `3. Непонятные SLA цифры и термины` | Implemented in branch | Wave5 | `Part A backend SLA contract` -> `Part B UI surfaces` if one PR is not enough |
-| `4. Вкладка Записи не удобна для управления` | Partially done | Wave6 + Wave8 + Wave9 | explicit split required by capability group |
-| `5. Капитальная реконструкция с ориентацией на мировые CRM` | In progress | Master program | closed only after Wave9 or explicit residual waiver |
-| `6. Любые недостающие функции и механизмы должны быть проанализированы и вписаны` | In progress | Wave6/Wave7/Wave9 | each missing capability must map to one wave/part |
-| `7. Все должно быть связано, интуитивно и без дублей` | In progress | Cross-wave invariant | enforced across all waves |
+| `3. Непонятные SLA цифры и термины` | Merge-ready in `PR #932` | Wave5 | `Part A backend SLA contract` -> `Part B UI surfaces` if one PR is not enough |
+| `4. Вкладка Записи не удобна для управления` | Merge-ready closure with accepted residual | Wave6 + Wave8 + Wave9 + Wave10 | explicit split required by capability group |
+| `5. Капитальная реконструкция с ориентацией на мировые CRM` | Merge-ready closure with accepted residual | Master program | close only via explicit closeout review |
+| `6. Любые недостающие функции и механизмы должны быть проанализированы и вписаны` | Merge-ready closure with accepted residual | Wave6/Wave7/Wave9/Wave10 | each missing capability must map to one wave/part |
+| `7. Все должно быть связано, интуитивно и без дублей` | Merge-ready | Cross-wave invariant | enforced across all waves |
 
 ## Execution model (mandatory TP/PR split)
 | Wave | TP document | PR policy | Objective | Status |
@@ -139,6 +142,8 @@
 | Wave8 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md` | Split allowed and expected: `Part A workspace shell`, `Part B queue position/context preservation` | Довести `Заявки/Записи` до единого workspace без потери контекста. | In PR `#932` (`Part A` + `Part B`) |
 | Wave9 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md` | Split allowed and expected: `Part A queue governance`, `Part B routing/admin views` | Supervisor/admin-grade queue governance: team views, columns, routing controls. | In PR `#932` (`Part A` + `Part B`) |
 | Wave10 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md` + `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md` | Split allowed and expected: `Part A factual load signals`, `Part B recommended routing action` | Сделать reassignment менее слепым: factual workload hints before any automation. | In PR `#932` (`Part A` + `Part B`) |
+| Closeout Review | `TP-2026-03-06-inbox-calendar-ux-reconstruction-closeout-review-a1.md` | No new PR; same `PR #932` decision gate | Explicitly classify original ТЗ closure and accepted residuals before merge. | In progress |
+| Wave11 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave11-a1.md` | One PR preferred; split allowed into `Part A action-sync correctness` then `Part B queue rail UX` | Post-merge live hardening: reopen-safe sync semantics + readable inbox left rail. | Implemented in branch |
 
 ## Wave-by-wave closure contract (mandatory)
 1. `Wave5` closes only when SLA перестает быть абстрактным и становится action-driven на сервере и в ключевых UI surface.
@@ -147,6 +152,7 @@
 4. `Wave8` closes only when переход `кейс -> запись -> кейс` перестает быть route-friction сценарием и становится единым рабочим экраном.
 5. `Wave9` closes only when очередь становится управляемой для supervisor/admin на масштабе, а не только удобной для одного менеджера.
 6. `Wave10` closes only when reassignment stops being a blind name-pick and shows factual workload signals in the current operator surfaces.
+7. `Wave11` closes only when `Вернуть в работу` перестает порождать ложные external sync errors, а compact queue rail снова становится читаемым рабочим инструментом для менеджера.
 
 ## TP/PR linkage rules (mandatory)
 - Если wave не помещается в один PR, split обязан быть зафиксирован прямо в wave TP до начала part-реализации.
@@ -206,7 +212,7 @@
 - `Expiry/trigger to stop deferral`: любой новый merge по `Заявки/Записи`, который не уменьшает один из этих residual gaps, требует отдельного owner-approved waiver.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: открыть bounded closeout review после Wave10 Part B и подтвердить, что текущий inbox-routing assist уже достаточно закрывает user ТЗ, либо зафиксировать отдельный follow-up только на policy-based routing automation.
-- `First deterministic check command`: `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line`
-- `Blocked-by conditions`: PR `#932` must keep Wave6-Wave9 behavior intact; new routing signals must not regress selection, bulk actions, current case focus or default manager readability.
+- `Next block objective`: выполнить Wave11 post-merge hardening по live-feedback: сначала action-correct reopen sync, затем bounded redesign левой очереди без нового route/tab.
+- `First deterministic check command`: `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_inbox_macros.py`
+- `Blocked-by conditions`: Wave11 must not regress shipped Wave5-Wave10 contracts, especially `take/resolve/return`, bulk selection, bookings panel and inspect-case workspace flow.
 - `Owner role for closure`: Brain / Top Architect.

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -507,3 +508,70 @@ def test_record_outreach_auto_case_trace_trims_to_limit():
     assert len(trace) == console_router._OUTREACH_AUTO_CASE_TRACE_MAX
     assert trace[-1]["stage"] == "outreach_auto_case_bootstrap"
     assert trace[-1]["case_id"] == str(case_id)
+
+
+@pytest.mark.asyncio
+async def test_reopen_case_skips_external_sync_side_effects(monkeypatch):
+    branch_id = uuid4()
+    agent_id = uuid4()
+    case = SimpleNamespace(
+        id=uuid4(),
+        status="resolved",
+        assigned_to=None,
+        assigned_to_name=None,
+        conversation_id=uuid4(),
+        created_at=datetime.now(timezone.utc),
+        trigger_type="bot_request",
+        first_response_at=None,
+        resolved_at=None,
+        resolution_time_seconds=None,
+        meta=None,
+    )
+    conversation = SimpleNamespace(id=case.conversation_id, branch_id=branch_id)
+    context = SimpleNamespace(
+        agent=SimpleNamespace(id=agent_id, name="Agent"),
+        role="manager",
+        client=SimpleNamespace(id=uuid4()),
+        branches=[SimpleNamespace(id=branch_id)],
+    )
+    db = Mock()
+    audit_events: list[str] = []
+    telegram_sync = Mock(side_effect=AssertionError("reopen must not edit telegram markup"))
+    client_notify = Mock(side_effect=AssertionError("reopen must not notify client as new handoff"))
+
+    def fake_reopen(*_args, **_kwargs):
+        case.status = "active"
+        case.assigned_to = agent_id
+        case.assigned_to_name = "Agent"
+        return SimpleNamespace(ok=True, error=None)
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "start_idempotency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_case_action_context",
+        lambda *_args, **_kwargs: (case, conversation),
+    )
+    monkeypatch.setattr(console_router, "state_manager_reopen", fake_reopen)
+    monkeypatch.setattr(console_router, "_sync_telegram_after_take", telegram_sync)
+    monkeypatch.setattr(console_router, "_notify_client_status", client_notify)
+    monkeypatch.setattr(
+        console_router,
+        "record_audit_event",
+        lambda *args, **kwargs: audit_events.append(kwargs["event_type"]),
+    )
+
+    response = await console_router.reopen_case(case.id, request=Mock(), db=db)
+
+    assert response.success is True
+    assert response.case.status == "active"
+    assert response.sync is not None
+    assert response.sync.telegram.status == "skipped"
+    assert response.sync.telegram.detail == "reopen_internal_only"
+    assert response.sync.client_notify.status == "skipped"
+    assert response.sync.client_notify.detail == "reopen_internal_only"
+    telegram_sync.assert_not_called()
+    client_notify.assert_not_called()
+    assert "case_reopened" in audit_events
+    assert "case_reopen_sync" in audit_events

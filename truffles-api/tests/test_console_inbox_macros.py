@@ -473,6 +473,88 @@ async def test_execute_inbox_macro_snooze_uses_action_payload(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_execute_inbox_macro_reopen_skips_external_sync(monkeypatch):
+    context = _mock_context(role="manager")
+    branch = _mock_branch()
+    macro = _mock_macro(
+        "Вернуть в работу",
+        is_active=True,
+        action_config={"type": "reopen_case"},
+        client_id=context.client.id,
+        branch_id=branch.id,
+    )
+    case = SimpleNamespace(
+        id=uuid4(),
+        status="resolved",
+        assigned_to=None,
+        assigned_to_name=None,
+        conversation_id=uuid4(),
+        created_at=datetime.now(timezone.utc),
+        trigger_type="bot_request",
+        first_response_at=None,
+        resolved_at=None,
+        resolution_time_seconds=None,
+        meta=None,
+    )
+    conversation = SimpleNamespace(id=case.conversation_id, branch_id=branch.id)
+    db = Mock()
+    audit_events: list[str] = []
+    telegram_sync = Mock(side_effect=AssertionError("macro reopen must not edit telegram markup"))
+    client_notify = Mock(side_effect=AssertionError("macro reopen must not notify client as new handoff"))
+
+    def fake_reopen(*_args, **_kwargs):
+        case.status = "active"
+        case.assigned_to = context.agent.id
+        case.assigned_to_name = context.agent.name
+        return SimpleNamespace(ok=True, error=None)
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda *_args, **_kwargs: branch)
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_inbox_macro_for_context",
+        lambda *_args, **_kwargs: macro,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_case_action_context",
+        lambda *_args, **_kwargs: (case, conversation),
+    )
+    monkeypatch.setattr(console_router, "start_idempotency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "state_manager_reopen", fake_reopen)
+    monkeypatch.setattr(console_router, "_sync_telegram_after_take", telegram_sync)
+    monkeypatch.setattr(console_router, "_notify_client_status", client_notify)
+    monkeypatch.setattr(
+        console_router,
+        "record_audit_event",
+        lambda *args, **kwargs: audit_events.append(kwargs["event_type"]),
+    )
+
+    response = await console_router.execute_inbox_macro(
+        macro.id,
+        body=ConsoleMacroExecuteRequest(case_id=case.id),
+        request=Mock(),
+        db=db,
+    )
+
+    assert response.success is True
+    assert response.macro.action is not None
+    assert response.macro.action.type == "reopen_case"
+    assert response.case.status == "active"
+    assert response.sync is not None
+    assert response.sync.telegram.status == "skipped"
+    assert response.sync.telegram.detail == "reopen_internal_only"
+    assert response.sync.client_notify.status == "skipped"
+    assert response.sync.client_notify.detail == "reopen_internal_only"
+    telegram_sync.assert_not_called()
+    client_notify.assert_not_called()
+    assert "case_reopened" in audit_events
+    assert "case_reopen_sync" in audit_events
+    assert "macro_executed" in audit_events
+
+
+@pytest.mark.asyncio
 async def test_execute_inbox_macro_rejects_inactive_macro(monkeypatch):
     context = _mock_context(role="manager")
     branch = _mock_branch()
