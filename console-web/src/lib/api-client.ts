@@ -498,6 +498,9 @@ export type CaseListResponse = components["schemas"]["ConsoleCaseListResponse"];
 export type CaseActionResponse = components["schemas"]["ConsoleCaseActionResponse"];
 export type CaseAssigneeOption = components["schemas"]["ConsoleCaseAssigneeOption"];
 export type CaseAssigneeListResponse = components["schemas"]["ConsoleCaseAssigneeListResponse"];
+export type CaseBulkActionRequest = components["schemas"]["ConsoleCaseBulkActionRequest"];
+export type CaseBulkActionResponse = components["schemas"]["ConsoleCaseBulkActionResponse"];
+export type CaseBulkActionResult = components["schemas"]["ConsoleCaseBulkActionResult"];
 export type CaseReassignRequest = components["schemas"]["ConsoleCaseReassignRequest"];
 export type CaseSnoozeRequest = components["schemas"]["ConsoleCaseSnoozeRequest"];
 export type Message = components["schemas"]["ConsoleMessage"];
@@ -1249,6 +1252,9 @@ export const casesApi = {
 
     snooze: (caseId: string, data: CaseSnoozeRequest) =>
         apiClient.post<CaseActionResponse>(`/cases/${caseId}/snooze`, data),
+
+    bulkAction: (data: CaseBulkActionRequest) =>
+        apiClient.post<CaseBulkActionResponse>("/cases/bulk", data),
 
     resolve: (caseId: string) =>
         apiClient.post<CaseActionResponse>(`/cases/${caseId}/resolve`),

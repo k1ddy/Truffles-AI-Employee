@@ -104,23 +104,31 @@
 - Есть backend endpoint для bounded bulk actions по заявкам.
 - Bulk `reassign` и `snooze` работают поверх existing single-case semantics.
 - Response возвращает per-case результат, а не только общий `success`.
+- В очереди доступна bounded selection semantics и компактный bulk toolbar без нового экрана.
 - Contract/openapi checks зелёные.
-- Если frontend bulk toolbar не помещается, это явно зафиксировано как residual этого же TP.
+- Frontend bulk toolbar не дублирует single-case actions и не ломает first-screen clarity.
 
 ## Checks
 - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py`
 - `cd truffles-api && python3 scripts/generate_openapi.py --check`
+- `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file src/lib/api-client.ts --file e2e/inspect_case.spec.ts`
+- `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line`
 - `scripts/session_check.sh`
 
 ## Current branch status
-- `Part B1` started и реализован в backend: добавлен bounded bulk endpoint `/cases/bulk` для `reassign` и `snooze` с per-case `processed/skipped/failed` результатами.
-- Request/response contract описывает частичный успех и не прячет permission/state ошибки внутри массовой операции.
-- Frontend bulk toolbar пока не подключался: сначала зафиксирован backend contract и openapi evidence.
+- `Part B1` реализован в backend: добавлен bounded bulk endpoint `/cases/bulk` для `reassign` и `snooze` с per-case `processed/skipped/failed` результатами.
+- `Part B2` реализован в UI: в `CaseList` добавлены selection checkbox, `Выбрать все`, компактный bulk toolbar и bounded submit flow для `reassign`/`snooze`.
+- Для `bulk reassign` UI ограничивает старт одним филиалом, а `bulk snooze` остаётся доступным для всей текущей выборки.
+- Исправлен queue-state bug в `CaseList`: пустой search debounce больше не очищает локальный список без фактической смены query, из-за чего mock/workspace lane терял видимые заявки после mount.
 
 ## Evidence
 - Git diff по touch-list.
 - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`37 passed`).
 - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`).
+- `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file src/lib/api-client.ts --file e2e/inspect_case.spec.ts` (`pass`).
+- `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`, mock lane now asserts bulk selection and `/cases/bulk` payload).
+- `console-web/case_inspection.png` (queue row + selection checkbox + updated inbox surface).
+- `console-web/calendar_case_context.png`.
 - Session log with Wave6 Part B evidence.
 
 ## Release safety (mandatory)
@@ -140,17 +148,17 @@
 ## Риски/блокеры
 - Mixed-branch selection может потребовать permission-aware skip, а не hard fail.
 - Bulk reassign должен использовать тот же assignee-source contract, иначе возможны неверные передачи.
-- Frontend toolbar может не поместиться в этот же блок без лишнего churn в `CaseList`.
+- Расширение bulk на `reopen/resolve/return` потребует отдельного rollout decision и supervisor policy.
 
 ## Residual architecture debt (mandatory)
-- `Current residuals accepted in this block`: frontend bulk toolbar и расширенные supervisor views могут остаться follow-up после backend contract.
-- `Why not in this block`: backend contract — критический путь; UI без него не должен определять модель bulk semantics.
-- `Risk if deferred`: supervisor всё ещё не увидит экономию кликов на UI, но контракт уже будет готов и проверяем.
-- `Linked follow-up Task Package(s)`: `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md` (current backend block), `TBD wave6-partb-ui`, `TBD wave7`.
-- `Expiry/trigger to stop deferral`: если backend contract green, а selection UX не закрыт, следующий блок должен быть UI bulk toolbar без ухода в новые фичи.
+- `Current residuals accepted in this block`: supervisor-grade queue governance, bulk `reopen/resolve/return`, team views and routing controls.
+- `Why not in this block`: этот блок bounded только на массовые `reassign/snooze` поверх текущего queue surface, без перехода в Wave7/Wave9.
+- `Risk if deferred`: supervisor всё ещё не получит полный control tower поверх очереди, хотя базовая массовая операционная работа уже стала быстрее.
+- `Linked follow-up Task Package(s)`: `TBD wave7`, `TBD wave9`.
+- `Expiry/trigger to stop deferral`: если после merge bulk `reassign/snooze` покрыты, следующий product block обязан идти либо в action-macros, либо в supervisor queue governance, но не в косметические UI правки.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: подключить минимальный queue selection + bulk toolbar к уже реализованному backend bulk contract, либо открыть follow-up TP только на UI surface.
-- `First deterministic check command`: `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py`
-- `Blocked-by conditions`: Wave5/Wave6 Part A checks должны оставаться зелёными.
+- `Next block objective`: открыть Wave7 Part A и превратить inbox macros из текстовых шаблонов в executable action-macros поверх уже закрытого Wave6 operator contract.
+- `First deterministic check command`: `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line`
+- `Blocked-by conditions`: PR `#931` должен остаться зелёным; Wave6 bulk/single-case contract не должен регрессировать.
 - `Owner role for closure`: Brain / Top Architect.

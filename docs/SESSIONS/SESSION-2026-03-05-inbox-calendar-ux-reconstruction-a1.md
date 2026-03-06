@@ -61,8 +61,12 @@
   - PR `#931` opened for Wave5 + Wave6 Part A: `feat(console): action-driven SLA and single-case inbox actions`.
   - Wave6 Part B TP created for bounded bulk/supervisor actions with explicit split `backend contract -> queue selection UI`.
   - Wave6 Part B1 backend started: added `/cases/bulk` contract for bulk `reassign`/`snooze` with per-case `processed/skipped/failed` results and contract checks.
+  - Fixed red PR `#931`: Python import ordering and stale `console-web/src/types/api.generated.ts` drift resolved in branch.
+  - Wave6 Part B2 implemented: `CaseList` now supports queue selection, `Выбрать все`, bounded bulk `reassign/snooze` toolbar and payload submission to `/cases/bulk`.
+  - Fixed inbox queue state bug: empty search debounce no longer clears visible cases without changing the actual query, which had hidden queue rows in the mock/workspace lane.
+  - `inspect_case` mock lane now validates bulk selection and `/cases/bulk` payload without breaking the existing case/calendar scenario.
 - next:
-  - Decide whether minimal queue selection + bulk toolbar fits in this PR, otherwise split it into dedicated UI follow-up on top of the new backend bulk contract.
+  - Watch PR `#931` checks after the new Wave6 Part B2 commits and then move to Wave7 Part A (`action-macro backend`) after merge.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -145,4 +149,7 @@
   - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
   - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
   - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
-- last_updated: 2026-03-06T08:28:00+05:00
+  - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file src/lib/api-client.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `scripts/session_check.sh` (`Session OK`)
+- last_updated: 2026-03-06T09:09:03+05:00
