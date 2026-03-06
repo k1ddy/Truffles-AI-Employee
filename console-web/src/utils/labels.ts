@@ -15,6 +15,47 @@ export function getStatusLabel(status: string): string {
     return labels[status] || status;
 }
 
+type CaseBusinessStatusCode =
+    | "unassigned"
+    | "open"
+    | "in_progress"
+    | "needs_reply"
+    | "waiting_client"
+    | "snoozed"
+    | "bot_handling"
+    | "resolved"
+    | string;
+
+type CaseBusinessStatusLike = {
+    status?: string;
+    business_status_code?: string | null;
+    business_status_label?: string | null;
+    assigned_to_id?: string | null;
+    assigned_to_name?: string | null;
+    sla_action_state?: string | null;
+    snoozed_until?: string | null;
+};
+
+export interface CaseBusinessStatusBadge {
+    label: string;
+    className: string;
+    code: string;
+}
+
+export function getCaseBusinessStatusBadge(caseItem: CaseBusinessStatusLike): CaseBusinessStatusBadge {
+    const code = (
+        caseItem.business_status_code
+        || deriveFallbackBusinessStatus(caseItem)
+    ) as CaseBusinessStatusCode;
+    const label = caseItem.business_status_label || getFallbackBusinessStatusLabel(code, caseItem.status || "");
+
+    return {
+        code,
+        label,
+        className: getCaseBusinessStatusClassName(code),
+    };
+}
+
 type CaseSlaState =
     | "reply_due"
     | "overdue"
@@ -135,6 +176,79 @@ function formatMinutesLabel(totalMinutes?: number | null): string {
         return `${hours} ч`;
     }
     return `${hours} ч ${minutes} мин`;
+}
+
+function deriveFallbackBusinessStatus(caseItem: CaseBusinessStatusLike): CaseBusinessStatusCode {
+    const actionState = (caseItem.sla_action_state || "").toLowerCase();
+    const hasOwner = Boolean(caseItem.assigned_to_id || caseItem.assigned_to_name);
+    if (caseItem.status === "resolved") {
+        return "resolved";
+    }
+    if (caseItem.status === "bot_handling") {
+        return "bot_handling";
+    }
+    if (actionState === "snoozed" || caseItem.snoozed_until) {
+        return "snoozed";
+    }
+    if (!hasOwner) {
+        return "unassigned";
+    }
+    if (actionState === "reply_due" || actionState === "overdue") {
+        return "needs_reply";
+    }
+    if (actionState === "waiting_client") {
+        return "waiting_client";
+    }
+    if (caseItem.status === "active") {
+        return "in_progress";
+    }
+    return "open";
+}
+
+function getFallbackBusinessStatusLabel(code: CaseBusinessStatusCode, rawStatus: string): string {
+    switch (code) {
+        case "unassigned":
+            return "Без владельца";
+        case "open":
+            return "Открыта";
+        case "in_progress":
+            return "В работе";
+        case "needs_reply":
+            return "Нужен ответ";
+        case "waiting_client":
+            return "Ждем клиента";
+        case "snoozed":
+            return "Отложена";
+        case "bot_handling":
+            return "Бот ведет";
+        case "resolved":
+            return "Закрыта";
+        default:
+            return getStatusLabel(rawStatus);
+    }
+}
+
+function getCaseBusinessStatusClassName(code: CaseBusinessStatusCode): string {
+    switch (code) {
+        case "unassigned":
+            return "bg-amber-100 text-amber-900";
+        case "open":
+            return "bg-yellow-100 text-yellow-800";
+        case "in_progress":
+            return "bg-green-100 text-green-800";
+        case "needs_reply":
+            return "bg-orange-100 text-orange-900";
+        case "waiting_client":
+            return "bg-blue-100 text-blue-800";
+        case "snoozed":
+            return "bg-slate-100 text-slate-700";
+        case "bot_handling":
+            return "bg-teal-100 text-teal-800";
+        case "resolved":
+            return "bg-muted text-muted-foreground";
+        default:
+            return "bg-muted text-muted-foreground";
+    }
 }
 
 function getCaseSlaClassName(state?: CaseSlaState | null): string {

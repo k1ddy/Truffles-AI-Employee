@@ -176,6 +176,8 @@
 | `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-closeout-review-a1.md` | Closeout-review Task Package for final ТЗ coverage classification and merge-go/no-go decision after Waves 1-10 | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave11-a1.md` | Wave11 Task Package for post-merge live hardening: reopen-safe sync semantics + inbox left-rail usability reconstruction | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-a1.md` | Wave12 Task Package for server-owned policy-based routing automation on existing reassignment surfaces (`least_open_cases`, single-case + bulk) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-live-validation-a1.md` | Post-merge live-validation Task Package for proving Wave12 policy-routing mutation path on real backend without mocks | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave13-a1.md` | Wave13 Task Package for server-owned business status contract and badge-noise reduction in inbox queue/header surfaces | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |

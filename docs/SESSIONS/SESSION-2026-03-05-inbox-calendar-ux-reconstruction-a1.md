@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave13-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -11,6 +11,12 @@
   - PR `#933` merged into `main` on 2026-03-06; Wave11 reopen-sync correctness and inbox left-rail usability fixes are now shipped.
   - Wave12 TP created for policy-based routing automation as the next active block.
   - Wave12 implemented in branch: backend now owns routing recommendation/apply (`least_open_cases`) for single-case and bulk reassignment, while UI adds one-click `Назначить по политике` and `Распределить по политике` without new routes.
+  - PR `#934` merged into `main` on 2026-03-06; Wave12 policy-routing contract is now shipped.
+  - Wave12 live-validation TP created to prove the merged mutation path on real backend without mocks before opening the next routing maturity wave.
+  - Wave12 live-validation classified precisely: live no-mocks fallback still cannot prove the routing mutation without an explicit safe `INSPECT_CASE_LIVE_CASE_ID`; the lane now reports that blocker instead of pretending mutation evidence.
+  - Wave13 TP created as the next active block: introduce server-owned business status and simplify badge-heavy queue/header surfaces around one operator status + one SLA next action.
+  - Wave13 implemented in branch: backend now exposes `business_status_code/business_status_label`, while `CaseList` and `CaseConversation` use that operator status as the primary lifecycle badge instead of raw `pending/active/resolved` chips.
+  - Compact queue cards now keep one business-status badge, one SLA next-action badge, and text metadata for owner/context; extra technical pills were removed from the default compact rail.
   - Worktree created and baseline rollback completed.
   - Task Package restored with mandatory gates and one web search evidence.
   - Backend calendar contract expanded with `conversation_id`/`case_id` linkage and `conversation_id` filter.
@@ -97,8 +103,8 @@
   - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
   - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - Prepare PR for Wave11 and then repeat the same `resolved -> reopen` scenario on live backend without route mocks.
-  - If live still shows transport anomalies on `take/resolve/return`, open a separate RCA block instead of extending Wave11.
+  - Open a bounded PR for Wave13 business-status contract + queue/header simplification.
+  - Keep Wave12 live validation blocker documented until a safe explicit live case ID is available for mutation proof.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -229,4 +235,4 @@
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave11 rail + reopen pass)
   - `console-web/case_inspection.png`
   - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
-- last_updated: 2026-03-06T17:34:00+05:00
+- last_updated: 2026-03-06T20:36:00+05:00

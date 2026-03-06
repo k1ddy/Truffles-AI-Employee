@@ -998,6 +998,8 @@ class ConsoleCase(BaseModel):
     id: UUID
     conversation_id: UUID
     status: str
+    business_status_code: Optional[str] = None
+    business_status_label: Optional[str] = None
     trigger_type: str
     trigger_value: Optional[str] = None
     context_summary: Optional[str] = None
