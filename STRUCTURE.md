@@ -143,6 +143,7 @@
 | `console-web/src/app/tenants/use-tenants-action-queue.ts` | Hook для action-queue orchestration и archive predicate в `/tenants` | Frontend |
 | `console-web/src/app/tenants/use-tenants-operational-model.ts` | Hook для вычисления Tenants operational KPI/drilldown/alert/report модели | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
+| `console-web/e2e/support/keycloak-auth.ts` | Shared Keycloak auth helper for Playwright `login/smoke/inspect_case` live lanes | Frontend/QA |
 | `console-web/e2e/tenants-a11y.spec.ts` | Live Playwright + Axe evidence для Tenants (desktop/mobile) | Frontend/QA |
 | `console-web/eslint.config.js` | ESLint flat config для console-web | Frontend |
 | `console-web/.env.e2e.example` | Шаблон env для console‑e2e | Frontend/QA |
@@ -159,6 +160,7 @@
 | `docs/runbooks/INBOX_CALENDAR_WAVE4_RELEASE.md` | Wave4 release runbook for Inbox/Calendar (`canary -> go/no-go -> rollback`) | Brain/Architect/OPS |
 | `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md` | Closeout Task Package for Inbox/Calendar wave4 release discipline (`flag rollback + live lane evidence + runbook`) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-05-console-e2e-live-auth-hardening-a1.md` | Follow-up Task Package for live no-mocks auth/case inspection hardening after wave4 closeout | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-console-e2e-auth-helper-unification-a1.md` | Follow-up Task Package for shared auth helper unification in `login/smoke/inspect_case` Playwright specs | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |
