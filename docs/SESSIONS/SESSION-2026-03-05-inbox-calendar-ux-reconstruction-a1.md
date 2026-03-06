@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-console-e2e-auth-helper-rollout-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -50,8 +50,16 @@
   - `marketing`, `owner-admin-business`, `platform-admin`, `tenants-a11y` migrated to shared Keycloak helper; local `startKeycloakLogin/loginThroughKeycloak` duplicates removed.
   - Shared helper hardened to avoid false-positive `/api/auth` URL completion and повторный signin через auth-origin, which caused local `redirect_uri` failures during RCA.
   - `owner-admin-business` lane now emits explicit skip when the authenticated role is not `owner/admin`, instead of reporting a false UI regression for manager credentials.
+  - Master TP refreshed into an atomic program map with actual `Done/In progress/Planned` wave states and explicit split contracts for all remaining business blocks.
+  - Wave5 TP created for action-driven SLA contract (`backend contract -> frontend surfaces`) as the next product block after merged e2e/auth follow-ups.
+  - Wave5 implementation started: backend case SLA action contract added (`sla_action_state`, `sla_overdue_minutes`) with deadline-based `reply_due/overdue/waiting_client` semantics.
+  - Inbox surfaces (`CaseConversation`, `CaseList`, `CaseDetailsPanel`) switched from abstract SLA copy to action-driven badges and deadline display.
+  - OpenAPI and generated frontend API types synced for new case SLA fields; inspect-case lane now asserts the action badge without legacy `SLA:` prefix.
+  - Wave6 TP created for bounded single-case actions `reassign/snooze/reopen`, with explicit split contract `single-case actions -> bulk/supervisor actions`.
+  - Wave6 Part A implemented: backend assignee/reassign/snooze/reopen contract added, `manager_reopen` fixed to use explicit operator override, and snooze semantics moved to `handover.meta` with stale-state cleanup on reply/resolve/return/reopen.
+  - Inbox operator controls extended with `Передать`, `Отложить`, `Вернуть в работу`; details surface shows snooze metadata; inspect-case mocks now validate the new controls.
 - next:
-  - Open PR for `CONSOLE-E2E-AUTH-HELPER-ROLLOUT-A1` and let CI verify owner/admin lane with dedicated GitHub secrets.
+  - Open bounded follow-up for wave6 `Part B`: bulk/supervisor actions on top of the new single-case contract.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -109,4 +117,19 @@
   - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/owner-admin-business.spec.ts --project=chromium --reporter=line --grep "should expose owner/admin control navigation and business summary"` (`1 skipped`)
   - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/marketing.spec.ts --project=chromium --reporter=line --grep "should open marketing page and render lifecycle blocks"` (`pass`, post-helper-hardening rerun)
   - `scripts/session_check.sh` (`Session OK`)
-- last_updated: 2026-03-06T06:36:10+05:00
+  - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "Wave5|Wave6|Wave7|Wave8|Wave9|Requirement coverage map|Atomic split rule" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md`
+  - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "## (One web search|Root cause|Residual architecture debt|Next-block contract)" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md`
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`29 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run lint -- --file src/utils/labels.ts --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file src/components/CaseDetailsPanel.tsx --file src/types/index.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`, calendar no-cases fallback)
+  - `cd truffles-api && pytest -q tests/test_state_service.py tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`67 passed`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd console-web && npm run lint -- --file src/lib/api-client.ts --file src/components/CaseConversation.tsx --file src/components/CaseDetailsPanel.tsx --file src/utils/labels.ts --file src/types/index.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`, calendar no-cases fallback)
+- last_updated: 2026-03-06T08:14:45+05:00

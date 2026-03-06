@@ -101,6 +101,166 @@ def test_format_case_metrics():
     assert metrics["resolution_time_seconds"] == 720
 
 
+def test_build_case_queue_signals_marks_reply_due_before_deadline():
+    now = datetime(2026, 3, 6, 10, 0, tzinfo=timezone.utc)
+    created_at = now - timedelta(minutes=45)
+
+    signals = console_router._build_case_queue_signals(
+        created_at=created_at,
+        status="active",
+        needs_reply=True,
+        has_delivery_error=False,
+        has_pending_outbox=False,
+        human_lock_active=False,
+        now_utc=now,
+    )
+
+    assert signals["sla_status"] == "warning"
+    assert signals["sla_action_state"] == "reply_due"
+    assert signals["sla_overdue_minutes"] is None
+    assert signals["priority_tier"] == "high"
+    assert signals["attention_reason"] == "Клиент ожидает ответ"
+    assert signals["target_response_at"] == (created_at + timedelta(minutes=60)).isoformat()
+
+
+def test_build_case_queue_signals_marks_overdue_after_deadline():
+    now = datetime(2026, 3, 6, 10, 0, tzinfo=timezone.utc)
+    created_at = now - timedelta(minutes=83)
+
+    signals = console_router._build_case_queue_signals(
+        created_at=created_at,
+        status="active",
+        needs_reply=True,
+        has_delivery_error=False,
+        has_pending_outbox=False,
+        human_lock_active=False,
+        now_utc=now,
+    )
+
+    assert signals["sla_status"] == "breached"
+    assert signals["sla_action_state"] == "overdue"
+    assert signals["sla_overdue_minutes"] == 23
+    assert signals["priority_tier"] == "urgent"
+    assert signals["attention_reason"] == "Клиент ожидает ответ"
+
+
+def test_build_case_queue_signals_marks_waiting_client_when_manager_already_replied():
+    now = datetime(2026, 3, 6, 10, 0, tzinfo=timezone.utc)
+    created_at = now - timedelta(minutes=20)
+    last_inbound_at = now - timedelta(minutes=18)
+    last_outbound_at = now - timedelta(minutes=5)
+
+    signals = console_router._build_case_queue_signals(
+        created_at=created_at,
+        status="active",
+        needs_reply=False,
+        has_delivery_error=False,
+        has_pending_outbox=False,
+        human_lock_active=False,
+        last_inbound_at=last_inbound_at,
+        last_outbound_at=last_outbound_at,
+        first_response_at=last_outbound_at,
+        now_utc=now,
+    )
+
+    assert signals["sla_status"] == "ok"
+    assert signals["sla_action_state"] == "waiting_client"
+    assert signals["sla_overdue_minutes"] is None
+    assert signals["priority_tier"] == "normal"
+    assert signals["attention_reason"] == "Ожидаем ответ клиента"
+
+
+def test_build_case_queue_signals_prioritizes_delivery_issue():
+    now = datetime(2026, 3, 6, 10, 0, tzinfo=timezone.utc)
+    created_at = now - timedelta(minutes=5)
+
+    signals = console_router._build_case_queue_signals(
+        created_at=created_at,
+        status="active",
+        needs_reply=True,
+        has_delivery_error=True,
+        has_pending_outbox=False,
+        human_lock_active=False,
+        now_utc=now,
+    )
+
+    assert signals["sla_status"] == "ok"
+    assert signals["sla_action_state"] == "delivery_issue"
+    assert signals["priority_tier"] == "urgent"
+    assert signals["attention_reason"] == "Ошибка доставки: проверьте отправку"
+
+
+def test_resolve_case_snooze_state_marks_active_snooze_without_new_inbound():
+    now = datetime(2026, 3, 6, 10, 0, tzinfo=timezone.utc)
+    snoozed_until = now + timedelta(minutes=45)
+    snoozed_at = now - timedelta(minutes=5)
+
+    state = console_router._resolve_case_snooze_state(
+        handover_meta={
+            "snoozed_until": snoozed_until.isoformat(),
+            "snoozed_at": snoozed_at.isoformat(),
+            "snooze_reason": "follow_up_later",
+            "snoozed_by_name": "Manager",
+        },
+        last_inbound_at=now - timedelta(minutes=10),
+        now_utc=now,
+    )
+
+    assert state["active"] is True
+    assert state["snoozed_until"] == snoozed_until.isoformat()
+    assert state["snoozed_reason"] == "follow_up_later"
+    assert state["snoozed_by"] == "Manager"
+
+
+def test_resolve_case_snooze_state_clears_when_new_inbound_arrives():
+    now = datetime(2026, 3, 6, 10, 0, tzinfo=timezone.utc)
+    snoozed_until = now + timedelta(minutes=45)
+    snoozed_at = now - timedelta(minutes=10)
+
+    state = console_router._resolve_case_snooze_state(
+        handover_meta={
+            "snoozed_until": snoozed_until.isoformat(),
+            "snoozed_at": snoozed_at.isoformat(),
+            "snooze_reason": "follow_up_later",
+            "snoozed_by_name": "Manager",
+        },
+        last_inbound_at=now - timedelta(minutes=2),
+        now_utc=now,
+    )
+
+    assert state["active"] is False
+    assert state["snoozed_until"] is None
+    assert state["snoozed_reason"] is None
+    assert state["snoozed_by"] is None
+
+
+def test_build_case_queue_signals_marks_snoozed_before_reply_due():
+    now = datetime(2026, 3, 6, 10, 0, tzinfo=timezone.utc)
+    created_at = now - timedelta(minutes=20)
+    snoozed_until = now + timedelta(minutes=40)
+
+    signals = console_router._build_case_queue_signals(
+        created_at=created_at,
+        status="active",
+        needs_reply=True,
+        has_delivery_error=False,
+        has_pending_outbox=False,
+        human_lock_active=False,
+        handover_meta={
+            "snoozed_until": snoozed_until.isoformat(),
+            "snoozed_at": (now - timedelta(minutes=1)).isoformat(),
+            "snooze_reason": "follow_up_later",
+            "snoozed_by_name": "Manager",
+        },
+        now_utc=now,
+    )
+
+    assert signals["sla_action_state"] == "snoozed"
+    assert signals["priority_tier"] == "low"
+    assert signals["attention_reason"] == "Диалог отложен менеджером"
+    assert signals["snoozed_until"] == snoozed_until.isoformat()
+
+
 def test_require_branch_access_allows_matching_branch():
     branch_id = uuid4()
     context = SimpleNamespace(

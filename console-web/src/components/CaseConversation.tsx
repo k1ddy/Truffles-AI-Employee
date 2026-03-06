@@ -8,7 +8,7 @@ import toast from "react-hot-toast";
 import { casesApi, outreachApi, type CaseActionResponse } from "@/lib/api-client";
 import type { Case, Message } from "@/types";
 import ChatInterface from "./ChatInterface";
-import { getStatusLabel, getSlaLabel } from "@/utils/labels";
+import { getCaseSlaIndicator, getStatusLabel } from "@/utils/labels";
 
 interface CaseConversationProps {
     caseDetail: Case;
@@ -49,6 +49,15 @@ async function returnCase(caseId: string): Promise<CaseActionResponse> {
     return response.data;
 }
 
+async function reopenCase(caseId: string): Promise<CaseActionResponse> {
+    const response = await casesApi.reopen(caseId);
+    return response.data;
+}
+
+function extractErrorCode(error: unknown): string | undefined {
+    return (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+}
+
 function collectSyncIssues(sync?: CaseActionResponse["sync"]) {
     const issues: string[] = [];
     if (sync?.telegram?.status === "failed") {
@@ -58,20 +67,6 @@ function collectSyncIssues(sync?: CaseActionResponse["sync"]) {
         issues.push(`Клиент: ${sync.client_notify.detail || "уведомление не доставлено"}`);
     }
     return issues;
-}
-
-function SlaBadge({ status }: { status?: string }) {
-    const styles = {
-        ok: "bg-green-100 text-green-800",
-        warning: "bg-yellow-100 text-yellow-800",
-        breached: "bg-red-100 text-red-800",
-    };
-    const style = styles[status as keyof typeof styles] || styles.ok;
-    return (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${style}`}>
-            SLA: {getSlaLabel(status)}
-        </span>
-    );
 }
 
 const HUMAN_LOCK_SOURCE_LABELS: Record<string, string> = {
@@ -85,6 +80,16 @@ const HUMAN_LOCK_REASON_LABELS: Record<string, string> = {
     manual_reply: "Ответ менеджера",
     manual_pause: "Ручная пауза",
 };
+
+const ASSIGNEE_ROLE_LABELS: Record<string, string> = {
+    owner: "Owner",
+    admin: "Admin",
+    manager: "Manager",
+};
+
+const CASE_SNOOZE_PRESETS = [30, 60, 120, 240];
+
+type ActionPanel = "reassign" | "snooze" | null;
 
 function formatHumanLockLabel(value?: string | null, lookup?: Record<string, string>) {
     if (!value) {
@@ -192,7 +197,14 @@ export default function CaseConversation({
         },
     });
 
+    const isActive = caseDetail.status === "active";
+    const isPending = caseDetail.status === "pending";
+    const isResolved = caseDetail.status === "resolved";
     const defaultDestination = caseDetail.customer_phone || caseDetail.customer_remote_jid || "";
+    const [actionPanel, setActionPanel] = useState<ActionPanel>(null);
+    const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
+    const [snoozeMinutes, setSnoozeMinutes] = useState(60);
+    const [snoozeReason, setSnoozeReason] = useState("");
     const [outreachDestination, setOutreachDestination] = useState(defaultDestination);
     const [outreachContent, setOutreachContent] = useState("");
     const [pauseMinutes, setPauseMinutes] = useState(30);
@@ -204,6 +216,10 @@ export default function CaseConversation({
     const outreachPanelRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
+        setActionPanel(null);
+        setSelectedAssigneeId("");
+        setSnoozeMinutes(60);
+        setSnoozeReason("");
         setOutreachDestination(caseDetail.customer_phone || caseDetail.customer_remote_jid || "");
         setOutreachContent("");
         setPauseMinutes(30);
@@ -213,6 +229,118 @@ export default function CaseConversation({
         setOutreachExpanded(false);
         setContextExpanded(layout !== "inbox");
     }, [caseId, caseDetail.customer_phone, caseDetail.customer_remote_jid, layout]);
+
+    const assigneeOptionsQuery = useQuery({
+        queryKey: ["case-assignees", caseId],
+        queryFn: async () => {
+            const response = await casesApi.listAssignees(caseId);
+            return response.data;
+        },
+        enabled: canWrite && isActive && actionPanel === "reassign",
+        staleTime: 30_000,
+    });
+
+    useEffect(() => {
+        if (actionPanel !== "reassign") {
+            return;
+        }
+        const items = assigneeOptionsQuery.data?.items ?? [];
+        if (items.length === 0) {
+            return;
+        }
+        setSelectedAssigneeId((current) => {
+            if (current && items.some((item) => item.agent_id === current)) {
+                return current;
+            }
+            const preferred = items.find((item) => !item.is_current) ?? items[0];
+            return preferred.agent_id;
+        });
+    }, [actionPanel, assigneeOptionsQuery.data?.items]);
+
+    const reassignMutation = useMutation({
+        mutationFn: async () => {
+            const agentId = selectedAssigneeId.trim();
+            if (!agentId) {
+                throw new Error("assignee_required");
+            }
+            const response = await casesApi.reassign(caseId, { agent_id: agentId });
+            return response.data;
+        },
+        onSuccess: (response) => {
+            setActionPanel(null);
+            toast.success(`Заявка передана: ${response.case.assigned_to_name ?? "новый менеджер"}`);
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
+            queryClient.invalidateQueries({ queryKey: ["case-assignees", caseId] });
+        },
+        onError: (error: unknown) => {
+            if (error instanceof Error && error.message === "assignee_required") {
+                toast.error("Выберите менеджера");
+                return;
+            }
+            const code = extractErrorCode(error);
+            if (code === "NOT_ASSIGNED") {
+                toast.error("Передавать заявку может только ответственный или администратор");
+                return;
+            }
+            if (code === "CASE_NOT_ACTIVE") {
+                toast.error("Передача доступна только для активной заявки");
+                return;
+            }
+            toast.error("Не удалось передать заявку");
+        },
+    });
+
+    const snoozeMutation = useMutation({
+        mutationFn: async () => {
+            const minutes = Math.min(Math.max(Number(snoozeMinutes) || 0, 1), 1440);
+            const response = await casesApi.snooze(caseId, {
+                minutes,
+                reason: snoozeReason.trim() || undefined,
+            });
+            return response.data;
+        },
+        onSuccess: (response) => {
+            setActionPanel(null);
+            const untilLabel = response.case.snoozed_until
+                ? new Date(response.case.snoozed_until).toLocaleTimeString("ru-RU", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                })
+                : null;
+            toast.success(untilLabel ? `Заявка отложена до ${untilLabel}` : "Заявка отложена");
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
+        },
+        onError: (error: unknown) => {
+            const code = extractErrorCode(error);
+            if (code === "NOT_ASSIGNED") {
+                toast.error("Отложить заявку может только ответственный или администратор");
+                return;
+            }
+            if (code === "CASE_NOT_ACTIVE") {
+                toast.error("Отложить можно только активную заявку");
+                return;
+            }
+            toast.error("Не удалось отложить заявку");
+        },
+    });
+
+    const reopenMutation = useMutation({
+        mutationFn: () => reopenCase(caseId),
+        onSuccess: (response) => {
+            toast.success(`Заявка возвращена в работу${response.case.assigned_to_name ? `: ${response.case.assigned_to_name}` : ""}`);
+            const issues = collectSyncIssues(response.sync);
+            if (issues.length > 0) {
+                toast.error(issues.join(" · "));
+            }
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
+        },
+        onError: () => {
+            toast.error("Не удалось вернуть заявку в работу");
+        },
+    });
 
     const humanLockQuery = useQuery({
         queryKey: ["human-lock", caseDetail.conversation_id],
@@ -302,8 +430,8 @@ export default function CaseConversation({
         },
     });
 
-    const isActive = caseDetail.status === "active";
-    const isPending = caseDetail.status === "pending";
+    const caseActionBusy =
+        reassignMutation.isPending || snoozeMutation.isPending || reopenMutation.isPending;
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
     const compactContextLimit = layout === "inbox" ? 110 : 180;
     const contextTitle = caseDetail.context_summary ? "Суть запроса" : "Последнее сообщение";
@@ -357,24 +485,10 @@ export default function CaseConversation({
     ]
         .filter(Boolean)
         .join(" · ");
+    const slaIndicator = getCaseSlaIndicator(caseDetail);
     const outreachBusy =
         sendOutreachMutation.isPending || pauseMutation.isPending || releasePauseMutation.isPending;
     const canSubmitOutreach = Boolean(outreachDestination.trim() && outreachContent.trim());
-    let nextActionHint = "Диалог под контролем";
-    let nextActionHintClass = "bg-green-100 text-green-800";
-    if (caseDetail.needs_reply) {
-        nextActionHint = "Ответьте клиенту в чате";
-        nextActionHintClass = "bg-yellow-100 text-yellow-800";
-    } else if (caseDetail.has_delivery_error) {
-        nextActionHint = "Проверьте ошибку доставки и отправьте повторно";
-        nextActionHintClass = "bg-red-100 text-red-800";
-    } else if (caseDetail.has_pending_outbox) {
-        nextActionHint = "Проверьте очередь отправки";
-        nextActionHintClass = "bg-amber-100 text-amber-800";
-    } else if (humanLockActive) {
-        nextActionHint = "Бот на паузе: ведите диалог вручную";
-        nextActionHintClass = "bg-emerald-100 text-emerald-800";
-    }
     const toggleOutreachPanel = () => {
         const nextExpanded = !outreachExpanded;
         setOutreachExpanded(nextExpanded);
@@ -472,6 +586,156 @@ export default function CaseConversation({
             )}
         </div>
     );
+    const currentSnoozeLabel = caseDetail.snoozed_until
+        ? new Date(caseDetail.snoozed_until).toLocaleString("ru-RU", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+        })
+        : null;
+    const actionPanelClass = `rounded-lg border border-border/60 bg-card px-4 py-3 text-sm ${
+        isInboxLayout ? "mx-5" : ""
+    }`;
+    const actionPanelContent = actionPanel === "reassign" ? (
+        <div className={actionPanelClass} data-testid="case-reassign-panel">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">Передать заявку</p>
+                    <p className="text-xs text-muted-foreground">
+                        Смена ответственного без закрытия заявки и потери контекста.
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => setActionPanel(null)}
+                    className="rounded border border-border/60 px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                >
+                    Скрыть
+                </button>
+            </div>
+            <div className="mt-3 space-y-3">
+                {assigneeOptionsQuery.isLoading ? (
+                    <p className="text-xs text-muted-foreground">Загружаем список менеджеров...</p>
+                ) : assigneeOptionsQuery.data?.items.length ? (
+                    <label className="block space-y-1">
+                        <span className="text-xs text-muted-foreground">Новый ответственный</span>
+                        <select
+                            value={selectedAssigneeId}
+                            onChange={(event) => setSelectedAssigneeId(event.target.value)}
+                            className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                            data-testid="case-reassign-select"
+                        >
+                            {assigneeOptionsQuery.data.items.map((item) => (
+                                <option key={item.agent_id} value={item.agent_id}>
+                                    {item.agent_name}
+                                    {ASSIGNEE_ROLE_LABELS[item.role] ? ` · ${ASSIGNEE_ROLE_LABELS[item.role]}` : ""}
+                                    {item.is_current ? " · текущий" : ""}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                ) : (
+                    <p className="text-xs text-muted-foreground">
+                        Нет доступных менеджеров для передачи в текущем контексте.
+                    </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        onClick={() => reassignMutation.mutate()}
+                        disabled={
+                            caseActionBusy
+                            || assigneeOptionsQuery.isLoading
+                            || !assigneeOptionsQuery.data?.items.length
+                            || !selectedAssigneeId
+                        }
+                        className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                        data-testid="case-reassign-submit"
+                    >
+                        {reassignMutation.isPending ? "Передаём..." : "Подтвердить передачу"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    ) : actionPanel === "snooze" ? (
+        <div className={actionPanelClass} data-testid="case-snooze-panel">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">Отложить заявку</p>
+                    <p className="text-xs text-muted-foreground">
+                        Уберите заявку из срочной очереди до конкретного времени. Новый входящий ответ клиента вернёт её в работу.
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => setActionPanel(null)}
+                    className="rounded border border-border/60 px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                >
+                    Скрыть
+                </button>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-[180px_1fr]">
+                <label className="space-y-1">
+                    <span className="text-xs text-muted-foreground">На сколько минут</span>
+                    <input
+                        type="number"
+                        min={1}
+                        max={1440}
+                        value={snoozeMinutes}
+                        onChange={(event) => {
+                            const next = Number(event.target.value);
+                            const normalized = Number.isFinite(next) ? Math.min(Math.max(next, 1), 1440) : 1;
+                            setSnoozeMinutes(normalized);
+                        }}
+                        className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                        data-testid="case-snooze-minutes"
+                    />
+                </label>
+                <label className="space-y-1">
+                    <span className="text-xs text-muted-foreground">Причина для команды</span>
+                    <input
+                        type="text"
+                        value={snoozeReason}
+                        onChange={(event) => setSnoozeReason(event.target.value)}
+                        className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                        placeholder="Например: ждём подтверждение времени"
+                        maxLength={120}
+                        data-testid="case-snooze-reason"
+                    />
+                </label>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+                {CASE_SNOOZE_PRESETS.map((preset) => (
+                    <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setSnoozeMinutes(preset)}
+                        className="rounded border border-border/60 px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground"
+                        data-testid={`case-snooze-preset-${preset}`}
+                    >
+                        {preset} мин
+                    </button>
+                ))}
+                {currentSnoozeLabel && (
+                    <span className="text-xs text-muted-foreground">
+                        Сейчас отложено до {currentSnoozeLabel}
+                    </span>
+                )}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                    type="button"
+                    onClick={() => snoozeMutation.mutate()}
+                    disabled={caseActionBusy}
+                    className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                    data-testid="case-snooze-submit"
+                >
+                    {snoozeMutation.isPending ? "Сохраняем..." : "Отложить заявку"}
+                </button>
+            </div>
+        </div>
+    ) : null;
 
     return (
         <div className={`flex flex-col h-full ${isInboxLayout ? "gap-4" : "gap-5"}`} data-testid="case-conversation">
@@ -482,15 +746,9 @@ export default function CaseConversation({
                             <h1 className="text-2xl font-bold" data-testid="case-title">
                                 Заявка {caseDetail.id.slice(0, 8)}
                             </h1>
-                            <SlaBadge status={caseDetail.sla_status} />
-                            <span className={`rounded px-2 py-1 text-[11px] font-semibold ${nextActionHintClass}`} data-testid="case-next-action">
-                                Действие: {nextActionHint}
+                            <span className={`rounded px-2 py-1 text-[11px] font-semibold ${slaIndicator.className}`} data-testid="case-next-action">
+                                {slaIndicator.label}
                             </span>
-                            {caseDetail.needs_reply && (
-                                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-yellow-100 text-yellow-800">
-                                    Нужно ответить
-                                </span>
-                            )}
                         </div>
                         <div className="flex flex-wrap gap-2 text-xs">
                             <span
@@ -530,7 +788,7 @@ export default function CaseConversation({
                                 {detailsLabel}
                             </button>
                         )}
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap justify-end gap-2">
                             {canOutreach && (
                                 <button
                                     type="button"
@@ -565,7 +823,7 @@ export default function CaseConversation({
                                     {isPending && (
                                         <button
                                             onClick={() => takeMutation.mutate()}
-                                            disabled={takeMutation.isPending}
+                                            disabled={takeMutation.isPending || caseActionBusy}
                                             className="bg-primary text-primary-foreground px-4 py-2 rounded hover:bg-primary/90 disabled:opacity-50"
                                         >
                                             {takeMutation.isPending ? "Берём..." : "Взять заявку"}
@@ -574,20 +832,49 @@ export default function CaseConversation({
                                     {isActive && (
                                         <>
                                             <button
+                                                type="button"
+                                                onClick={() => setActionPanel((current) => current === "reassign" ? null : "reassign")}
+                                                disabled={caseActionBusy}
+                                                className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+                                                data-testid="case-reassign-toggle"
+                                            >
+                                                {actionPanel === "reassign" ? "Скрыть передачу" : "Передать"}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setActionPanel((current) => current === "snooze" ? null : "snooze")}
+                                                disabled={caseActionBusy}
+                                                className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+                                                data-testid="case-snooze-toggle"
+                                            >
+                                                {caseDetail.snoozed_until ? "Изменить отсрочку" : "Отложить"}
+                                            </button>
+                                            <button
                                                 onClick={() => resolveMutation.mutate()}
-                                                disabled={resolveMutation.isPending}
+                                                disabled={resolveMutation.isPending || caseActionBusy}
                                                 className="bg-foreground text-background px-4 py-2 rounded hover:bg-foreground/90 disabled:opacity-50"
                                             >
                                                 {resolveMutation.isPending ? "Закрываем..." : "Закрыть заявку"}
                                             </button>
                                             <button
                                                 onClick={() => returnMutation.mutate()}
-                                                disabled={returnMutation.isPending}
+                                                disabled={returnMutation.isPending || caseActionBusy}
                                                 className="border border-border/60 px-4 py-2 rounded text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
                                             >
                                                 {returnMutation.isPending ? "Возвращаем..." : "Вернуть боту"}
                                             </button>
                                         </>
+                                    )}
+                                    {isResolved && (
+                                        <button
+                                            type="button"
+                                            onClick={() => reopenMutation.mutate()}
+                                            disabled={reopenMutation.isPending}
+                                            className="rounded bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                                            data-testid="case-reopen"
+                                        >
+                                            {reopenMutation.isPending ? "Возвращаем..." : "Вернуть в работу"}
+                                        </button>
                                     )}
                                 </>
                             ) : (
@@ -600,6 +887,7 @@ export default function CaseConversation({
                 </div>
                 {caseDetail.conversation_id && humanLockPanel}
             </div>
+            {actionPanelContent}
 
             <div className={contextClass}>
                 <div className="flex flex-wrap items-center justify-between text-xs text-muted-foreground mb-1">

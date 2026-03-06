@@ -28,6 +28,15 @@ def _has_string_type(schema: dict) -> bool:
     return any(isinstance(item, dict) and item.get("type") == "string" for item in any_of)
 
 
+def _has_integer_type(schema: dict) -> bool:
+    if schema.get("type") == "integer":
+        return True
+    any_of = schema.get("anyOf")
+    if not isinstance(any_of, list):
+        return False
+    return any(isinstance(item, dict) and item.get("type") == "integer" for item in any_of)
+
+
 def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
     spec = _load_console_contract()
     paths = spec.get("paths") or {}
@@ -143,6 +152,69 @@ def test_bookings_list_response_contract_exposes_cursor_and_has_more() -> None:
     assert _has_string_type(properties.get("cursor") or {})
     assert "has_more" in properties
     assert (properties.get("has_more") or {}).get("type") == "boolean"
+
+
+def test_console_case_contract_exposes_action_sla_fields() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    case_schema = schemas.get("ConsoleCase") or {}
+    properties = case_schema.get("properties") or {}
+
+    assert "sla_status" in properties
+    assert _has_string_type(properties.get("sla_status") or {})
+    assert "sla_action_state" in properties
+    assert _has_string_type(properties.get("sla_action_state") or {})
+    assert "sla_overdue_minutes" in properties
+    assert _has_integer_type(properties.get("sla_overdue_minutes") or {})
+    assert "target_response_at" in properties
+    assert _has_string_type(properties.get("target_response_at") or {})
+    assert "assigned_to_id" in properties
+    assert _has_string_type(properties.get("assigned_to_id") or {})
+    assert "snoozed_until" in properties
+    assert _has_string_type(properties.get("snoozed_until") or {})
+    assert "snoozed_reason" in properties
+    assert _has_string_type(properties.get("snoozed_reason") or {})
+    assert "snoozed_by" in properties
+    assert _has_string_type(properties.get("snoozed_by") or {})
+
+
+def test_console_case_action_paths_expose_wave6_single_case_actions() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+
+    assert _find_path(paths, "/cases/{case_id}/assignees") is not None
+    assert "get" in ((_find_path(paths, "/cases/{case_id}/assignees") or {}).keys())
+    assert _find_path(paths, "/cases/{case_id}/reassign") is not None
+    assert "post" in ((_find_path(paths, "/cases/{case_id}/reassign") or {}).keys())
+    assert _find_path(paths, "/cases/{case_id}/snooze") is not None
+    assert "post" in ((_find_path(paths, "/cases/{case_id}/snooze") or {}).keys())
+    assert _find_path(paths, "/cases/{case_id}/reopen") is not None
+    assert "post" in ((_find_path(paths, "/cases/{case_id}/reopen") or {}).keys())
+
+
+def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+
+    assignee_schema = schemas.get("ConsoleCaseAssigneeOption") or {}
+    assignee_props = assignee_schema.get("properties") or {}
+    assert "agent_id" in assignee_props
+    assert _has_string_type(assignee_props.get("agent_id") or {})
+    assert "agent_name" in assignee_props
+    assert _has_string_type(assignee_props.get("agent_name") or {})
+    assert "is_current" in assignee_props
+    assert (assignee_props.get("is_current") or {}).get("type") == "boolean"
+
+    assignee_list_schema = schemas.get("ConsoleCaseAssigneeListResponse") or {}
+    assert "items" in (assignee_list_schema.get("properties") or {})
+
+    reassign_schema = schemas.get("ConsoleCaseReassignRequest") or {}
+    assert _has_string_type(((reassign_schema.get("properties") or {}).get("agent_id") or {}))
+
+    snooze_schema = schemas.get("ConsoleCaseSnoozeRequest") or {}
+    snooze_props = snooze_schema.get("properties") or {}
+    assert _has_integer_type(snooze_props.get("minutes") or {})
+    assert _has_string_type(snooze_props.get("reason") or {})
 
 
 def test_no_show_followup_request_contract_exposes_result_and_rebook_link() -> None:

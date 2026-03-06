@@ -948,6 +948,33 @@ def manager_take(
         return Result.failure(str(e), "take_error")
 
 
+def manager_reassign(
+    db: Session,
+    conversation: Conversation,
+    handover: Handover,
+    *,
+    manager_id: str,
+    manager_name: str,
+) -> Result[bool]:
+    """Переassign активный handover другому оператору без закрытия кейса."""
+
+    if conversation.state != ConversationState.MANAGER_ACTIVE.value:
+        return Result.failure(f"Cannot reassign from state {conversation.state}", "invalid_state")
+
+    if handover.status != "active":
+        return Result.failure(f"Handover status is {handover.status}", "invalid_handover")
+
+    try:
+        handover.assigned_to = manager_id
+        handover.assigned_to_name = manager_name
+        db.flush()
+        logger.info("Manager %s reassigned conversation %s", manager_name, conversation.id)
+        return Result.success(True)
+    except Exception as e:
+        logger.error(f"Manager reassign failed: {e}")
+        return Result.failure(str(e), "reassign_error")
+
+
 def manager_resolve(
     db: Session,
     conversation: Conversation,
@@ -1049,6 +1076,63 @@ def manager_return(
     except Exception as e:
         logger.error(f"Manager return failed: {e}")
         return Result.failure(str(e), "return_error")
+
+
+def manager_reopen(
+    db: Session,
+    conversation: Conversation,
+    handover: Handover,
+    *,
+    manager_id: str,
+    manager_name: str,
+) -> Result[bool]:
+    """Вернуть resolved handover в manager_active без создания нового кейса."""
+
+    if conversation.state != ConversationState.BOT_ACTIVE.value:
+        return Result.failure(f"Cannot reopen from state {conversation.state}", "invalid_state")
+
+    if handover.status != "resolved":
+        return Result.failure(f"Handover status is {handover.status}", "invalid_handover")
+
+    try:
+        now = datetime.now(timezone.utc)
+        # Reopen is an explicit operator override from bot_active back to manager_active.
+        force_state(
+            conversation,
+            ConversationState.MANAGER_ACTIVE,
+            reason="manager_reopen",
+            handover=handover,
+        )
+
+        meta = dict(handover.meta or {})
+        reopen_count = int(meta.get("reopen_count") or 0) + 1
+        if handover.resolved_at:
+            meta["last_resolved_at"] = handover.resolved_at.isoformat()
+        meta["reopen_count"] = reopen_count
+        meta["last_reopened_at"] = now.isoformat()
+        meta["last_reopened_by"] = manager_name
+        handover.meta = meta
+
+        handover.status = "active"
+        handover.created_at = now
+        handover.notified_at = None
+        handover.first_response_at = None
+        handover.resolved_at = None
+        handover.resolved_by_id = None
+        handover.resolved_by_name = None
+        handover.resolution_time_seconds = None
+        handover.resolution_type = None
+        handover.resolution_notes = None
+        handover.assigned_to = manager_id
+        handover.assigned_to_name = manager_name
+
+        db.flush()
+
+        logger.info("Manager %s reopened conversation %s", manager_name, conversation.id)
+        return Result.success(True)
+    except Exception as e:
+        logger.error(f"Manager reopen failed: {e}")
+        return Result.failure(str(e), "reopen_error")
 
 
 def check_invariants(conversation: Conversation, handover: Handover = None) -> list[str]:

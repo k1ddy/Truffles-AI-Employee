@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuthenticatedApi } from "@/hooks/useAuthenticatedApi";
 import Link from "next/link";
 import { Case } from "@/types";
-import { getStatusLabel, getSlaIndicator } from "@/utils/labels";
+import { getCaseSlaIndicator, getStatusLabel } from "@/utils/labels";
 import {
     type InboxCaseFilters,
     type InboxCaseListPrefs,
@@ -682,12 +682,11 @@ export default function CaseList({
             {isCompact ? (
                 <div className="flex-1 overflow-y-auto pr-1 mt-3 flex flex-col gap-2" data-testid="cases-table">
                     {sortedCases.map((c) => {
-                        const sla = getSlaIndicator(c.created_at);
+                        const sla = getCaseSlaIndicator(c);
                         const branchName = branchMap.get(c.branch_id || "") || "-";
                         const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
                         const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
                         const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
-                        const needsReply = !!c.needs_reply;
                         const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
                         const contactName = c.customer_name || c.customer_phone || c.customer_remote_jid?.split("@")[0] || "Клиент";
                         const contactPhone = c.customer_phone || c.customer_remote_jid?.split("@")[0] || "";
@@ -732,11 +731,6 @@ export default function CaseList({
                                     <span className={`px-2 py-0.5 rounded font-semibold ${sla.className}`}>
                                         {sla.label}
                                     </span>
-                                    {needsReply && (
-                                        <span className="px-2 py-0.5 rounded font-semibold bg-yellow-100 text-yellow-800">
-                                            Нужно ответить
-                                        </span>
-                                    )}
                                     {isLive && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-green-100 text-green-800">
                                             Недавний диалог
@@ -752,7 +746,7 @@ export default function CaseList({
                                             Ошибка
                                         </span>
                                     )}
-                                    {c.attention_reason && (
+                                    {c.attention_reason && !sla.state?.startsWith("reply") && sla.state !== "overdue" && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-primary/10 text-primary">
                                             {c.attention_reason}
                                         </span>
@@ -800,12 +794,11 @@ export default function CaseList({
                         </thead>
                         <tbody>
                             {sortedCases.map((c) => {
-                                const sla = getSlaIndicator(c.created_at);
+                                const sla = getCaseSlaIndicator(c);
                                 const branchName = branchMap.get(c.branch_id || "") || "-";
                                 const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
                                 const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
                                 const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
-                                const needsReply = !!c.needs_reply;
                                 const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
                                 const priorityChip = getPriorityChip(c.priority_tier);
                                 return (
@@ -846,11 +839,6 @@ export default function CaseList({
                                         <td className="p-4 text-sm max-w-xs">
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="truncate max-w-[180px]">{c.last_message_preview || c.user_message || "-"}</span>
-                                                {needsReply && (
-                                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-800">
-                                                        Нужно ответить
-                                                    </span>
-                                                )}
                                                 {isLive && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-800">
                                                         Недавний диалог
@@ -861,7 +849,7 @@ export default function CaseList({
                                                         Ошибка
                                                     </span>
                                                 )}
-                                                {c.attention_reason && (
+                                                {c.attention_reason && !sla.state?.startsWith("reply") && sla.state !== "overdue" && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-primary/10 text-primary">
                                                         {c.attention_reason}
                                                     </span>

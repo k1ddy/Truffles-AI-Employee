@@ -15,6 +15,32 @@ export function getStatusLabel(status: string): string {
     return labels[status] || status;
 }
 
+type CaseSlaState =
+    | "reply_due"
+    | "overdue"
+    | "snoozed"
+    | "waiting_client"
+    | "delivery_issue"
+    | "pending_outbox"
+    | "resolved"
+    | string;
+
+type CaseSlaLike = {
+    created_at?: string;
+    status?: string;
+    sla_status?: string | null;
+    sla_action_state?: string | null;
+    sla_overdue_minutes?: number | null;
+    target_response_at?: string | null;
+    needs_reply?: boolean | null;
+    has_delivery_error?: boolean | null;
+    has_pending_outbox?: boolean | null;
+    human_lock_active?: boolean | null;
+    last_inbound_at?: string | null;
+    last_outbound_at?: string | null;
+    snoozed_until?: string | null;
+};
+
 // SLA status labels
 export function getSlaLabel(status?: string): string {
     const labels: Record<string, string> = {
@@ -75,6 +101,7 @@ export interface SlaIndicator {
     label: string;
     className: string;
     minutes: number;
+    state?: string;
 }
 
 export interface SlaCountdown {
@@ -85,6 +112,158 @@ export interface SlaCountdown {
 const SLA_WARNING_MINUTES = 60;
 const SLA_BREACHED_MINUTES = 120;
 
+function formatTimeLabel(value?: string | null): string {
+    if (!value) {
+        return "—";
+    }
+    return new Date(value).toLocaleTimeString("ru-RU", {
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
+function formatMinutesLabel(totalMinutes?: number | null): string {
+    if (!totalMinutes || totalMinutes <= 0) {
+        return "1 мин";
+    }
+    if (totalMinutes < 60) {
+        return `${totalMinutes} мин`;
+    }
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (minutes === 0) {
+        return `${hours} ч`;
+    }
+    return `${hours} ч ${minutes} мин`;
+}
+
+function getCaseSlaClassName(state?: CaseSlaState | null): string {
+    if (state === "delivery_issue" || state === "overdue") {
+        return "bg-red-100 text-red-800";
+    }
+    if (state === "pending_outbox" || state === "reply_due") {
+        return "bg-yellow-100 text-yellow-800";
+    }
+    if (state === "waiting_client") {
+        return "bg-blue-100 text-blue-800";
+    }
+    if (state === "snoozed") {
+        return "bg-slate-200 text-slate-800";
+    }
+    if (state === "resolved") {
+        return "bg-muted text-muted-foreground";
+    }
+    return "bg-green-100 text-green-800";
+}
+
+export function getCaseSlaIndicator(caseItem: CaseSlaLike): SlaIndicator {
+    const state = (caseItem.sla_action_state || "").toLowerCase();
+    if (state === "delivery_issue") {
+        return {
+            label: "Проверьте отправку",
+            className: getCaseSlaClassName(state),
+            minutes: 0,
+            state,
+        };
+    }
+    if (state === "pending_outbox") {
+        return {
+            label: "Проверьте очередь",
+            className: getCaseSlaClassName(state),
+            minutes: 0,
+            state,
+        };
+    }
+    if (state === "overdue") {
+        const overdueMinutes = Math.max(1, caseItem.sla_overdue_minutes ?? 0);
+        return {
+            label: `Просрочено на ${formatMinutesLabel(overdueMinutes)}`,
+            className: getCaseSlaClassName(state),
+            minutes: overdueMinutes,
+            state,
+        };
+    }
+    if (state === "reply_due") {
+        return {
+            label: `Ответить до ${formatTimeLabel(caseItem.target_response_at)}`,
+            className: getCaseSlaClassName(state),
+            minutes: 0,
+            state,
+        };
+    }
+    if (state === "waiting_client") {
+        return {
+            label: "Ожидаем клиента",
+            className: getCaseSlaClassName(state),
+            minutes: 0,
+            state,
+        };
+    }
+    if (state === "snoozed") {
+        return {
+            label: `Отложено до ${formatTimeLabel(caseItem.snoozed_until)}`,
+            className: getCaseSlaClassName(state),
+            minutes: 0,
+            state,
+        };
+    }
+    if (state === "resolved" || caseItem.status === "resolved") {
+        return {
+            label: "Заявка закрыта",
+            className: getCaseSlaClassName("resolved"),
+            minutes: 0,
+            state: "resolved",
+        };
+    }
+
+    if (caseItem.has_delivery_error) {
+        return {
+            label: "Проверьте отправку",
+            className: getCaseSlaClassName("delivery_issue"),
+            minutes: 0,
+            state: "delivery_issue",
+        };
+    }
+    if (caseItem.has_pending_outbox) {
+        return {
+            label: "Проверьте очередь",
+            className: getCaseSlaClassName("pending_outbox"),
+            minutes: 0,
+            state: "pending_outbox",
+        };
+    }
+    if (caseItem.needs_reply && caseItem.target_response_at) {
+        return {
+            label: `Ответить до ${formatTimeLabel(caseItem.target_response_at)}`,
+            className: getCaseSlaClassName(
+                caseItem.sla_status === "breached" ? "overdue" : "reply_due",
+            ),
+            minutes: 0,
+            state: caseItem.sla_status === "breached" ? "overdue" : "reply_due",
+        };
+    }
+    if (caseItem.human_lock_active) {
+        return {
+            label: "Ожидаем клиента",
+            className: getCaseSlaClassName("waiting_client"),
+            minutes: 0,
+            state: "waiting_client",
+        };
+    }
+
+    const createdAt = caseItem.created_at;
+    if (createdAt) {
+        return getSlaIndicator(createdAt);
+    }
+
+    return {
+        label: "Диалог под контролем",
+        className: "bg-green-100 text-green-800",
+        minutes: 0,
+        state: "ok",
+    };
+}
+
 export function getSlaIndicator(createdAt: string): SlaIndicator {
     const created = new Date(createdAt);
     const now = new Date();
@@ -92,11 +271,11 @@ export function getSlaIndicator(createdAt: string): SlaIndicator {
     const diffMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
 
     if (diffMinutes < SLA_WARNING_MINUTES) {
-        return { label: "Ответ по плану", className: "bg-green-100 text-green-800", minutes: diffMinutes };
+        return { label: "Ответ по плану", className: "bg-green-100 text-green-800", minutes: diffMinutes, state: "ok" };
     } else if (diffMinutes < SLA_BREACHED_MINUTES) {
-        return { label: "Ответ в приоритете", className: "bg-yellow-100 text-yellow-800", minutes: diffMinutes };
+        return { label: "Ответ в приоритете", className: "bg-yellow-100 text-yellow-800", minutes: diffMinutes, state: "warning" };
     } else {
-        return { label: "Срочный ответ", className: "bg-red-100 text-red-800", minutes: diffMinutes };
+        return { label: "Срочный ответ", className: "bg-red-100 text-red-800", minutes: diffMinutes, state: "breached" };
     }
 }
 

@@ -16,6 +16,8 @@ from app.services.state_machine import ConversationState
 from app.services.state_service import (
     check_invariants,
     escalate_to_pending,
+    manager_reassign,
+    manager_reopen,
     manager_resolve,
     manager_return,
     manager_take,
@@ -644,6 +646,50 @@ class TestManagerResolve:
         assert result.error_code == "invalid_state"
 
 
+class TestManagerReassign:
+    def test_success_from_manager_active(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.MANAGER_ACTIVE.value
+        conversation.id = "conv-123"
+
+        handover = Mock()
+        handover.status = "active"
+        handover.assigned_to = "mgr-old"
+        handover.assigned_to_name = "Old Manager"
+
+        result = manager_reassign(
+            db,
+            conversation,
+            handover,
+            manager_id="mgr-new",
+            manager_name="New Manager",
+        )
+
+        assert result.ok is True
+        assert handover.assigned_to == "mgr-new"
+        assert handover.assigned_to_name == "New Manager"
+
+    def test_fails_from_pending(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.PENDING.value
+
+        handover = Mock()
+        handover.status = "pending"
+
+        result = manager_reassign(
+            db,
+            conversation,
+            handover,
+            manager_id="mgr-new",
+            manager_name="New Manager",
+        )
+
+        assert result.ok is False
+        assert result.error_code == "invalid_state"
+
+
 class TestManagerReturn:
     def test_success_from_manager_active(self):
         db = Mock()
@@ -743,6 +789,57 @@ class TestManagerReturn:
 
         assert result.ok is False
         assert result.error_code == "invalid_state"
+
+
+class TestManagerReopen:
+    def test_success_from_resolved(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.BOT_ACTIVE.value
+        conversation.id = "conv-123"
+
+        handover = Mock()
+        handover.status = "resolved"
+        handover.created_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        handover.resolved_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        handover.meta = {"reopen_count": 1}
+
+        result = manager_reopen(
+            db,
+            conversation,
+            handover,
+            manager_id="mgr-123",
+            manager_name="Manager Name",
+        )
+
+        assert result.ok is True
+        assert conversation.state == ConversationState.MANAGER_ACTIVE.value
+        assert handover.status == "active"
+        assert handover.assigned_to == "mgr-123"
+        assert handover.assigned_to_name == "Manager Name"
+        assert handover.resolved_at is None
+        assert handover.meta["reopen_count"] == 2
+        assert handover.meta["last_reopened_by"] == "Manager Name"
+        assert isinstance(handover.meta["last_reopened_at"], str)
+
+    def test_fails_when_case_not_resolved(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.BOT_ACTIVE.value
+
+        handover = Mock()
+        handover.status = "active"
+
+        result = manager_reopen(
+            db,
+            conversation,
+            handover,
+            manager_id="mgr-123",
+            manager_name="Manager Name",
+        )
+
+        assert result.ok is False
+        assert result.error_code == "invalid_handover"
 
 
 class TestCheckInvariants:

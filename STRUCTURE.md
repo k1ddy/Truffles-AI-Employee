@@ -162,6 +162,8 @@
 | `docs/TASK_PACKAGES/TP-2026-03-05-console-e2e-live-auth-hardening-a1.md` | Follow-up Task Package for live no-mocks auth/case inspection hardening after wave4 closeout | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-06-console-e2e-auth-helper-unification-a1.md` | Follow-up Task Package for shared auth helper unification in `login/smoke/inspect_case` Playwright specs | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-06-console-e2e-auth-helper-rollout-a1.md` | Follow-up Task Package for rollout of shared auth helper into the remaining Playwright specs | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md` | Wave5 Task Package for action-driven SLA contract in Inbox (`backend contract -> frontend surfaces`) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md` | Wave6 Task Package for bounded single-case Inbox actions (`reassign/snooze/reopen`) before bulk scope | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |

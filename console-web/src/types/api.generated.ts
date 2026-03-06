@@ -72,6 +72,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/cases/{case_id}/assignees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Case Assignees */
+        get: operations["list_case_assignees_console_v1_cases__case_id__assignees_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/{case_id}/reassign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reassign Case */
+        post: operations["reassign_case_console_v1_cases__case_id__reassign_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/{case_id}/snooze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Snooze Case */
+        post: operations["snooze_case_console_v1_cases__case_id__snooze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/{case_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reopen Case */
+        post: operations["reopen_case_console_v1_cases__case_id__reopen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/cases/{case_id}/take": {
         parameters: {
             query?: never;
@@ -4028,6 +4096,8 @@ export interface components {
             context_summary?: string | null;
             /** User Message */
             user_message?: string | null;
+            /** Assigned To Id */
+            assigned_to_id?: string | null;
             /** Assigned To Name */
             assigned_to_name?: string | null;
             /** First Response At */
@@ -4047,6 +4117,10 @@ export interface components {
              * @default ok
              */
             sla_status: string | null;
+            /** Sla Action State */
+            sla_action_state?: string | null;
+            /** Sla Overdue Minutes */
+            sla_overdue_minutes?: number | null;
             /** Priority Tier */
             priority_tier?: string | null;
             /** Attention Reason */
@@ -4095,6 +4169,12 @@ export interface components {
             human_lock_reason?: string | null;
             /** Human Lock By */
             human_lock_by?: string | null;
+            /** Snoozed Until */
+            snoozed_until?: string | null;
+            /** Snoozed Reason */
+            snoozed_reason?: string | null;
+            /** Snoozed By */
+            snoozed_by?: string | null;
             telegram_trail?: components["schemas"]["ConsoleTelegramTrail"] | null;
         };
         /** ConsoleCaseActionResponse */
@@ -4109,6 +4189,30 @@ export interface components {
             telegram?: components["schemas"]["ConsoleSyncStatus"] | null;
             client_notify?: components["schemas"]["ConsoleSyncStatus"] | null;
         };
+        /** ConsoleCaseAssigneeListResponse */
+        ConsoleCaseAssigneeListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleCaseAssigneeOption"][];
+        };
+        /** ConsoleCaseAssigneeOption */
+        ConsoleCaseAssigneeOption: {
+            /**
+             * Agent Id
+             * Format: uuid
+             */
+            agent_id: string;
+            /** Agent Name */
+            agent_name: string;
+            /** Role */
+            role: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Is Current
+             * @default false
+             */
+            is_current: boolean;
+        };
         /** ConsoleCaseListResponse */
         ConsoleCaseListResponse: {
             /** Items */
@@ -4119,6 +4223,24 @@ export interface components {
             has_more: boolean;
             /** Total */
             total?: number | null;
+        };
+        /** ConsoleCaseReassignRequest */
+        ConsoleCaseReassignRequest: {
+            /**
+             * Agent Id
+             * Format: uuid
+             */
+            agent_id: string;
+        };
+        /** ConsoleCaseSnoozeRequest */
+        ConsoleCaseSnoozeRequest: {
+            /**
+             * Minutes
+             * @default 30
+             */
+            minutes: number;
+            /** Reason */
+            reason?: string | null;
         };
         /** ConsoleClient */
         ConsoleClient: {
@@ -8828,6 +8950,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_case_assignees_console_v1_cases__case_id__assignees_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseAssigneeListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reassign_case_console_v1_cases__case_id__reassign_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCaseReassignRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    snooze_case_console_v1_cases__case_id__snooze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCaseSnoozeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reopen_case_console_v1_cases__case_id__reopen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseActionResponse"];
                 };
             };
             /** @description Validation Error */
