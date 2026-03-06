@@ -169,11 +169,11 @@
 - `Current residuals accepted in this block`: bulk operations и supervisor queue governance остаются вне этого wave.
 - `Why not in this block`: сначала нужен корректный single-case contract.
 - `Risk if deferred`: админские массовые сценарии по-прежнему будут делать лишние клики.
-- `Linked follow-up Task Package(s)`: `TBD wave7`, future `wave6-part-bulk` if needed.
+- `Linked follow-up Task Package(s)`: `TBD wave7`, `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md`.
 - `Expiry/trigger to stop deferral`: если после wave6 основной pain переносится в массовые операции, bulk block становится immediate next priority.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: открыть bounded follow-up TP на wave6 `Part B` и добавить bulk/supervisor actions без регресса single-case контракта.
+- `Next block objective`: реализовать `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md` и добавить bulk/supervisor actions без регресса single-case контракта.
 - `First deterministic check command`: `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py`
 - `Blocked-by conditions`: wave5 SLA action contract must stay green and case action UI cannot regress first-screen clarity.
 - `Owner role for closure`: Brain / Top Architect.

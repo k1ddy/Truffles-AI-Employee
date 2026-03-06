@@ -1075,6 +1075,35 @@ class ConsoleCaseSnoozeRequest(ConsoleRequestModel):
     reason: Optional[StrictStr] = None
 
 
+ConsoleCaseBulkActionType = Literal["reassign", "snooze"]
+
+
+class ConsoleCaseBulkActionRequest(ConsoleRequestModel):
+    action: ConsoleCaseBulkActionType
+    case_ids: list[UUID]
+    agent_id: Optional[UUID] = None
+    minutes: Optional[int] = None
+    reason: Optional[StrictStr] = None
+
+
+class ConsoleCaseBulkActionResult(BaseModel):
+    case_id: UUID
+    status: Literal["processed", "skipped", "failed"]
+    code: str
+    message: Optional[str] = None
+    case: Optional[ConsoleCase] = None
+
+
+class ConsoleCaseBulkActionResponse(BaseModel):
+    success: bool
+    action: ConsoleCaseBulkActionType
+    requested_count: int
+    processed_count: int
+    skipped_count: int
+    failed_count: int
+    items: list[ConsoleCaseBulkActionResult]
+
+
 class ConsoleMessageListResponse(BaseModel):
     items: list[ConsoleMessage]
     cursor: Optional[str] = None

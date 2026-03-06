@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -58,8 +58,11 @@
   - Wave6 TP created for bounded single-case actions `reassign/snooze/reopen`, with explicit split contract `single-case actions -> bulk/supervisor actions`.
   - Wave6 Part A implemented: backend assignee/reassign/snooze/reopen contract added, `manager_reopen` fixed to use explicit operator override, and snooze semantics moved to `handover.meta` with stale-state cleanup on reply/resolve/return/reopen.
   - Inbox operator controls extended with `Передать`, `Отложить`, `Вернуть в работу`; details surface shows snooze metadata; inspect-case mocks now validate the new controls.
+  - PR `#931` opened for Wave5 + Wave6 Part A: `feat(console): action-driven SLA and single-case inbox actions`.
+  - Wave6 Part B TP created for bounded bulk/supervisor actions with explicit split `backend contract -> queue selection UI`.
+  - Wave6 Part B1 backend started: added `/cases/bulk` contract for bulk `reassign`/`snooze` with per-case `processed/skipped/failed` results and contract checks.
 - next:
-  - Open bounded follow-up for wave6 `Part B`: bulk/supervisor actions on top of the new single-case contract.
+  - Decide whether minimal queue selection + bulk toolbar fits in this PR, otherwise split it into dedicated UI follow-up on top of the new backend bulk contract.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -127,9 +130,19 @@
   - `cd console-web && npm run lint -- --file src/utils/labels.ts --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file src/components/CaseDetailsPanel.tsx --file src/types/index.ts --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
   - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`, calendar no-cases fallback)
+  - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title "feat(console): action-driven SLA and single-case inbox actions" ...` (`PR #931`)
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`37 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
   - `cd truffles-api && pytest -q tests/test_state_service.py tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`67 passed`)
   - `cd console-web && npm run generate:api` (`pass`)
   - `cd console-web && npm run lint -- --file src/lib/api-client.ts --file src/components/CaseConversation.tsx --file src/components/CaseDetailsPanel.tsx --file src/utils/labels.ts --file src/types/index.ts --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
   - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`, calendar no-cases fallback)
-- last_updated: 2026-03-06T08:14:45+05:00
+  - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title "feat(console): action-driven SLA and single-case inbox actions" ...` (`PR #931`)
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`37 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+- last_updated: 2026-03-06T08:28:00+05:00

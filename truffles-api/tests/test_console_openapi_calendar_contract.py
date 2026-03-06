@@ -182,6 +182,8 @@ def test_console_case_action_paths_expose_wave6_single_case_actions() -> None:
     spec = _load_console_contract()
     paths = spec.get("paths") or {}
 
+    assert _find_path(paths, "/cases/bulk") is not None
+    assert "post" in ((_find_path(paths, "/cases/bulk") or {}).keys())
     assert _find_path(paths, "/cases/{case_id}/assignees") is not None
     assert "get" in ((_find_path(paths, "/cases/{case_id}/assignees") or {}).keys())
     assert _find_path(paths, "/cases/{case_id}/reassign") is not None
@@ -195,6 +197,29 @@ def test_console_case_action_paths_expose_wave6_single_case_actions() -> None:
 def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> None:
     spec = _load_console_contract()
     schemas = ((spec.get("components") or {}).get("schemas")) or {}
+
+    bulk_request_schema = schemas.get("ConsoleCaseBulkActionRequest") or {}
+    bulk_request_props = bulk_request_schema.get("properties") or {}
+    assert (bulk_request_props.get("action") or {}).get("enum") == ["reassign", "snooze"]
+    assert "case_ids" in bulk_request_props
+    assert "agent_id" in bulk_request_props
+    assert _has_string_type(bulk_request_props.get("agent_id") or {})
+    assert "minutes" in bulk_request_props
+    assert _has_integer_type(bulk_request_props.get("minutes") or {})
+    assert "reason" in bulk_request_props
+    assert _has_string_type(bulk_request_props.get("reason") or {})
+
+    bulk_result_schema = schemas.get("ConsoleCaseBulkActionResult") or {}
+    bulk_result_props = bulk_result_schema.get("properties") or {}
+    assert (bulk_result_props.get("status") or {}).get("enum") == ["processed", "skipped", "failed"]
+    assert _has_string_type(bulk_result_props.get("code") or {})
+
+    bulk_response_schema = schemas.get("ConsoleCaseBulkActionResponse") or {}
+    bulk_response_props = bulk_response_schema.get("properties") or {}
+    assert (bulk_response_props.get("success") or {}).get("type") == "boolean"
+    assert _has_integer_type(bulk_response_props.get("processed_count") or {})
+    assert _has_integer_type(bulk_response_props.get("skipped_count") or {})
+    assert _has_integer_type(bulk_response_props.get("failed_count") or {})
 
     assignee_schema = schemas.get("ConsoleCaseAssigneeOption") or {}
     assignee_props = assignee_schema.get("properties") or {}

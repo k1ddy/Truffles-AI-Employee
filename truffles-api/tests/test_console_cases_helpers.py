@@ -261,6 +261,32 @@ def test_build_case_queue_signals_marks_snoozed_before_reply_due():
     assert signals["snoozed_until"] == snoozed_until.isoformat()
 
 
+def test_normalize_case_bulk_ids_dedupes_and_preserves_order():
+    case_1 = uuid4()
+    case_2 = uuid4()
+
+    result = console_router._normalize_case_bulk_ids([case_1, case_2, case_1])
+
+    assert result == [case_1, case_2]
+
+
+def test_normalize_case_bulk_ids_rejects_empty():
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._normalize_case_bulk_ids([])
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+def test_normalize_case_bulk_ids_rejects_oversized_payload():
+    case_ids = [uuid4() for _ in range(51)]
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._normalize_case_bulk_ids(case_ids)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
 def test_require_branch_access_allows_matching_branch():
     branch_id = uuid4()
     context = SimpleNamespace(

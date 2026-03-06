@@ -236,6 +236,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/bulk:
+    post:
+      tags:
+      - console
+      summary: Bulk Case Action
+      operationId: bulk_case_action_console_v1_cases_bulk_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleCaseBulkActionRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseBulkActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/cases/{case_id}/assignees:
     get:
       tags:
@@ -10055,6 +10080,111 @@ components:
       - agent_name
       - role
       title: ConsoleCaseAssigneeOption
+    ConsoleCaseBulkActionRequest:
+      properties:
+        action:
+          type: string
+          enum:
+          - reassign
+          - snooze
+          title: Action
+        case_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Case Ids
+        agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Id
+        minutes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Minutes
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      required:
+      - action
+      - case_ids
+      title: ConsoleCaseBulkActionRequest
+    ConsoleCaseBulkActionResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        action:
+          type: string
+          enum:
+          - reassign
+          - snooze
+          title: Action
+        requested_count:
+          type: integer
+          title: Requested Count
+        processed_count:
+          type: integer
+          title: Processed Count
+        skipped_count:
+          type: integer
+          title: Skipped Count
+        failed_count:
+          type: integer
+          title: Failed Count
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleCaseBulkActionResult'
+          type: array
+          title: Items
+      type: object
+      required:
+      - success
+      - action
+      - requested_count
+      - processed_count
+      - skipped_count
+      - failed_count
+      - items
+      title: ConsoleCaseBulkActionResponse
+    ConsoleCaseBulkActionResult:
+      properties:
+        case_id:
+          type: string
+          format: uuid
+          title: Case Id
+        status:
+          type: string
+          enum:
+          - processed
+          - skipped
+          - failed
+          title: Status
+        code:
+          type: string
+          title: Code
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+        case:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCase'
+          - type: 'null'
+      type: object
+      required:
+      - case_id
+      - status
+      - code
+      title: ConsoleCaseBulkActionResult
     ConsoleCaseListResponse:
       properties:
         items:

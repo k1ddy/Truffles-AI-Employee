@@ -140,6 +140,9 @@ from app.schemas.console import (
     ConsoleCaseSnoozeRequest,
     ConsoleCaseActionResponse,
     ConsoleCaseActionSync,
+    ConsoleCaseBulkActionRequest,
+    ConsoleCaseBulkActionResponse,
+    ConsoleCaseBulkActionResult,
     ConsoleCaseListResponse,
     ConsoleClient,
     ConsoleClientCreateRequest,
@@ -807,6 +810,7 @@ _CASE_REPLY_WINDOW_MINUTES = 60
 _CASE_DUE_SOON_MINUTES = 15
 _CASE_ASSIGNABLE_ROLES = {"owner", "admin", "manager"}
 _CASE_SNOOZE_DEFAULT_REASON = "case_snooze"
+_CASE_BULK_MAX_ITEMS = 50
 _CASE_SNOOZE_META_KEYS = (
     "snoozed_until",
     "snoozed_at",
@@ -1077,6 +1081,48 @@ def _build_case_action_response(
         success=True,
         case=_build_case_action_case(handover=handover, branch_id=branch_id),
         sync=sync,
+    )
+
+
+def _normalize_case_bulk_ids(case_ids: list[UUID]) -> list[UUID]:
+    if not case_ids:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "case_ids must contain at least one case")
+
+    deduped: list[UUID] = []
+    seen: set[UUID] = set()
+    for case_id in case_ids:
+        if case_id in seen:
+            continue
+        seen.add(case_id)
+        deduped.append(case_id)
+
+    if len(deduped) > _CASE_BULK_MAX_ITEMS:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"case_ids must contain at most {_CASE_BULK_MAX_ITEMS} cases",
+        )
+    return deduped
+
+
+def _build_case_bulk_result(
+    *,
+    case_id: UUID,
+    status: Literal["processed", "skipped", "failed"],
+    code: str,
+    message: Optional[str] = None,
+    handover: Optional[Handover] = None,
+    branch_id: UUID | None = None,
+) -> ConsoleCaseBulkActionResult:
+    case_snapshot = None
+    if handover is not None:
+        case_snapshot = _build_case_action_case(handover=handover, branch_id=branch_id)
+    return ConsoleCaseBulkActionResult(
+        case_id=case_id,
+        status=status,
+        code=code,
+        message=message,
+        case=case_snapshot,
     )
 
 
@@ -10301,6 +10347,341 @@ async def list_cases(
         has_more=has_more,
         total=total_count,
     )
+
+
+@router.post(
+    "/cases/bulk",
+    response_model=ConsoleCaseBulkActionResponse,
+)
+async def bulk_case_action(
+    body: ConsoleCaseBulkActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseBulkActionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+    action = body.action
+    case_ids = _normalize_case_bulk_ids(body.case_ids)
+    idempotency_key = _get_idempotency_key(request)
+
+    target_agent_id: Optional[UUID] = None
+    snooze_minutes: Optional[int] = None
+    snooze_reason: Optional[str] = None
+
+    if action == "reassign":
+        if body.agent_id is None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "agent_id is required for reassign")
+        target_agent_id = body.agent_id
+    elif action == "snooze":
+        snooze_minutes = _normalize_pause_minutes(body.minutes, default=30, allow_zero=False)
+        snooze_reason = _normalize_optional_text(body.reason) or _CASE_SNOOZE_DEFAULT_REASON
+
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.bulk",
+        payload={
+            "action": action,
+            "case_ids": [str(case_id) for case_id in case_ids],
+            "agent_id": str(target_agent_id) if target_agent_id else None,
+            "minutes": snooze_minutes,
+            "reason": snooze_reason,
+        },
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        handovers = (
+            db.query(Handover)
+            .filter(
+                Handover.client_id == context.client.id,
+                Handover.id.in_(case_ids),
+            )
+            .with_for_update()
+            .all()
+        )
+        handovers_by_id = {handover.id: handover for handover in handovers}
+        conversation_ids = [handover.conversation_id for handover in handovers]
+        conversations = (
+            db.query(Conversation)
+            .filter(Conversation.id.in_(conversation_ids))
+            .with_for_update()
+            .all()
+        ) if conversation_ids else []
+        conversations_by_id = {conversation.id: conversation for conversation in conversations}
+
+        assignee_cache: dict[UUID | None, list[ConsoleCaseAssigneeOption]] = {}
+        results: list[ConsoleCaseBulkActionResult] = []
+        processed_count = 0
+        skipped_count = 0
+        failed_count = 0
+        actor_name = context.agent.name or "Менеджер"
+
+        for case_id in case_ids:
+            handover = handovers_by_id.get(case_id)
+            if handover is None:
+                skipped_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="skipped",
+                        code="NOT_FOUND",
+                        message="Case not found",
+                    )
+                )
+                continue
+
+            conversation = conversations_by_id.get(handover.conversation_id)
+            if conversation is None:
+                failed_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="failed",
+                        code="NOT_FOUND",
+                        message="Conversation not found",
+                    )
+                )
+                continue
+
+            branch_id = conversation.branch_id
+            try:
+                _require_branch_access(context, branch_id, message="Access to this case denied")
+                _require_case_operator_access(context=context, handover=handover)
+
+                if action == "reassign":
+                    if handover.status == "resolved":
+                        skipped_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="skipped",
+                                code="CASE_ALREADY_RESOLVED",
+                                message="Case already resolved",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+                    if handover.status != "active":
+                        skipped_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="skipped",
+                                code="CASE_NOT_ACTIVE",
+                                message="Case must be active to reassign",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+
+                    if branch_id not in assignee_cache:
+                        assignee_cache[branch_id] = _list_case_assignee_options(
+                            db,
+                            client_id=context.client.id,
+                            branch_id=branch_id,
+                            current_assignee_id=str(handover.assigned_to) if handover.assigned_to else None,
+                        )
+                    target_option = next(
+                        (
+                            option
+                            for option in assignee_cache[branch_id]
+                            if option.agent_id == target_agent_id
+                        ),
+                        None,
+                    )
+                    if target_option is None:
+                        skipped_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="skipped",
+                                code="NOT_FOUND",
+                                message="Assignee not available for this case",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+
+                    current_assignee_id = str(handover.assigned_to) if handover.assigned_to else None
+                    if current_assignee_id == str(target_agent_id):
+                        skipped_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="skipped",
+                                code="ALREADY_ASSIGNED",
+                                message="Case already assigned to target manager",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+
+                    result = state_manager_reassign(
+                        db,
+                        conversation,
+                        handover,
+                        manager_id=str(target_option.agent_id),
+                        manager_name=target_option.agent_name,
+                    )
+                    if not result.ok:
+                        failed_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="failed",
+                                code="CASE_NOT_ACTIVE",
+                                message=result.error or "Case must be active to reassign",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+
+                    record_audit_event(
+                        db,
+                        actor=context.agent,
+                        event_type="case_bulk_reassigned",
+                        entity_type="handover",
+                        entity_id=handover.id,
+                        payload={
+                            "action": action,
+                            "assigned_to_id": str(target_option.agent_id),
+                            "assigned_to_name": target_option.agent_name,
+                        },
+                        branch_id=branch_id,
+                    )
+                    processed_count += 1
+                    results.append(
+                        _build_case_bulk_result(
+                            case_id=case_id,
+                            status="processed",
+                            code="REASSIGNED",
+                            message=f"Assigned to {target_option.agent_name}",
+                            handover=handover,
+                            branch_id=branch_id,
+                        )
+                    )
+                    continue
+
+                if handover.status == "resolved":
+                    skipped_count += 1
+                    results.append(
+                        _build_case_bulk_result(
+                            case_id=case_id,
+                            status="skipped",
+                            code="CASE_ALREADY_RESOLVED",
+                            message="Case already resolved",
+                            handover=handover,
+                            branch_id=branch_id,
+                        )
+                    )
+                    continue
+                if handover.status != "active":
+                    skipped_count += 1
+                    results.append(
+                        _build_case_bulk_result(
+                            case_id=case_id,
+                            status="skipped",
+                            code="CASE_NOT_ACTIVE",
+                            message="Case must be active to snooze",
+                            handover=handover,
+                            branch_id=branch_id,
+                        )
+                    )
+                    continue
+
+                now_utc = datetime.now(timezone.utc)
+                _set_case_snooze_meta(
+                    handover,
+                    snoozed_until=now_utc + timedelta(minutes=snooze_minutes or 30),
+                    now_utc=now_utc,
+                    reason=snooze_reason,
+                    agent_id=context.agent.id,
+                    agent_name=actor_name,
+                )
+                record_audit_event(
+                    db,
+                    actor=context.agent,
+                    event_type="case_bulk_snoozed",
+                    entity_type="handover",
+                    entity_id=handover.id,
+                    payload={
+                        "action": action,
+                        "minutes": snooze_minutes,
+                        "reason": snooze_reason,
+                    },
+                    branch_id=branch_id,
+                )
+                processed_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="processed",
+                        code="SNOOZED",
+                        message="Case snoozed",
+                        handover=handover,
+                        branch_id=branch_id,
+                    )
+                )
+            except ConsoleAPIError as exc:
+                skipped_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="skipped",
+                        code=exc.code,
+                        message=exc.message,
+                        handover=handover,
+                        branch_id=branch_id,
+                    )
+                )
+            except Exception as exc:
+                failed_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="failed",
+                        code="SERVER_ERROR",
+                        message=str(exc),
+                        handover=handover,
+                        branch_id=branch_id,
+                    )
+                )
+
+        db.commit()
+        response = ConsoleCaseBulkActionResponse(
+            success=failed_count == 0,
+            action=action,
+            requested_count=len(case_ids),
+            processed_count=processed_count,
+            skipped_count=skipped_count,
+            failed_count=failed_count,
+            items=results,
+        )
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        db.rollback()
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
 
 
 @router.get(
