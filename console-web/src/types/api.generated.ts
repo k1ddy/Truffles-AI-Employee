@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/cases/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk Case Action */
+        post: operations["bulk_case_action_console_v1_cases_bulk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/cases/{case_id}/assignees": {
         parameters: {
             query?: never;
@@ -4212,6 +4229,60 @@ export interface components {
              * @default false
              */
             is_current: boolean;
+        };
+        /** ConsoleCaseBulkActionRequest */
+        ConsoleCaseBulkActionRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "reassign" | "snooze";
+            /** Case Ids */
+            case_ids: string[];
+            /** Agent Id */
+            agent_id?: string | null;
+            /** Minutes */
+            minutes?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** ConsoleCaseBulkActionResponse */
+        ConsoleCaseBulkActionResponse: {
+            /** Success */
+            success: boolean;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "reassign" | "snooze";
+            /** Requested Count */
+            requested_count: number;
+            /** Processed Count */
+            processed_count: number;
+            /** Skipped Count */
+            skipped_count: number;
+            /** Failed Count */
+            failed_count: number;
+            /** Items */
+            items: components["schemas"]["ConsoleCaseBulkActionResult"][];
+        };
+        /** ConsoleCaseBulkActionResult */
+        ConsoleCaseBulkActionResult: {
+            /**
+             * Case Id
+             * Format: uuid
+             */
+            case_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "processed" | "skipped" | "failed";
+            /** Code */
+            code: string;
+            /** Message */
+            message?: string | null;
+            case?: components["schemas"]["ConsoleCase"] | null;
         };
         /** ConsoleCaseListResponse */
         ConsoleCaseListResponse: {
@@ -8950,6 +9021,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_case_action_console_v1_cases_bulk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCaseBulkActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseBulkActionResponse"];
                 };
             };
             /** @description Validation Error */
