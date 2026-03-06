@@ -11,7 +11,16 @@ const CALENDAR_PREFS_KEY_PREFIX = "console:calendar:prefs:v1:";
 
 export type InboxSortBy = "created_at" | "sla" | "activity";
 export type InboxSidePanelMode = "details" | "bookings";
-export type InboxQueueViewId = "all_open" | "mine" | "needs_reply" | "paused" | "delivery" | "unassigned";
+export const INBOX_QUEUE_VIEW_IDS = [
+    "all_open",
+    "mine",
+    "needs_reply",
+    "waiting_client",
+    "snoozed",
+    "delivery",
+    "unassigned",
+] as const;
+export type InboxQueueViewId = (typeof INBOX_QUEUE_VIEW_IDS)[number];
 export type InboxCaseVisibleField = "branch" | "owner" | "channel" | "activity" | "priority";
 
 export interface InboxCaseFilters {
@@ -45,6 +54,16 @@ export interface InboxCaseListPrefs {
     autoRefreshEnabled: boolean;
     activeViewId?: InboxQueueViewId;
     visibleFields?: InboxCaseVisibleFields;
+}
+
+export function normalizeInboxQueueViewId(raw: unknown): InboxQueueViewId {
+    if (raw === "paused") {
+        return "waiting_client";
+    }
+    if (typeof raw === "string" && (INBOX_QUEUE_VIEW_IDS as readonly string[]).includes(raw)) {
+        return raw as InboxQueueViewId;
+    }
+    return "all_open";
 }
 
 export interface CalendarWorkspacePrefs {

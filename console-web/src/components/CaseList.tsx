@@ -18,6 +18,7 @@ import {
     type InboxCaseVisibleField,
     type InboxCaseVisibleFields,
     type InboxQueueViewId,
+    normalizeInboxQueueViewId,
     readInboxCaseListPrefs,
     writeInboxCaseListPrefs,
 } from "@/lib/inbox-workspace";
@@ -46,11 +47,23 @@ type QueueViewDefinition = {
     label: string;
     description: string;
     privileged?: boolean;
+    serverView?: "needs_reply" | "waiting_client" | "snoozed" | "delivery" | "unassigned";
     applyFilters: (prev: CaseFilters) => CaseFilters;
     matchesFilters: (filters: CaseFilters) => boolean;
-    localPredicate?: (caseItem: Case) => boolean;
-    localHint?: string;
 };
+
+function resolveServerQueueView(viewId: InboxQueueViewId): QueueViewDefinition["serverView"] {
+    if (
+        viewId === "needs_reply"
+        || viewId === "waiting_client"
+        || viewId === "snoozed"
+        || viewId === "delivery"
+        || viewId === "unassigned"
+    ) {
+        return viewId;
+    }
+    return undefined;
+}
 
 interface CaseListProps {
     variant?: CaseListVariant;
@@ -286,6 +299,7 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             id: "needs_reply",
             label: "Требуют ответа",
             description: "Срочный фокус на кейсах, где клиент ждёт менеджера.",
+            serverView: "needs_reply",
             applyFilters: (prev) => ({
                 ...prev,
                 status: "open",
@@ -307,17 +321,12 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
                 hasHumanLock: false,
                 sortBy: "sla",
             }),
-            localPredicate: (caseItem) => Boolean(
-                caseItem.needs_reply
-                || caseItem.sla_action_state === "reply_due"
-                || caseItem.sla_action_state === "overdue"
-            ),
-            localHint: "Режим скрывает лишние заявки только в текущей выборке. Для полного охвата можно догрузить ещё.",
         },
         {
-            id: "paused",
-            label: "Пауза",
-            description: "Диалоги, где бот выключен и нужен контроль менеджера.",
+            id: "waiting_client",
+            label: "Ждём клиента",
+            description: "Диалоги, где менеджер уже ответил и ждёт следующий шаг клиента.",
+            serverView: "waiting_client",
             applyFilters: (prev) => ({
                 ...prev,
                 status: "open",
@@ -326,7 +335,34 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
                 unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
-                hasHumanLock: true,
+                hasHumanLock: false,
+                sortBy: "activity",
+            }),
+            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+                status: "open",
+                assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: "activity",
+            }),
+        },
+        {
+            id: "snoozed",
+            label: "Отложенные",
+            description: "Диалоги, которые менеджер сознательно отложил до следующего срока.",
+            serverView: "snoozed",
+            applyFilters: (prev) => ({
+                ...prev,
+                status: "open",
+                assignedToMe: false,
+                assigneeId: undefined,
+                unassigned: false,
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
                 sortBy: "activity",
             }),
             matchesFilters: (filters) => matchesGovernedFilters(filters, {
@@ -344,6 +380,7 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             id: "delivery",
             label: "Проблемы доставки",
             description: "Ошибки отправки и зависшие исходящие.",
+            serverView: "delivery",
             applyFilters: (prev) => ({
                 ...prev,
                 status: "open",
@@ -365,8 +402,6 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
                 hasHumanLock: false,
                 sortBy: "activity",
             }),
-            localPredicate: (caseItem) => Boolean(caseItem.has_delivery_error || caseItem.has_pending_outbox),
-            localHint: "Режим собирает ошибки и зависшие исходящие в текущей выборке очереди.",
         },
     ];
 
@@ -381,6 +416,7 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             label: "Без владельца",
             description: "Быстрый срез для супервизора по кейсам без ответственного.",
             privileged: true,
+            serverView: "unassigned",
             applyFilters: (prev) => ({
                 ...prev,
                 status: "open",
@@ -418,6 +454,9 @@ function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPref
     if (sortBy !== "activity" && sortBy !== "created_at" && sortBy !== "sla") {
         return null;
     }
+    const rawActiveViewId = raw.activeViewId as string | undefined;
+    const normalizedActiveViewId = normalizeInboxQueueViewId(rawActiveViewId);
+    const legacyPausedView = rawActiveViewId === "paused";
     return {
         filters: {
             status: filters.status,
@@ -428,7 +467,7 @@ function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPref
             query: filters.query,
             hasDeliveryError: Boolean(filters.hasDeliveryError),
             hasPendingOutbox: Boolean(filters.hasPendingOutbox),
-            hasHumanLock: Boolean(filters.hasHumanLock),
+            hasHumanLock: legacyPausedView ? false : Boolean(filters.hasHumanLock),
             dateFrom: filters.dateFrom,
             dateTo: filters.dateTo,
             sortBy,
@@ -437,9 +476,7 @@ function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPref
         showAdvancedFilters: Boolean(raw.showAdvancedFilters),
         filtersCollapsed: Boolean(raw.filtersCollapsed),
         autoRefreshEnabled: typeof raw.autoRefreshEnabled === "boolean" ? raw.autoRefreshEnabled : true,
-        activeViewId: raw.activeViewId && ["all_open", "mine", "needs_reply", "paused", "delivery", "unassigned"].includes(raw.activeViewId)
-            ? raw.activeViewId
-            : "all_open",
+        activeViewId: normalizedActiveViewId,
         visibleFields: normalizeVisibleFields(raw.visibleFields),
     };
 }
@@ -583,6 +620,7 @@ export default function CaseList({
     const privilegedOwnerFilterVisible = isPrivilegedQueueRole(viewerRole);
     const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
     const activeQueueView = queueViewMap.get(activeViewId) ?? queueViewMap.get("all_open") ?? queueViews[0];
+    const activeServerQueueView = resolveServerQueueView(activeViewId);
     const queueViewHasManualOverrides = activeQueueView ? !activeQueueView.matchesFilters(filters) : false;
     const ownerFilterLabel = filters.unassigned
         ? "Без владельца"
@@ -674,7 +712,7 @@ export default function CaseList({
     }, [branchFilterEnabled, filters.branchId]);
 
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuery({
-        queryKey: ["cases", filters, cursor],
+        queryKey: ["cases", filters, activeServerQueueView || activeViewId, cursor],
         queryFn: async (): Promise<CasesResponse> => {
             const buildParams = (includeSort: boolean) => {
                 const params = new URLSearchParams();
@@ -689,6 +727,7 @@ export default function CaseList({
                 if (filters.hasHumanLock) params.append("has_human_lock", "true");
                 if (filters.dateFrom) params.append("date_from", filters.dateFrom);
                 if (filters.dateTo) params.append("date_to", filters.dateTo);
+                if (activeServerQueueView) params.append("queue_view", activeServerQueueView);
                 if (includeSort) {
                     if (filters.sortBy === "activity") params.append("sort_by", "last_activity");
                     if (filters.sortBy === "created_at") params.append("sort_by", "created_at");
@@ -760,9 +799,7 @@ export default function CaseList({
                 }
                 return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
             });
-    const visibleCases = activeQueueView?.localPredicate
-        ? sortedCases.filter((caseItem) => activeQueueView.localPredicate?.(caseItem))
-        : sortedCases;
+    const visibleCases = sortedCases;
     const selectedCaseIdSet = useMemo(() => new Set(selectedCaseIds), [selectedCaseIds]);
     const selectedCases = useMemo(
         () => visibleCases.filter((item) => selectedCaseIdSet.has(item.id)),
@@ -1064,11 +1101,9 @@ export default function CaseList({
 
     const loadedCases = visibleCases.length;
     const totalCases = typeof data?.total === "number" && data.total >= 0 ? data.total : loadedCases;
-    const countBaseLabel = activeQueueView?.localPredicate
-        ? `${loadedCases} ${caseNoun(loadedCases)} на экране`
-        : totalCases > loadedCases
-            ? `Показано ${loadedCases} из ${totalCases} ${caseNoun(totalCases)}`
-            : `${loadedCases} ${caseNoun(loadedCases)}`;
+    const countBaseLabel = totalCases > loadedCases
+        ? `Показано ${loadedCases} из ${totalCases} ${caseNoun(totalCases)}`
+        : `${loadedCases} ${caseNoun(loadedCases)}`;
     const casesCountLabel = `${countBaseLabel}${data?.has_more ? " (есть ещё)" : ""}`;
 
     return (
@@ -1418,11 +1453,6 @@ export default function CaseList({
                         </span>
                     )}
                 </div>
-                {activeQueueView?.localHint && (
-                    <div className="text-[11px] text-muted-foreground" data-testid="cases-queue-view-hint">
-                        {activeQueueView.localHint}
-                    </div>
-                )}
                 {fieldPanelOpen && (
                     <div className="flex w-full flex-wrap items-center gap-3 border-t border-border/60 pt-2" data-testid="cases-field-panel">
                         {FIELD_ORDER.map((field) => (

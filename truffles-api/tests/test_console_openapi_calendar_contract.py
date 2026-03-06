@@ -200,6 +200,22 @@ def test_console_case_action_paths_expose_wave6_single_case_actions() -> None:
     assert "post" in ((_find_path(paths, "/cases/{case_id}/reopen") or {}).keys())
 
 
+def test_console_cases_list_contract_exposes_queue_view_param() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+    path_item = _find_path(paths, "/cases") or {}
+    get_op = path_item.get("get") or {}
+    params = get_op.get("parameters") or []
+    queue_view_param = next(
+        ((param or {}) for param in params if (param or {}).get("name") == "queue_view"),
+        None,
+    )
+
+    assert queue_view_param is not None
+    schema = (queue_view_param.get("schema") or {})
+    assert _has_string_type(schema)
+
+
 def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> None:
     spec = _load_console_contract()
     schemas = ((spec.get("components") or {}).get("schemas")) or {}
