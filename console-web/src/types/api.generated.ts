@@ -280,6 +280,23 @@ export interface paths {
         patch: operations["update_inbox_macro_console_v1_inbox_macros__macro_id__patch"];
         trace?: never;
     };
+    "/console/v1/inbox/macros/{macro_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execute Inbox Macro */
+        post: operations["execute_inbox_macro_console_v1_inbox_macros__macro_id__execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/cases/{case_id}": {
         parameters: {
             query?: never;
@@ -5498,12 +5515,25 @@ export interface components {
             label: string;
             /** Body */
             body: string;
+            action?: components["schemas"]["ConsoleMacroAction"] | null;
             /** Is Active */
             is_active: boolean;
             /** Created At */
             created_at?: string | null;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /** ConsoleMacroAction */
+        ConsoleMacroAction: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "take_case" | "resolve_case" | "return_to_bot" | "reopen_case" | "snooze_case";
+            /** Minutes */
+            minutes?: number | null;
+            /** Reason */
+            reason?: string | null;
         };
         /** ConsoleMacroCreateRequest */
         ConsoleMacroCreateRequest: {
@@ -5516,6 +5546,7 @@ export interface components {
             label: string;
             /** Body */
             body: string;
+            action?: components["schemas"]["ConsoleMacroAction"] | null;
             /**
              * Is Active
              * @default true
@@ -5525,6 +5556,22 @@ export interface components {
         /** ConsoleMacroCreateResponse */
         ConsoleMacroCreateResponse: {
             macro: components["schemas"]["ConsoleMacro"];
+        };
+        /** ConsoleMacroExecuteRequest */
+        ConsoleMacroExecuteRequest: {
+            /**
+             * Case Id
+             * Format: uuid
+             */
+            case_id: string;
+        };
+        /** ConsoleMacroExecuteResponse */
+        ConsoleMacroExecuteResponse: {
+            /** Success */
+            success: boolean;
+            macro: components["schemas"]["ConsoleMacro"];
+            case: components["schemas"]["ConsoleCase"];
+            sync?: components["schemas"]["ConsoleCaseActionSync"] | null;
         };
         /** ConsoleMacroListResponse */
         ConsoleMacroListResponse: {
@@ -5537,6 +5584,7 @@ export interface components {
             label?: string | null;
             /** Body */
             body?: string | null;
+            action?: components["schemas"]["ConsoleMacroAction"] | null;
             /** Is Active */
             is_active?: boolean | null;
         };
@@ -9520,6 +9568,77 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_inbox_macro_console_v1_inbox_macros__macro_id__execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                macro_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMacroExecuteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMacroExecuteResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

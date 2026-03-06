@@ -133,9 +133,10 @@ export default function CaseView({ caseId }: CaseViewProps) {
                     composerBefore={
                         <InboxMacroChips
                             onSelect={handleMacroSelect}
-                            disabled={!canReply}
+                            disabled={!caseId || !canWriteInbox}
                             canManage={canWriteInbox}
                             branchId={macroBranchId}
+                            caseId={caseId}
                         />
                     }
                     detailsOpen={detailsOpen}

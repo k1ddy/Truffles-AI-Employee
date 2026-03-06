@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-partb-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -65,8 +65,12 @@
   - Wave6 Part B2 implemented: `CaseList` now supports queue selection, `Выбрать все`, bounded bulk `reassign/snooze` toolbar and payload submission to `/cases/bulk`.
   - Fixed inbox queue state bug: empty search debounce no longer clears visible cases without changing the actual query, which had hidden queue rows in the mock/workspace lane.
   - `inspect_case` mock lane now validates bulk selection and `/cases/bulk` payload without breaking the existing case/calendar scenario.
+  - PR `#931` merged into `main` on 2026-03-06; branch synced forward to `origin/main` and Wave7 Part A opened as next active block.
+  - Wave7 Part A implemented and verified: executable macro action contract persisted in `console_macros.action_config`, `/inbox/macros/{macro_id}/execute` added, targeted macro/OpenAPI checks green, canonical contract synced to `openapi.v1.yaml`, and frontend API types regenerated.
+  - Wave7 Part B TP created as the next active block for macro UI builder/apply flow.
+  - Wave7 Part B implemented in frontend: `InboxMacros` now supports action builder/apply flow, `executeMacro` wired into composer-side apply, action hints are visible in use/manage cards, and `inspect_case` mock lane now covers create + apply for action-macros.
 - next:
-  - Watch PR `#931` checks after the new Wave6 Part B2 commits and then move to Wave7 Part A (`action-macro backend`) after merge.
+  - Open Wave8 TP and start unified workspace shell without route-level friction between `Заявки` and `Записи`.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -152,4 +156,12 @@
   - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file src/lib/api-client.ts --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
   - `scripts/session_check.sh` (`Session OK`)
-- last_updated: 2026-03-06T09:09:03+05:00
+  - `cd truffles-api && pytest -q tests/test_console_inbox_macros.py tests/test_console_openapi_calendar_contract.py` (`23 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_inbox_macros.py tests/test_console_openapi_calendar_contract.py` (`pass`)
+  - `cd console-web && npm run lint -- --file src/components/InboxMacros.tsx --file src/lib/api-client.ts --file src/components/InboxView.tsx --file src/components/CaseView.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`)
+- last_updated: 2026-03-06T10:22:37+05:00

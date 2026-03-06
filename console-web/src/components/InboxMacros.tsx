@@ -9,6 +9,7 @@ import type { components } from "@/types/api.generated";
 const DEFAULT_SCOPE: components["schemas"]["ConsoleMacro"]["scope"] = "personal";
 
 type InboxMacro = components["schemas"]["ConsoleMacro"];
+type InboxMacroAction = components["schemas"]["ConsoleMacroAction"];
 type InboxMacroListResponse = components["schemas"]["ConsoleMacroListResponse"];
 
 type InboxMacrosProps = {
@@ -16,13 +17,31 @@ type InboxMacrosProps = {
     disabled?: boolean;
     canManage?: boolean;
     branchId?: string | null;
+    caseId?: string | null;
 };
 
 type MacroFormState = {
     scope: InboxMacro["scope"];
     label: string;
     body: string;
+    actionType: InboxMacroAction["type"] | "none";
+    snoozeMinutes: string;
+    snoozeReason: string;
 };
+
+type MacroActionOption = {
+    value: MacroFormState["actionType"];
+    label: string;
+};
+
+const MACRO_ACTION_OPTIONS: MacroActionOption[] = [
+    { value: "none", label: "Только текст" },
+    { value: "take_case", label: "Взять в работу" },
+    { value: "resolve_case", label: "Закрыть заявку" },
+    { value: "return_to_bot", label: "Вернуть боту" },
+    { value: "reopen_case", label: "Вернуть в работу" },
+    { value: "snooze_case", label: "Отложить заявку" },
+];
 
 function getScopeLabel(scope: InboxMacro["scope"]) {
     return scope === "personal" ? "Личные" : "Командные";
@@ -38,13 +57,98 @@ function sortMacros(macros: InboxMacro[]) {
 }
 
 function buildFormState(macro?: InboxMacro | null): MacroFormState {
+    const action = macro?.action ?? null;
     if (!macro) {
-        return { scope: DEFAULT_SCOPE, label: "", body: "" };
+        return {
+            scope: DEFAULT_SCOPE,
+            label: "",
+            body: "",
+            actionType: "none",
+            snoozeMinutes: "30",
+            snoozeReason: "",
+        };
     }
     return {
         scope: macro.scope,
         label: macro.label ?? "",
         body: macro.body ?? "",
+        actionType: action?.type ?? "none",
+        snoozeMinutes: action?.type === "snooze_case" && action.minutes ? String(action.minutes) : "30",
+        snoozeReason: action?.type === "snooze_case" ? action.reason ?? "" : "",
+    };
+}
+
+function getMacroActionLabel(action?: InboxMacro["action"] | null) {
+    if (!action) {
+        return "Только текст";
+    }
+    switch (action.type) {
+        case "take_case":
+            return "Взять в работу";
+        case "resolve_case":
+            return "Закрыть заявку";
+        case "return_to_bot":
+            return "Вернуть боту";
+        case "reopen_case":
+            return "Вернуть в работу";
+        case "snooze_case":
+            return `Отложить на ${action.minutes ?? 30} мин`;
+        default:
+            return "Только текст";
+    }
+}
+
+function getMacroActionHint(action?: InboxMacro["action"] | null) {
+    if (!action) {
+        return "Подставит текст в поле ответа без изменения статуса заявки.";
+    }
+    switch (action.type) {
+        case "take_case":
+            return "Назначит заявку на вас и подставит текст ответа.";
+        case "resolve_case":
+            return "Закроет заявку и подставит текст ответа.";
+        case "return_to_bot":
+            return "Вернёт заявку боту и подставит текст ответа.";
+        case "reopen_case":
+            return "Вернёт закрытую заявку в работу и подставит текст ответа.";
+        case "snooze_case":
+            return "Уберёт заявку из срочной очереди на время и подставит текст ответа.";
+        default:
+            return "Подставит текст в поле ответа.";
+    }
+}
+
+function buildActionPayload(form: MacroFormState): InboxMacroAction | null {
+    if (form.actionType === "none") {
+        return null;
+    }
+    if (form.actionType !== "snooze_case") {
+        return { type: form.actionType };
+    }
+    const minutes = Number.parseInt(form.snoozeMinutes.trim(), 10);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+        throw new Error("INVALID_SNOOZE_MINUTES");
+    }
+    const reason = form.snoozeReason.trim();
+    return {
+        type: "snooze_case",
+        minutes,
+        reason: reason || undefined,
+    };
+}
+
+function buildActionPreview(form: MacroFormState): InboxMacroAction | null {
+    if (form.actionType === "none") {
+        return null;
+    }
+    if (form.actionType !== "snooze_case") {
+        return { type: form.actionType };
+    }
+    const minutes = Number.parseInt(form.snoozeMinutes.trim(), 10);
+    return {
+        type: "snooze_case",
+        minutes: Number.isFinite(minutes) && minutes > 0 ? minutes : 30,
+        reason: form.snoozeReason.trim() || undefined,
     };
 }
 
@@ -60,6 +164,7 @@ function InboxMacros({
     disabled,
     canManage = false,
     branchId,
+    caseId,
 }: InboxMacrosProps) {
     const queryClient = useQueryClient();
     const [panelOpen, setPanelOpen] = useState(false);
@@ -135,6 +240,44 @@ function InboxMacros({
         },
     });
 
+    const executeMutation = useMutation({
+        mutationFn: async (macro: InboxMacro) => {
+            if (!caseId) {
+                throw new Error("CASE_REQUIRED");
+            }
+            const response = await inboxApi.executeMacro(
+                macro.id,
+                { case_id: caseId },
+                branchId,
+            );
+            return response.data;
+        },
+        onSuccess: (data) => {
+            if (caseId) {
+                queryClient.setQueryData(["case", caseId], data.case);
+                queryClient.invalidateQueries({ queryKey: ["cases"] });
+            }
+            if (data.macro.body?.trim()) {
+                onSelect(data.macro.body);
+            }
+            const actionLabel = getMacroActionLabel(data.macro.action);
+            const suffix = data.macro.body?.trim() ? " Текст добавлен в черновик." : "";
+            toast.success(`Применено: ${actionLabel}.${suffix}`);
+        },
+        onError: (error: unknown) => {
+            const code = getErrorCode(error);
+            if (code === "CASE_NOT_ACTIVE") {
+                toast.error("Это действие недоступно для текущего статуса заявки");
+                return;
+            }
+            if (code === "CASE_ALREADY_RESOLVED") {
+                toast.error("Заявка уже закрыта");
+                return;
+            }
+            toast.error("Не удалось применить макрос");
+        },
+    });
+
     const macros = useMemo(() => macrosQuery.data?.items ?? [], [macrosQuery.data?.items]);
     const sortedMacros = useMemo(() => sortMacros(macros), [macros]);
     const activeMacros = macros.filter((macro) => macro.is_active);
@@ -165,9 +308,11 @@ function InboxMacros({
     const teamMacros = filteredMacros.filter((macro) => macro.scope === "team");
     const personalActiveMacros = filteredActiveMacros.filter((macro) => macro.scope === "personal");
     const teamActiveMacros = filteredActiveMacros.filter((macro) => macro.scope === "team");
+    const previewAction = useMemo(() => buildActionPreview(form), [form]);
 
     const canEdit = canManage;
     const isSaving = createMutation.isPending || updateMutation.isPending;
+    const isApplying = executeMutation.isPending;
     const tabClass = (active: boolean) => (
         `rounded-full border px-3 py-1 text-xs font-semibold transition ${
             active
@@ -196,16 +341,27 @@ function InboxMacros({
             toast.error("Заполните заголовок и текст");
             return;
         }
+        let action: InboxMacroAction | null = null;
+        try {
+            action = buildActionPayload(form);
+        } catch (error) {
+            if (error instanceof Error && error.message === "INVALID_SNOOZE_MINUTES") {
+                toast.error("Укажите корректное время отсрочки в минутах");
+                return;
+            }
+            throw error;
+        }
         if (editing) {
             await updateMutation.mutateAsync({
                 macroId: editing.id,
-                payload: { label, body },
+                payload: { label, body, action },
             });
         } else {
             await createMutation.mutateAsync({
                 scope: form.scope,
                 label,
                 body,
+                action,
                 is_active: true,
             });
         }
@@ -217,6 +373,21 @@ function InboxMacros({
             macroId: macro.id,
             payload: { is_active: !macro.is_active },
         });
+    };
+
+    const handleApplyMacro = async (macro: InboxMacro) => {
+        if (disabled) {
+            return;
+        }
+        if (!macro.action) {
+            onSelect(macro.body);
+            return;
+        }
+        if (!caseId) {
+            toast.error("Откройте заявку, чтобы применить действие макроса");
+            return;
+        }
+        await executeMutation.mutateAsync(macro);
     };
 
     if (!branchId) {
@@ -276,18 +447,31 @@ function InboxMacros({
                     )}
                 </div>
             ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                    {primaryMacros.map((macro) => (
-                        <button
-                            key={macro.id}
-                            type="button"
-                            onClick={() => onSelect(macro.body)}
-                            disabled={disabled}
-                            className="rounded-full border border-border/60 bg-card px-3 py-1 text-xs font-semibold transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                            {macro.label}
-                        </button>
-                    ))}
+                <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                        {primaryMacros.map((macro) => (
+                            <button
+                                key={macro.id}
+                                type="button"
+                                onClick={() => void handleApplyMacro(macro)}
+                                disabled={disabled || isApplying}
+                                data-testid={`macro-chip-${macro.id}`}
+                                className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card px-3 py-1 text-xs font-semibold transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                <span>{macro.label}</span>
+                                {macro.action && (
+                                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                                        Действие
+                                    </span>
+                                )}
+                            </button>
+                        ))}
+                    </div>
+                    {sortedActiveMacros.some((macro) => Boolean(macro.action)) && (
+                        <p className="text-[11px] text-muted-foreground">
+                            Макросы с пометкой «Действие» меняют статус заявки и добавляют текст в черновик.
+                        </p>
+                    )}
                 </div>
             )}
 
@@ -343,8 +527,9 @@ function InboxMacros({
                                                     <button
                                                         key={macro.id}
                                                         type="button"
-                                                        onClick={() => onSelect(macro.body)}
-                                                        disabled={disabled}
+                                                        onClick={() => void handleApplyMacro(macro)}
+                                                        disabled={disabled || isApplying}
+                                                        data-testid={`macro-apply-${macro.id}`}
                                                         className="rounded-xl border border-border/60 bg-background px-3 py-2 text-left text-xs transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
                                                         <div className="flex items-start justify-between gap-2">
@@ -356,6 +541,14 @@ function InboxMacros({
                                                             </div>
                                                             <span className="text-[10px] text-muted-foreground">
                                                                 {getScopeLabel(macro.scope)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                                                            <span className="rounded-full bg-muted px-2 py-0.5 font-semibold text-foreground">
+                                                                {getMacroActionLabel(macro.action)}
+                                                            </span>
+                                                            <span className="text-muted-foreground">
+                                                                {getMacroActionHint(macro.action)}
                                                             </span>
                                                         </div>
                                                     </button>
@@ -392,6 +585,14 @@ function InboxMacros({
                                                                 <div className="text-sm font-semibold">{macro.label}</div>
                                                                 <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
                                                                     {macro.body}
+                                                                </div>
+                                                                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                                                                    <span className="rounded-full bg-muted px-2 py-0.5 font-semibold text-foreground">
+                                                                        {getMacroActionLabel(macro.action)}
+                                                                    </span>
+                                                                    <span className="text-muted-foreground">
+                                                                        {getMacroActionHint(macro.action)}
+                                                                    </span>
                                                                 </div>
                                                             </div>
                                                             <span className="text-[10px] text-muted-foreground">
@@ -476,9 +677,77 @@ function InboxMacros({
                                         disabled={isSaving}
                                     />
                                 </div>
+                                <div className="space-y-2 rounded-lg border border-border/60 bg-card px-3 py-3">
+                                    <div>
+                                        <p className="text-xs font-semibold text-foreground">Действие по заявке</p>
+                                        <p className="mt-1 text-[11px] text-muted-foreground">
+                                            Выполнится, когда менеджер применит макрос в открытой заявке.
+                                        </p>
+                                    </div>
+                                    <select
+                                        value={form.actionType}
+                                        onChange={(event) =>
+                                            setForm((prev) => ({
+                                                ...prev,
+                                                actionType: event.target.value as MacroFormState["actionType"],
+                                            }))
+                                        }
+                                        className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-xs"
+                                        data-testid="macro-action-select"
+                                        disabled={isSaving}
+                                    >
+                                        {MACRO_ACTION_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {form.actionType === "snooze_case" && (
+                                        <div className="grid gap-2 sm:grid-cols-[140px_minmax(0,1fr)]">
+                                            <input
+                                                type="number"
+                                                min={5}
+                                                step={5}
+                                                value={form.snoozeMinutes}
+                                                onChange={(event) =>
+                                                    setForm((prev) => ({
+                                                        ...prev,
+                                                        snoozeMinutes: event.target.value,
+                                                    }))
+                                                }
+                                                placeholder="Минуты"
+                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-xs"
+                                                data-testid="macro-action-minutes"
+                                                disabled={isSaving}
+                                            />
+                                            <input
+                                                type="text"
+                                                value={form.snoozeReason}
+                                                onChange={(event) =>
+                                                    setForm((prev) => ({
+                                                        ...prev,
+                                                        snoozeReason: event.target.value,
+                                                    }))
+                                                }
+                                                placeholder="Причина отсрочки"
+                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-xs"
+                                                disabled={isSaving}
+                                            />
+                                        </div>
+                                    )}
+                                    <div className="rounded-lg border border-border/60 bg-background px-3 py-2 text-[11px]">
+                                        <div className="font-semibold text-foreground">
+                                            {getMacroActionLabel(previewAction)}
+                                        </div>
+                                        <div className="mt-1 text-muted-foreground">
+                                            {getMacroActionHint(previewAction)}
+                                        </div>
+                                    </div>
+                                </div>
                                 <button
                                     type="submit"
                                     className="w-full rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+                                    data-testid="macro-save-button"
                                     disabled={!canEdit || isSaving}
                                 >
                                     {editing ? "Сохранить" : "Добавить"}

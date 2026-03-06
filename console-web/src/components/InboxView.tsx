@@ -289,9 +289,10 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const composerBefore = (
         <InboxMacroChips
             onSelect={handleMacroSelect}
-            disabled={!selectedCaseId || !canSend}
+            disabled={!selectedCaseId || !canWriteInbox}
             canManage={canManageMacros}
             branchId={macroBranchId}
+            caseId={selectedCaseId || null}
         />
     );
 

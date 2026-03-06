@@ -670,6 +670,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/inbox/macros/{macro_id}/execute:
+    post:
+      tags:
+      - console
+      summary: Execute Inbox Macro
+      operationId: execute_inbox_macro_console_v1_inbox_macros__macro_id__execute_post
+      parameters:
+      - name: macro_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Macro Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleMacroExecuteRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMacroExecuteResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Conflict
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/cases/{case_id}:
     get:
       tags:
@@ -12418,6 +12475,10 @@ components:
         body:
           type: string
           title: Body
+        action:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleMacroAction'
+          - type: 'null'
         is_active:
           type: boolean
           title: Is Active
@@ -12439,6 +12500,32 @@ components:
       - body
       - is_active
       title: ConsoleMacro
+    ConsoleMacroAction:
+      properties:
+        type:
+          type: string
+          enum:
+          - take_case
+          - resolve_case
+          - return_to_bot
+          - reopen_case
+          - snooze_case
+          title: Type
+        minutes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Minutes
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      required:
+      - type
+      title: ConsoleMacroAction
     ConsoleMacroCreateRequest:
       properties:
         scope:
@@ -12453,6 +12540,10 @@ components:
         body:
           type: string
           title: Body
+        action:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleMacroAction'
+          - type: 'null'
         is_active:
           anyOf:
           - type: boolean
@@ -12473,6 +12564,36 @@ components:
       required:
       - macro
       title: ConsoleMacroCreateResponse
+    ConsoleMacroExecuteRequest:
+      properties:
+        case_id:
+          type: string
+          format: uuid
+          title: Case Id
+      additionalProperties: false
+      type: object
+      required:
+      - case_id
+      title: ConsoleMacroExecuteRequest
+    ConsoleMacroExecuteResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        macro:
+          $ref: '#/components/schemas/ConsoleMacro'
+        case:
+          $ref: '#/components/schemas/ConsoleCase'
+        sync:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCaseActionSync'
+          - type: 'null'
+      type: object
+      required:
+      - success
+      - macro
+      - case
+      title: ConsoleMacroExecuteResponse
     ConsoleMacroListResponse:
       properties:
         items:
@@ -12496,6 +12617,10 @@ components:
           - type: string
           - type: 'null'
           title: Body
+        action:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleMacroAction'
+          - type: 'null'
         is_active:
           anyOf:
           - type: boolean

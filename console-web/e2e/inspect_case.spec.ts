@@ -15,6 +15,11 @@ const CASE_ID = '55555555-5555-4555-8555-555555555555';
 const LIVE_CASE_ID = process.env.INSPECT_CASE_LIVE_CASE_ID ?? CASE_ID;
 const CONVERSATION_ID = '66666666-6666-4666-8666-666666666666';
 const SPECIALIST_ID = '77777777-7777-4777-8777-777777777777';
+const TEXT_MACRO_ID = 'abababab-abab-4bab-8bab-abababababab';
+const ACTION_MACRO_ID = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+const CREATED_MACRO_ID = 'efefefef-efef-4fef-8fef-efefefefefef';
+let lastMacroCreatePayload: unknown = null;
+let lastMacroExecutePayload: unknown = null;
 
 function toJsonResponse(route: import('@playwright/test').Route, payload: unknown) {
     return route.fulfill({
@@ -25,6 +30,8 @@ function toJsonResponse(route: import('@playwright/test').Route, payload: unknow
 }
 
 async function installConsoleMocks(page: import('@playwright/test').Page) {
+    lastMacroCreatePayload = null;
+    lastMacroExecutePayload = null;
     await page.route('**/api/auth/session**', async (route) => {
         if (route.request().method() !== 'GET') {
             await route.fallback();
@@ -101,44 +108,67 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             selected_branch_id: BRANCH_ID,
         });
     });
+    const caseState = {
+        id: CASE_ID,
+        conversation_id: CONVERSATION_ID,
+        branch_id: BRANCH_ID,
+        status: 'active',
+        trigger_type: 'message',
+        trigger_value: null,
+        context_summary: 'Клиент хочет маникюр и уточняет свободное время.',
+        user_message: 'Здравствуйте, можно записаться на завтра?',
+        created_at: '2026-03-05T09:00:00+05:00',
+        assigned_to_id: AGENT_ID,
+        assigned_to_name: 'Manager',
+        channel: 'whatsapp',
+        sla_status: 'warning',
+        sla_action_state: 'reply_due',
+        sla_overdue_minutes: null,
+        target_response_at: '2026-03-05T10:00:00+05:00',
+        customer_name: 'Айгуль',
+        customer_phone: '+77001234567',
+        last_inbound_at: '2026-03-05T09:10:00+05:00',
+        last_activity_at: '2026-03-05T09:10:00+05:00',
+        last_message_preview: 'Здравствуйте, можно записаться на завтра?',
+        needs_reply: true,
+        has_delivery_error: false,
+        has_pending_outbox: false,
+        human_lock_active: false,
+        snoozed_until: null,
+        snoozed_reason: null,
+        snoozed_by: null,
+    } as Record<string, unknown>;
+    const macroStore = [
+        {
+            id: ACTION_MACRO_ID,
+            scope: 'team',
+            label: 'Закрыть и ответить',
+            body: 'Заявку закрываю, если понадобится — напишите снова.',
+            action: {
+                type: 'resolve_case',
+            },
+            is_active: true,
+            created_at: '2026-03-05T09:12:00+05:00',
+            updated_at: '2026-03-05T09:12:00+05:00',
+        },
+        {
+            id: TEXT_MACRO_ID,
+            scope: 'personal',
+            label: 'Уточняю время',
+            body: 'Уточняю свободное время и скоро отвечу.',
+            action: null,
+            is_active: true,
+            created_at: '2026-03-05T09:11:00+05:00',
+            updated_at: '2026-03-05T09:11:00+05:00',
+        },
+    ];
     await page.route(/.*\/api\/proxy\/cases\/?(?:\?.*)?$/, async (route) => {
         if (route.request().method() !== 'GET') {
             await route.fallback();
             return;
         }
         await toJsonResponse(route, {
-            items: [
-                {
-                    id: CASE_ID,
-                    conversation_id: CONVERSATION_ID,
-                    branch_id: BRANCH_ID,
-                    status: 'active',
-                    trigger_type: 'message',
-                    trigger_value: null,
-                    context_summary: 'Клиент хочет маникюр и уточняет свободное время.',
-                    user_message: 'Здравствуйте, можно записаться на завтра?',
-                    created_at: '2026-03-05T09:00:00+05:00',
-                    assigned_to_id: AGENT_ID,
-                    assigned_to_name: 'Manager',
-                    channel: 'whatsapp',
-                    sla_status: 'warning',
-                    sla_action_state: 'reply_due',
-                    sla_overdue_minutes: null,
-                    target_response_at: '2026-03-05T10:00:00+05:00',
-                    customer_name: 'Айгуль',
-                    customer_phone: '+77001234567',
-                    last_inbound_at: '2026-03-05T09:10:00+05:00',
-                    last_activity_at: '2026-03-05T09:10:00+05:00',
-                    last_message_preview: 'Здравствуйте, можно записаться на завтра?',
-                    needs_reply: true,
-                    has_delivery_error: false,
-                    has_pending_outbox: false,
-                    human_lock_active: false,
-                    snoozed_until: null,
-                    snoozed_reason: null,
-                    snoozed_by: null,
-                },
-            ],
+            items: [{ ...caseState }],
             cursor: null,
             has_more: false,
             total: 1,
@@ -167,35 +197,107 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             await route.fallback();
             return;
         }
+        await toJsonResponse(route, { ...caseState });
+    });
+    await page.route(/.*\/api\/proxy\/inbox\/macros(?:\?.*)?$/, async (route) => {
+        if (route.request().method() === 'GET') {
+            await toJsonResponse(route, {
+                items: macroStore.map((macro) => ({ ...macro })),
+            });
+            return;
+        }
+        if (route.request().method() === 'POST') {
+            const payload = route.request().postDataJSON() as {
+                scope?: 'personal' | 'team';
+                label?: string;
+                body?: string;
+                action?: Record<string, unknown> | null;
+                is_active?: boolean;
+            } | null;
+            lastMacroCreatePayload = payload;
+            const createdMacro = {
+                id: CREATED_MACRO_ID,
+                scope: payload?.scope === 'team' ? 'team' : 'personal',
+                label: payload?.label ?? 'Новый макрос',
+                body: payload?.body ?? '',
+                action: payload?.action ?? null,
+                is_active: payload?.is_active ?? true,
+                created_at: '2026-03-05T09:30:00+05:00',
+                updated_at: '2026-03-05T09:30:00+05:00',
+            };
+            macroStore.unshift(createdMacro);
+            await toJsonResponse(route, { macro: createdMacro });
+            return;
+        }
+        await route.fallback();
+    });
+    await page.route(/.*\/api\/proxy\/inbox\/macros\/[^/]+$/, async (route) => {
+        if (route.request().method() !== 'PATCH') {
+            await route.fallback();
+            return;
+        }
+        const macroId = route.request().url().split('/').pop() ?? '';
+        const payload = route.request().postDataJSON() as {
+            label?: string;
+            body?: string;
+            action?: Record<string, unknown> | null;
+            is_active?: boolean;
+        } | null;
+        const macro = macroStore.find((item) => item.id === macroId);
+        if (!macro) {
+            await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { code: 'NOT_FOUND' } }) });
+            return;
+        }
+        if (typeof payload?.label === 'string') {
+            macro.label = payload.label;
+        }
+        if (typeof payload?.body === 'string') {
+            macro.body = payload.body;
+        }
+        if (payload && Object.prototype.hasOwnProperty.call(payload, 'action')) {
+            macro.action = payload.action ?? null;
+        }
+        if (typeof payload?.is_active === 'boolean') {
+            macro.is_active = payload.is_active;
+        }
+        macro.updated_at = '2026-03-05T09:31:00+05:00';
+        await toJsonResponse(route, { ...macro });
+    });
+    await page.route(/.*\/api\/proxy\/inbox\/macros\/[^/]+\/execute$/, async (route) => {
+        if (route.request().method() !== 'POST') {
+            await route.fallback();
+            return;
+        }
+        const payload = route.request().postDataJSON() as { case_id?: string } | null;
+        lastMacroExecutePayload = payload;
+        const urlParts = route.request().url().split('/');
+        const macroId = urlParts[urlParts.length - 2] ?? '';
+        const macro = macroStore.find((item) => item.id === macroId);
+        if (!macro) {
+            await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { code: 'NOT_FOUND' } }) });
+            return;
+        }
+        if (macro.action?.type === 'resolve_case') {
+            caseState.status = 'resolved';
+            caseState.sla_status = 'ok';
+            caseState.sla_action_state = 'resolved';
+            caseState.target_response_at = null;
+            caseState.needs_reply = false;
+        }
+        if (macro.action?.type === 'snooze_case') {
+            caseState.snoozed_until = '2026-03-05T10:15:00+05:00';
+            caseState.snoozed_reason = (macro.action as { reason?: string | null }).reason ?? 'follow_up';
+            caseState.snoozed_by = 'Manager';
+            caseState.sla_action_state = 'waiting_client';
+        }
         await toJsonResponse(route, {
-            id: CASE_ID,
-            conversation_id: CONVERSATION_ID,
-            branch_id: BRANCH_ID,
-            status: 'active',
-            trigger_type: 'message',
-            trigger_value: null,
-            context_summary: 'Клиент хочет маникюр и уточняет свободное время.',
-            user_message: 'Здравствуйте, можно записаться на завтра?',
-            created_at: '2026-03-05T09:00:00+05:00',
-            assigned_to_id: AGENT_ID,
-            assigned_to_name: 'Manager',
-            channel: 'whatsapp',
-            sla_status: 'warning',
-            sla_action_state: 'reply_due',
-            sla_overdue_minutes: null,
-            target_response_at: '2026-03-05T10:00:00+05:00',
-            customer_name: 'Айгуль',
-            customer_phone: '+77001234567',
-            last_inbound_at: '2026-03-05T09:10:00+05:00',
-            last_activity_at: '2026-03-05T09:10:00+05:00',
-            last_message_preview: 'Здравствуйте, можно записаться на завтра?',
-            needs_reply: true,
-            has_delivery_error: false,
-            has_pending_outbox: false,
-            human_lock_active: false,
-            snoozed_until: null,
-            snoozed_reason: null,
-            snoozed_by: null,
+            success: true,
+            macro: { ...macro },
+            case: { ...caseState },
+            sync: {
+                telegram: { status: 'ok' },
+                client_notify: { status: 'ok' },
+            },
         });
     });
     await page.route(`**/api/proxy/cases/${CASE_ID}/assignees**`, async (route) => {
@@ -756,4 +858,46 @@ test('inspect first case', async ({ page }) => {
     } else {
         console.log('case-open-calendar button is not visible for this case.');
     }
+});
+
+test('manage and apply action macro', async ({ page }) => {
+    test.skip(!useRouteMocks, 'action-macro UI is covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page);
+    await ensureLoggedIn(page);
+    await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
+    await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
+
+    await page.getByRole('button', { name: /все ответы/i }).click();
+    await expect(page.getByTestId(`macro-chip-${ACTION_MACRO_ID}`)).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole('button', { name: 'Управление' }).click();
+    await page.getByPlaceholder('Заголовок').fill('Отложить и ответить');
+    await page.getByPlaceholder('Текст быстрого ответа').fill('Отложу заявку и вернусь позже.');
+    await page.getByTestId('macro-action-select').selectOption('snooze_case');
+    await page.getByTestId('macro-action-minutes').fill('45');
+    await page.getByPlaceholder('Причина отсрочки').fill('follow_up');
+    await page.getByTestId('macro-save-button').click();
+
+    await expect.poll(() => lastMacroCreatePayload).not.toBeNull();
+    expect(lastMacroCreatePayload).toMatchObject({
+        label: 'Отложить и ответить',
+        body: 'Отложу заявку и вернусь позже.',
+        action: {
+            type: 'snooze_case',
+            minutes: 45,
+            reason: 'follow_up',
+        },
+    });
+
+    await page.getByRole('button', { name: 'Ответы', exact: true }).click();
+    await expect(page.getByTestId(`macro-apply-${CREATED_MACRO_ID}`)).toBeVisible({ timeout: 15000 });
+    await page.getByTestId(`macro-apply-${CREATED_MACRO_ID}`).click();
+
+    await expect.poll(() => lastMacroExecutePayload).toMatchObject({ case_id: CASE_ID });
+    await expect(page.getByTestId('case-next-action')).toContainText('Ожидаем клиента', { timeout: 15000 });
+    await expect(
+        page.getByPlaceholder('Введите сообщение или подпись к файлу. Enter — отправить.')
+    ).toHaveValue(/Отложу заявку и вернусь позже\./, { timeout: 15000 });
 });

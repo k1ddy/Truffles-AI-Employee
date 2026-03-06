@@ -567,11 +567,27 @@ class ConsoleMarketingCampaignLifecycleActionRequest(ConsoleRequestModel):
     reason: Optional[StrictStr] = None
 
 
+ConsoleMacroActionType = Literal[
+    "take_case",
+    "resolve_case",
+    "return_to_bot",
+    "reopen_case",
+    "snooze_case",
+]
+
+
+class ConsoleMacroAction(ConsoleRequestModel):
+    type: ConsoleMacroActionType
+    minutes: Optional[int] = None
+    reason: Optional[StrictStr] = None
+
+
 class ConsoleMacro(BaseModel):
     id: UUID
     scope: Literal["personal", "team"]
     label: str
     body: str
+    action: Optional[ConsoleMacroAction] = None
     is_active: bool
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -585,6 +601,7 @@ class ConsoleMacroCreateRequest(BaseModel):
     scope: Literal["personal", "team"]
     label: str
     body: str
+    action: Optional[ConsoleMacroAction] = None
     is_active: Optional[bool] = True
 
 
@@ -595,6 +612,7 @@ class ConsoleMacroCreateResponse(BaseModel):
 class ConsoleMacroUpdateRequest(BaseModel):
     label: Optional[str] = None
     body: Optional[str] = None
+    action: Optional[ConsoleMacroAction] = None
     is_active: Optional[bool] = None
 
 
@@ -1050,6 +1068,17 @@ class ConsoleCaseActionSync(BaseModel):
 
 class ConsoleCaseActionResponse(BaseModel):
     success: bool
+    case: ConsoleCase
+    sync: Optional[ConsoleCaseActionSync] = None
+
+
+class ConsoleMacroExecuteRequest(ConsoleRequestModel):
+    case_id: UUID
+
+
+class ConsoleMacroExecuteResponse(BaseModel):
+    success: bool
+    macro: ConsoleMacro
     case: ConsoleCase
     sync: Optional[ConsoleCaseActionSync] = None
 
