@@ -8,6 +8,7 @@
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
 - done:
+  - PR `#937` opened for Wave15: `fix(console): harden operator action feedback`.
   - Wave15 implemented in branch: `ConsoleSyncStatus` now exposes operator-safe `operator_message`, direct case actions no longer leak raw sync detail strings in default UI, and action-macros use the same follow-up warning model.
   - `inspect_case` deterministic lane now proves the new contract: sync-bearing macro shows friendly warning copy instead of `chatflow_failed`, and direct `reopen` stays internal-only with no warning leak.
   - Manual operator-eye analysis completed after Wave14 merge: raw sync reason leakage (`chatflow_failed`) and overloaded action/queue surfaces were confirmed from code + screenshot evidence.
@@ -112,7 +113,6 @@
   - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
   - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - Open bounded PR for Wave15 operator-safe feedback contract.
   - After Wave15 merge, execute Wave15 live validation on a safe explicit live case.
   - Then execute Wave16 action surface + queue rail redesign in bounded parts if needed.
 - evidence:
@@ -265,4 +265,5 @@
   - `cd console-web && npm run build` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`3 passed`)
   - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
-- last_updated: 2026-03-06T18:53:24+05:00
+  - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title \"fix(console): harden operator action feedback\" ...` (`PR #937`)
+- last_updated: 2026-03-06T18:55:25+05:00
