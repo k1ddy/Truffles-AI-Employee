@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-console-e2e-auth-helper-unification-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-06-console-e2e-auth-helper-rollout-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
@@ -45,8 +45,13 @@
   - Added API-backed live case discovery and calendar queue fallback path when no inspectable case exists in current live scope.
   - Removed flaky auth-gate skip path by re-login recovery + deterministic calendar-surface validation.
   - Unified Keycloak auth helper added in `console-web/e2e/support/keycloak-auth.ts` and connected to `login/smoke/inspect_case` to remove local `start/login` drift.
+  - Shared auth helper unification merged via PR `#928` (`83f9e9f1fb0c9ff96a40a10c4a84e7657c494b4a`).
+  - Follow-up TP created for rollout of shared auth helper into `marketing/owner-admin-business/platform-admin/tenants-a11y` (`TP-2026-03-06-console-e2e-auth-helper-rollout-a1.md`).
+  - `marketing`, `owner-admin-business`, `platform-admin`, `tenants-a11y` migrated to shared Keycloak helper; local `startKeycloakLogin/loginThroughKeycloak` duplicates removed.
+  - Shared helper hardened to avoid false-positive `/api/auth` URL completion and повторный signin через auth-origin, which caused local `redirect_uri` failures during RCA.
+  - `owner-admin-business` lane now emits explicit skip when the authenticated role is not `owner/admin`, instead of reporting a false UI regression for manager credentials.
 - next:
-  - Open PR for `CONSOLE-E2E-AUTH-HELPER-UNIFICATION-A1`, watch CI, and merge after green checks.
+  - Open PR for `CONSOLE-E2E-AUTH-HELPER-ROLLOUT-A1` and let CI verify owner/admin lane with dedicated GitHub secrets.
 - evidence:
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
@@ -94,4 +99,14 @@
   - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
   - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/smoke.spec.ts --project=chromium --reporter=line --grep "should display filter controls|should navigate to Settings"` (`2 passed`)
   - `scripts/session_check.sh` (`Session OK`)
-- last_updated: 2026-03-05
+  - `cd console-web && rg -n "async function (startKeycloakLogin|loginThroughKeycloak)" e2e/marketing.spec.ts e2e/owner-admin-business.spec.ts e2e/platform-admin.spec.ts e2e/tenants-a11y.spec.ts` (`no matches`)
+  - `cd console-web && npm run lint -- --file e2e/support/keycloak-auth.ts --file e2e/marketing.spec.ts --file e2e/owner-admin-business.spec.ts --file e2e/platform-admin.spec.ts --file e2e/tenants-a11y.spec.ts` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/marketing.spec.ts --project=chromium --reporter=line --grep "should open marketing page and render lifecycle blocks"` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/owner-admin-business.spec.ts --project=chromium --reporter=line --grep "should expose owner/admin control navigation and business summary"` (`skip`: current local/manual credentials resolve to non-owner role)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 E2E_DETERMINISTIC_AUTH=1 npx playwright test e2e/platform-admin.spec.ts --project=chromium --reporter=line --grep "should render full incident details, allow 30m hide, and navigate via CTA"` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 E2E_DETERMINISTIC_AUTH=1 npx playwright test e2e/tenants-a11y.spec.ts --project=chromium --reporter=line --grep "desktop snapshot"` (`pass`)
+  - `cd console-web && npm run lint -- --file e2e/support/keycloak-auth.ts --file e2e/owner-admin-business.spec.ts` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/owner-admin-business.spec.ts --project=chromium --reporter=line --grep "should expose owner/admin control navigation and business summary"` (`1 skipped`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/marketing.spec.ts --project=chromium --reporter=line --grep "should open marketing page and render lifecycle blocks"` (`pass`, post-helper-hardening rerun)
+  - `scripts/session_check.sh` (`Session OK`)
+- last_updated: 2026-03-06T06:36:10+05:00
