@@ -14,6 +14,7 @@ const AGENT_ID = '44444444-4444-4444-8444-444444444444';
 const CASE_ID = '55555555-5555-4555-8555-555555555555';
 const LIVE_CASE_ID = process.env.INSPECT_CASE_LIVE_CASE_ID ?? CASE_ID;
 const HAS_EXPLICIT_LIVE_CASE_ID = LIVE_CASE_ID !== CASE_ID;
+const WAVE22_LIVE_PROOF_REQUIRED_MESSAGE = 'Set INSPECT_CASE_LIVE_CASE_ID to a safe resolved case for Wave22 live proof.';
 const CONVERSATION_ID = '66666666-6666-4666-8666-666666666666';
 const SPECIALIST_ID = '77777777-7777-4777-8777-777777777777';
 const TEXT_MACRO_ID = 'abababab-abab-4bab-8bab-abababababab';
@@ -1725,22 +1726,31 @@ test('booking no-show reopens resolved case and preserves case-booking semantics
     await expect(page.getByTestId('case-booking-summary')).toContainText('Клиент не пришел', { timeout: 15000 });
 });
 
-test('live action feedback validation requires explicit safe case and hides raw sync codes', async ({ page }) => {
-    test.skip(useRouteMocks, 'Wave15 live validation runs only without route mocks');
+test('live action feedback validation requires explicit safe case and hides raw sync codes', {
+    tag: ['@live', '@wave22-live-proof'],
+    annotation: [
+        { type: 'wave', description: 'Wave22 live-proof closure' },
+        { type: 'blocked-by', description: 'Requires explicit safe INSPECT_CASE_LIVE_CASE_ID' },
+    ],
+}, async ({ page }) => {
+    test.skip(useRouteMocks, 'Wave22 live proof runs only without route mocks');
     test.setTimeout(90000);
 
     if (!HAS_EXPLICIT_LIVE_CASE_ID) {
-        test.skip(true, 'Set INSPECT_CASE_LIVE_CASE_ID to a safe resolved case for Wave15 live validation.');
+        test.info().annotations.push({ type: 'blocked-by', description: 'INSPECT_CASE_LIVE_CASE_ID is not set' });
+        test.skip(true, WAVE22_LIVE_PROOF_REQUIRED_MESSAGE);
     }
 
     await ensureLoggedIn(page);
     const opened = await openCaseDirectly(page, LIVE_CASE_ID);
     if (!opened) {
+        test.info().annotations.push({ type: 'blocked-by', description: `Explicit live case_id=${LIVE_CASE_ID} is not accessible` });
         test.skip(true, `Explicit live case_id=${LIVE_CASE_ID} is not accessible.`);
     }
 
     const reopenButton = page.getByTestId('case-reopen');
     if (!(await reopenButton.isVisible().catch(() => false))) {
+        test.info().annotations.push({ type: 'blocked-by', description: `Explicit live case_id=${LIVE_CASE_ID} does not expose reopen control` });
         test.skip(true, `Explicit live case_id=${LIVE_CASE_ID} does not expose reopen control.`);
     }
 
@@ -1767,6 +1777,7 @@ test('live action feedback validation requires explicit safe case and hides raw 
 
     const returnToBotButton = page.getByRole('button', { name: 'Вернуть боту', exact: true });
     if (!(await returnToBotButton.isVisible().catch(() => false))) {
+        test.info().annotations.push({ type: 'blocked-by', description: `Explicit live case_id=${LIVE_CASE_ID} does not expose a sync-bearing return action after reopen` });
         test.skip(true, `Explicit live case_id=${LIVE_CASE_ID} does not expose a sync-bearing return action after reopen.`);
     }
 

@@ -102,11 +102,11 @@
 - `Current residuals accepted in this block`: only optional future productivity features, not correctness gaps.
 - `Why not in this block`: this wave is strictly for proof and closeout.
 - `Risk if deferred`: semantic regressions stay invisible until operator complaints.
-- `Linked follow-up Task Package(s)`: none expected if Wave22 closes green.
+- `Linked follow-up Task Package(s)`: `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-live-proof-a1.md` while explicit safe live proof is still blocked.
 - `Expiry/trigger to stop deferral`: any red matrix slice or blocked live proof keeps the overall program open.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: close the new inbox semantic program with explicit go/no-go.
+- `Next block objective`: execute the dedicated live-proof closure block with an approved safe case id and explicit `pass|fail|blocked` evidence.
 - `First deterministic check command`: `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line`
-- `Blocked-by conditions`: unresolved live blockers or missing deterministic slices.
+- `Blocked-by conditions`: unresolved safe-case approval, live auth/env issues, or any red deterministic slice.
 - `Owner role for closure`: Brain / Top Architect.
