@@ -9,6 +9,7 @@ import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
     bookingNeedsAttention,
+    collectBookingCaseEffectMessages,
     createBooking,
     fetchBookings,
     getBookingAttentionLabel,
@@ -242,13 +243,19 @@ export default function CalendarPage() {
             setStatusUpdateBookingId(payload.bookingId);
             return updateBookingStatus(payload.bookingId, { status: payload.status });
         },
-        onSuccess: (_data, variables) => {
+        onSuccess: (data, variables) => {
             const labels: Record<BookingStatusUpdateRequest["status"], string> = {
                 COMPLETED: "Статус: клиент пришел",
                 NO_SHOW: "Статус: клиент не пришел",
             };
-            toast.success(labels[variables.status]);
+            const effectMessages = collectBookingCaseEffectMessages(data);
+            const suffix = effectMessages.length > 0 ? ` ${effectMessages.join(" ")}` : "";
+            toast.success(`${labels[variables.status]}.${suffix}`.trim());
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
+            if (focusedCaseId) {
+                queryClient.invalidateQueries({ queryKey: ["case", focusedCaseId] });
+                queryClient.invalidateQueries({ queryKey: ["cases"] });
+            }
         },
         onError: (error: unknown) => {
             const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
@@ -277,13 +284,19 @@ export default function CalendarPage() {
                 rebooked_appointment_id: payload.rebookedAppointmentId,
             });
         },
-        onSuccess: (_data, variables) => {
+        onSuccess: (data, variables) => {
+            const effectMessages = collectBookingCaseEffectMessages(data);
+            const suffix = effectMessages.length > 0 ? ` ${effectMessages.join(" ")}` : "";
             if (variables.result === "rebooked") {
-                toast.success("Follow-up закрыт: клиент перезаписан");
+                toast.success(`Follow-up закрыт: клиент перезаписан.${suffix}`.trim());
             } else {
-                toast.success("Follow-up закрыт: с клиентом связались");
+                toast.success(`Follow-up закрыт: с клиентом связались.${suffix}`.trim());
             }
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
+            if (focusedCaseId) {
+                queryClient.invalidateQueries({ queryKey: ["case", focusedCaseId] });
+                queryClient.invalidateQueries({ queryKey: ["cases"] });
+            }
         },
         onError: (error: unknown) => {
             const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;

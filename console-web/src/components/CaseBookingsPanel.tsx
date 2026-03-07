@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import {
+    collectBookingCaseEffectMessages,
     bookingNeedsAttention,
     fetchBookings,
     getBookingAttentionLabel,
@@ -63,7 +64,9 @@ export default function CaseBookingsPanel({
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
-            toast.success(`Статус записи обновлен: ${getBookingStatusLabel(response.booking.status)}`);
+            const effectMessages = collectBookingCaseEffectMessages(response);
+            const suffix = effectMessages.length > 0 ? ` ${effectMessages.join(" ")}` : "";
+            toast.success(`Статус записи обновлен: ${getBookingStatusLabel(response.booking.status)}.${suffix}`.trim());
         },
         onError: () => {
             toast.error("Не удалось обновить статус записи");
@@ -78,7 +81,9 @@ export default function CaseBookingsPanel({
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
             const label = response.booking.no_show_followup_result === "rebooked" ? "перезапись сохранена" : "контакт отмечен";
-            toast.success(`После неявки: ${label}`);
+            const effectMessages = collectBookingCaseEffectMessages(response);
+            const suffix = effectMessages.length > 0 ? ` ${effectMessages.join(" ")}` : "";
+            toast.success(`После неявки: ${label}.${suffix}`.trim());
         },
         onError: () => {
             toast.error("Не удалось сохранить результат после неявки");

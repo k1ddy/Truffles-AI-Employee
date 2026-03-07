@@ -19,6 +19,7 @@ from app.models.appointment_audit import AppointmentAudit
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.models.appointment_sync_state import AppointmentSyncState
 from app.models.branch import Branch
+from app.models.conversation import Conversation
 from app.models.handover import Handover
 from app.models.specialist import Specialist
 from app.services.appointment_reminder_service import schedule_default_reminders
@@ -30,11 +31,13 @@ from app.services.appointment_service import (
     SchedulingService,
     SpecialistNotFoundError,
 )
+from app.services.audit_service import record_audit_event
 from app.services.calendar_sync_service import enqueue_appointment_sync
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_errors import ConsoleAPIError
 from app.services.google_calendar_service import GoogleCalendarService
 from app.services.onboarding_state import OnboardingStep, ensure_onboarding_step
+from app.services.state_service import manager_reopen as state_manager_reopen
 
 logger = get_logger(__name__)
 
@@ -159,9 +162,16 @@ class BookingsListResponse(BaseModel):
     has_more: bool = False
 
 
+class BookingCaseEffect(BaseModel):
+    case_id: str
+    action: Literal["reopened_for_booking_attention", "linked_rebooked_booking"]
+    message: str
+
+
 class BookingActionResponse(BaseModel):
     success: bool
     booking: BookingResponse
+    case_effects: List[BookingCaseEffect] = Field(default_factory=list)
 
 
 # ==================== Specialists ====================
@@ -361,6 +371,183 @@ def _serialize_no_show_followup_state(audit_row: Optional[AppointmentAudit]) -> 
         "closed_by": closed_by,
         "rebooked_appointment_id": rebooked_appointment_id,
     }
+
+
+_CASE_SNOOZE_META_KEYS = (
+    "snoozed_until",
+    "snoozed_at",
+    "snooze_reason",
+    "snoozed_by_id",
+    "snoozed_by_name",
+)
+
+
+def _clear_case_snooze_meta(handover: Handover) -> None:
+    raw_meta = getattr(handover, "meta", None)
+    if not isinstance(raw_meta, dict):
+        return
+    meta = dict(raw_meta)
+    changed = False
+    for key in _CASE_SNOOZE_META_KEYS:
+        if key in meta:
+            meta.pop(key, None)
+            changed = True
+    if changed:
+        handover.meta = meta
+
+
+def _resolve_booking_case_context(
+    db: Session,
+    *,
+    client_id: UUID,
+    case_id: UUID | None,
+    lock: bool = False,
+) -> tuple[Optional[Handover], Optional[Conversation]]:
+    if case_id is None:
+        return None, None
+
+    case_query = db.query(Handover).filter(
+        Handover.id == case_id,
+        Handover.client_id == client_id,
+    )
+    if lock:
+        case_query = case_query.with_for_update()
+    handover = case_query.first()
+    if handover is None:
+        return None, None
+
+    conversation_query = db.query(Conversation).filter(Conversation.id == handover.conversation_id)
+    if lock:
+        conversation_query = conversation_query.with_for_update()
+    conversation = conversation_query.first()
+    return handover, conversation
+
+
+def _maybe_reopen_linked_case_for_booking_attention(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    booking: Appointment,
+) -> list[BookingCaseEffect]:
+    handover, conversation = _resolve_booking_case_context(
+        db,
+        client_id=context.client.id,
+        case_id=booking.case_id,
+        lock=True,
+    )
+    if handover is None or conversation is None:
+        return []
+    if handover.status != "resolved":
+        return []
+
+    manager_name = context.agent.name or "Менеджер"
+    _clear_case_snooze_meta(handover)
+    result = state_manager_reopen(
+        db,
+        conversation,
+        handover,
+        manager_id=str(context.agent.id),
+        manager_name=manager_name,
+    )
+    if not result.ok:
+        logger.warning(
+            "Booking attention could not reopen linked case",
+            extra={
+                "context": {
+                    "booking_id": str(booking.id),
+                    "case_id": str(handover.id),
+                    "reason": result.error,
+                }
+            },
+        )
+        return []
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="case_reopened_from_booking_attention",
+        entity_type="handover",
+        entity_id=handover.id,
+        payload={
+            "booking_id": str(booking.id),
+            "booking_status": booking.status,
+            "source": "calendar_booking_status",
+        },
+        branch_id=conversation.branch_id,
+    )
+    return [
+        BookingCaseEffect(
+            case_id=str(handover.id),
+            action="reopened_for_booking_attention",
+            message="Неявка требует follow-up: заявка возвращена в работу.",
+        )
+    ]
+
+
+def _validate_or_link_rebooked_booking_case(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    source_booking: Appointment,
+    rebooked_booking: Appointment,
+) -> tuple[list[BookingCaseEffect], bool]:
+    source_case_id = getattr(source_booking, "case_id", None)
+    source_conversation_id = getattr(source_booking, "conversation_id", None)
+    if source_case_id is None and source_conversation_id is None:
+        return [], False
+
+    rebooked_case_id = getattr(rebooked_booking, "case_id", None)
+    rebooked_conversation_id = getattr(rebooked_booking, "conversation_id", None)
+
+    if source_case_id and rebooked_case_id and rebooked_case_id != source_case_id:
+        raise ConsoleAPIError(
+            409,
+            "REBOOKED_BOOKING_CASE_CONFLICT",
+            "Rebooked booking is already linked to another case",
+        )
+    if (
+        source_conversation_id
+        and rebooked_conversation_id
+        and rebooked_conversation_id != source_conversation_id
+    ):
+        raise ConsoleAPIError(
+            409,
+            "REBOOKED_BOOKING_CONVERSATION_CONFLICT",
+            "Rebooked booking is already linked to another conversation",
+        )
+
+    changed = False
+    if source_case_id and rebooked_case_id is None:
+        rebooked_booking.case_id = source_case_id
+        changed = True
+    if source_conversation_id and rebooked_conversation_id is None:
+        rebooked_booking.conversation_id = source_conversation_id
+        changed = True
+    if not changed:
+        return [], False
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="rebooked_booking_linked_to_case",
+        entity_type="appointment",
+        entity_id=rebooked_booking.id,
+        payload={
+            "source_booking_id": str(source_booking.id),
+            "case_id": str(source_case_id) if source_case_id else None,
+            "conversation_id": str(source_conversation_id) if source_conversation_id else None,
+        },
+        branch_id=getattr(rebooked_booking, "branch_id", None),
+    )
+    if source_case_id is None:
+        return [], True
+    return ([
+        BookingCaseEffect(
+            case_id=str(source_case_id),
+            action="linked_rebooked_booking",
+            message="Новая запись привязана к этой заявке.",
+        )
+    ], True)
 
 
 def _latest_case_ids_by_conversation(
@@ -1055,6 +1242,7 @@ async def update_booking_status(
             actor_type="agent",
             channel="console",
             reason=reason,
+            commit=False,
         )
     except AppointmentNotFoundError:
         raise ConsoleAPIError(404, "BOOKING_NOT_FOUND", "Booking not found")
@@ -1076,6 +1264,17 @@ async def update_booking_status(
             },
         )
 
+    case_effects: list[BookingCaseEffect] = []
+    if (booking.status or "").upper() == "NO_SHOW":
+        case_effects = _maybe_reopen_linked_case_for_booking_attention(
+            db=db,
+            context=context,
+            booking=booking,
+        )
+
+    db.commit()
+    db.refresh(booking)
+
     logger.info(
         "Booking status updated",
         extra={
@@ -1083,10 +1282,15 @@ async def update_booking_status(
                 "agent": context.agent.name,
                 "booking_id": booking_id,
                 "target_status": booking.status,
+                "case_effects": [effect.action for effect in case_effects],
             }
         },
     )
-    return BookingActionResponse(success=True, booking=_build_booking_response(db, booking))
+    return BookingActionResponse(
+        success=True,
+        booking=_build_booking_response(db, booking),
+        case_effects=case_effects,
+    )
 
 
 @router.post("/bookings/{booking_id}/no-show-followup", response_model=BookingActionResponse)
@@ -1119,6 +1323,7 @@ async def register_booking_no_show_followup(
             "INVALID_PARAM",
             "rebooked_appointment_id is allowed only when result=rebooked",
         )
+    rebooked_booking: Optional[Appointment] = None
     if rebooked_appointment_id:
         rebooked_uuid = _parse_uuid(
             rebooked_appointment_id,
@@ -1130,14 +1335,15 @@ async def register_booking_no_show_followup(
                 "INVALID_PARAM",
                 "rebooked_appointment_id must reference another booking",
             )
-        if not (
+        rebooked_booking = (
             db.query(Appointment)
             .filter(
                 Appointment.id == rebooked_uuid,
                 Appointment.client_id == context.client.id,
             )
             .first()
-        ):
+        )
+        if not rebooked_booking:
             raise ConsoleAPIError(
                 404,
                 "BOOKING_NOT_FOUND",
@@ -1155,6 +1361,7 @@ async def register_booking_no_show_followup(
     )
 
     now = datetime.now(timezone.utc)
+    followup_changed = False
     if existing_followup:
         existing_payload = (
             dict(existing_followup.payload)
@@ -1195,7 +1402,7 @@ async def register_booking_no_show_followup(
 
         if changed:
             existing_followup.payload = updated_payload
-            db.commit()
+            followup_changed = True
     else:
         payload: dict[str, Any] = {
             "action": "contact_rebook",
@@ -1224,7 +1431,22 @@ async def register_booking_no_show_followup(
                 created_at=now,
             )
         )
+        followup_changed = True
+
+    case_effects: list[BookingCaseEffect] = []
+    rebook_link_changed = False
+    if result == "rebooked" and rebooked_booking is not None:
+        case_effects, rebook_link_changed = _validate_or_link_rebooked_booking_case(
+            db=db,
+            context=context,
+            source_booking=booking,
+            rebooked_booking=rebooked_booking,
+        )
+
+    if followup_changed or rebook_link_changed:
         db.commit()
+    if rebooked_booking is not None:
+        db.refresh(rebooked_booking)
 
     logger.info(
         "Booking no_show follow-up recorded",
@@ -1234,10 +1456,15 @@ async def register_booking_no_show_followup(
                 "booking_id": booking_id,
                 "action": "contact_rebook",
                 "result": result,
+                "case_effects": [effect.action for effect in case_effects],
             }
         },
     )
-    return BookingActionResponse(success=True, booking=_build_booking_response(db, booking))
+    return BookingActionResponse(
+        success=True,
+        booking=_build_booking_response(db, booking),
+        case_effects=case_effects,
+    )
 
 
 # ==================== Google Calendar OAuth ====================

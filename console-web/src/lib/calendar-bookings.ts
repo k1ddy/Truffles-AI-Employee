@@ -48,6 +48,11 @@ export interface BookingNoShowFollowUpRequest {
 export interface BookingActionResponse {
     success: boolean;
     booking: Booking;
+    case_effects?: Array<{
+        case_id: string;
+        action: "reopened_for_booking_attention" | "linked_rebooked_booking";
+        message: string;
+    }>;
 }
 
 export interface BookingsListResponse {
@@ -154,4 +159,13 @@ export function getBookingAttentionLabel(booking: Booking): string | null {
         return "Связаться после неявки";
     }
     return null;
+}
+
+export function collectBookingCaseEffectMessages(response?: BookingActionResponse | null): string[] {
+    if (!response?.case_effects?.length) {
+        return [];
+    }
+    return response.case_effects
+        .map((effect) => effect?.message?.trim())
+        .filter((message): message is string => Boolean(message));
 }

@@ -61,10 +61,13 @@
 - `console-web/src/components/CaseBookingsPanel.tsx`
 - `console-web/src/components/CaseDetailsPanel.tsx`
 - `console-web/src/app/calendar/page.tsx`
+ - `console-web/src/lib/calendar-bookings.ts`
 - `truffles-api/app/routers/console.py`
 - `truffles-api/app/routers/calendar.py`
 - `truffles-api/app/schemas/console.py`
 - `truffles-api/app/models/appointment.py`
+ - `truffles-api/tests/test_calendar_noshow_followup_router.py`
+ - `truffles-api/tests/test_console_openapi_calendar_contract.py`
 - `console-web/e2e/inspect_case.spec.ts`
 
 ## DoD
@@ -73,8 +76,11 @@
 - Key booking outcomes (`confirmed`, `rescheduled`, `cancelled`, `no_show follow-up`) имеют понятное отражение в case/business flow.
 
 ## Checks
-- `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py`
-- `cd console-web && npm run lint -- --file src/components/CaseConversation.tsx --file src/components/CaseBookingsPanel.tsx --file src/app/calendar/page.tsx --file e2e/inspect_case.spec.ts`
+- `cd truffles-api && pytest -q tests/test_calendar_noshow_followup_router.py tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py`
+- `cd truffles-api && python3 scripts/generate_openapi.py --check`
+- `cd console-web && npm run generate:api`
+- `cd console-web && npm run lint -- --file src/components/CaseConversation.tsx --file src/components/CaseBookingsPanel.tsx --file src/app/calendar/page.tsx --file src/lib/calendar-bookings.ts --file e2e/inspect_case.spec.ts`
+- `cd console-web && npm run build`
 - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line`
 
 ## Evidence
@@ -89,7 +95,7 @@
 - Introduce new status text that contradicts existing action-driven SLA model.
 
 ## Residual architecture debt (mandatory)
-- `Current residuals accepted in this block`: full forbidden-state matrix and live evidence stay for Wave22.
+- `Current residuals accepted in this block`: full forbidden-state matrix and live evidence stay for Wave22; booking-driven state propagation is intentionally limited to explicit `case_id` links and concrete no-show/rebook mutations, not heuristic conversation-only matches.
 - `Why not in this block`: semantic integration must land before exhaustive validation.
 - `Risk if deferred`: without Wave22, regressions can reappear in edge states.
 - `Linked follow-up Task Package(s)`: `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-a1.md`.

@@ -324,6 +324,19 @@ async function installConsoleMocks(
         ...state,
         booking_summary: state.id === CASE_ID ? buildMockBookingSummary() : null,
     });
+    const reopenCaseForBookingAttention = () => {
+        caseState.status = 'active';
+        caseState.business_status_code = 'needs_reply';
+        caseState.business_status_label = 'Нужен ответ';
+        caseState.sla_status = 'warning';
+        caseState.sla_action_state = 'reply_due';
+        caseState.target_response_at = '2026-03-05T10:30:00+05:00';
+        caseState.needs_reply = true;
+        caseState.resolved_at = null;
+        caseState.assigned_to_id = AGENT_ID;
+        caseState.assigned_to_name = 'Manager';
+        caseState.attention_reason = 'Связаться после неявки';
+    };
     const macroStore = [
         {
             id: ACTION_MACRO_ID,
@@ -841,9 +854,23 @@ async function installConsoleMocks(
         bookingState.status = payload?.status === 'NO_SHOW' ? 'NO_SHOW' : 'COMPLETED';
         bookingState.needs_action = bookingState.status === 'NO_SHOW';
         bookingState.attention_reason = bookingState.status === 'NO_SHOW' ? 'Связаться после неявки' : null;
+        const caseEffects = [] as Array<{
+            case_id: string;
+            action: 'reopened_for_booking_attention' | 'linked_rebooked_booking';
+            message: string;
+        }>;
+        if (bookingState.status === 'NO_SHOW' && caseState.status === 'resolved') {
+            reopenCaseForBookingAttention();
+            caseEffects.push({
+                case_id: CASE_ID,
+                action: 'reopened_for_booking_attention',
+                message: 'Неявка требует follow-up: заявка возвращена в работу.',
+            });
+        }
         await toJsonResponse(route, {
             success: true,
             booking: { ...bookingState },
+            case_effects: caseEffects,
         });
     });
     await page.route(`**/api/proxy/calendar/bookings/${bookingState.id}/no-show-followup`, async (route) => {
@@ -851,14 +878,30 @@ async function installConsoleMocks(
             await route.fallback();
             return;
         }
-        const payload = route.request().postDataJSON() as { result?: 'contacted' | 'rebooked' } | null;
+        const payload = route.request().postDataJSON() as {
+            result?: 'contacted' | 'rebooked';
+            rebooked_appointment_id?: string;
+        } | null;
         bookingState.no_show_followup_done = true;
         bookingState.no_show_followup_result = payload?.result ?? 'contacted';
         bookingState.needs_action = false;
         bookingState.attention_reason = null;
+        const caseEffects = [] as Array<{
+            case_id: string;
+            action: 'reopened_for_booking_attention' | 'linked_rebooked_booking';
+            message: string;
+        }>;
+        if (payload?.result === 'rebooked' && payload?.rebooked_appointment_id) {
+            caseEffects.push({
+                case_id: CASE_ID,
+                action: 'linked_rebooked_booking',
+                message: 'Новая запись привязана к этой заявке.',
+            });
+        }
         await toJsonResponse(route, {
             success: true,
             booking: { ...bookingState },
+            case_effects: caseEffects,
         });
     });
 }
@@ -1606,6 +1649,32 @@ test('action feedback hides raw sync reason codes and keeps reopen internal-only
     await expect(page.getByTestId('case-business-status')).toContainText('В работе', { timeout: 15000 });
     await expect(page.getByText('chatflow_failed')).toHaveCount(0);
     await expect(page.getByText('Не удалось отправить системное уведомление клиенту.')).toHaveCount(0);
+});
+
+test('booking no-show reopens resolved case and preserves case-booking semantics', async ({ page }) => {
+    test.skip(!useRouteMocks, 'Wave21 booking-state propagation is covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page);
+    await ensureLoggedIn(page);
+    await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
+    await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
+
+    await page.getByRole('button', { name: /все ответы/i }).click({ force: true });
+    await page.getByTestId(`macro-apply-${ACTION_MACRO_ID}`).click({ force: true });
+
+    await expect(page.getByTestId('case-business-status')).toContainText('Закрыта', { timeout: 15000 });
+
+    const openCalendarButton = page.getByTestId('case-open-calendar');
+    await openCalendarButton.click();
+    const visibleBookingsPanel = page.locator('[data-testid=\"case-bookings-panel\"]:visible').first();
+    await expect(visibleBookingsPanel).toBeVisible({ timeout: 20000 });
+    await visibleBookingsPanel.getByRole('button', { name: 'Не пришел', exact: true }).click();
+
+    await expect(page.getByText('Неявка требует follow-up: заявка возвращена в работу.')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('case-business-status')).toContainText('Нужен ответ', { timeout: 15000 });
+    await expect(page.getByTestId('case-next-action')).toContainText('Ответить до', { timeout: 15000 });
+    await expect(page.getByTestId('case-booking-summary')).toContainText('Клиент не пришел', { timeout: 15000 });
 });
 
 test('live action feedback validation requires explicit safe case and hides raw sync codes', async ({ page }) => {

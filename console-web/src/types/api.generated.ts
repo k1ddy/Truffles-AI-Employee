@@ -2609,6 +2609,20 @@ export interface components {
             /** Success */
             success: boolean;
             booking: components["schemas"]["BookingResponse"];
+            /** Case Effects */
+            case_effects?: components["schemas"]["BookingCaseEffect"][];
+        };
+        /** BookingCaseEffect */
+        BookingCaseEffect: {
+            /** Case Id */
+            case_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "reopened_for_booking_attention" | "linked_rebooked_booking";
+            /** Message */
+            message: string;
         };
         /** BookingCreate */
         BookingCreate: {
