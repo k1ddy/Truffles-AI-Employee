@@ -122,6 +122,28 @@ function formatAssigneeRoleLabel(option: CaseAssigneeOption) {
     return roleLabel.toLowerCase() === option.agent_name.toLowerCase() ? null : roleLabel;
 }
 
+function formatAssigneeMetaLabel(option: CaseAssigneeOption) {
+    const parts = [formatAssigneeRoleLabel(option), formatAssigneeLoadLabel(option)].filter(Boolean);
+    if (option.is_current) {
+        parts.push("текущий");
+    }
+    return parts.join(" · ");
+}
+
+function formatRoutingRecommendationCopy(
+    recommendation: { reason_summary?: string | null } | null | undefined,
+    recommendedAssignee: CaseAssigneeOption | null,
+    currentAssignee: CaseAssigneeOption | null,
+) {
+    if (recommendedAssignee && currentAssignee) {
+        return `Сейчас у ${currentAssignee.agent_name} ${formatAssigneeLoadLabel(currentAssignee)}. Лучше передать ${recommendedAssignee.agent_name}, у него ${formatAssigneeLoadLabel(recommendedAssignee)}.`;
+    }
+    if (recommendedAssignee) {
+        return `Рекомендуем ${recommendedAssignee.agent_name}: ${formatAssigneeLoadLabel(recommendedAssignee)}.`;
+    }
+    return recommendation?.reason_summary || "Выберите ответственного по текущей нагрузке команды.";
+}
+
 function sortAssigneeOptionsByLoad(options: CaseAssigneeOption[]) {
     return [...options].sort((left, right) => {
         if (left.is_current !== right.is_current) {
@@ -329,10 +351,9 @@ export default function CaseConversation({
             return { response: response.data, mode };
         },
         onSuccess: ({ response, mode }) => {
-            const routingSummary = response.routing?.reason_summary;
             setActionPanel(null);
-            if (mode === "policy" && routingSummary) {
-                toast.success(routingSummary);
+            if (mode === "policy") {
+                toast.success(`Заявка назначена по политике: ${response.case.assigned_to_name ?? "новый менеджер"}`);
             } else {
                 toast.success(`Заявка передана: ${response.case.assigned_to_name ?? "новый менеджер"}`);
             }
@@ -516,6 +537,14 @@ export default function CaseConversation({
         },
         [fallbackRecommendedAssignee, routingRecommendation?.recommended_agent_id, sortedAssigneeOptions],
     );
+    const currentAssigneeOption = useMemo(
+        () => sortedAssigneeOptions.find((item) => item.is_current) ?? null,
+        [sortedAssigneeOptions],
+    );
+    const transferableAssigneeOptions = useMemo(
+        () => sortedAssigneeOptions.filter((item) => !item.is_current),
+        [sortedAssigneeOptions],
+    );
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
     const compactContextLimit = layout === "inbox" ? 110 : 180;
     const contextTitle = caseDetail.context_summary ? "Суть запроса" : "Последнее сообщение";
@@ -689,105 +718,164 @@ export default function CaseConversation({
     }`;
     const actionPanelContent = actionPanel === "reassign" ? (
         <div className={actionPanelClass} data-testid="case-reassign-panel">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1">
                     <p className="text-sm font-semibold text-foreground">Передать заявку</p>
                     <p className="text-xs text-muted-foreground">
-                        Смена ответственного без закрытия заявки и потери контекста.
+                        Выберите следующего ответственного. История и чат останутся в этой же заявке.
                     </p>
                 </div>
                 <button
                     type="button"
                     onClick={() => setActionPanel(null)}
-                    className="rounded border border-border/60 px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 text-base font-semibold text-muted-foreground hover:text-foreground"
+                    aria-label="Закрыть панель передачи"
+                    data-testid="case-reassign-close"
                 >
-                    Скрыть
+                    ×
                 </button>
             </div>
             <div className="mt-3 space-y-3">
+                {currentAssigneeOption && (
+                    <div className="rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            Сейчас отвечает
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">
+                            {currentAssigneeOption.agent_name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            {formatAssigneeMetaLabel(currentAssigneeOption)}
+                        </p>
+                    </div>
+                )}
+                {recommendedAssignee && (
+                    <div
+                        className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3"
+                        data-testid="case-reassign-recommendation"
+                    >
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-900/70">
+                            Рекомендуем
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+                            <div className="space-y-1">
+                                <p className="text-sm font-semibold text-emerald-950">
+                                    {recommendedAssignee.agent_name}
+                                </p>
+                                <p className="text-xs text-emerald-900/80">
+                                    {formatAssigneeMetaLabel(recommendedAssignee)}
+                                </p>
+                                <p className="text-xs text-emerald-900/80">
+                                    {formatRoutingRecommendationCopy(
+                                        routingRecommendation,
+                                        recommendedAssignee,
+                                        currentAssigneeOption,
+                                    )}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSelectedAssigneeId(String(recommendedAssignee.agent_id));
+                                    reassignMutation.mutate("manual");
+                                }}
+                                disabled={caseActionBusy}
+                                className="rounded bg-emerald-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                                data-testid="case-reassign-recommend-submit"
+                            >
+                                {reassignMutation.isPending && selectedAssigneeId === String(recommendedAssignee.agent_id)
+                                    ? "Передаём..."
+                                    : `Передать ${recommendedAssignee.agent_name}`}
+                            </button>
+                        </div>
+                    </div>
+                )}
                 {assigneeOptionsQuery.isLoading ? (
                     <p className="text-xs text-muted-foreground">Загружаем список менеджеров...</p>
-                ) : sortedAssigneeOptions.length ? (
-                    <label className="block space-y-1">
-                        <span className="text-xs text-muted-foreground">Новый ответственный</span>
-                        <select
-                            value={selectedAssigneeId}
-                            onChange={(event) => setSelectedAssigneeId(event.target.value)}
-                            className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
-                            data-testid="case-reassign-select"
-                        >
-                            {sortedAssigneeOptions.map((item) => (
-                                <option key={item.agent_id} value={item.agent_id}>
-                                    {item.agent_name}
-                                    {formatAssigneeRoleLabel(item) ? ` · ${formatAssigneeRoleLabel(item)}` : ""}
-                                    {` · ${formatAssigneeLoadLabel(item)}`}
-                                    {item.is_current ? " · текущий" : ""}
-                                </option>
-                            ))}
-                        </select>
-                        <span className="text-[11px] text-muted-foreground">
-                            После текущего ответственного список отсортирован по открытым заявкам.
-                        </span>
-                        {routingRecommendation && recommendedAssignee && (
-                            <span
-                                className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900"
-                                data-testid="case-reassign-recommendation"
-                            >
-                                {routingRecommendation.reason_summary}
-                                {" "}Сейчас у {recommendedAssignee.agent_name} {formatAssigneeLoadLabel(recommendedAssignee)}.
+                ) : transferableAssigneeOptions.length ? (
+                    <div className="space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-xs font-semibold text-muted-foreground">
+                                Другой ответственный
                             </span>
-                        )}
-                    </label>
+                            {routingRecommendation && (
+                                <button
+                                    type="button"
+                                    onClick={() => reassignMutation.mutate("policy")}
+                                    disabled={caseActionBusy || assigneeOptionsQuery.isLoading || !sortedAssigneeOptions.length}
+                                    className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 disabled:opacity-50"
+                                    data-testid="case-reassign-policy-submit"
+                                >
+                                    {reassignMutation.isPending ? "Распределяем..." : "Назначить по политике"}
+                                </button>
+                            )}
+                        </div>
+                        <div className="space-y-2">
+                            {transferableAssigneeOptions.map((item) => {
+                                const isSelected = selectedAssigneeId === String(item.agent_id);
+                                return (
+                                    <button
+                                        key={item.agent_id}
+                                        type="button"
+                                        onClick={() => setSelectedAssigneeId(String(item.agent_id))}
+                                        className={`flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-3 text-left transition ${
+                                            isSelected
+                                                ? "border-primary bg-primary/5"
+                                                : "border-border/60 bg-background hover:bg-muted/40"
+                                        }`}
+                                        data-testid={isSelected ? "case-reassign-select" : undefined}
+                                    >
+                                        <div className="space-y-1">
+                                            <p className="text-sm font-semibold text-foreground">{item.agent_name}</p>
+                                            <p className="text-xs text-muted-foreground">{formatAssigneeMetaLabel(item)}</p>
+                                        </div>
+                                        <span
+                                            className={`mt-0.5 rounded-full px-2 py-1 text-[10px] font-semibold ${
+                                                isSelected
+                                                    ? "bg-primary text-primary-foreground"
+                                                    : "bg-muted text-muted-foreground"
+                                            }`}
+                                        >
+                                            {isSelected ? "Выбрано" : "Выбрать"}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
                 ) : (
                     <p className="text-xs text-muted-foreground">
                         Нет доступных менеджеров для передачи в текущем контексте.
                     </p>
                 )}
-                <div className="flex flex-wrap gap-2">
-                    {recommendedAssignee && (
-                        <button
-                            type="button"
-                            onClick={() => setSelectedAssigneeId(String(recommendedAssignee.agent_id))}
-                            disabled={caseActionBusy || selectedAssigneeId === String(recommendedAssignee.agent_id)}
-                            className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 disabled:opacity-50"
-                            data-testid="case-reassign-recommend-button"
-                        >
-                            {selectedAssigneeId === String(recommendedAssignee.agent_id)
-                                ? "Рекомендация выбрана"
-                                : "Выбрать рекомендацию"}
-                        </button>
-                    )}
-                    {routingRecommendation && (
-                        <button
-                            type="button"
-                            onClick={() => reassignMutation.mutate("policy")}
-                            disabled={caseActionBusy || assigneeOptionsQuery.isLoading || !sortedAssigneeOptions.length}
-                            className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 disabled:opacity-50"
-                            data-testid="case-reassign-policy-submit"
-                        >
-                            {reassignMutation.isPending ? "Распределяем..." : "Назначить по политике"}
-                        </button>
-                    )}
+                <div className="flex flex-wrap justify-end gap-2 border-t border-border/60 pt-3">
+                    <button
+                        type="button"
+                        onClick={() => setActionPanel(null)}
+                        className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                    >
+                        Отмена
+                    </button>
                     <button
                         type="button"
                         onClick={() => reassignMutation.mutate("manual")}
                         disabled={
                             caseActionBusy
                             || assigneeOptionsQuery.isLoading
-                            || !sortedAssigneeOptions.length
+                            || !transferableAssigneeOptions.length
                             || !selectedAssigneeId
                         }
                         className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
                         data-testid="case-reassign-submit"
                     >
-                        {reassignMutation.isPending ? "Передаём..." : "Подтвердить передачу"}
+                        {reassignMutation.isPending ? "Передаём..." : "Передать выбранному"}
                     </button>
                 </div>
             </div>
         </div>
     ) : actionPanel === "snooze" ? (
         <div className={actionPanelClass} data-testid="case-snooze-panel">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1">
                     <p className="text-sm font-semibold text-foreground">Отложить заявку</p>
                     <p className="text-xs text-muted-foreground">
@@ -797,9 +885,11 @@ export default function CaseConversation({
                 <button
                     type="button"
                     onClick={() => setActionPanel(null)}
-                    className="rounded border border-border/60 px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 text-base font-semibold text-muted-foreground hover:text-foreground"
+                    aria-label="Закрыть панель отсрочки"
+                    data-testid="case-snooze-close"
                 >
-                    Скрыть
+                    ×
                 </button>
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-[180px_1fr]">
@@ -850,7 +940,14 @@ export default function CaseConversation({
                     </span>
                 )}
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-border/60 pt-3">
+                <button
+                    type="button"
+                    onClick={() => setActionPanel(null)}
+                    className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                >
+                    Отмена
+                </button>
                 <button
                     type="button"
                     onClick={() => snoozeMutation.mutate()}
@@ -867,27 +964,26 @@ export default function CaseConversation({
     return (
         <div className={`flex flex-col h-full ${isInboxLayout ? "gap-4" : "gap-5"}`} data-testid="case-conversation">
             <div className={headerClass}>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <h1 className="text-2xl font-bold" data-testid="case-title">
-                                Заявка {caseDetail.id.slice(0, 8)}
-                            </h1>
-                            <span className={`rounded px-2 py-1 text-[11px] font-semibold ${businessStatus.className}`} data-testid="case-business-status">
-                                {businessStatus.label}
-                            </span>
-                            <span className={`rounded px-2 py-1 text-[11px] font-semibold ${slaIndicator.className}`} data-testid="case-next-action">
-                                {slaIndicator.label}
-                            </span>
+                <div className="flex flex-col gap-4">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h1 className="text-2xl font-bold" data-testid="case-title">
+                                    Заявка {caseDetail.id.slice(0, 8)}
+                                </h1>
+                                <span className={`rounded px-2 py-1 text-[11px] font-semibold ${businessStatus.className}`} data-testid="case-business-status">
+                                    {businessStatus.label}
+                                </span>
+                                <span className={`rounded px-2 py-1 text-[11px] font-semibold ${slaIndicator.className}`} data-testid="case-next-action">
+                                    {slaIndicator.label}
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                <span data-testid="case-owner-label">
+                                    Владелец: <span className="font-semibold text-foreground">{assignedLabel}</span>
+                                </span>
+                            </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                            <span data-testid="case-owner-label">
-                                Владелец: <span className="font-semibold text-foreground">{assignedLabel}</span>
-                            </span>
-                        </div>
-                    </div>
-
-                    <div className="flex flex-col items-end gap-2">
                         {showDetailsToggle && (
                             <button
                                 type="button"
@@ -902,7 +998,9 @@ export default function CaseConversation({
                                 {detailsLabel}
                             </button>
                         )}
-                        <div className="flex flex-wrap justify-end gap-2">
+                    </div>
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="flex flex-wrap items-center gap-2">
                             {canOutreach && (
                                 <button
                                     type="button"
@@ -946,70 +1044,89 @@ export default function CaseConversation({
                                     Следующая заявка
                                 </button>
                             )}
-                            {canWrite ? (
-                                <>
-                                    {isPending && (
-                                        <button
-                                            onClick={() => takeMutation.mutate()}
-                                            disabled={takeMutation.isPending || caseActionBusy}
-                                            className="bg-primary text-primary-foreground px-4 py-2 rounded hover:bg-primary/90 disabled:opacity-50"
-                                        >
-                                            {takeMutation.isPending ? "Берём..." : "Взять заявку"}
-                                        </button>
-                                    )}
-                                    {isActive && (
-                                        <>
-                                            <button
-                                                type="button"
-                                                onClick={() => setActionPanel((current) => current === "reassign" ? null : "reassign")}
-                                                disabled={caseActionBusy}
-                                                className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-50"
-                                                data-testid="case-reassign-toggle"
-                                            >
-                                                {actionPanel === "reassign" ? "Скрыть передачу" : "Передать"}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setActionPanel((current) => current === "snooze" ? null : "snooze")}
-                                                disabled={caseActionBusy}
-                                                className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-50"
-                                                data-testid="case-snooze-toggle"
-                                            >
-                                                {caseDetail.snoozed_until ? "Изменить отсрочку" : "Отложить"}
-                                            </button>
-                                            <button
-                                                onClick={() => resolveMutation.mutate()}
-                                                disabled={resolveMutation.isPending || caseActionBusy}
-                                                className="bg-foreground text-background px-4 py-2 rounded hover:bg-foreground/90 disabled:opacity-50"
-                                            >
-                                                {resolveMutation.isPending ? "Закрываем..." : "Закрыть заявку"}
-                                            </button>
-                                            <button
-                                                onClick={() => returnMutation.mutate()}
-                                                disabled={returnMutation.isPending || caseActionBusy}
-                                                className="border border-border/60 px-4 py-2 rounded text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
-                                            >
-                                                {returnMutation.isPending ? "Возвращаем..." : "Вернуть боту"}
-                                            </button>
-                                        </>
-                                    )}
-                                    {isResolved && (
-                                        <button
-                                            type="button"
-                                            onClick={() => reopenMutation.mutate()}
-                                            disabled={reopenMutation.isPending}
-                                            className="rounded bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-                                            data-testid="case-reopen"
-                                        >
-                                            {reopenMutation.isPending ? "Возвращаем..." : "Вернуть в работу"}
-                                        </button>
-                                    )}
-                                </>
-                            ) : (
-                                <span className="text-xs text-muted-foreground self-center">
-                                    Только просмотр
+                        </div>
+                        <div className="flex min-w-0 flex-col items-start gap-2 sm:items-end">
+                            {canWrite && (
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                    Работа по заявке
                                 </span>
                             )}
+                            <div className="flex flex-wrap justify-end gap-2">
+                                {canWrite ? (
+                                    <>
+                                        {isPending && (
+                                            <button
+                                                onClick={() => takeMutation.mutate()}
+                                                disabled={takeMutation.isPending || caseActionBusy}
+                                                className="rounded bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                                            >
+                                                {takeMutation.isPending ? "Берём..." : "Взять заявку"}
+                                            </button>
+                                        )}
+                                        {isActive && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setActionPanel((current) => current === "reassign" ? null : "reassign")}
+                                                    disabled={caseActionBusy}
+                                                    className={`rounded border px-4 py-2 text-sm font-semibold disabled:opacity-50 ${
+                                                        actionPanel === "reassign"
+                                                            ? "border-primary bg-primary/5 text-primary"
+                                                            : "border-border/60 text-foreground hover:bg-muted"
+                                                    }`}
+                                                    aria-pressed={actionPanel === "reassign"}
+                                                    data-testid="case-reassign-toggle"
+                                                >
+                                                    Передать
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setActionPanel((current) => current === "snooze" ? null : "snooze")}
+                                                    disabled={caseActionBusy}
+                                                    className={`rounded border px-4 py-2 text-sm font-semibold disabled:opacity-50 ${
+                                                        actionPanel === "snooze"
+                                                            ? "border-primary bg-primary/5 text-primary"
+                                                            : "border-border/60 text-foreground hover:bg-muted"
+                                                    }`}
+                                                    aria-pressed={actionPanel === "snooze"}
+                                                    data-testid="case-snooze-toggle"
+                                                >
+                                                    {caseDetail.snoozed_until ? "Изменить отсрочку" : "Отложить"}
+                                                </button>
+                                                <button
+                                                    onClick={() => returnMutation.mutate()}
+                                                    disabled={returnMutation.isPending || caseActionBusy}
+                                                    className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
+                                                >
+                                                    {returnMutation.isPending ? "Возвращаем..." : "Вернуть боту"}
+                                                </button>
+                                                <button
+                                                    onClick={() => resolveMutation.mutate()}
+                                                    disabled={resolveMutation.isPending || caseActionBusy}
+                                                    className="rounded bg-foreground px-4 py-2 text-sm font-semibold text-background hover:bg-foreground/90 disabled:opacity-50"
+                                                >
+                                                    {resolveMutation.isPending ? "Закрываем..." : "Закрыть заявку"}
+                                                </button>
+                                            </>
+                                        )}
+                                        {isResolved && (
+                                            <button
+                                                type="button"
+                                                onClick={() => reopenMutation.mutate()}
+                                                disabled={reopenMutation.isPending}
+                                                className="rounded bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                                                data-testid="case-reopen"
+                                            >
+                                                {reopenMutation.isPending ? "Возвращаем..." : "Вернуть в работу"}
+                                            </button>
+                                        )}
+                                    </>
+                                ) : (
+                                    <span className="self-center text-xs text-muted-foreground">
+                                        Только просмотр
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

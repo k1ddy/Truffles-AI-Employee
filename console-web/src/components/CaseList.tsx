@@ -147,6 +147,14 @@ function formatBulkAssigneeOptionLabel(option: CaseAssigneeOption) {
     return `${option.agent_name} · ${option.open_case_count ?? 0} в работе`;
 }
 
+function bulkToggleClass(active: boolean) {
+    return `rounded-full border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
+        active
+            ? "border-primary bg-primary/5 text-primary"
+            : "border-border/60 text-foreground"
+    }`;
+}
+
 function resolveRecommendedAssignee(options: CaseAssigneeOption[]) {
     if (options.length === 0) {
         return null;
@@ -209,6 +217,15 @@ function getPriorityChip(tier?: string | null): { label: string; className: stri
         return { label: "Низкий", className: "bg-slate-100 text-slate-700" };
     }
     return { label: normalized, className: "bg-muted text-muted-foreground" };
+}
+
+function formatCompactActivityLabel(value: string) {
+    return new Date(value).toLocaleString("ru-RU", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
 }
 
 function isPrivilegedQueueRole(role?: string): boolean {
@@ -1124,7 +1141,7 @@ export default function CaseList({
                         className="text-xs font-semibold text-muted-foreground hover:text-foreground"
                         data-testid="cases-field-toggle"
                     >
-                        Поля {enabledFieldCount}/{FIELD_ORDER.length}
+                        Вид {enabledFieldCount}/{FIELD_ORDER.length}
                     </button>
                     {canBulkManage && visibleCases.length > 0 && (
                         <button
@@ -1155,25 +1172,6 @@ export default function CaseList({
                     >
                         Обновить
                     </button>
-                    <button
-                        type="button"
-                        onClick={() => setAutoRefreshEnabled((prev) => !prev)}
-                        className={`text-xs font-semibold ${autoRefreshButtonClass}`}
-                        aria-pressed={autoRefreshEnabled}
-                        data-testid="cases-auto-refresh-toggle"
-                    >
-                        {autoRefreshLabel}
-                    </button>
-                    {refreshStatusLabel && (
-                        <span
-                            className={`text-xs ${
-                                isFetching ? "text-emerald-700 animate-pulse" : "text-muted-foreground"
-                            }`}
-                            data-testid="cases-refresh-status"
-                        >
-                            {refreshStatusLabel}
-                        </span>
-                    )}
                 </div>
             </div>
 
@@ -1439,9 +1437,6 @@ export default function CaseList({
                     <span className="rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary">
                         {activeQueueView?.label ?? "Все открытые"}
                     </span>
-                    <span className="text-muted-foreground">
-                        {activeQueueView?.description ?? "Базовая очередь для менеджера."}
-                    </span>
                     {queueViewHasManualOverrides && (
                         <span className="font-semibold text-amber-700">
                             Есть ручные фильтры поверх режима
@@ -1452,21 +1447,44 @@ export default function CaseList({
                             {selectedAssigneeLabel}
                         </span>
                     )}
+                    {refreshStatusLabel && (
+                        <span
+                            className={`text-muted-foreground ${
+                                isFetching ? "animate-pulse text-emerald-700" : ""
+                            }`}
+                            data-testid="cases-refresh-status"
+                        >
+                            {refreshStatusLabel}
+                        </span>
+                    )}
                 </div>
                 {fieldPanelOpen && (
-                    <div className="flex w-full flex-wrap items-center gap-3 border-t border-border/60 pt-2" data-testid="cases-field-panel">
-                        {FIELD_ORDER.map((field) => (
-                            <label key={field} className="flex items-center gap-2 text-xs text-foreground/80">
-                                <input
-                                    type="checkbox"
-                                    checked={visibleFields[field]}
-                                    onChange={(event) => updateVisibleField(field, event.target.checked)}
-                                    className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                    data-testid={`cases-field-${field}`}
-                                />
-                                {FIELD_LABELS[field]}
-                            </label>
-                        ))}
+                    <div className="grid w-full gap-3 border-t border-border/60 pt-3 md:grid-cols-[1fr_auto]" data-testid="cases-field-panel">
+                        <div className="flex flex-wrap items-center gap-3">
+                            {FIELD_ORDER.map((field) => (
+                                <label key={field} className="flex items-center gap-2 text-xs text-foreground/80">
+                                    <input
+                                        type="checkbox"
+                                        checked={visibleFields[field]}
+                                        onChange={(event) => updateVisibleField(field, event.target.checked)}
+                                        className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                        data-testid={`cases-field-${field}`}
+                                    />
+                                    {FIELD_LABELS[field]}
+                                </label>
+                            ))}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                            <button
+                                type="button"
+                                onClick={() => setAutoRefreshEnabled((prev) => !prev)}
+                                className={`font-semibold ${autoRefreshButtonClass}`}
+                                aria-pressed={autoRefreshEnabled}
+                                data-testid="cases-auto-refresh-toggle"
+                            >
+                                {autoRefreshLabel}
+                            </button>
+                        </div>
                     </div>
                 )}
                 {showAdvancedFiltersRow && (
@@ -1577,7 +1595,7 @@ export default function CaseList({
                                     setBulkActionMode((current) => current === "reassign" ? null : "reassign");
                                 }}
                                 disabled={!!bulkReassignDisabledReason || bulkActionMutation.isPending}
-                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                className={bulkToggleClass(bulkActionMode === "reassign")}
                                 data-testid="cases-bulk-toggle-reassign"
                             >
                                 Передать
@@ -1589,7 +1607,7 @@ export default function CaseList({
                                     setBulkActionMode((current) => current === "route" ? null : "route");
                                 }}
                                 disabled={!!bulkRouteDisabledReason || bulkActionMutation.isPending}
-                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                className={bulkToggleClass(bulkActionMode === "route")}
                                 data-testid="cases-bulk-toggle-route"
                             >
                                 Распределить
@@ -1601,7 +1619,7 @@ export default function CaseList({
                                     setBulkActionMode((current) => current === "snooze" ? null : "snooze");
                                 }}
                                 disabled={bulkActionMutation.isPending}
-                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                className={bulkToggleClass(bulkActionMode === "snooze")}
                                 data-testid="cases-bulk-toggle-snooze"
                             >
                                 Отложить
@@ -1626,11 +1644,26 @@ export default function CaseList({
                                 </p>
                             ) : (
                                 <div className="flex flex-col gap-3">
-                                    <p className="text-xs text-muted-foreground">
-                                        Сервер распределит выбранные заявки по политике меньшей нагрузки внутри одного филиала.
-                                        Текущий владелец сохраняется, если уже соответствует этой политике.
-                                    </p>
-                                    <div className="flex flex-wrap items-center gap-2">
+                                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3">
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-900/70">
+                                            Политика
+                                        </p>
+                                        <p className="mt-1 text-sm font-semibold text-emerald-950">
+                                            Меньше всего открытых заявок
+                                        </p>
+                                        <p className="mt-1 text-xs text-emerald-900/80">
+                                            Сервер сам распределит выборку внутри одного филиала и сохранит текущего владельца, если нагрузка уже минимальная.
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap justify-end gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setBulkActionMode(null)}
+                                            disabled={bulkActionMutation.isPending}
+                                            className="rounded-full border border-border/60 px-4 py-2 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            Отмена
+                                        </button>
                                         <button
                                             type="button"
                                             onClick={() => bulkActionMutation.mutate()}
@@ -1640,9 +1673,6 @@ export default function CaseList({
                                         >
                                             {bulkActionMutation.isPending ? "Распределяем..." : "Распределить по политике"}
                                         </button>
-                                        <p className="text-xs text-muted-foreground">
-                                            Политика: меньше всего открытых заявок у доступных менеджеров.
-                                        </p>
                                     </div>
                                 </div>
                             )}
@@ -1657,20 +1687,33 @@ export default function CaseList({
                                 </p>
                             ) : (
                                 <div className="flex flex-col gap-3">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        {recommendedBulkAssignee && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setBulkAssigneeId(String(recommendedBulkAssignee.agent_id))}
-                                                className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900"
-                                                disabled={assigneesLoading || bulkActionMutation.isPending || bulkAssigneeId === String(recommendedBulkAssignee.agent_id)}
-                                                data-testid="cases-bulk-reassign-recommend"
-                                            >
-                                                {bulkAssigneeId === String(recommendedBulkAssignee.agent_id)
-                                                    ? "Рекомендация выбрана"
-                                                    : "Выбрать рекомендацию"}
-                                            </button>
-                                        )}
+                                    {recommendedBulkAssignee && (
+                                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3">
+                                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-900/70">
+                                                Рекомендуем
+                                            </p>
+                                            <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                                                <p
+                                                    className="text-xs text-emerald-900"
+                                                    data-testid="cases-bulk-reassign-recommendation"
+                                                >
+                                                    {recommendedBulkAssignee.agent_name} · {recommendedBulkAssignee.open_case_count ?? 0} в работе.
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setBulkAssigneeId(String(recommendedBulkAssignee.agent_id))}
+                                                    className="rounded-full border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-900"
+                                                    disabled={assigneesLoading || bulkActionMutation.isPending || bulkAssigneeId === String(recommendedBulkAssignee.agent_id)}
+                                                    data-testid="cases-bulk-reassign-recommend"
+                                                >
+                                                    {bulkAssigneeId === String(recommendedBulkAssignee.agent_id)
+                                                        ? "Рекомендация выбрана"
+                                                        : `Выбрать ${recommendedBulkAssignee.agent_name}`}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
                                         <select
                                             value={bulkAssigneeId}
                                             onChange={(event) => setBulkAssigneeId(event.target.value)}
@@ -1692,21 +1735,19 @@ export default function CaseList({
                                             className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                                             data-testid="cases-bulk-reassign-submit"
                                         >
-                                            {bulkActionMutation.isPending ? "Передаём..." : "Подтвердить передачу"}
+                                            {bulkActionMutation.isPending ? "Передаём..." : "Передать выбранному"}
                                         </button>
                                     </div>
-                                    <p className="text-xs text-muted-foreground">
-                                        Передача меняет ответственного только у активных заявок в выбранном филиале. Список отсортирован по открытым заявкам.
-                                    </p>
-                                    {recommendedBulkAssignee && (
-                                        <p
-                                            className="text-xs text-emerald-900"
-                                            data-testid="cases-bulk-reassign-recommendation"
+                                    <div className="flex flex-wrap justify-end gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setBulkActionMode(null)}
+                                            disabled={bulkActionMutation.isPending}
+                                            className="rounded-full border border-border/60 px-4 py-2 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
                                         >
-                                            Рекомендуем: {recommendedBulkAssignee.agent_name} · {recommendedBulkAssignee.open_case_count ?? 0} в работе.
-                                            Это наименьшая текущая нагрузка в выбранном филиале.
-                                        </p>
-                                    )}
+                                            Отмена
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -1755,6 +1796,14 @@ export default function CaseList({
                                 <div className="flex flex-wrap items-center gap-2">
                                     <button
                                         type="button"
+                                        onClick={() => setBulkActionMode(null)}
+                                        disabled={bulkActionMutation.isPending}
+                                        className="rounded-full border border-border/60 px-4 py-2 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        Отмена
+                                    </button>
+                                    <button
+                                        type="button"
                                         onClick={() => bulkActionMutation.mutate()}
                                         disabled={bulkActionMutation.isPending}
                                         className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
@@ -1795,7 +1844,7 @@ export default function CaseList({
                         const businessStatus = getCaseBusinessStatusBadge(c);
                         const branchName = branchMap.get(c.branch_id || "") || "-";
                         const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
-                        const activityLabel = new Date(lastActivity).toLocaleString("ru-RU");
+                        const activityLabel = formatCompactActivityLabel(lastActivity);
                         const contactName = c.customer_name || c.customer_phone || c.customer_remote_jid?.split("@")[0] || "Клиент";
                         const contactPhone = c.customer_phone || c.customer_remote_jid?.split("@")[0] || "";
                         const preview = c.last_message_preview || c.user_message || "-";
@@ -1805,53 +1854,53 @@ export default function CaseList({
                         const secondaryAttention = c.attention_reason && !sla.state?.startsWith("reply") && sla.state !== "overdue"
                             ? c.attention_reason
                             : null;
+                        const ownerLabel = c.assigned_to_name || "Без владельца";
+                        const metaParts = [
+                            visibleFields.branch ? branchName : null,
+                            visibleFields.owner ? ownerLabel : null,
+                            visibleFields.activity ? activityLabel : null,
+                            visibleFields.channel ? c.channel : null,
+                            visibleFields.priority && priorityChip ? priorityChip.label : null,
+                        ].filter(Boolean);
                         const content = (
                             <div
-                                className={`rounded-2xl border border-border/60 p-3.5 text-left transition ${
+                                className={`rounded-2xl border border-border/60 p-4 text-left transition ${
                                     isSelected ? "border-primary/60 bg-primary/5 shadow-sm" : "bg-card hover:bg-muted/60"
                                 } ${isBulkSelected && !isSelected ? "border-amber-300 bg-amber-50/70" : ""}`}
                             >
-                                <div className="mb-2 flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <p className="text-sm font-semibold text-foreground">{contactName}</p>
-                                            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                                                {c.id.slice(0, 8)}
-                                            </span>
-                                        </div>
-                                        <p className="text-xs text-muted-foreground">
-                                            {contactPhone || branchName}
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0 space-y-1">
+                                        <p className="truncate text-sm font-semibold text-foreground">{contactName}</p>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            {contactPhone || `Заявка ${c.id.slice(0, 8)}`}
                                         </p>
                                     </div>
-                                    <span className={`px-2 py-1 rounded-full text-[10px] font-semibold ${businessStatus.className}`} data-testid="cases-business-status">
+                                    <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${businessStatus.className}`} data-testid="cases-business-status">
                                         {businessStatus.label}
                                     </span>
                                 </div>
-                                <p className="mb-3 text-xs leading-relaxed text-foreground/80">
+                                <p className="mt-3 text-xs leading-relaxed text-foreground/80">
                                     {preview}
                                 </p>
-                                <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                                <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
                                     <span className={`rounded-full px-2 py-1 font-semibold ${sla.className}`}>
                                         {sla.label}
                                     </span>
-                                    {visibleFields.branch && <span>{branchName}</span>}
-                                    {visibleFields.owner && <span>Владелец: {c.assigned_to_name || "не назначен"}</span>}
-                                    {visibleFields.channel && (
-                                        <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
-                                            {c.channel}
+                                    {metaParts.slice(0, 2).map((part) => (
+                                        <span key={part} className="text-muted-foreground">
+                                            {part}
                                         </span>
-                                    )}
-                                    {visibleFields.activity && <span>{activityLabel}</span>}
-                                    {visibleFields.priority && priorityChip && (
-                                        <span className={`rounded-full px-2 py-1 font-semibold ${priorityChip.className}`}>
-                                            {priorityChip.label}
-                                        </span>
-                                    )}
+                                    ))}
                                 </div>
+                                {metaParts.length > 2 && (
+                                    <p className="mt-2 text-[11px] text-muted-foreground">
+                                        {metaParts.slice(2).join(" · ")}
+                                    </p>
+                                )}
                                 {secondaryAttention && (
-                                    <div className="mt-3 rounded-xl bg-primary/10 px-3 py-2 text-[11px] font-medium text-primary">
+                                    <p className="mt-2 text-[11px] font-medium text-amber-700">
                                         {secondaryAttention}
-                                    </div>
+                                    </p>
                                 )}
                             </div>
                         );
