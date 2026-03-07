@@ -174,7 +174,8 @@
 | Wave15 Live Validation | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-live-validation-a1.md` | No feature PR; evidence gate after Wave15 merge | Подтвердить на live backend без mocks, что `reopen` и sync-bearing action больше не показывают raw technical feedback менеджеру. | Blocked with precise evidence: explicit safe `INSPECT_CASE_LIVE_CASE_ID` missing; dedicated live mutation test now skips instead of fake-pass |
 | Wave16 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave16-a1.md` | Split allowed and expected: `Part A case action surface`, `Part B queue rail simplification` | Полностью пересобрать перегруженные operator surfaces в `Заявках`: action area и левую очередь. | Done (merged via `PR #938`) |
 | Wave17 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-a1.md` | Split allowed and expected: `Part A filter contract`, `Part B rail UX cleanup` | Разделить queue mode, owner scope, advanced diagnostics и presentation prefs, чтобы фильтры в `Заявках` перестали конфликтовать логически и визуально. | In review (`PR #939`) |
-| Wave17 Closeout | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-closeout-a1.md` | No new PR; decision gate for `PR #939` | Подтвердить, что Wave17 закрыл корень конфликта фильтров и не требует отдельного follow-up до новых операторских evidence. | In progress |
+| Wave17 Closeout | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-closeout-a1.md` | No new PR; decision gate for `PR #939` | Подтвердить, что Wave17 закрыл корень конфликта фильтров и не требует отдельного follow-up до новых операторских evidence. | Done (local review complete; PR #939 merged) |
+| Wave18 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave18-a1.md` | Split allowed and expected: `Part A contract extraction`, `Part B rollout + verification` | Довести фильтры `Заявки` до строгого filter-state correctness contract и доказать это deterministic coverage. | In progress (local correctness refactor + deterministic checks green; PR not opened yet) |
 
 ## Wave-by-wave closure contract (mandatory)
 1. `Wave5` closes only when SLA перестает быть абстрактным и становится action-driven на сервере и в ключевых UI surface.
@@ -192,6 +193,7 @@
 13. `Wave16` closes only when `Передать / Отложить / Вернуть в работу` and the left queue rail become readable, hierarchical, and business-clear without regressing the current workspace loop.
 14. `Wave17` closes only when queue view, owner scope, and advanced refinements stop fighting each other and the inbox first screen exposes one clear filtering model.
 15. `Wave17 Closeout` closes only when there is an explicit merge-go/no-go verdict for `PR #939` and an explicit answer whether a Wave18 follow-up is required now.
+16. `Wave18` closes only when filter precedence, role gating, persistence, and request-param emission are deterministic and do not silently violate business logic.
 
 ## TP/PR linkage rules (mandatory)
 - Если wave не помещается в один PR, split обязан быть зафиксирован прямо в wave TP до начала part-реализации.

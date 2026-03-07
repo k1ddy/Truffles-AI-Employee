@@ -2,12 +2,17 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-closeout-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave18-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
 - done:
+  - Wave18 correctness refactor implemented locally: filter precedence moved into `console-web/src/lib/inbox-case-filters.ts`, `CaseList.tsx` no longer lets queue view silently rewrite owner scope or explicit refinements, and workspace prefs now persist canonical `v3` filter state.
+  - Deterministic coverage extended in `console-web/e2e/inspect_case.spec.ts`: queue-view changes preserve owner/status/sort query params; stale privileged owner-scope restore is normalized before the first request for manager role.
+  - Local checks for Wave18 are green: targeted `lint`, `build`, `Playwright inspect_case` (`4 passed, 1 skipped`), and `SESSION_AGENT=a1 scripts/session_check.sh`.
+  - PR `#939` merged into `main` on 2026-03-07; Wave17 filter-model cleanup is shipped, but new operator feedback confirms remaining correctness bugs in filter precedence and state transitions.
+  - Wave18 opened as the next active block: filter-state correctness will now be treated as a strict contract problem with truth-table/deterministic validation, not as another UI-polish pass.
   - PR `#939` opened for Wave17: `feat(console): simplify inbox filter model`.
   - Branch synced with `origin/main` after PR open; `PR #939` is no longer behind base after merge-forward.
   - Wave17 closeout review started: current verdict is `merge-go if checks are green`, and no separate Wave18 follow-up is required now for queue filters.
