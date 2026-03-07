@@ -195,6 +195,7 @@
 | `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md` | Wave24 Task Package for server-owned `Queue State Canon` across Inbox/Calendar before saved views, presets, and shareable URLs | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave25-a1.md` | Wave25 Task Package for personal saved views on top of the shared inbox/calendar queue-state canon | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave26-a1.md` | Wave26 Task Package for managed team presets on the shared inbox/calendar saved-view object with branch/role-targeted defaults | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md` | Wave27 Task Package for shareable inbox/calendar queue URLs via explicit params plus optional `view_id` on the same queue-state/saved-view canon | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |

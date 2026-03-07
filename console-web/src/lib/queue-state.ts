@@ -21,6 +21,8 @@ type SearchParamsLike = {
     get(name: string): string | null;
 };
 
+type SearchParamsInput = string | URLSearchParams | SearchParamsLike;
+
 export type QueueStateSurface = "cases" | "calendar";
 
 type QueueStateRecord = {
@@ -59,6 +61,35 @@ export interface CalendarQueueStateSnapshot {
     queueStatusFilter: BookingStatusFilter;
     queueSearch: string;
 }
+
+const CASE_QUEUE_URL_PARAM_KEYS = [
+    "view_id",
+    "status",
+    "queue_view",
+    "assigned_to_me",
+    "assignee_id",
+    "unassigned",
+    "branch_id",
+    "q",
+    "has_delivery_error",
+    "has_pending_outbox",
+    "has_human_lock",
+    "date_from",
+    "date_to",
+    "resolved_from",
+    "resolved_to",
+    "sort_by",
+] as const;
+
+const CALENDAR_QUEUE_URL_PARAM_KEYS = [
+    "view_id",
+    "date",
+    "date_from",
+    "date_to",
+    "lane",
+    "status",
+    "q",
+] as const;
 
 function trimToUndefined(value: string | null | undefined): string | undefined {
     if (typeof value !== "string") {
@@ -111,6 +142,41 @@ function normalizeCalendarStatusFilter(value: unknown): BookingStatusFilter {
         || value === "cancelled"
         ? value
         : "all";
+}
+
+function toMutableSearchParams(searchParams: SearchParamsInput): URLSearchParams {
+    if (typeof searchParams === "string") {
+        return new URLSearchParams(searchParams.startsWith("?") ? searchParams.slice(1) : searchParams);
+    }
+    if (searchParams instanceof URLSearchParams) {
+        return new URLSearchParams(searchParams.toString());
+    }
+    const params = new URLSearchParams();
+    for (const key of [...CASE_QUEUE_URL_PARAM_KEYS, ...CALENDAR_QUEUE_URL_PARAM_KEYS]) {
+        const value = searchParams.get(key);
+        if (value != null) {
+            params.set(key, value);
+        }
+    }
+    return params;
+}
+
+function stripQueueUrlParams(params: URLSearchParams, surface: QueueStateSurface): URLSearchParams {
+    const next = new URLSearchParams(params.toString());
+    const keys = surface === "cases" ? CASE_QUEUE_URL_PARAM_KEYS : CALENDAR_QUEUE_URL_PARAM_KEYS;
+    for (const key of keys) {
+        next.delete(key);
+    }
+    return next;
+}
+
+function buildHref(pathname: string, params: URLSearchParams): string {
+    const queryString = params.toString();
+    return queryString ? `${pathname}?${queryString}` : pathname;
+}
+
+export function readQueueStateViewIdFromUrl(searchParams: SearchParamsLike): string | null {
+    return trimToUndefined(searchParams.get("view_id")) ?? null;
 }
 
 export function readCasesQueueStateFromServer(
@@ -390,6 +456,39 @@ export function buildCasesQueueUrlParams(
     return params;
 }
 
+export function buildCasesQueueHref(
+    snapshot: CasesQueueStateSnapshot,
+    {
+        pathname,
+        currentSearch,
+        branchFilterEnabled,
+        privilegedOwnerFilterVisible,
+        viewId,
+    }: {
+        pathname: string;
+        currentSearch: SearchParamsInput;
+        branchFilterEnabled: boolean;
+        privilegedOwnerFilterVisible: boolean;
+        viewId?: string | null;
+    },
+): string {
+    const params = stripQueueUrlParams(toMutableSearchParams(currentSearch), "cases");
+    if (viewId) {
+        params.set("view_id", viewId);
+    }
+    const queueParams = buildCasesQueueUrlParams(snapshot, {
+        branchFilterEnabled,
+        privilegedOwnerFilterVisible,
+    });
+    if (Array.from(queueParams.keys()).length === 0) {
+        queueParams.set("status", snapshot.modeScope);
+    }
+    queueParams.forEach((value, key) => {
+        params.set(key, value);
+    });
+    return buildHref(pathname, params);
+}
+
 export function readCalendarQueueStateFromServer(
     record: QueueStateRecord | null | undefined,
     {
@@ -498,4 +597,37 @@ export function buildCalendarQueueUrlParams(
         params.set("q", query);
     }
     return params;
+}
+
+export function buildCalendarQueueHref(
+    snapshot: CalendarQueueStateSnapshot,
+    {
+        pathname,
+        currentSearch,
+        defaultSelectedDate,
+        defaultQueueLane,
+        viewId,
+    }: {
+        pathname: string;
+        currentSearch: SearchParamsInput;
+        defaultSelectedDate: string;
+        defaultQueueLane: BookingQueueLane;
+        viewId?: string | null;
+    },
+): string {
+    const params = stripQueueUrlParams(toMutableSearchParams(currentSearch), "calendar");
+    if (viewId) {
+        params.set("view_id", viewId);
+    }
+    const queueParams = buildCalendarQueueUrlParams(snapshot, {
+        defaultSelectedDate,
+        defaultQueueLane,
+    });
+    if (Array.from(queueParams.keys()).length === 0) {
+        queueParams.set("lane", snapshot.queueLane);
+    }
+    queueParams.forEach((value, key) => {
+        params.set(key, value);
+    });
+    return buildHref(pathname, params);
 }

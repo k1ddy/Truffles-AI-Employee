@@ -11198,6 +11198,34 @@ async def list_queue_state_views(
     return ConsoleSavedViewListResponse(items=[_serialize_saved_view(item) for item in items])
 
 
+@router.get(
+    "/queue-state/views/{view_id}",
+    response_model=ConsoleSavedView,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_queue_state_view(
+    view_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleSavedView:
+    context = get_console_context(request, db)
+    record = _get_saved_view_for_client(
+        db,
+        client_id=context.client.id,
+        view_id=view_id,
+    )
+    if record is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+    _assert_saved_view_access(context, record=record, mutate=False)
+    _require_queue_state_permission(context, record.surface)
+    record.is_applicable = _saved_view_applies_to_context(
+        record,
+        role=context.role,
+        current_branch_id=_saved_view_current_branch_id(context),
+    )
+    return _serialize_saved_view(record)
+
+
 @router.post(
     "/queue-state/views",
     response_model=ConsoleSavedView,

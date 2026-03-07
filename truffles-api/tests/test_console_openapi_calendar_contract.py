@@ -44,7 +44,7 @@ def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
     expected_methods = {
         "/queue-state/current": {"get", "put"},
         "/queue-state/views": {"get", "post"},
-        "/queue-state/views/{view_id}": {"patch", "delete"},
+        "/queue-state/views/{view_id}": {"get", "patch", "delete"},
         "/calendar/specialists": {"get", "post"},
         "/calendar/specialists/{specialist_id}": {"patch"},
         "/calendar/specialists/{specialist_id}/enable": {"post"},

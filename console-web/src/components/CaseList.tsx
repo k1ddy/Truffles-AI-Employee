@@ -47,6 +47,7 @@ import {
     writeInboxCaseListPrefs,
 } from "@/lib/inbox-workspace";
 import {
+    buildCasesQueueHref,
     buildCasesQueueStatePayload,
     findPreferredDefaultSavedView,
     findSavedViewByFingerprint,
@@ -56,6 +57,7 @@ import {
     readCasesQueueStateFromServer,
     readCasesQueueStateFromSavedView,
     readCasesQueueStateFromUrl,
+    readQueueStateViewIdFromUrl,
     type CasesQueueStateSnapshot,
 } from "@/lib/queue-state";
 import toast from "react-hot-toast";
@@ -382,6 +384,15 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
         || fallback;
 }
 
+async function copyText(text: string): Promise<void> {
+    try {
+        await navigator.clipboard.writeText(text);
+        return;
+    } catch {
+        window.prompt("Скопируйте ссылку", text);
+    }
+}
+
 function getSavedViewBranchLabel(branchId: string | null | undefined, branchMap: Map<string, string>): string | null {
     if (!branchId) {
         return null;
@@ -628,6 +639,10 @@ export default function CaseList({
     );
     const privilegedOwnerFilterVisible = isPrivilegedQueueRole(viewerRole);
     const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
+    const urlSavedViewId = useMemo(
+        () => readQueueStateViewIdFromUrl(searchParams),
+        [searchParams],
+    );
     const urlQueueState = useMemo(
         () =>
             readCasesQueueStateFromUrl(searchParams, {
@@ -637,8 +652,11 @@ export default function CaseList({
         [branchFilterEnabled, privilegedOwnerFilterVisible, searchParams],
     );
     const urlQueueStateKey = useMemo(
-        () => JSON.stringify(urlQueueState ?? null),
-        [urlQueueState],
+        () => JSON.stringify({
+            viewId: urlSavedViewId,
+            queueState: urlQueueState ?? null,
+        }),
+        [urlQueueState, urlSavedViewId],
     );
     const resetPagination = () => {
         setCursor(undefined);
@@ -686,6 +704,16 @@ export default function CaseList({
         retry: 1,
         staleTime: 60_000,
     });
+    const urlSavedViewQuery = useQuery({
+        queryKey: ["queue-state-view", "cases", urlSavedViewId],
+        queryFn: async () => {
+            const response = await queueStateApi.getView(urlSavedViewId as string);
+            return response.data;
+        },
+        enabled: hasToken && !!urlSavedViewId,
+        retry: false,
+        staleTime: 60_000,
+    });
     const savedViews = useMemo(
         () => savedViewsQuery.data?.items ?? [],
         [savedViewsQuery.data?.items],
@@ -702,6 +730,10 @@ export default function CaseList({
         () => savedViews.filter((view) => isTeamSavedView(view)),
         [savedViews],
     );
+    const urlSavedView = useMemo(
+        () => urlSavedViewQuery.data ?? savedViews.find((view) => view.id === urlSavedViewId) ?? null,
+        [savedViews, urlSavedViewId, urlSavedViewQuery.data],
+    );
 
     useEffect(() => {
         if (!workspaceScope) {
@@ -714,7 +746,13 @@ export default function CaseList({
             || currentQueueStateQuery.isFetched
             || currentQueueStateQuery.isError;
         const savedViewsSettled = !hasToken || savedViewsQuery.isFetched || savedViewsQuery.isError;
-        if (!currentQueueStateSettled || !savedViewsSettled || restoredQueueStateRef.current === restoreKey) {
+        const urlSavedViewSettled = !urlSavedViewId || urlSavedViewQuery.isFetched || urlSavedViewQuery.isError;
+        if (
+            !currentQueueStateSettled
+            || !savedViewsSettled
+            || !urlSavedViewSettled
+            || restoredQueueStateRef.current === restoreKey
+        ) {
             return;
         }
         const restored = normalizeStoredPrefs(readInboxCaseListPrefs(workspaceScope), {
@@ -734,13 +772,19 @@ export default function CaseList({
             branchFilterEnabled,
             privilegedOwnerFilterVisible,
         });
+        const urlSavedViewSnapshot = readCasesQueueStateFromSavedView(urlSavedView, {
+            branchFilterEnabled,
+            privilegedOwnerFilterVisible,
+        });
         const defaultSavedViewSnapshot = readCasesQueueStateFromSavedView(defaultSavedView, {
             branchFilterEnabled,
             privilegedOwnerFilterVisible,
         });
-        const queueSnapshot = urlQueueState ?? serverSnapshot ?? defaultSavedViewSnapshot ?? localSnapshot;
+        const queueSnapshot = urlQueueState ?? urlSavedViewSnapshot ?? serverSnapshot ?? defaultSavedViewSnapshot ?? localSnapshot;
         const source = urlQueueState
             ? "url"
+            : urlSavedViewSnapshot
+                ? "url_view"
             : serverSnapshot
                 ? "server"
                 : defaultSavedViewSnapshot
@@ -748,7 +792,9 @@ export default function CaseList({
                     : localSnapshot
                     ? "local"
                     : "default";
-        const matchedSavedView = source === "saved_default"
+        const matchedSavedView = (urlSavedView && (source === "url" || source === "url_view"))
+            ? urlSavedView
+            : source === "saved_default"
             ? defaultSavedView
             : queueSnapshot
                 ? findSavedViewByFingerprint(
@@ -819,6 +865,10 @@ export default function CaseList({
         savedViews,
         savedViewsQuery.isError,
         savedViewsQuery.isFetched,
+        urlSavedView,
+        urlSavedViewId,
+        urlSavedViewQuery.isError,
+        urlSavedViewQuery.isFetched,
         urlQueueState,
         urlQueueStateKey,
         workspaceScope,
@@ -946,6 +996,23 @@ export default function CaseList({
         ? getSavedViewFingerprint(selectedSavedView) !== currentQueueFingerprint
         : false;
     const savedViewsLoading = savedViewsQuery.isFetching && savedViews.length === 0;
+    const queueShareHref = useMemo(() => {
+        if (typeof window === "undefined") {
+            return "";
+        }
+        return buildCasesQueueHref(currentQueueSnapshot, {
+            pathname: window.location.pathname,
+            currentSearch: window.location.search,
+            branchFilterEnabled,
+            privilegedOwnerFilterVisible,
+            viewId: activeSavedViewId,
+        });
+    }, [
+        activeSavedViewId,
+        branchFilterEnabled,
+        currentQueueSnapshot,
+        privilegedOwnerFilterVisible,
+    ]);
 
     useEffect(() => {
         if (!saveViewComposerOpen || saveViewDefaultTouched) {
@@ -1051,6 +1118,20 @@ export default function CaseList({
         savedViewsQuery.isFetching,
         selectedSavedView,
     ]);
+
+    useEffect(() => {
+        if (!stateReady || !restoredQueueStateRef.current || typeof window === "undefined") {
+            return;
+        }
+        if (!queueShareHref) {
+            return;
+        }
+        const currentHref = `${window.location.pathname}${window.location.search}`;
+        if (currentHref === queueShareHref) {
+            return;
+        }
+        window.history.replaceState(window.history.state, "", queueShareHref);
+    }, [queueShareHref, stateReady]);
 
     useEffect(() => {
         if (!filtersCompact) {
@@ -1395,6 +1476,16 @@ export default function CaseList({
     const savedViewMutationPending = createSavedViewMutation.isPending
         || updateSavedViewMutation.isPending
         || deleteSavedViewMutation.isPending;
+
+    const handleCopyQueueLink = async () => {
+        if (!queueShareHref || typeof window === "undefined") {
+            toast.error("Не удалось собрать ссылку на очередь");
+            return;
+        }
+        const absoluteHref = new URL(queueShareHref, window.location.origin).toString();
+        await copyText(absoluteHref);
+        toast.success("Ссылка на очередь скопирована");
+    };
 
     const handleOpenSaveViewComposer = () => {
         setSaveViewDraftName("");
@@ -1896,6 +1987,16 @@ export default function CaseList({
                             </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    void handleCopyQueueLink();
+                                }}
+                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                data-testid="cases-queue-copy-link"
+                            >
+                                Копировать ссылку
+                            </button>
                             <button
                                 type="button"
                                 onClick={handleOpenSaveViewComposer}

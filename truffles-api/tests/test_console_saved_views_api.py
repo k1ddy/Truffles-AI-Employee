@@ -438,6 +438,46 @@ async def test_list_queue_state_views_marks_team_preset_applicability(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_get_queue_state_view_returns_personal_view_for_owner(monkeypatch) -> None:
+    context = _mock_context()
+    record = _saved_view_record()
+    record.agent_id = context.agent.id
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_get_saved_view_for_client", lambda *args, **kwargs: record)
+
+    response = await console_router.get_queue_state_view(
+        view_id=record.id,
+        request=Mock(),
+        db=Mock(),
+    )
+
+    assert response.id == record.id
+    assert response.scope == "personal"
+    assert response.is_applicable is True
+
+
+@pytest.mark.asyncio
+async def test_get_queue_state_view_returns_not_found_for_inaccessible_team_preset(monkeypatch) -> None:
+    branch_id = uuid4()
+    context = _mock_context(role="viewer", selected_branch_id=branch_id, allowed_branch_ids={branch_id})
+    record = _saved_view_record(scope="team", target_branch_id=branch_id, target_role="manager")
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "_get_saved_view_for_client", lambda *args, **kwargs: record)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_queue_state_view(
+            view_id=record.id,
+            request=Mock(),
+            db=Mock(),
+        )
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
 async def test_update_queue_state_view_returns_not_found(monkeypatch) -> None:
     context = _mock_context()
 

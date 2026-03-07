@@ -1292,6 +1292,8 @@ export const queueStateApi = {
         apiClient.get<QueueSavedViewListResponse>("/queue-state/views", {
             params: { surface },
         }),
+    getView: (viewId: string) =>
+        apiClient.get<QueueSavedView>(`/queue-state/views/${viewId}`),
     createView: (data: QueueSavedViewCreateInput) =>
         apiClient.post<QueueSavedView>("/queue-state/views", data as QueueSavedViewCreateRequest),
     updateView: (viewId: string, data: QueueSavedViewUpdateInput) =>

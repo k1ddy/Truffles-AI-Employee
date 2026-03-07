@@ -2,12 +2,23 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave26-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Реализовать Wave26 managed team presets для `Заявки` и `Записи` поверх Wave25 saved-view object: branch/role-targeted admin-managed defaults, one shared catalog for personal+team views, and restore precedence `URL override -> server current -> managed team default -> personal default -> local fallback` without opening shareable URLs or richer routing.
+- scope: Реализовать Wave27 shareable queue URLs для `Заявки` и `Записи` поверх Wave24-26 canon: explicit queue params + optional `view_id`, URL restore precedence, and copyable handoff links without touching richer routing or supervisor-grade booking governance.
 - done:
+  - Wave27 implementation completed locally:
+    - backend adds `GET /console/v1/queue-state/views/{view_id}` so a specific saved view can be resolved with the same ACL semantics as the existing catalog;
+    - frontend `CaseList` and `calendar/page.tsx` now restore queue state by precedence `URL queue params -> URL view_id -> server current -> managed team default -> personal default -> local fallback`;
+    - both queue surfaces now keep the browser URL aligned with the active queue slice and expose one-click `Копировать ссылку` actions built from explicit queue params plus optional `view_id`.
+  - Wave27 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `40 passed`
+    - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/api-client.ts --file src/lib/queue-state.ts --file src/components/CaseList.tsx --file src/app/calendar/page.tsx` → `pass`
+    - `cd console-web && npm run build` → `pass`
   - Wave26 implementation completed locally:
     - backend extends `console_saved_views` with managed scope/targeting (`scope`, `created_by_agent_id`, `target_branch_id`, `target_role`) and keeps personal/team presets on one canonical queue-state object;
     - `/console/v1/queue-state/views` now returns personal views plus applicable/all team presets depending on permission, and owner/admin mutations enforce `team.write` ACL plus branch/role targeting validation;
@@ -217,8 +228,8 @@
   - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
   - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - Wave26 managed presets are locally green; the next valid product block is shareable queue URLs on top of the same `view_id` catalog, not richer routing.
-  - Do not open richer routing directly; it remains blocked by later bookings supervisor-grade governance (`follow-up owner/due/history`) even after queue-state canon and managed presets exist.
+  - Wave27 shareable queue URLs are locally green; the next valid product block is supervisor-grade booking governance (`follow-up owner`, `due`, `history/archive`) before richer routing.
+  - Do not open richer routing directly; it remains blocked until booking governance becomes explicit even after queue-state canon, saved views, managed presets, and shareable URLs exist.
 - evidence:
   - `truffles-api/app/models/console_queue_state.py`
   - `truffles-api/app/services/console_queue_state.py`
@@ -399,4 +410,4 @@
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`3 passed`)
   - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
   - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title \"fix(console): harden operator action feedback\" ...` (`PR #937`)
-- last_updated: 2026-03-07T20:48:00+05:00
+- last_updated: 2026-03-07T20:18:38+05:00

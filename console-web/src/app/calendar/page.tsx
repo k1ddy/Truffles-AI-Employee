@@ -28,6 +28,7 @@ import {
     writeCalendarWorkspacePrefs,
 } from "@/lib/inbox-workspace";
 import {
+    buildCalendarQueueHref,
     buildCalendarQueueStatePayload,
     findPreferredDefaultSavedView,
     findSavedViewByFingerprint,
@@ -37,6 +38,7 @@ import {
     readCalendarQueueStateFromServer,
     readCalendarQueueStateFromSavedView,
     readCalendarQueueStateFromUrl,
+    readQueueStateViewIdFromUrl,
     type CalendarQueueStateSnapshot,
 } from "@/lib/queue-state";
 import { getBookingStatusLabel, getBookingStatusColor } from "@/utils/labels";
@@ -87,6 +89,15 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
     return (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
         || (error as Error)?.message
         || fallback;
+}
+
+async function copyText(text: string): Promise<void> {
+    try {
+        await navigator.clipboard.writeText(text);
+        return;
+    } catch {
+        window.prompt("Скопируйте ссылку", text);
+    }
 }
 
 const SAVED_VIEW_SCOPE_LABELS = {
@@ -257,6 +268,10 @@ export default function CalendarPage() {
     const saveViewInputRef = useRef<HTMLInputElement | null>(null);
     const defaultSelectedDate = focusedConversationId || focusedCaseId ? "" : today;
     const defaultQueueLane: BookingQueueLane = focusedConversationId ? "all" : "attention";
+    const urlSavedViewId = useMemo(
+        () => readQueueStateViewIdFromUrl(searchParams),
+        [searchParams],
+    );
     const urlQueueState = useMemo(
         () =>
             readCalendarQueueStateFromUrl(searchParams, {
@@ -266,8 +281,11 @@ export default function CalendarPage() {
         [defaultQueueLane, defaultSelectedDate, searchParams],
     );
     const urlQueueStateKey = useMemo(
-        () => JSON.stringify(urlQueueState ?? null),
-        [urlQueueState],
+        () => JSON.stringify({
+            viewId: urlSavedViewId,
+            queueState: urlQueueState ?? null,
+        }),
+        [urlQueueState, urlSavedViewId],
     );
 
     // Form state
@@ -326,6 +344,16 @@ export default function CalendarPage() {
         retry: 1,
         staleTime: 60_000,
     });
+    const urlSavedViewQuery = useQuery({
+        queryKey: ["queue-state-view", "calendar", urlSavedViewId],
+        queryFn: async () => {
+            const response = await queueStateApi.getView(urlSavedViewId as string);
+            return response.data;
+        },
+        enabled: !!session && canReadCalendar && !!urlSavedViewId,
+        retry: false,
+        staleTime: 60_000,
+    });
     const savedViews = useMemo(
         () => savedViewsQuery.data?.items ?? [],
         [savedViewsQuery.data?.items],
@@ -341,6 +369,10 @@ export default function CalendarPage() {
     const teamSavedViews = useMemo(
         () => savedViews.filter((view) => isTeamSavedView(view)),
         [savedViews],
+    );
+    const urlSavedView = useMemo(
+        () => urlSavedViewQuery.data ?? savedViews.find((view) => view.id === urlSavedViewId) ?? null,
+        [savedViews, urlSavedViewId, urlSavedViewQuery.data],
     );
     const currentQueueSnapshot = useMemo<CalendarQueueStateSnapshot>(
         () => ({
@@ -392,6 +424,23 @@ export default function CalendarPage() {
         ? getSavedViewFingerprint(selectedSavedView) !== currentQueueFingerprint
         : false;
     const savedViewsLoading = savedViewsQuery.isFetching && savedViews.length === 0;
+    const queueShareHref = useMemo(() => {
+        if (typeof window === "undefined") {
+            return "";
+        }
+        return buildCalendarQueueHref(currentQueueSnapshot, {
+            pathname: window.location.pathname,
+            currentSearch: window.location.search,
+            defaultSelectedDate,
+            defaultQueueLane,
+            viewId: activeSavedViewId,
+        });
+    }, [
+        activeSavedViewId,
+        currentQueueSnapshot,
+        defaultQueueLane,
+        defaultSelectedDate,
+    ]);
 
     useEffect(() => {
         restoredCalendarScopeRef.current = null;
@@ -418,7 +467,13 @@ export default function CalendarPage() {
             || currentQueueStateQuery.isFetched
             || currentQueueStateQuery.isError;
         const savedViewsSettled = !session || !canReadCalendar || savedViewsQuery.isFetched || savedViewsQuery.isError;
-        if (!currentQueueStateSettled || !savedViewsSettled || restoredCalendarScopeRef.current === restoreKey) {
+        const urlSavedViewSettled = !urlSavedViewId || urlSavedViewQuery.isFetched || urlSavedViewQuery.isError;
+        if (
+            !currentQueueStateSettled
+            || !savedViewsSettled
+            || !urlSavedViewSettled
+            || restoredCalendarScopeRef.current === restoreKey
+        ) {
             return;
         }
         const prefs = readCalendarWorkspacePrefs(calendarWorkspaceScope);
@@ -434,13 +489,19 @@ export default function CalendarPage() {
             defaultSelectedDate,
             defaultQueueLane,
         });
+        const urlSavedViewSnapshot = readCalendarQueueStateFromSavedView(urlSavedView, {
+            defaultSelectedDate,
+            defaultQueueLane,
+        });
         const defaultSavedViewSnapshot = readCalendarQueueStateFromSavedView(defaultSavedView, {
             defaultSelectedDate,
             defaultQueueLane,
         });
-        const queueSnapshot = urlQueueState ?? serverSnapshot ?? defaultSavedViewSnapshot ?? localSnapshot;
+        const queueSnapshot = urlQueueState ?? urlSavedViewSnapshot ?? serverSnapshot ?? defaultSavedViewSnapshot ?? localSnapshot;
         const source = urlQueueState
             ? "url"
+            : urlSavedViewSnapshot
+                ? "url_view"
             : serverSnapshot
                 ? "server"
                 : defaultSavedViewSnapshot
@@ -448,7 +509,9 @@ export default function CalendarPage() {
                     : localSnapshot
                     ? "local"
                     : "default";
-        const matchedSavedView = source === "saved_default"
+        const matchedSavedView = (urlSavedView && (source === "url" || source === "url_view"))
+            ? urlSavedView
+            : source === "saved_default"
             ? defaultSavedView
             : queueSnapshot
                 ? findSavedViewByFingerprint(savedViews, getCalendarQueueStateFingerprint(queueSnapshot), {
@@ -492,6 +555,10 @@ export default function CalendarPage() {
         savedViews,
         savedViewsQuery.isError,
         savedViewsQuery.isFetched,
+        urlSavedView,
+        urlSavedViewId,
+        urlSavedViewQuery.isError,
+        urlSavedViewQuery.isFetched,
         urlQueueState,
         urlQueueStateKey,
     ]);
@@ -553,6 +620,20 @@ export default function CalendarPage() {
         savedViewsQuery.isFetching,
         selectedSavedView,
     ]);
+
+    useEffect(() => {
+        if (!restoredCalendarScopeRef.current || typeof window === "undefined") {
+            return;
+        }
+        if (!queueShareHref) {
+            return;
+        }
+        const currentHref = `${window.location.pathname}${window.location.search}`;
+        if (currentHref === queueShareHref) {
+            return;
+        }
+        window.history.replaceState(window.history.state, "", queueShareHref);
+    }, [queueShareHref]);
 
     useEffect(() => {
         if (!calendarWorkspaceScope || !restoredCalendarScopeRef.current) {
@@ -775,6 +856,16 @@ export default function CalendarPage() {
     const savedViewMutationPending = createSavedViewMutation.isPending
         || updateSavedViewMutation.isPending
         || deleteSavedViewMutation.isPending;
+
+    const handleCopyQueueLink = async () => {
+        if (!queueShareHref || typeof window === "undefined") {
+            toast.error("Не удалось собрать ссылку на очередь");
+            return;
+        }
+        const absoluteHref = new URL(queueShareHref, window.location.origin).toString();
+        await copyText(absoluteHref);
+        toast.success("Ссылка на очередь скопирована");
+    };
 
     const handleOpenSaveViewComposer = () => {
         setSaveViewDraftName("");
@@ -1377,6 +1468,16 @@ export default function CalendarPage() {
                                         </p>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                void handleCopyQueueLink();
+                                            }}
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                            data-testid="calendar-queue-copy-link"
+                                        >
+                                            Копировать ссылку
+                                        </button>
                                         <button
                                             type="button"
                                             onClick={handleOpenSaveViewComposer}

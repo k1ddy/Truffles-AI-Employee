@@ -204,6 +204,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/queue-state/views/{view_id}:
+    get:
+      tags:
+      - console
+      summary: Get Queue State View
+      operationId: get_queue_state_view_console_v1_queue_state_views__view_id__get
+      parameters:
+      - name: view_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: View Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSavedView'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     patch:
       tags:
       - console
