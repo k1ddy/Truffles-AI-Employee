@@ -43,6 +43,8 @@ def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
 
     expected_methods = {
         "/queue-state/current": {"get", "put"},
+        "/queue-state/views": {"get", "post"},
+        "/queue-state/views/{view_id}": {"patch", "delete"},
         "/calendar/specialists": {"get", "post"},
         "/calendar/specialists/{specialist_id}": {"patch"},
         "/calendar/specialists/{specialist_id}/enable": {"post"},
@@ -86,6 +88,10 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
         ("BookingsListResponse",),
         ("ConsoleQueueStateCurrentRequest",),
         ("ConsoleQueueStateCurrentResponse",),
+        ("ConsoleSavedView",),
+        ("ConsoleSavedViewListResponse",),
+        ("ConsoleSavedViewCreateRequest",),
+        ("ConsoleSavedViewUpdateRequest",),
     ]
     for aliases in required_schema_aliases:
         assert any(name in schemas for name in aliases), (
@@ -213,6 +219,26 @@ def test_queue_state_current_response_contract_exposes_restore_payload() -> None
     assert (properties.get("query_state") or {}).get("type") == "object"
     assert "updated_at" in properties
     assert _has_string_type(properties.get("updated_at") or {})
+
+
+def test_queue_state_saved_views_contract_exposes_catalog_payload() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    saved_view_schema = schemas.get("ConsoleSavedView") or {}
+    properties = saved_view_schema.get("properties") or {}
+
+    assert "id" in properties
+    assert _has_string_type(properties.get("id") or {})
+    assert "surface" in properties
+    assert _has_string_type(properties.get("surface") or {})
+    assert "name" in properties
+    assert _has_string_type(properties.get("name") or {})
+    assert "version" in properties
+    assert _has_integer_type(properties.get("version") or {})
+    assert "query_state" in properties
+    assert (properties.get("query_state") or {}).get("type") == "object"
+    assert "is_default" in properties
+    assert (properties.get("is_default") or {}).get("type") == "boolean"
 
 
 def test_bookings_list_response_contract_exposes_cursor_and_has_more() -> None:

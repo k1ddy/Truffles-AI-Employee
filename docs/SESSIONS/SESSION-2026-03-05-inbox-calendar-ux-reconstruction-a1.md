@@ -2,12 +2,25 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave25-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Реализовать Wave24 `Queue State Canon`: server-owned current queue state для `Заявки` и `Записи` с URL-overrides -> server-current -> local-fallback precedence, без открытия saved views/presets/routing сверх foundation layer.
+- scope: Реализовать Wave25 personal named saved views для `Заявки` и `Записи` поверх Wave24 `Queue State Canon`: server-owned saved-view catalog, default-per-surface semantics, and bounded save/apply/update/delete UX without opening managed presets/share URLs/routing.
 - done:
+  - `PR #947` opened for Wave24 foundation: `https://github.com/k1ddy/Truffles-AI-Employee/pull/947`.
+  - Wave25 implementation completed locally:
+    - backend added `console_saved_views` model + migration + CRUD service + `/console/v1/queue-state/views` `GET/POST/PATCH/DELETE`;
+    - frontend cases/calendar now list, save, apply, update, delete, and mark default personal saved views on top of the queue-state canon;
+    - restore precedence is now effectively `URL override -> server current -> default saved view -> local fallback`, while saved views still exclude local presentation state.
+  - Wave25 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `31 passed`
+    - `cd truffles-api && ruff check app/models/__init__.py app/models/console_saved_view.py app/services/console_saved_views.py app/routers/console.py app/schemas/console.py tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/queue-state.ts --file src/lib/api-client.ts --file src/components/CaseList.tsx --file src/app/calendar/page.tsx` → `pass`
+    - `cd console-web && npm run build` → `pass`
+    - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
   - Wave24 implementation completed locally:
     - backend added `console_queue_states` model + migration + normalization service + `/console/v1/queue-state/current` `GET/PUT`;
     - frontend inbox/calendar now restore operational queue state in precedence `URL override -> server current state -> local fallback`;
@@ -374,4 +387,4 @@
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`3 passed`)
   - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
   - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title \"fix(console): harden operator action feedback\" ...` (`PR #937`)
-- last_updated: 2026-03-06T18:55:25+05:00
+- last_updated: 2026-03-07T20:48:00+05:00

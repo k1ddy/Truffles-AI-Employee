@@ -503,6 +503,17 @@ export type CaseBulkActionResponse = components["schemas"]["ConsoleCaseBulkActio
 export type CaseBulkActionResult = components["schemas"]["ConsoleCaseBulkActionResult"];
 export type CaseReassignRequest = components["schemas"]["ConsoleCaseReassignRequest"];
 export type CaseSnoozeRequest = components["schemas"]["ConsoleCaseSnoozeRequest"];
+export type QueueStateSurface = components["schemas"]["ConsoleQueueStateCurrentRequest"]["surface"];
+export type QueueSavedView = components["schemas"]["ConsoleSavedView"];
+export type QueueSavedViewCreateRequest = components["schemas"]["ConsoleSavedViewCreateRequest"];
+export type QueueSavedViewListResponse = components["schemas"]["ConsoleSavedViewListResponse"];
+export type QueueSavedViewUpdateRequest = components["schemas"]["ConsoleSavedViewUpdateRequest"];
+export type QueueSavedViewCreateInput = Omit<QueueSavedViewCreateRequest, "query_state"> & {
+    query_state?: Record<string, unknown>;
+};
+export type QueueSavedViewUpdateInput = Omit<QueueSavedViewUpdateRequest, "query_state"> & {
+    query_state?: Record<string, unknown>;
+};
 export type Message = components["schemas"]["ConsoleMessage"];
 export type MessageListResponse = components["schemas"]["ConsoleMessageListResponse"];
 export type OutreachDeliveryStatus = "queued" | "delivered" | "failed";
@@ -1274,6 +1285,19 @@ export const casesApi = {
 
     getMessages: (caseId: string, params?: { cursor?: string; limit?: number }) =>
         apiClient.get<MessageListResponse>(`/cases/${caseId}/messages`, { params }),
+};
+
+export const queueStateApi = {
+    listViews: (surface: QueueStateSurface) =>
+        apiClient.get<QueueSavedViewListResponse>("/queue-state/views", {
+            params: { surface },
+        }),
+    createView: (data: QueueSavedViewCreateInput) =>
+        apiClient.post<QueueSavedView>("/queue-state/views", data as QueueSavedViewCreateRequest),
+    updateView: (viewId: string, data: QueueSavedViewUpdateInput) =>
+        apiClient.patch<QueueSavedView>(`/queue-state/views/${viewId}`, data as QueueSavedViewUpdateRequest),
+    deleteView: (viewId: string) =>
+        apiClient.delete<{ success: boolean }>(`/queue-state/views/${viewId}`),
 };
 
 /** Inbox macros endpoints */

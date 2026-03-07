@@ -129,6 +129,162 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/queue-state/views:
+    get:
+      tags:
+      - console
+      summary: List Queue State Views
+      operationId: list_queue_state_views_console_v1_queue_state_views_get
+      parameters:
+      - name: surface
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Surface
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSavedViewListResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - console
+      summary: Create Queue State View
+      operationId: create_queue_state_view_console_v1_queue_state_views_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleSavedViewCreateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSavedView'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/queue-state/views/{view_id}:
+    patch:
+      tags:
+      - console
+      summary: Update Queue State View
+      operationId: update_queue_state_view_console_v1_queue_state_views__view_id__patch
+      parameters:
+      - name: view_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: View Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleSavedViewUpdateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSavedView'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - console
+      summary: Delete Queue State View
+      operationId: delete_queue_state_view_console_v1_queue_state_views__view_id__delete
+      parameters:
+      - name: view_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: View Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/agents:
     get:
       tags:
@@ -17145,6 +17301,114 @@ components:
       - skipped
       - matched
       title: ConsoleReminderRetryResponse
+    ConsoleSavedView:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        surface:
+          type: string
+          enum:
+          - cases
+          - calendar
+          title: Surface
+        name:
+          type: string
+          title: Name
+        version:
+          type: integer
+          title: Version
+          default: 1
+        query_state:
+          type: object
+          title: Query State
+        is_default:
+          type: boolean
+          title: Is Default
+          default: false
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - id
+      - surface
+      - name
+      title: ConsoleSavedView
+    ConsoleSavedViewCreateRequest:
+      properties:
+        surface:
+          type: string
+          enum:
+          - cases
+          - calendar
+          title: Surface
+        name:
+          type: string
+          title: Name
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
+          default: 1
+        query_state:
+          type: object
+          title: Query State
+        is_default:
+          type: boolean
+          title: Is Default
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - surface
+      - name
+      title: ConsoleSavedViewCreateRequest
+    ConsoleSavedViewListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleSavedView'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: ConsoleSavedViewListResponse
+    ConsoleSavedViewUpdateRequest:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Version
+        query_state:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Query State
+        is_default:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Default
+      additionalProperties: false
+      type: object
+      title: ConsoleSavedViewUpdateRequest
     ConsoleSettingsResponse:
       properties:
         branches:

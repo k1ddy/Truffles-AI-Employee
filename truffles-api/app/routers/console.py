@@ -304,6 +304,10 @@ from app.schemas.console import (
     ConsoleReminderListResponse,
     ConsoleReminderRetryRequest,
     ConsoleReminderRetryResponse,
+    ConsoleSavedView,
+    ConsoleSavedViewCreateRequest,
+    ConsoleSavedViewListResponse,
+    ConsoleSavedViewUpdateRequest,
     ConsoleSettingsResponse,
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
@@ -623,6 +627,21 @@ from app.services.console_router_utils import (
 )
 from app.services.console_router_utils import (
     validate_limit as _validate_limit_util,
+)
+from app.services.console_saved_views import (
+    create_saved_view as _create_saved_view,
+)
+from app.services.console_saved_views import (
+    delete_saved_view as _delete_saved_view,
+)
+from app.services.console_saved_views import (
+    get_saved_view_for_owner as _get_saved_view_for_owner,
+)
+from app.services.console_saved_views import (
+    list_saved_views as _list_saved_views,
+)
+from app.services.console_saved_views import (
+    update_saved_view as _update_saved_view,
 )
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import resolve_telegram_routing
@@ -10952,6 +10971,19 @@ def _build_current_queue_state_response(
     )
 
 
+def _serialize_saved_view(record) -> ConsoleSavedView:
+    return ConsoleSavedView(
+        id=record.id,
+        surface=record.surface,
+        name=record.name,
+        version=record.version,
+        query_state=dict(record.query_state or {}),
+        is_default=bool(record.is_default),
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
 @router.get(
     "/queue-state/current",
     response_model=ConsoleQueueStateCurrentResponse,
@@ -11015,6 +11047,123 @@ async def put_current_queue_state(
         query_state=query_state,
     )
     return _build_current_queue_state_response(surface=scope.surface, scope=scope, record=record)
+
+
+@router.get(
+    "/queue-state/views",
+    response_model=ConsoleSavedViewListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_queue_state_views(
+    request: Request,
+    surface: str = Query(...),
+    db: Session = Depends(get_db),
+) -> ConsoleSavedViewListResponse:
+    context = get_console_context(request, db)
+    _reject_unknown_query_params(request, {"surface"})
+    _require_queue_state_permission(context, surface)
+    scope = _build_queue_state_scope(context, surface=surface)
+    items = _list_saved_views(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        surface=scope.surface,
+    )
+    return ConsoleSavedViewListResponse(items=[_serialize_saved_view(item) for item in items])
+
+
+@router.post(
+    "/queue-state/views",
+    response_model=ConsoleSavedView,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def create_queue_state_view(
+    body: ConsoleSavedViewCreateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleSavedView:
+    context = get_console_context(request, db)
+    _require_queue_state_permission(context, body.surface)
+    query_state = _normalize_queue_state_payload(
+        context,
+        surface=body.surface,
+        query_state=body.query_state,
+    )
+    record = _create_saved_view(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        surface=body.surface,
+        name=body.name,
+        version=body.version,
+        query_state=query_state,
+        is_default=body.is_default,
+    )
+    return _serialize_saved_view(record)
+
+
+@router.patch(
+    "/queue-state/views/{view_id}",
+    response_model=ConsoleSavedView,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def update_queue_state_view(
+    view_id: UUID,
+    body: ConsoleSavedViewUpdateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleSavedView:
+    context = get_console_context(request, db)
+    record = _get_saved_view_for_owner(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        view_id=view_id,
+    )
+    if record is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+    _require_queue_state_permission(context, record.surface)
+    query_state = (
+        _normalize_queue_state_payload(
+            context,
+            surface=record.surface,
+            query_state=body.query_state,
+        )
+        if body.query_state is not None
+        else None
+    )
+    updated = _update_saved_view(
+        db,
+        record=record,
+        name=body.name,
+        version=body.version,
+        query_state=query_state,
+        is_default=body.is_default,
+    )
+    return _serialize_saved_view(updated)
+
+
+@router.delete(
+    "/queue-state/views/{view_id}",
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def delete_queue_state_view(
+    view_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    context = get_console_context(request, db)
+    record = _get_saved_view_for_owner(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        view_id=view_id,
+    )
+    if record is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+    _require_queue_state_permission(context, record.surface)
+    _delete_saved_view(db, record=record)
+    return JSONResponse({"success": True})
 
 
 @router.get(

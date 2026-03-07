@@ -21,7 +21,7 @@ type SearchParamsLike = {
     get(name: string): string | null;
 };
 
-type QueueStateSurface = "cases" | "calendar";
+export type QueueStateSurface = "cases" | "calendar";
 
 type QueueStateRecord = {
     found?: boolean;
@@ -33,6 +33,13 @@ type QueueStateRecord = {
     query_state?: Record<string, unknown> | null;
     updated_at?: string | null;
 };
+
+export interface QueueStateSavedViewLike {
+    id?: string;
+    name?: string;
+    query_state?: Record<string, unknown> | null;
+    is_default?: boolean;
+}
 
 export interface CasesQueueStateSnapshot {
     filters: InboxCaseFilters;
@@ -154,6 +161,26 @@ export function readCasesQueueStateFromServer(
     };
 }
 
+export function readCasesQueueStateFromSavedView(
+    savedView: QueueStateSavedViewLike | null | undefined,
+    options: {
+        branchFilterEnabled: boolean;
+        privilegedOwnerFilterVisible: boolean;
+    },
+): CasesQueueStateSnapshot | null {
+    if (!savedView?.query_state || typeof savedView.query_state !== "object") {
+        return null;
+    }
+    return readCasesQueueStateFromServer(
+        {
+            found: true,
+            surface: "cases",
+            query_state: savedView.query_state,
+        },
+        options,
+    );
+}
+
 export function readCasesQueueStateFromUrl(
     searchParams: SearchParamsLike,
     {
@@ -254,6 +281,24 @@ export function buildCasesQueueStatePayload(
     };
 }
 
+export function getCasesQueueStateFingerprint(
+    snapshot: CasesQueueStateSnapshot,
+    options: {
+        branchFilterEnabled: boolean;
+    },
+): string {
+    return JSON.stringify(buildCasesQueueStatePayload(snapshot, options));
+}
+
+export function getSavedViewFingerprint(
+    savedView: QueueStateSavedViewLike | null | undefined,
+): string {
+    if (!savedView?.query_state || typeof savedView.query_state !== "object") {
+        return JSON.stringify({});
+    }
+    return JSON.stringify(savedView.query_state);
+}
+
 export function buildCasesQueueUrlParams(
     snapshot: CasesQueueStateSnapshot,
     {
@@ -303,6 +348,26 @@ export function readCalendarQueueStateFromServer(
     };
 }
 
+export function readCalendarQueueStateFromSavedView(
+    savedView: QueueStateSavedViewLike | null | undefined,
+    options: {
+        defaultSelectedDate: string;
+        defaultQueueLane: BookingQueueLane;
+    },
+): CalendarQueueStateSnapshot | null {
+    if (!savedView?.query_state || typeof savedView.query_state !== "object") {
+        return null;
+    }
+    return readCalendarQueueStateFromServer(
+        {
+            found: true,
+            surface: "calendar",
+            query_state: savedView.query_state,
+        },
+        options,
+    );
+}
+
 export function readCalendarQueueStateFromUrl(
     searchParams: SearchParamsLike,
     {
@@ -338,6 +403,10 @@ export function buildCalendarQueueStatePayload(snapshot: CalendarQueueStateSnaps
         status_filter: snapshot.queueStatusFilter,
         query: snapshot.queueSearch.trim() || null,
     };
+}
+
+export function getCalendarQueueStateFingerprint(snapshot: CalendarQueueStateSnapshot): string {
+    return JSON.stringify(buildCalendarQueueStatePayload(snapshot));
 }
 
 export function buildCalendarQueueUrlParams(

@@ -29,12 +29,21 @@ import {
 } from "@/lib/inbox-workspace";
 import {
     buildCalendarQueueStatePayload,
+    getCalendarQueueStateFingerprint,
+    getSavedViewFingerprint,
     readCalendarQueueStateFromServer,
+    readCalendarQueueStateFromSavedView,
     readCalendarQueueStateFromUrl,
+    type CalendarQueueStateSnapshot,
 } from "@/lib/queue-state";
 import { getBookingStatusLabel, getBookingStatusColor } from "@/utils/labels";
 import AccessDenied from "@/components/AccessDenied";
-import { authApi, canAccessConsole } from "@/lib/api-client";
+import {
+    authApi,
+    canAccessConsole,
+    type QueueSavedView,
+    queueStateApi,
+} from "@/lib/api-client";
 
 interface Specialist {
     id: string;
@@ -68,6 +77,16 @@ function formatDate(date: Date): string {
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
+}
+
+function findSavedViewByFingerprint(savedViews: QueueSavedView[], fingerprint: string): QueueSavedView | null {
+    return savedViews.find((view) => getSavedViewFingerprint(view) === fingerprint) ?? null;
+}
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+    return (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
+        || (error as Error)?.message
+        || fallback;
 }
 
 export default function CalendarPage() {
@@ -118,6 +137,7 @@ export default function CalendarPage() {
     );
     const restoredCalendarScopeRef = useRef<string | null>(null);
     const lastSavedQueueStateRef = useRef<string>("");
+    const saveViewInputRef = useRef<HTMLInputElement | null>(null);
     const defaultSelectedDate = focusedConversationId || focusedCaseId ? "" : today;
     const defaultQueueLane: BookingQueueLane = focusedConversationId ? "all" : "attention";
     const urlQueueState = useMemo(
@@ -148,6 +168,9 @@ export default function CalendarPage() {
     const [queueLane, setQueueLane] = useState<BookingQueueLane>(defaultQueueLane);
     const [queueStatusFilter, setQueueStatusFilter] = useState<BookingStatusFilter>("all");
     const [queueSearch, setQueueSearch] = useState("");
+    const [activeSavedViewId, setActiveSavedViewId] = useState<string | null>(null);
+    const [saveViewDraftName, setSaveViewDraftName] = useState("");
+    const [saveViewComposerOpen, setSaveViewComposerOpen] = useState(false);
 
     const currentQueueStateQuery = useQuery({
         queryKey: ["queue-state", "calendar", calendarWorkspaceScope, focusedCaseId, focusedConversationId],
@@ -169,10 +192,49 @@ export default function CalendarPage() {
         retry: 1,
         staleTime: 60_000,
     });
+    const savedViewsQuery = useQuery({
+        queryKey: ["queue-state-views", "calendar"],
+        queryFn: async () => {
+            const response = await queueStateApi.listViews("calendar");
+            return response.data;
+        },
+        enabled: !!session && canReadCalendar,
+        retry: 1,
+        staleTime: 60_000,
+    });
+    const savedViews = useMemo(
+        () => savedViewsQuery.data?.items ?? [],
+        [savedViewsQuery.data?.items],
+    );
+    const defaultSavedView = savedViews.find((view) => view.is_default) ?? null;
+    const currentQueueSnapshot = useMemo<CalendarQueueStateSnapshot>(
+        () => ({
+            selectedDate,
+            queueLane,
+            queueStatusFilter,
+            queueSearch,
+        }),
+        [queueLane, queueSearch, queueStatusFilter, selectedDate],
+    );
+    const currentQueueFingerprint = useMemo(
+        () => getCalendarQueueStateFingerprint(currentQueueSnapshot),
+        [currentQueueSnapshot],
+    );
+    const selectedSavedView = useMemo(
+        () => savedViews.find((view) => view.id === activeSavedViewId) ?? null,
+        [activeSavedViewId, savedViews],
+    );
+    const savedViewDirty = selectedSavedView
+        ? getSavedViewFingerprint(selectedSavedView) !== currentQueueFingerprint
+        : false;
+    const savedViewsLoading = savedViewsQuery.isFetching && savedViews.length === 0;
 
     useEffect(() => {
         restoredCalendarScopeRef.current = null;
         lastSavedQueueStateRef.current = "";
+        setActiveSavedViewId(null);
+        setSaveViewDraftName("");
+        setSaveViewComposerOpen(false);
     }, [calendarWorkspaceScope, urlQueueStateKey]);
 
     useEffect(() => {
@@ -184,7 +246,8 @@ export default function CalendarPage() {
             || !session
             || currentQueueStateQuery.isFetched
             || currentQueueStateQuery.isError;
-        if (!currentQueueStateSettled || restoredCalendarScopeRef.current === restoreKey) {
+        const savedViewsSettled = !session || !canReadCalendar || savedViewsQuery.isFetched || savedViewsQuery.isError;
+        if (!currentQueueStateSettled || !savedViewsSettled || restoredCalendarScopeRef.current === restoreKey) {
             return;
         }
         const prefs = readCalendarWorkspacePrefs(calendarWorkspaceScope);
@@ -200,18 +263,30 @@ export default function CalendarPage() {
             defaultSelectedDate,
             defaultQueueLane,
         });
-        const queueSnapshot = urlQueueState ?? serverSnapshot ?? localSnapshot;
+        const defaultSavedViewSnapshot = readCalendarQueueStateFromSavedView(defaultSavedView, {
+            defaultSelectedDate,
+            defaultQueueLane,
+        });
+        const queueSnapshot = urlQueueState ?? serverSnapshot ?? defaultSavedViewSnapshot ?? localSnapshot;
         const source = urlQueueState
             ? "url"
             : serverSnapshot
                 ? "server"
-                : localSnapshot
+                : defaultSavedViewSnapshot
+                    ? "saved_default"
+                    : localSnapshot
                     ? "local"
                     : "default";
+        const matchedSavedView = queueSnapshot
+            ? findSavedViewByFingerprint(savedViews, getCalendarQueueStateFingerprint(queueSnapshot))
+            : null;
         setSelectedDate(queueSnapshot?.selectedDate ?? defaultSelectedDate);
         setQueueLane(queueSnapshot?.queueLane ?? defaultQueueLane);
         setQueueStatusFilter(queueSnapshot?.queueStatusFilter ?? "all");
         setQueueSearch(queueSnapshot?.queueSearch ?? "");
+        setActiveSavedViewId(matchedSavedView?.id ?? null);
+        setSaveViewDraftName("");
+        setSaveViewComposerOpen(false);
         if (source === "server" && queueSnapshot) {
             lastSavedQueueStateRef.current = JSON.stringify({
                 surface: "calendar",
@@ -232,8 +307,47 @@ export default function CalendarPage() {
         focusedCaseId,
         focusedConversationId,
         session,
+        canReadCalendar,
+        defaultSavedView,
+        savedViews,
+        savedViewsQuery.isError,
+        savedViewsQuery.isFetched,
         urlQueueState,
         urlQueueStateKey,
+    ]);
+
+    useEffect(() => {
+        if (!saveViewComposerOpen) {
+            return;
+        }
+        const timeoutId = window.setTimeout(() => {
+            saveViewInputRef.current?.focus();
+            saveViewInputRef.current?.select();
+        }, 0);
+        return () => window.clearTimeout(timeoutId);
+    }, [saveViewComposerOpen]);
+
+    useEffect(() => {
+        if (activeSavedViewId && selectedSavedView) {
+            return;
+        }
+        if (activeSavedViewId && !selectedSavedView && !savedViewsQuery.isFetching) {
+            setActiveSavedViewId(null);
+            return;
+        }
+        if (activeSavedViewId || savedViews.length === 0) {
+            return;
+        }
+        const matchedSavedView = findSavedViewByFingerprint(savedViews, currentQueueFingerprint);
+        if (matchedSavedView) {
+            setActiveSavedViewId(matchedSavedView.id);
+        }
+    }, [
+        activeSavedViewId,
+        currentQueueFingerprint,
+        savedViews,
+        savedViewsQuery.isFetching,
+        selectedSavedView,
     ]);
 
     useEffect(() => {
@@ -257,12 +371,7 @@ export default function CalendarPage() {
             case_id: focusedCaseId || undefined,
             conversation_id: focusedConversationId || undefined,
             version: 1,
-            query_state: buildCalendarQueueStatePayload({
-                selectedDate,
-                queueLane,
-                queueStatusFilter,
-                queueSearch,
-            }),
+            query_state: buildCalendarQueueStatePayload(currentQueueSnapshot),
         };
         const fingerprint = JSON.stringify(payload);
         if (lastSavedQueueStateRef.current === fingerprint) {
@@ -283,12 +392,9 @@ export default function CalendarPage() {
     }, [
         calendarWorkspaceScope,
         canReadCalendar,
+        currentQueueSnapshot,
         focusedCaseId,
         focusedConversationId,
-        queueLane,
-        queueSearch,
-        queueStatusFilter,
-        selectedDate,
         session,
     ]);
 
@@ -358,6 +464,150 @@ export default function CalendarPage() {
             return haystack.includes(queueSearchNormalized);
         });
     }, [bookingsSorted, queueSearchNormalized]);
+
+    const applyCalendarQueueSnapshot = (
+        snapshot: CalendarQueueStateSnapshot,
+        {
+            savedViewId = null,
+        }: {
+            savedViewId?: string | null;
+        } = {},
+    ) => {
+        setSelectedDate(snapshot.selectedDate);
+        setQueueLane(snapshot.queueLane);
+        setQueueStatusFilter(snapshot.queueStatusFilter);
+        setQueueSearch(snapshot.queueSearch);
+        setActiveSavedViewId(savedViewId);
+        setSaveViewDraftName("");
+        setSaveViewComposerOpen(false);
+    };
+
+    const createSavedViewMutation = useMutation({
+        mutationFn: async (payload: { name: string; isDefault: boolean }) => {
+            const response = await queueStateApi.createView({
+                surface: "calendar",
+                name: payload.name,
+                version: 1,
+                query_state: buildCalendarQueueStatePayload(currentQueueSnapshot),
+                is_default: payload.isDefault,
+            });
+            return response.data;
+        },
+        onSuccess: async (savedView) => {
+            setActiveSavedViewId(savedView.id);
+            setSaveViewDraftName("");
+            setSaveViewComposerOpen(false);
+            await queryClient.invalidateQueries({ queryKey: ["queue-state-views", "calendar"] });
+            toast.success(`Вид «${savedView.name}» сохранён`);
+        },
+        onError: (error: unknown) => {
+            toast.error(getApiErrorMessage(error, "Не удалось сохранить вид"));
+        },
+    });
+
+    const updateSavedViewMutation = useMutation({
+        mutationFn: async (payload: {
+            viewId: string;
+            queryState?: Record<string, unknown>;
+            isDefault?: boolean;
+        }) => {
+            const response = await queueStateApi.updateView(payload.viewId, {
+                query_state: payload.queryState,
+                is_default: payload.isDefault,
+            });
+            return response.data;
+        },
+        onSuccess: async (savedView) => {
+            setActiveSavedViewId(savedView.id);
+            await queryClient.invalidateQueries({ queryKey: ["queue-state-views", "calendar"] });
+            toast.success(`Вид «${savedView.name}» обновлён`);
+        },
+        onError: (error: unknown) => {
+            toast.error(getApiErrorMessage(error, "Не удалось обновить вид"));
+        },
+    });
+
+    const deleteSavedViewMutation = useMutation({
+        mutationFn: async (viewId: string) => {
+            await queueStateApi.deleteView(viewId);
+            return viewId;
+        },
+        onSuccess: async (viewId) => {
+            if (activeSavedViewId === viewId) {
+                setActiveSavedViewId(null);
+            }
+            await queryClient.invalidateQueries({ queryKey: ["queue-state-views", "calendar"] });
+            toast.success("Вид удалён");
+        },
+        onError: (error: unknown) => {
+            toast.error(getApiErrorMessage(error, "Не удалось удалить вид"));
+        },
+    });
+    const savedViewMutationPending = createSavedViewMutation.isPending
+        || updateSavedViewMutation.isPending
+        || deleteSavedViewMutation.isPending;
+
+    const handleOpenSaveViewComposer = () => {
+        setSaveViewDraftName("");
+        setSaveViewComposerOpen(true);
+    };
+
+    const handleSaveCurrentView = () => {
+        const name = saveViewDraftName.trim();
+        if (!name) {
+            toast.error("Введите название вида");
+            return;
+        }
+        createSavedViewMutation.mutate({
+            name,
+            isDefault: savedViews.length === 0,
+        });
+    };
+
+    const handleApplySavedView = (viewId: string) => {
+        const savedView = savedViews.find((item) => item.id === viewId);
+        const snapshot = readCalendarQueueStateFromSavedView(savedView, {
+            defaultSelectedDate,
+            defaultQueueLane,
+        });
+        if (!savedView || !snapshot) {
+            toast.error("Не удалось прочитать сохранённый вид");
+            return;
+        }
+        applyCalendarQueueSnapshot(snapshot, { savedViewId: savedView.id });
+        toast.success(`Применён вид «${savedView.name}»`);
+    };
+
+    const handleUpdateSavedView = () => {
+        if (!selectedSavedView) {
+            return;
+        }
+        updateSavedViewMutation.mutate({
+            viewId: selectedSavedView.id,
+            queryState: buildCalendarQueueStatePayload(currentQueueSnapshot),
+        });
+    };
+
+    const handleToggleSavedViewDefault = () => {
+        if (!selectedSavedView) {
+            return;
+        }
+        updateSavedViewMutation.mutate({
+            viewId: selectedSavedView.id,
+            isDefault: !selectedSavedView.is_default,
+        });
+    };
+
+    const handleDeleteSavedView = () => {
+        if (!selectedSavedView) {
+            return;
+        }
+        const confirmed = window.confirm(`Удалить вид «${selectedSavedView.name}»?`);
+        if (!confirmed) {
+            return;
+        }
+        deleteSavedViewMutation.mutate(selectedSavedView.id);
+    };
 
     // Create booking mutation
     const createMutation = useMutation({
@@ -867,6 +1117,158 @@ export default function CalendarPage() {
                                 >
                                     Все записи
                                 </button>
+                            </div>
+                            <div className="rounded-lg border border-border/60 bg-background/80 p-3" data-testid="calendar-saved-views">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                            Сохранённые виды
+                                        </p>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            Личный каталог календарной очереди.
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={handleOpenSaveViewComposer}
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                            disabled={savedViewMutationPending}
+                                            data-testid="calendar-saved-view-save"
+                                        >
+                                            Сохранить текущий
+                                        </button>
+                                        {selectedSavedView && savedViewDirty && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleApplySavedView(selectedSavedView.id)}
+                                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                                    disabled={savedViewMutationPending}
+                                                    data-testid="calendar-saved-view-reapply"
+                                                >
+                                                    Вернуть вид
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleUpdateSavedView}
+                                                    className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary"
+                                                    disabled={savedViewMutationPending}
+                                                    data-testid="calendar-saved-view-update"
+                                                >
+                                                    Обновить вид
+                                                </button>
+                                            </>
+                                        )}
+                                        {selectedSavedView && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleToggleSavedViewDefault}
+                                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                                    disabled={savedViewMutationPending}
+                                                    data-testid="calendar-saved-view-default"
+                                                >
+                                                    {selectedSavedView.is_default ? "Снять дефолт" : "Сделать дефолтом"}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleDeleteSavedView}
+                                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-destructive"
+                                                    disabled={savedViewMutationPending}
+                                                    data-testid="calendar-saved-view-delete"
+                                                >
+                                                    Удалить
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                                    <select
+                                        value={activeSavedViewId ?? ""}
+                                        onChange={(event) => {
+                                            const nextId = event.target.value;
+                                            if (!nextId) {
+                                                setActiveSavedViewId(null);
+                                                return;
+                                            }
+                                            handleApplySavedView(nextId);
+                                        }}
+                                        className="rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        disabled={savedViewsLoading || savedViewMutationPending}
+                                        data-testid="calendar-saved-view-select"
+                                    >
+                                        <option value="">
+                                            {savedViewsLoading
+                                                ? "Загружаем виды..."
+                                                : savedViews.length === 0
+                                                    ? "Нет сохранённых видов"
+                                                    : "Выберите сохранённый вид"}
+                                        </option>
+                                        {savedViews.map((view) => (
+                                            <option key={view.id} value={view.id}>
+                                                {view.name}{view.is_default ? " · default" : ""}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {selectedSavedView && (
+                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                            <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
+                                                {selectedSavedView.name}
+                                            </span>
+                                            {selectedSavedView.is_default && (
+                                                <span className="rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary">
+                                                    default
+                                                </span>
+                                            )}
+                                            {savedViewDirty && (
+                                                <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-900">
+                                                    изменён
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                                {saveViewComposerOpen && (
+                                    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+                                        <input
+                                            ref={saveViewInputRef}
+                                            type="text"
+                                            value={saveViewDraftName}
+                                            onChange={(event) => setSaveViewDraftName(event.target.value)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === "Enter") {
+                                                    event.preventDefault();
+                                                    handleSaveCurrentView();
+                                                }
+                                            }}
+                                            placeholder="Например: Неявки сегодня"
+                                            className="min-w-[220px] flex-1 rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                            data-testid="calendar-saved-view-name-input"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleSaveCurrentView}
+                                            className="rounded-full border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary"
+                                            disabled={createSavedViewMutation.isPending}
+                                            data-testid="calendar-saved-view-name-submit"
+                                        >
+                                            {createSavedViewMutation.isPending ? "Сохраняем..." : "Сохранить"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setSaveViewDraftName("");
+                                                setSaveViewComposerOpen(false);
+                                            }}
+                                            className="rounded-full border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                            disabled={createSavedViewMutation.isPending}
+                                        >
+                                            Отмена
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
                                 <input

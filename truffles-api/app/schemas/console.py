@@ -1095,6 +1095,36 @@ class ConsoleQueueStateCurrentResponse(BaseModel):
     updated_at: Optional[str] = None
 
 
+class ConsoleSavedView(BaseModel):
+    id: UUID
+    surface: ConsoleQueueStateSurface
+    name: str
+    version: int = 1
+    query_state: dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleSavedViewListResponse(BaseModel):
+    items: list[ConsoleSavedView]
+
+
+class ConsoleSavedViewCreateRequest(ConsoleRequestModel):
+    surface: ConsoleQueueStateSurface
+    name: StrictStr
+    version: int = Field(default=1, ge=1)
+    query_state: dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+
+
+class ConsoleSavedViewUpdateRequest(ConsoleRequestModel):
+    name: Optional[StrictStr] = None
+    version: Optional[int] = Field(default=None, ge=1)
+    query_state: Optional[dict[str, Any]] = None
+    is_default: Optional[bool] = None
+
+
 class ConsoleSyncStatus(BaseModel):
     status: Literal["ok", "skipped", "failed"]
     detail: Optional[str] = None
