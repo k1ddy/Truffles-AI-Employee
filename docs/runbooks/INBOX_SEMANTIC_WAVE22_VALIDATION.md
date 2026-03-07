@@ -58,7 +58,7 @@ PLAYWRIGHT_WEB_SERVER=0 \
 PLAYWRIGHT_BASE_URL=https://console.truffles.kz \
 INSPECT_CASE_USE_MOCKS=0 \
 INSPECT_CASE_LIVE_CASE_ID=<safe-case-id> \
-npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1
+npx playwright test e2e/inspect_case.spec.ts --grep @wave22-live-proof --project=chromium --reporter=line --workers=1
 ```
 
 ## Live Result Classification

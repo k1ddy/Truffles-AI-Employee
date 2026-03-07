@@ -2,12 +2,14 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-live-proof-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
 - done:
+  - `PR #944` merged into `main` on 2026-03-07; Wave22 deterministic proof is shipped.
+  - Wave22 was explicitly split after merge into a final live-proof closure block because the remaining gap is operational evidence, not product semantics.
   - `PR #943` merged into `main` on 2026-03-07; Wave21 Part B booking-state propagation is shipped.
   - Wave22 implementation started locally:
     - deterministic validation now includes a manager history-mode matrix, proving that queue views disappear outside `Открытые`, role-gated owner scope does not leak privileged options, and `resolved/all/open` mode transitions emit stable query semantics.
@@ -16,7 +18,7 @@
     - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts` → `pass`
     - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` → `6 passed, 1 skipped`
     - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
-    - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts -g "live action feedback validation requires explicit safe case" --project=chromium --reporter=line --workers=1` → `1 skipped` (`blocked` without explicit safe live case)
+    - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --grep @wave22-live-proof --project=chromium --reporter=line --workers=1` → `1 skipped` (`blocked` without explicit safe live case)
   - `PR #942` merged into `main` on 2026-03-07; Wave21 Part A semantic booking context is shipped.
   - `PR #941` merged into `main` on 2026-03-07; Wave20 inbox history/archive modes are shipped.
   - Wave21 Part A implemented locally: case detail API now returns a semantic `booking_summary`, inbox workspace shows `Почему заявка открыта` + `Что по записи`, details panel uses the same operator story, and the case-bookings panel refreshes case summary after booking mutations.
@@ -168,13 +170,14 @@
   - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
   - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - Open PR for Wave22 deterministic proof and wait for CI green.
-  - Then run full Wave22 live validation only with an explicit safe case id; otherwise keep the program in `blocked` live-proof state, not `pass`.
+  - Keep the program in `blocked` state until Brain/Top Architect provide an approved safe live case id.
+  - Then run the tagged `@wave22-live-proof` lane and classify it only as `pass`, `fail`, or `blocked`.
 - evidence:
+  - `PR #944` merged via `dc8b720f` on `origin/main`
   - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` (`6 passed, 1 skipped`)
   - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
-  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts -g "live action feedback validation requires explicit safe case" --project=chromium --reporter=line --workers=1` (`1 skipped`; `blocked` without explicit safe case)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --grep @wave22-live-proof --project=chromium --reporter=line --workers=1` (`1 skipped`; `blocked` without explicit safe case)
   - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/lib/inbox-workspace.ts --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && npm run build` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`3 passed, 1 skipped`)
