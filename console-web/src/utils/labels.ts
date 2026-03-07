@@ -148,6 +148,38 @@ export function getTriggerLabel(trigger?: string | null): string {
     return labels[normalized] ?? trigger;
 }
 
+type CaseOriginLike = {
+    trigger_type?: string | null;
+    trigger_value?: string | null;
+    context_summary?: string | null;
+    user_message?: string | null;
+};
+
+export interface CaseOriginSummary {
+    title: string;
+    detail: string | null;
+}
+
+type CaseBookingSummaryLike = {
+    status?: string | null;
+    start_at?: string | null;
+    specialist_name?: string | null;
+    service_type?: string | null;
+    needs_action?: boolean | null;
+    attention_reason?: string | null;
+    no_show_followup_done?: boolean | null;
+    no_show_followup_result?: string | null;
+    operator_summary?: string | null;
+};
+
+export interface CaseBookingSemanticSummary {
+    label: string;
+    className: string;
+    operatorSummary: string;
+    meta: string | null;
+    needsAttention: boolean;
+}
+
 function getSyncFallbackMessage(target: "telegram" | "client_notify"): string {
     if (target === "telegram") {
         return "Не удалось синхронизировать состояние заявки с Telegram.";
@@ -176,6 +208,117 @@ export function collectCaseActionFollowupMessages(sync?: CaseActionSyncLike | nu
         messages.push(clientNotifyMessage);
     }
     return messages;
+}
+
+export function getCaseOriginSummary(caseItem: CaseOriginLike): CaseOriginSummary {
+    const trigger = (caseItem.trigger_type || "").toLowerCase();
+    const detail = caseItem.context_summary || caseItem.trigger_value || caseItem.user_message || null;
+
+    if (trigger === "handover" || trigger === "escalation") {
+        return {
+            title: "Бот передал диалог менеджеру",
+            detail,
+        };
+    }
+    if (trigger === "policy_gate") {
+        return {
+            title: "Бот остановился на policy-проверке",
+            detail,
+        };
+    }
+    if (trigger === "reminder") {
+        return {
+            title: "Система вернула заявку в работу",
+            detail,
+        };
+    }
+    if (trigger === "manual") {
+        return {
+            title: "Заявка создана вручную",
+            detail,
+        };
+    }
+    if (trigger === "message" || trigger === "inbound_message") {
+        return {
+            title: "Клиент написал, и заявка ушла менеджеру",
+            detail,
+        };
+    }
+
+    return {
+        title: `Повод: ${getTriggerLabel(caseItem.trigger_type)}`,
+        detail,
+    };
+}
+
+function formatBookingMeta(summary: CaseBookingSummaryLike): string | null {
+    const parts: string[] = [];
+    if (summary.start_at) {
+        parts.push(
+            new Date(summary.start_at).toLocaleString("ru-RU", {
+                day: "2-digit",
+                month: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+            }),
+        );
+    }
+    if (summary.specialist_name) {
+        parts.push(summary.specialist_name);
+    }
+    if (summary.service_type) {
+        parts.push(summary.service_type);
+    }
+    return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function buildBookingOperatorSummary(summary: CaseBookingSummaryLike): string {
+    const normalized = (summary.status || "").toUpperCase();
+    const meta = formatBookingMeta(summary);
+    const slot = meta ? ` ${meta}` : "";
+    if (summary.operator_summary?.trim()) {
+        return summary.operator_summary.trim();
+    }
+    if (normalized === "PENDING_CONFIRMATION") {
+        return `По заявке создан визит${slot} — нужно подтвердить запись.`;
+    }
+    if (normalized === "RESCHEDULE_REQUESTED") {
+        return `Клиент просит перенос записи${slot}.`;
+    }
+    if (normalized === "HOLD") {
+        return `Запись${slot} удерживается до решения менеджера.`;
+    }
+    if (normalized === "NO_SHOW" && summary.no_show_followup_done) {
+        return summary.no_show_followup_result === "rebooked"
+            ? "После неявки клиента уже перезаписали."
+            : "После неявки с клиентом уже связались.";
+    }
+    if (normalized === "NO_SHOW") {
+        return `Клиент не пришел на визит${slot} — ${summary.attention_reason || "нужен follow-up"}.`;
+    }
+    if (normalized === "COMPLETED") {
+        return `Визит по заявке завершен${slot ? `: ${meta}` : ""}.`;
+    }
+    if (normalized === "CANCELLED") {
+        return `Запись по заявке отменена${slot ? `: ${meta}` : ""}.`;
+    }
+    return `По заявке есть запись${slot}.`;
+}
+
+export function getCaseBookingSemanticSummary(
+    summary?: CaseBookingSummaryLike | null,
+): CaseBookingSemanticSummary | null {
+    if (!summary?.status) {
+        return null;
+    }
+    const needsAttention = Boolean(summary.needs_action);
+    return {
+        label: getBookingStatusLabel(summary.status),
+        className: getBookingStatusColor(summary.status),
+        operatorSummary: buildBookingOperatorSummary(summary),
+        meta: formatBookingMeta(summary),
+        needsAttention,
+    };
 }
 
 // SLA indicator with color styling based on elapsed time

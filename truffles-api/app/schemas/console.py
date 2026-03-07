@@ -994,6 +994,19 @@ class ConsoleTelegramTrail(BaseModel):
     delivered_at: Optional[str] = None
 
 
+class ConsoleCaseBookingSummary(BaseModel):
+    booking_id: UUID
+    status: str
+    start_at: Optional[str] = None
+    specialist_name: Optional[str] = None
+    service_type: Optional[str] = None
+    needs_action: bool = False
+    attention_reason: Optional[str] = None
+    no_show_followup_done: bool = False
+    no_show_followup_result: Optional[str] = None
+    operator_summary: str
+
+
 class ConsoleCase(BaseModel):
     id: UUID
     conversation_id: UUID
@@ -1049,6 +1062,8 @@ class ConsoleCase(BaseModel):
     snoozed_by: Optional[str] = None
     # Telegram trail (for escalation visibility)
     telegram_trail: Optional[ConsoleTelegramTrail] = None
+    # Linked booking semantic summary
+    booking_summary: Optional[ConsoleCaseBookingSummary] = None
 
 
 class ConsoleCaseListResponse(BaseModel):

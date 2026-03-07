@@ -75,6 +75,7 @@ from app.models import (
 )
 from app.models.appointment import Appointment
 from app.models.appointment_audit import AppointmentAudit
+from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.models.reminder_job import ReminderJob
 from app.schemas.capabilities import (
     CAPABILITIES_SCHEMA_VERSION,
@@ -138,6 +139,7 @@ from app.schemas.console import (
     ConsoleCaseActionSync,
     ConsoleCaseAssigneeListResponse,
     ConsoleCaseAssigneeOption,
+    ConsoleCaseBookingSummary,
     ConsoleCaseBulkActionRequest,
     ConsoleCaseBulkActionResponse,
     ConsoleCaseBulkActionResult,
@@ -1000,6 +1002,162 @@ def _build_case_business_status(
     return {"business_status_code": "open", "business_status_label": "Открыта"}
 
 
+def _serialize_case_booking_followup(audit_row: Optional[AppointmentAudit]) -> dict[str, Any]:
+    if not audit_row:
+        return {
+            "done": False,
+            "result": None,
+        }
+    payload = audit_row.payload if isinstance(audit_row.payload, dict) else {}
+    return {
+        "done": True,
+        "result": payload.get("result") or "contacted",
+    }
+
+
+def _get_case_booking_attention_reason(status: str, *, followup_done: bool) -> Optional[str]:
+    normalized = (status or "").upper()
+    if normalized == "PENDING_CONFIRMATION":
+        return "Нужно подтвердить визит"
+    if normalized == "RESCHEDULE_REQUESTED":
+        return "Клиент просит перенос"
+    if normalized == "HOLD":
+        return "Нужно решение менеджера"
+    if normalized == "NO_SHOW" and not followup_done:
+        return "Связаться после неявки"
+    return None
+
+
+def _format_case_booking_slot_label(
+    *,
+    start_at: Optional[datetime],
+    specialist_name: Optional[str],
+    service_type: Optional[str],
+) -> str:
+    parts: list[str] = []
+    if start_at:
+        parts.append(start_at.strftime("%d.%m %H:%M"))
+    if specialist_name:
+        parts.append(specialist_name)
+    if service_type:
+        parts.append(service_type)
+    return " · ".join(parts)
+
+
+def _build_case_booking_operator_summary(
+    *,
+    status: str,
+    slot_label: str,
+    attention_reason: Optional[str],
+    no_show_followup_done: bool,
+    no_show_followup_result: Optional[str],
+) -> str:
+    normalized = (status or "").upper()
+    if normalized == "PENDING_CONFIRMATION":
+        return f"По заявке создан визит{f' {slot_label}' if slot_label else ''} — нужно подтвердить запись."
+    if normalized == "RESCHEDULE_REQUESTED":
+        return f"Клиент просит перенос записи{f' {slot_label}' if slot_label else ''}."
+    if normalized == "HOLD":
+        return f"Запись{f' {slot_label}' if slot_label else ''} удерживается до решения менеджера."
+    if normalized in {"DRAFT", "CONFIRMED", "CHECKED_IN"}:
+        return f"По заявке есть запись{f' {slot_label}' if slot_label else ''}."
+    if normalized == "NO_SHOW" and no_show_followup_done:
+        if no_show_followup_result == "rebooked":
+            return "После неявки клиента уже перезаписали."
+        return "После неявки с клиентом уже связались."
+    if normalized == "NO_SHOW":
+        return f"Клиент не пришел на визит{f' {slot_label}' if slot_label else ''} — {attention_reason or 'нужен follow-up'}."
+    if normalized == "COMPLETED":
+        return f"Визит по заявке завершен{f': {slot_label}' if slot_label else ''}."
+    if normalized == "CANCELLED":
+        return f"Запись по заявке отменена{f': {slot_label}' if slot_label else ''}."
+    return f"По заявке есть запись{f' {slot_label}' if slot_label else ''}."
+
+
+def _select_primary_case_booking(
+    query,
+    *,
+    now_utc: datetime,
+) -> Optional[Appointment]:
+    upcoming = (
+        query.filter(Appointment.start_at >= now_utc)
+        .order_by(Appointment.start_at.asc(), Appointment.created_at.desc())
+        .first()
+    )
+    if upcoming is not None:
+        return upcoming
+    return query.order_by(Appointment.start_at.desc(), Appointment.created_at.desc()).first()
+
+
+def _build_case_booking_summary(
+    db: Session,
+    *,
+    client_id: UUID,
+    handover: Handover,
+    now_utc: Optional[datetime] = None,
+) -> Optional[ConsoleCaseBookingSummary]:
+    effective_now = now_utc or datetime.now(timezone.utc)
+    explicit_query = db.query(Appointment).filter(
+        Appointment.client_id == client_id,
+        Appointment.case_id == handover.id,
+    )
+    booking = _select_primary_case_booking(explicit_query, now_utc=effective_now)
+    if booking is None and handover.conversation_id:
+        fallback_query = db.query(Appointment).filter(
+            Appointment.client_id == client_id,
+            Appointment.conversation_id == handover.conversation_id,
+        )
+        booking = _select_primary_case_booking(fallback_query, now_utc=effective_now)
+    if booking is None:
+        return None
+    if not isinstance(booking, Appointment):
+        return None
+
+    service_type = (
+        db.query(AppointmentServiceModel.service_name)
+        .filter(AppointmentServiceModel.appointment_id == booking.id)
+        .scalar()
+    )
+    no_show_followup_audit = (
+        db.query(AppointmentAudit)
+        .filter(
+            AppointmentAudit.appointment_id == booking.id,
+            AppointmentAudit.action == "no_show_followup",
+        )
+        .order_by(AppointmentAudit.created_at.desc())
+        .first()
+    )
+    followup_state = _serialize_case_booking_followup(no_show_followup_audit)
+    attention_reason = _get_case_booking_attention_reason(
+        booking.status,
+        followup_done=bool(followup_state["done"]),
+    )
+    slot_label = _format_case_booking_slot_label(
+        start_at=booking.start_at,
+        specialist_name=getattr(getattr(booking, "specialist", None), "name", None),
+        service_type=service_type,
+    )
+    operator_summary = _build_case_booking_operator_summary(
+        status=booking.status,
+        slot_label=slot_label,
+        attention_reason=attention_reason,
+        no_show_followup_done=bool(followup_state["done"]),
+        no_show_followup_result=followup_state["result"],
+    )
+    return ConsoleCaseBookingSummary(
+        booking_id=booking.id,
+        status=booking.status,
+        start_at=booking.start_at.isoformat() if booking.start_at else None,
+        specialist_name=getattr(getattr(booking, "specialist", None), "name", None),
+        service_type=service_type,
+        needs_action=attention_reason is not None,
+        attention_reason=attention_reason,
+        no_show_followup_done=bool(followup_state["done"]),
+        no_show_followup_result=followup_state["result"],
+        operator_summary=operator_summary,
+    )
+
+
 def _build_case_active_snooze_expr(
     *,
     last_inbound_col,
@@ -1086,6 +1244,8 @@ def _build_case_queue_view_expr(
 
 def _build_case_action_case(
     *,
+    db: Optional[Session] = None,
+    client_id: Optional[UUID] = None,
     handover: Handover,
     branch_id: UUID | None,
     now_utc: Optional[datetime] = None,
@@ -1105,6 +1265,14 @@ def _build_case_action_case(
         assigned_to_name=handover.assigned_to_name,
         queue_signals=queue_signals,
     )
+    booking_summary = None
+    if db is not None and client_id is not None:
+        booking_summary = _build_case_booking_summary(
+            db,
+            client_id=client_id,
+            handover=handover,
+            now_utc=effective_now,
+        )
     return ConsoleCase(
         id=handover.id,
         conversation_id=handover.conversation_id,
@@ -1112,14 +1280,19 @@ def _build_case_action_case(
         business_status_code=business_status["business_status_code"],
         business_status_label=business_status["business_status_label"],
         trigger_type=handover.trigger_type,
+        trigger_value=getattr(handover, "trigger_value", None),
+        context_summary=getattr(handover, "context_summary", None),
+        user_message=getattr(handover, "user_message", None),
         created_at=handover.created_at.isoformat(),
         assigned_to_id=str(handover.assigned_to) if handover.assigned_to else None,
         assigned_to_name=handover.assigned_to_name,
         branch_id=branch_id,
+        channel=getattr(handover, "channel", None),
         **_format_case_metrics(handover),
         snoozed_until=snooze_state["snoozed_until"],
         snoozed_reason=snooze_state["snoozed_reason"],
         snoozed_by=snooze_state["snoozed_by"],
+        booking_summary=booking_summary,
     )
 
 
@@ -1202,6 +1375,8 @@ def _require_case_operator_access(
 
 def _build_case_action_response(
     *,
+    db: Optional[Session] = None,
+    client_id: Optional[UUID] = None,
     handover: Handover,
     branch_id: UUID | None,
     sync: Optional[ConsoleCaseActionSync] = None,
@@ -1209,7 +1384,12 @@ def _build_case_action_response(
 ) -> ConsoleCaseActionResponse:
     return ConsoleCaseActionResponse(
         success=True,
-        case=_build_case_action_case(handover=handover, branch_id=branch_id),
+        case=_build_case_action_case(
+            db=db,
+            client_id=client_id,
+            handover=handover,
+            branch_id=branch_id,
+        ),
         sync=sync,
         routing=routing,
     )
@@ -1217,12 +1397,16 @@ def _build_case_action_response(
 
 def _build_macro_execute_response(
     *,
+    db: Optional[Session] = None,
+    client_id: Optional[UUID] = None,
     macro: ConsoleMacroModel,
     handover: Handover,
     branch_id: UUID | None,
     sync: Optional[ConsoleCaseActionSync] = None,
 ) -> ConsoleMacroExecuteResponse:
     case_response = _build_case_action_response(
+        db=db,
+        client_id=client_id,
         handover=handover,
         branch_id=branch_id,
         sync=sync,
@@ -1394,6 +1578,8 @@ def _execute_macro_case_action(
                     details={"current_assignee": current_assignee},
                 )
             return _build_macro_execute_response(
+                db=db,
+                client_id=context.client.id,
                 macro=macro,
                 handover=handover,
                 branch_id=branch_id,
@@ -1429,6 +1615,8 @@ def _execute_macro_case_action(
             reason="macro_take_case",
         )
         return _build_macro_execute_response(
+            db=db,
+            client_id=context.client.id,
             macro=macro,
             handover=handover,
             branch_id=branch_id,
@@ -1491,6 +1679,8 @@ def _execute_macro_case_action(
             reason="macro_resolve_case",
         )
         return _build_macro_execute_response(
+            db=db,
+            client_id=context.client.id,
             macro=macro,
             handover=handover,
             branch_id=branch_id,
@@ -1552,6 +1742,8 @@ def _execute_macro_case_action(
             reason="macro_return_to_bot",
         )
         return _build_macro_execute_response(
+            db=db,
+            client_id=context.client.id,
             macro=macro,
             handover=handover,
             branch_id=branch_id,
@@ -1592,6 +1784,8 @@ def _execute_macro_case_action(
             reason="macro_reopen_case",
         )
         return _build_macro_execute_response(
+            db=db,
+            client_id=context.client.id,
             macro=macro,
             handover=handover,
             branch_id=branch_id,
@@ -1633,6 +1827,8 @@ def _execute_macro_case_action(
         db.commit()
         db.refresh(handover)
         return _build_macro_execute_response(
+            db=db,
+            client_id=context.client.id,
             macro=macro,
             handover=handover,
             branch_id=branch_id,
@@ -6094,6 +6290,8 @@ def _execute_case_reassign(
                 branch_id=branch_id,
             )
         return _build_case_action_response(
+            db=db,
+            client_id=context.client.id,
             handover=case,
             branch_id=branch_id,
             routing=routing,
@@ -6129,6 +6327,8 @@ def _execute_case_reassign(
     )
     db.flush()
     return _build_case_action_response(
+        db=db,
+        client_id=context.client.id,
         handover=case,
         branch_id=branch_id,
         routing=routing,
@@ -11932,7 +12132,12 @@ async def snooze_case(
         db.commit()
         db.refresh(case)
 
-        response = _build_case_action_response(handover=case, branch_id=branch_id)
+        response = _build_case_action_response(
+            db=db,
+            client_id=context.client.id,
+            handover=case,
+            branch_id=branch_id,
+        )
         if idempotency and idempotency.record:
             finalize_idempotency(
                 db,
@@ -12016,7 +12221,13 @@ async def reopen_case(
             branch_id=branch_id,
             reason="case_reopened",
         )
-        response = _build_case_action_response(handover=case, branch_id=branch_id, sync=sync)
+        response = _build_case_action_response(
+            db=db,
+            client_id=context.client.id,
+            handover=case,
+            branch_id=branch_id,
+            sync=sync,
+        )
         if idempotency and idempotency.record:
             finalize_idempotency(
                 db,
@@ -12101,15 +12312,11 @@ async def take_case(
 
         response = ConsoleCaseActionResponse(
             success=True,
-            case=ConsoleCase(
-                id=case.id,
-                conversation_id=case.conversation_id,
-                status=case.status,
-                trigger_type=case.trigger_type,
-                created_at=case.created_at.isoformat(),
-                assigned_to_name=case.assigned_to_name,
+            case=_build_case_action_case(
+                db=db,
+                client_id=context.client.id,
+                handover=case,
                 branch_id=branch_id,
-                **_format_case_metrics(case),
             ),
             sync=ConsoleCaseActionSync(
                 telegram=_build_sync_status("skipped", "already_taken"),
@@ -12153,7 +12360,13 @@ async def take_case(
             branch_id=branch_id,
             manager_name=manager_name,
         )
-        response = _build_case_action_response(handover=case, branch_id=branch_id, sync=sync)
+        response = _build_case_action_response(
+            db=db,
+            client_id=context.client.id,
+            handover=case,
+            branch_id=branch_id,
+            sync=sync,
+        )
         if idempotency and idempotency.record:
             finalize_idempotency(
                 db,
@@ -12280,7 +12493,13 @@ async def resolve_case(
             manager_name=manager_name,
             action="resolve",
         )
-        response = _build_case_action_response(handover=case, branch_id=branch_id, sync=sync)
+        response = _build_case_action_response(
+            db=db,
+            client_id=context.client.id,
+            handover=case,
+            branch_id=branch_id,
+            sync=sync,
+        )
         if idempotency and idempotency.record:
             finalize_idempotency(
                 db,
@@ -12406,7 +12625,13 @@ async def return_case(
             manager_name=manager_name,
             action="return",
         )
-        response = _build_case_action_response(handover=case, branch_id=branch_id, sync=sync)
+        response = _build_case_action_response(
+            db=db,
+            client_id=context.client.id,
+            handover=case,
+            branch_id=branch_id,
+            sync=sync,
+        )
         if idempotency and idempotency.record:
             finalize_idempotency(
                 db,
@@ -12961,6 +13186,11 @@ async def get_case(
         assigned_to_name=case.assigned_to_name,
         queue_signals=queue_signals,
     )
+    booking_summary = _build_case_booking_summary(
+        db,
+        client_id=context.client.id,
+        handover=case,
+    )
     
     return ConsoleCase(
         id=case.id,
@@ -13004,6 +13234,7 @@ async def get_case(
         snoozed_by=queue_signals["snoozed_by"],
         **human_lock_snapshot,
         telegram_trail=telegram_trail,
+        booking_summary=booking_summary,
     )
 
 

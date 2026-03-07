@@ -180,6 +180,20 @@ def test_console_case_contract_exposes_action_sla_fields() -> None:
     assert _has_string_type(properties.get("snoozed_reason") or {})
     assert "snoozed_by" in properties
     assert _has_string_type(properties.get("snoozed_by") or {})
+    assert "booking_summary" in properties
+
+    booking_summary_schema = schemas.get("ConsoleCaseBookingSummary") or {}
+    booking_summary_props = booking_summary_schema.get("properties") or {}
+    assert "booking_id" in booking_summary_props
+    assert _has_string_type(booking_summary_props.get("booking_id") or {})
+    assert "status" in booking_summary_props
+    assert _has_string_type(booking_summary_props.get("status") or {})
+    assert "start_at" in booking_summary_props
+    assert _has_string_type(booking_summary_props.get("start_at") or {})
+    assert "operator_summary" in booking_summary_props
+    assert _has_string_type(booking_summary_props.get("operator_summary") or {})
+    assert "needs_action" in booking_summary_props
+    assert (booking_summary_props.get("needs_action") or {}).get("type") == "boolean"
 
 
 def test_console_case_action_paths_expose_wave6_single_case_actions() -> None:

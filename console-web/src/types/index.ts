@@ -16,6 +16,19 @@ export interface TelegramTrail {
     delivered_at?: string | null;
 }
 
+export interface CaseBookingSummary {
+    booking_id: string;
+    status: string;
+    start_at?: string | null;
+    specialist_name?: string | null;
+    service_type?: string | null;
+    needs_action?: boolean | null;
+    attention_reason?: string | null;
+    no_show_followup_done?: boolean | null;
+    no_show_followup_result?: string | null;
+    operator_summary: string;
+}
+
 export interface Case {
     id: string;
     conversation_id: string;
@@ -65,6 +78,7 @@ export interface Case {
     snoozed_until?: string | null;
     snoozed_reason?: string | null;
     snoozed_by?: string | null;
+    booking_summary?: CaseBookingSummary | null;
 }
 
 export interface Message {

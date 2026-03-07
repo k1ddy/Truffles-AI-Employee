@@ -2,12 +2,22 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave20-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave21-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
 - done:
+  - `PR #941` merged into `main` on 2026-03-07; Wave20 inbox history/archive modes are shipped.
+  - Wave21 Part A implemented locally: case detail API now returns a semantic `booking_summary`, inbox workspace shows `Почему заявка открыта` + `Что по записи`, details panel uses the same operator story, and the case-bookings panel refreshes case summary after booking mutations.
+  - Wave21 local evidence is green:
+    - `pytest -q truffles-api/tests/test_console_cases_helpers.py truffles-api/tests/test_console_openapi_calendar_contract.py` → `70 passed`
+    - `python3 truffles-api/scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/components/CaseConversation.tsx --file src/components/CaseBookingsPanel.tsx --file src/components/CaseDetailsPanel.tsx --file src/utils/labels.ts --file src/types/index.ts --file e2e/inspect_case.spec.ts` → `pass`
+    - `cd console-web && npm run build` → `pass`
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` → `4 passed, 1 skipped`
+    - `SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
   - `PR #940` merged into `main` on 2026-03-07; Wave18 filter-state correctness is shipped.
   - Wave19 semantic chain/decomposition block completed locally and recorded in canon; active implementation block switched to Wave20.
   - Wave20 implementation progressed locally across frontend + backend history contract:

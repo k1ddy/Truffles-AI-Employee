@@ -10139,6 +10139,10 @@ components:
           anyOf:
           - $ref: '#/components/schemas/ConsoleTelegramTrail'
           - type: 'null'
+        booking_summary:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCaseBookingSummary'
+          - type: 'null'
       type: object
       required:
       - id
@@ -10226,6 +10230,57 @@ components:
       - agent_name
       - role
       title: ConsoleCaseAssigneeOption
+    ConsoleCaseBookingSummary:
+      properties:
+        booking_id:
+          type: string
+          format: uuid
+          title: Booking Id
+        status:
+          type: string
+          title: Status
+        start_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Start At
+        specialist_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Specialist Name
+        service_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Service Type
+        needs_action:
+          type: boolean
+          title: Needs Action
+          default: false
+        attention_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Attention Reason
+        no_show_followup_done:
+          type: boolean
+          title: No Show Followup Done
+          default: false
+        no_show_followup_result:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: No Show Followup Result
+        operator_summary:
+          type: string
+          title: Operator Summary
+      type: object
+      required:
+      - booking_id
+      - status
+      - operator_summary
+      title: ConsoleCaseBookingSummary
     ConsoleCaseBulkActionRequest:
       properties:
         action:

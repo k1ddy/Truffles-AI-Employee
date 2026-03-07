@@ -12,7 +12,11 @@ import {
     updateBookingStatus,
     type Booking,
 } from "@/lib/calendar-bookings";
-import { getBookingStatusColor, getBookingStatusLabel } from "@/utils/labels";
+import {
+    getBookingStatusColor,
+    getBookingStatusLabel,
+    getCaseBookingSemanticSummary,
+} from "@/utils/labels";
 
 function formatTimeRange(startAt: string, endAt: string) {
     return `${new Date(startAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })} - ${new Date(endAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
@@ -57,6 +61,8 @@ export default function CaseBookingsPanel({
             updateBookingStatus(payload.bookingId, { status: payload.status }),
         onSuccess: (response) => {
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
             toast.success(`Статус записи обновлен: ${getBookingStatusLabel(response.booking.status)}`);
         },
         onError: () => {
@@ -69,6 +75,8 @@ export default function CaseBookingsPanel({
             registerNoShowFollowUp(payload.bookingId, { result: payload.result }),
         onSuccess: (response) => {
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
             const label = response.booking.no_show_followup_result === "rebooked" ? "перезапись сохранена" : "контакт отмечен";
             toast.success(`После неявки: ${label}`);
         },
@@ -79,6 +87,7 @@ export default function CaseBookingsPanel({
 
     const bookings = bookingsQuery.data?.items ?? [];
     const attentionCount = bookings.filter((booking) => bookingNeedsAttention(booking)).length;
+    const primaryBookingSummary = getCaseBookingSemanticSummary(bookings[0] ?? null);
 
     return (
         <div className="card-surface p-4 flex flex-col gap-4" data-testid="case-bookings-panel">
@@ -109,6 +118,20 @@ export default function CaseBookingsPanel({
                     Открыть полный календарь
                 </Link>
             </div>
+
+            {primaryBookingSummary ? (
+                <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="case-bookings-semantic-summary">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className={`rounded px-2 py-0.5 text-[11px] font-semibold ${primaryBookingSummary.className}`}>
+                            {primaryBookingSummary.label}
+                        </span>
+                        {primaryBookingSummary.meta ? (
+                            <span className="text-xs text-muted-foreground">{primaryBookingSummary.meta}</span>
+                        ) : null}
+                    </div>
+                    <p className="mt-2 text-sm font-medium text-foreground">{primaryBookingSummary.operatorSummary}</p>
+                </div>
+            ) : null}
 
             {bookingsQuery.isLoading ? (
                 <div className="space-y-3" data-testid="case-bookings-loading">
