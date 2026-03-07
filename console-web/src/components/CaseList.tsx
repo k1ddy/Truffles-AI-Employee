@@ -17,7 +17,9 @@ import {
     type InboxCaseListPrefs,
     type InboxCaseVisibleField,
     type InboxCaseVisibleFields,
+    type InboxOwnerScope,
     type InboxQueueViewId,
+    normalizeInboxOwnerScope,
     normalizeInboxQueueViewId,
     readInboxCaseListPrefs,
     writeInboxCaseListPrefs,
@@ -46,10 +48,14 @@ type QueueViewDefinition = {
     id: InboxQueueViewId;
     label: string;
     description: string;
-    privileged?: boolean;
-    serverView?: "needs_reply" | "waiting_client" | "snoozed" | "delivery" | "unassigned";
+    serverView?: "needs_reply" | "waiting_client" | "snoozed" | "delivery";
     applyFilters: (prev: CaseFilters) => CaseFilters;
     matchesFilters: (filters: CaseFilters) => boolean;
+};
+
+type OwnerScopeOption = {
+    value: string;
+    label: string;
 };
 
 function resolveServerQueueView(viewId: InboxQueueViewId): QueueViewDefinition["serverView"] {
@@ -58,7 +64,6 @@ function resolveServerQueueView(viewId: InboxQueueViewId): QueueViewDefinition["
         || viewId === "waiting_client"
         || viewId === "snoozed"
         || viewId === "delivery"
-        || viewId === "unassigned"
     ) {
         return viewId;
     }
@@ -86,9 +91,6 @@ interface BulkSummary {
 const DEFAULT_FILTERS: CaseFilters = {
     status: "open",
     branchId: undefined,
-    assignedToMe: false,
-    assigneeId: undefined,
-    unassigned: false,
     query: undefined,
     hasDeliveryError: false,
     hasPendingOutbox: false,
@@ -97,6 +99,7 @@ const DEFAULT_FILTERS: CaseFilters = {
     dateTo: undefined,
     sortBy: "activity",
 };
+const DEFAULT_OWNER_SCOPE: InboxOwnerScope = { kind: "all" };
 
 const DEFAULT_VISIBLE_FIELDS: InboxCaseVisibleFields = {
     branch: true,
@@ -232,12 +235,9 @@ function isPrivilegedQueueRole(role?: string): boolean {
     return role === "owner" || role === "admin" || role === "platform_admin";
 }
 
-function matchesGovernedFilters(filters: CaseFilters, target: Partial<CaseFilters>): boolean {
+function matchesViewFilters(filters: CaseFilters, target: Partial<CaseFilters>): boolean {
     return (
         (target.status ?? DEFAULT_FILTERS.status) === filters.status
-        && (target.assignedToMe ?? DEFAULT_FILTERS.assignedToMe) === filters.assignedToMe
-        && (target.assigneeId ?? DEFAULT_FILTERS.assigneeId) === filters.assigneeId
-        && (target.unassigned ?? DEFAULT_FILTERS.unassigned) === filters.unassigned
         && (target.hasDeliveryError ?? DEFAULT_FILTERS.hasDeliveryError) === filters.hasDeliveryError
         && (target.hasPendingOutbox ?? DEFAULT_FILTERS.hasPendingOutbox) === filters.hasPendingOutbox
         && (target.hasHumanLock ?? DEFAULT_FILTERS.hasHumanLock) === filters.hasHumanLock
@@ -258,7 +258,49 @@ function normalizeVisibleFields(raw?: InboxCaseVisibleFields | null): InboxCaseV
     };
 }
 
-function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
+function getDefaultSortForQueueView(viewId: InboxQueueViewId): CaseFilters["sortBy"] {
+    return viewId === "needs_reply" ? "sla" : "activity";
+}
+
+function resolveOwnerScopeLabel(scope: InboxOwnerScope, assignees: CaseAssigneeOption[]): string {
+    if (scope.kind === "mine") {
+        return "Мои заявки";
+    }
+    if (scope.kind === "unassigned") {
+        return "Без владельца";
+    }
+    if (scope.kind === "agent") {
+        return assignees.find((item) => String(item.agent_id) === scope.agentId)?.agent_name
+            ?? scope.agentId
+            ?? "Менеджер";
+    }
+    return "Все заявки";
+}
+
+function buildOwnerScopeOptions({
+    privileged,
+    assignees,
+}: {
+    privileged: boolean;
+    assignees: CaseAssigneeOption[];
+}): OwnerScopeOption[] {
+    const options: OwnerScopeOption[] = [
+        { value: "__all__", label: "Все заявки" },
+        { value: "__mine__", label: "Мои заявки" },
+    ];
+    if (privileged) {
+        options.push({ value: "__unassigned__", label: "Без владельца" });
+        assignees.forEach((option) => {
+            options.push({
+                value: String(option.agent_id),
+                label: formatQueueAssigneeOptionLabel(option),
+            });
+        });
+    }
+    return options;
+}
+
+function buildQueueViews(): QueueViewDefinition[] {
     const sharedViews: QueueViewDefinition[] = [
         {
             id: "all_open",
@@ -267,45 +309,13 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             applyFilters: (prev) => ({
                 ...prev,
                 status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
                 sortBy: "activity",
             }),
-            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+            matchesFilters: (filters) => matchesViewFilters(filters, {
                 status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: false,
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
-        },
-        {
-            id: "mine",
-            label: "Мои",
-            description: "Только заявки текущего менеджера.",
-            applyFilters: (prev) => ({
-                ...prev,
-                status: "open",
-                assignedToMe: true,
-                assigneeId: undefined,
-                unassigned: false,
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
-            matchesFilters: (filters) => matchesGovernedFilters(filters, {
-                status: "open",
-                assignedToMe: true,
-                assigneeId: undefined,
-                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -320,19 +330,13 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             applyFilters: (prev) => ({
                 ...prev,
                 status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
                 sortBy: "sla",
             }),
-            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+            matchesFilters: (filters) => matchesViewFilters(filters, {
                 status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -347,19 +351,13 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             applyFilters: (prev) => ({
                 ...prev,
                 status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
                 sortBy: "activity",
             }),
-            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+            matchesFilters: (filters) => matchesViewFilters(filters, {
                 status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -374,22 +372,16 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             applyFilters: (prev) => ({
                 ...prev,
                 status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
                 sortBy: "activity",
             }),
-            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+            matchesFilters: (filters) => matchesViewFilters(filters, {
                 status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
-                hasHumanLock: true,
+                hasHumanLock: false,
                 sortBy: "activity",
             }),
         },
@@ -401,19 +393,13 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             applyFilters: (prev) => ({
                 ...prev,
                 status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
                 sortBy: "activity",
             }),
-            matchesFilters: (filters) => matchesGovernedFilters(filters, {
+            matchesFilters: (filters) => matchesViewFilters(filters, {
                 status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: false,
                 hasDeliveryError: false,
                 hasPendingOutbox: false,
                 hasHumanLock: false,
@@ -421,42 +407,7 @@ function buildQueueViews(privileged: boolean): QueueViewDefinition[] {
             }),
         },
     ];
-
-    if (!privileged) {
-        return sharedViews;
-    }
-
-    return [
-        ...sharedViews,
-        {
-            id: "unassigned",
-            label: "Без владельца",
-            description: "Быстрый срез для супервизора по кейсам без ответственного.",
-            privileged: true,
-            serverView: "unassigned",
-            applyFilters: (prev) => ({
-                ...prev,
-                status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: true,
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
-            matchesFilters: (filters) => matchesGovernedFilters(filters, {
-                status: "open",
-                assignedToMe: false,
-                assigneeId: undefined,
-                unassigned: true,
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
-        },
-    ];
+    return sharedViews;
 }
 
 function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPrefs | null {
@@ -473,22 +424,33 @@ function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPref
     }
     const rawActiveViewId = raw.activeViewId as string | undefined;
     const normalizedActiveViewId = normalizeInboxQueueViewId(rawActiveViewId);
-    const legacyPausedView = rawActiveViewId === "paused";
+    const legacyFilters = raw.filters as Partial<{
+        assignedToMe: boolean;
+        assigneeId: string;
+        unassigned: boolean;
+    }>;
+    const ownerScope = raw.ownerScope
+        ? normalizeInboxOwnerScope(raw.ownerScope)
+        : legacyFilters.assignedToMe
+            ? { kind: "mine" as const }
+            : legacyFilters.unassigned
+                ? { kind: "unassigned" as const }
+                : typeof legacyFilters.assigneeId === "string" && legacyFilters.assigneeId
+                    ? { kind: "agent" as const, agentId: legacyFilters.assigneeId }
+                    : { ...DEFAULT_OWNER_SCOPE };
     return {
         filters: {
             status: filters.status,
             branchId: filters.branchId,
-            assignedToMe: Boolean(filters.assignedToMe),
-            assigneeId: typeof filters.assigneeId === "string" ? filters.assigneeId : undefined,
-            unassigned: Boolean(filters.unassigned),
             query: filters.query,
             hasDeliveryError: Boolean(filters.hasDeliveryError),
             hasPendingOutbox: Boolean(filters.hasPendingOutbox),
-            hasHumanLock: legacyPausedView ? false : Boolean(filters.hasHumanLock),
+            hasHumanLock: rawActiveViewId === "paused" ? false : Boolean(filters.hasHumanLock),
             dateFrom: filters.dateFrom,
             dateTo: filters.dateTo,
             sortBy,
         },
+        ownerScope,
         searchValue: typeof raw.searchValue === "string" ? raw.searchValue : "",
         showAdvancedFilters: Boolean(raw.showAdvancedFilters),
         filtersCollapsed: Boolean(raw.filtersCollapsed),
@@ -533,6 +495,7 @@ export default function CaseList({
     const [stateReady, setStateReady] = useState(!storageEnabled);
 
     const [filters, setFilters] = useState<CaseFilters>(DEFAULT_FILTERS);
+    const [ownerScope, setOwnerScope] = useState<InboxOwnerScope>(DEFAULT_OWNER_SCOPE);
     const [cursor, setCursor] = useState<string | undefined>(undefined);
     const [caseItems, setCaseItems] = useState<Case[]>([]);
     const [searchValue, setSearchValue] = useState("");
@@ -553,8 +516,8 @@ export default function CaseList({
     const filtersCompact = isCompact && !!selectedCaseId;
     const headingLabel = isCompact ? "Очередь" : "Заявки";
     const queueViews = useMemo(
-        () => buildQueueViews(isPrivilegedQueueRole(viewerRole)),
-        [viewerRole],
+        () => buildQueueViews(),
+        [],
     );
     const queueViewMap = useMemo(
         () => new Map(queueViews.map((view) => [view.id, view])),
@@ -565,6 +528,9 @@ export default function CaseList({
         { id: "created_at", label: "Новые" },
         { id: "sla", label: "Срочные" },
     ];
+    const resetPagination = () => {
+        setCursor(undefined);
+    };
 
     useEffect(() => {
         setStateReady(!workspaceScope);
@@ -578,6 +544,7 @@ export default function CaseList({
         const restored = normalizeStoredPrefs(readInboxCaseListPrefs(workspaceScope));
         if (restored) {
             setFilters(restored.filters);
+            setOwnerScope(restored.ownerScope ? normalizeInboxOwnerScope(restored.ownerScope) : { ...DEFAULT_OWNER_SCOPE });
             setSearchValue(restored.searchValue);
             setShowAdvancedFilters(restored.showAdvancedFilters);
             setFiltersCollapsed(restored.filtersCollapsed);
@@ -638,22 +605,16 @@ export default function CaseList({
     const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
     const activeQueueView = queueViewMap.get(activeViewId) ?? queueViewMap.get("all_open") ?? queueViews[0];
     const activeServerQueueView = resolveServerQueueView(activeViewId);
-    const queueViewHasManualOverrides = activeQueueView ? !activeQueueView.matchesFilters(filters) : false;
-    const ownerFilterLabel = filters.unassigned
-        ? "Без владельца"
-        : filters.assigneeId
-            ? null
-            : "Все владельцы";
     const statusFilterActive = filters.status !== "open";
     const advancedFiltersActive = Boolean(
-        filters.branchId
-        || filters.assigneeId
-        || filters.unassigned
+        statusFilterActive
+        || (branchFilterEnabled && filters.branchId)
         || filters.dateFrom
         || filters.dateTo
         || filters.hasDeliveryError
         || filters.hasPendingOutbox
         || filters.hasHumanLock
+        || filters.sortBy !== getDefaultSortForQueueView(activeViewId)
     );
     const advancedFiltersVisible = showAdvancedFilters || advancedFiltersActive;
     const filtersToggleLabel = filtersCollapsed
@@ -663,23 +624,22 @@ export default function CaseList({
         : "Скрыть фильтры";
     const showAdvancedFiltersRow = !filtersCollapsed && advancedFiltersVisible;
     const advancedToggleLabel = advancedFiltersActive
-        ? "Фильтры активны"
+        ? "Уточнения активны"
         : advancedFiltersVisible
-            ? "Скрыть фильтры"
-            : "Расширенные фильтры";
+            ? "Скрыть уточнения"
+            : "Уточнить очередь";
     const hasAnyFiltersApplied = Boolean(
         activeViewId !== "all_open"
         || statusFilterActive
         || (branchFilterEnabled && filters.branchId)
         || filters.dateFrom
         || filters.dateTo
-        || filters.assignedToMe
-        || filters.assigneeId
-        || filters.unassigned
+        || ownerScope.kind !== "all"
         || filters.query
         || filters.hasDeliveryError
         || filters.hasPendingOutbox
         || filters.hasHumanLock
+        || filters.sortBy !== getDefaultSortForQueueView(activeViewId)
     );
     const headingClass = filtersCompact ? "text-base" : isCompact ? "text-lg" : "text-xl";
     const isTight = filtersCompact || filtersCollapsed;
@@ -699,7 +659,6 @@ export default function CaseList({
     }`;
     const compactSearchInputClass = "w-full rounded-xl border border-border/60 bg-card px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40";
     const compactSelectClass = "w-full min-w-0 rounded-xl border border-border/60 bg-card px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40";
-    const compactPrimaryGridClass = "grid w-full gap-2 sm:grid-cols-2";
 
     const pillClass = (active: boolean) => (
         `rounded-full border px-3 py-1 text-xs font-semibold transition ${
@@ -728,16 +687,26 @@ export default function CaseList({
         }
     }, [branchFilterEnabled, filters.branchId]);
 
+    useEffect(() => {
+        if (privilegedOwnerFilterVisible) {
+            return;
+        }
+        if (ownerScope.kind === "agent" || ownerScope.kind === "unassigned") {
+            resetPagination();
+            setOwnerScope({ ...DEFAULT_OWNER_SCOPE });
+        }
+    }, [ownerScope.kind, privilegedOwnerFilterVisible]);
+
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuery({
-        queryKey: ["cases", filters, activeServerQueueView || activeViewId, cursor],
+        queryKey: ["cases", filters, ownerScope, activeServerQueueView || activeViewId, cursor],
         queryFn: async (): Promise<CasesResponse> => {
             const buildParams = (includeSort: boolean) => {
                 const params = new URLSearchParams();
                 if (filters.status) params.append("status", filters.status);
                 if (filters.branchId) params.append("branch_id", filters.branchId);
-                if (filters.assignedToMe) params.append("assigned_to_me", "true");
-                if (filters.assigneeId) params.append("assignee_id", filters.assigneeId);
-                if (filters.unassigned) params.append("unassigned", "true");
+                if (ownerScope.kind === "mine") params.append("assigned_to_me", "true");
+                if (ownerScope.kind === "agent" && ownerScope.agentId) params.append("assignee_id", ownerScope.agentId);
+                if (ownerScope.kind === "unassigned") params.append("unassigned", "true");
                 if (filters.query) params.append("q", filters.query);
                 if (filters.hasDeliveryError) params.append("has_delivery_error", "true");
                 if (filters.hasPendingOutbox) params.append("has_pending_outbox", "true");
@@ -804,19 +773,7 @@ export default function CaseList({
 
     const cases = caseItems;
 
-    // Keep server order for SLA; local sort for other modes.
-    const sortedCases =
-        filters.sortBy === "sla"
-            ? cases
-            : [...cases].sort((a, b) => {
-                if (filters.sortBy === "activity") {
-                    const aTime = a.last_inbound_at || a.last_activity_at || a.created_at;
-                    const bTime = b.last_inbound_at || b.last_activity_at || b.created_at;
-                    return new Date(bTime).getTime() - new Date(aTime).getTime();
-                }
-                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-            });
-    const visibleCases = sortedCases;
+    const visibleCases = cases;
     const selectedCaseIdSet = useMemo(() => new Set(selectedCaseIds), [selectedCaseIds]);
     const selectedCases = useMemo(
         () => visibleCases.filter((item) => selectedCaseIdSet.has(item.id)),
@@ -877,13 +834,101 @@ export default function CaseList({
         () => sortAssigneeOptionsByName(queueAssigneesData?.items ?? []),
         [queueAssigneesData?.items],
     );
+    const ownerScopeOptions = useMemo(
+        () => buildOwnerScopeOptions({
+            privileged: privilegedOwnerFilterVisible,
+            assignees: queueAssignees,
+        }),
+        [privilegedOwnerFilterVisible, queueAssignees],
+    );
+    const ownerScopeValue = ownerScope.kind === "agent" ? ownerScope.agentId || "__all__" : `__${ownerScope.kind}__`;
+    const ownerScopeLabel = resolveOwnerScopeLabel(ownerScope, queueAssignees);
     const recommendedBulkAssignee = useMemo(
         () => resolveRecommendedAssignee(bulkAssignees),
         [bulkAssignees],
     );
-    const selectedAssigneeLabel = filters.assigneeId
-        ? queueAssignees.find((item) => String(item.agent_id) === filters.assigneeId)?.agent_name ?? filters.assigneeId
-        : ownerFilterLabel;
+    const refinementChips = [
+        ownerScope.kind !== "all"
+            ? {
+                key: "owner",
+                label: `Ответственный: ${ownerScopeLabel}`,
+                onClear: () => {
+                    resetPagination();
+                    setOwnerScope({ ...DEFAULT_OWNER_SCOPE });
+                },
+            }
+            : null,
+        branchFilterEnabled && filters.branchId
+            ? {
+                key: "branch",
+                label: `Филиал: ${branchMap.get(filters.branchId) ?? filters.branchId}`,
+                onClear: () => {
+                    resetPagination();
+                    setFilters((prev) => ({ ...prev, branchId: undefined }));
+                },
+            }
+            : null,
+        statusFilterActive
+            ? {
+                key: "status",
+                label: `Статус: ${filters.status === "resolved" ? "Закрыта" : filters.status === "active" ? "В работе" : filters.status === "pending" ? "Ожидает" : filters.status ?? "Все"}`,
+                onClear: () => {
+                    resetPagination();
+                    setFilters((prev) => ({ ...prev, status: DEFAULT_FILTERS.status }));
+                },
+            }
+            : null,
+        filters.sortBy !== getDefaultSortForQueueView(activeViewId)
+            ? {
+                key: "sort",
+                label: `Порядок: ${sortOptions.find((option) => option.id === filters.sortBy)?.label ?? filters.sortBy}`,
+                onClear: () => {
+                    resetPagination();
+                    setFilters((prev) => ({ ...prev, sortBy: getDefaultSortForQueueView(activeViewId) }));
+                },
+            }
+            : null,
+        filters.dateFrom || filters.dateTo
+            ? {
+                key: "dates",
+                label: `Период: ${filters.dateFrom || "..." } — ${filters.dateTo || "..."}`,
+                onClear: () => {
+                    resetPagination();
+                    setFilters((prev) => ({ ...prev, dateFrom: undefined, dateTo: undefined }));
+                },
+            }
+            : null,
+        filters.hasDeliveryError
+            ? {
+                key: "delivery-error",
+                label: "Есть ошибки доставки",
+                onClear: () => {
+                    resetPagination();
+                    setFilters((prev) => ({ ...prev, hasDeliveryError: false }));
+                },
+            }
+            : null,
+        filters.hasPendingOutbox
+            ? {
+                key: "pending-outbox",
+                label: "Есть исходящие в очереди",
+                onClear: () => {
+                    resetPagination();
+                    setFilters((prev) => ({ ...prev, hasPendingOutbox: false }));
+                },
+            }
+            : null,
+        filters.hasHumanLock
+            ? {
+                key: "human-lock",
+                label: "Бот на паузе",
+                onClear: () => {
+                    resetPagination();
+                    setFilters((prev) => ({ ...prev, hasHumanLock: false }));
+                },
+            }
+            : null,
+    ].filter((item): item is { key: string; label: string; onClear: () => void } => Boolean(item));
 
     const bulkActionMutation = useMutation({
         mutationFn: async () => {
@@ -979,6 +1024,7 @@ export default function CaseList({
         }
         writeInboxCaseListPrefs(workspaceScope, {
             filters,
+            ownerScope,
             searchValue,
             showAdvancedFilters,
             filtersCollapsed,
@@ -986,7 +1032,7 @@ export default function CaseList({
             activeViewId,
             visibleFields,
         });
-    }, [workspaceScope, stateReady, filters, searchValue, showAdvancedFilters, filtersCollapsed, autoRefreshEnabled, activeViewId, visibleFields]);
+    }, [workspaceScope, stateReady, filters, ownerScope, searchValue, showAdvancedFilters, filtersCollapsed, autoRefreshEnabled, activeViewId, visibleFields]);
 
     useEffect(() => {
         if (!onCaseIdsChange) {
@@ -1005,8 +1051,21 @@ export default function CaseList({
         }
     };
 
-    const resetPagination = () => {
-        setCursor(undefined);
+    const applyOwnerScopeValue = (nextValue: string) => {
+        resetPagination();
+        if (!nextValue || nextValue === "__all__") {
+            setOwnerScope({ ...DEFAULT_OWNER_SCOPE });
+            return;
+        }
+        if (nextValue === "__mine__") {
+            setOwnerScope({ kind: "mine" });
+            return;
+        }
+        if (nextValue === "__unassigned__") {
+            setOwnerScope({ kind: "unassigned" });
+            return;
+        }
+        setOwnerScope({ kind: "agent", agentId: nextValue });
     };
 
     const applyQueueView = (viewId: InboxQueueViewId) => {
@@ -1068,12 +1127,14 @@ export default function CaseList({
     const resetAllFilters = () => {
         setSearchValue("");
         setShowAdvancedFilters(false);
+        setFiltersCollapsed(false);
         setSelectedCaseIds([]);
         setBulkSummary(null);
         setFieldPanelOpen(false);
         resetPagination();
         setActiveViewId("all_open");
         setFilters({ ...DEFAULT_FILTERS });
+        setOwnerScope({ ...DEFAULT_OWNER_SCOPE });
     };
 
     if (!session) {
@@ -1206,94 +1267,26 @@ export default function CaseList({
                             data-testid="cases-filter-search"
                         />
                         {!filtersCollapsed && (
-                            <div className={compactPrimaryGridClass}>
-                                <label className="space-y-1">
-                                    <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                        Статус
-                                    </span>
-                                    <select
-                                        value={filters.status || ""}
-                                        onChange={(e) => { resetPagination(); setFilters({ ...filters, status: e.target.value || undefined }); }}
-                                        className={compactSelectClass}
-                                        data-testid="cases-filter-status"
-                                    >
-                                        <option value="open">Открытые</option>
-                                        <option value="">Все статусы</option>
-                                        <option value="pending">Ожидает</option>
-                                        <option value="active">В работе</option>
-                                        <option value="resolved">Закрыта</option>
-                                    </select>
-                                </label>
-                                <label className="space-y-1">
-                                    <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                        Сортировка
-                                    </span>
-                                    <select
-                                        value={filters.sortBy}
-                                        onChange={(e) => {
-                                            resetPagination();
-                                            setFilters({ ...filters, sortBy: e.target.value as CaseFilters["sortBy"] });
-                                        }}
-                                        className={compactSelectClass}
-                                        data-testid="cases-filter-sort-select"
-                                    >
-                                        {sortOptions.map((option) => (
-                                            <option key={option.id} value={option.id}>
-                                                {option.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
-                                {privilegedOwnerFilterVisible && (
-                                    <label className="space-y-1 sm:col-span-2">
-                                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                            Владелец
-                                        </span>
-                                        <select
-                                            value={filters.unassigned ? "__unassigned__" : filters.assigneeId || ""}
-                                            onChange={(event) => {
-                                                const nextValue = event.target.value;
-                                                resetPagination();
-                                                setFilters({
-                                                    ...filters,
-                                                    assignedToMe: false,
-                                                    assigneeId: nextValue && nextValue !== "__unassigned__" ? nextValue : undefined,
-                                                    unassigned: nextValue === "__unassigned__",
-                                                });
-                                            }}
-                                            className={compactSelectClass}
-                                            disabled={queueAssigneesLoading}
-                                            data-testid="cases-filter-assignee"
-                                        >
-                                            <option value="">Все владельцы</option>
-                                            <option value="__unassigned__">Без владельца</option>
-                                            {queueAssignees.map((option) => (
-                                                <option key={option.agent_id} value={String(option.agent_id)}>
-                                                    {formatQueueAssigneeOptionLabel(option)}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </label>
-                                )}
-                            </div>
+                            <label className="space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    Ответственный
+                                </span>
+                                <select
+                                    value={ownerScopeValue}
+                                    onChange={(event) => applyOwnerScopeValue(event.target.value)}
+                                    className={compactSelectClass}
+                                    disabled={queueAssigneesLoading}
+                                    data-testid="cases-filter-owner-scope"
+                                >
+                                    {ownerScopeOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
                         )}
                         <div className="flex flex-wrap items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    resetPagination();
-                                    setFilters({
-                                        ...filters,
-                                        assignedToMe: !filters.assignedToMe,
-                                        assigneeId: undefined,
-                                        unassigned: false,
-                                    });
-                                }}
-                                className={pillClass(filters.assignedToMe)}
-                                data-testid="cases-filter-assigned"
-                            >
-                                Мои
-                            </button>
                             <button
                                 type="button"
                                 onClick={() => setShowAdvancedFilters((prev) => !prev)}
@@ -1325,92 +1318,18 @@ export default function CaseList({
                             data-testid="cases-filter-search"
                         />
                         <select
-                            value={filters.status || ""}
-                            onChange={(e) => { resetPagination(); setFilters({ ...filters, status: e.target.value || undefined }); }}
+                            value={ownerScopeValue}
+                            onChange={(event) => applyOwnerScopeValue(event.target.value)}
                             className={selectClass}
-                            data-testid="cases-filter-status"
+                            disabled={queueAssigneesLoading}
+                            data-testid="cases-filter-owner-scope"
                         >
-                            <option value="open">Открытые</option>
-                            <option value="">Все статусы</option>
-                            <option value="pending">Ожидает</option>
-                            <option value="active">В работе</option>
-                            <option value="resolved">Закрыта</option>
+                            {ownerScopeOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                    {option.label}
+                                </option>
+                            ))}
                         </select>
-                        {filtersCollapsed ? (
-                            <select
-                                value={filters.sortBy}
-                                onChange={(e) => {
-                                    resetPagination();
-                                    setFilters({ ...filters, sortBy: e.target.value as CaseFilters["sortBy"] });
-                                }}
-                                className={selectClass}
-                                data-testid="cases-filter-sort-select"
-                            >
-                                {sortOptions.map((option) => (
-                                    <option key={option.id} value={option.id}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                        ) : (
-                            <div className="flex items-center gap-2" data-testid="cases-filter-sort">
-                                {sortOptions.map((option) => (
-                                    <button
-                                        key={option.id}
-                                        type="button"
-                                        onClick={() => {
-                                            resetPagination();
-                                            setFilters({ ...filters, sortBy: option.id });
-                                        }}
-                                        className={pillClass(filters.sortBy === option.id)}
-                                    >
-                                        {option.label}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                        <button
-                            type="button"
-                            onClick={() => {
-                                resetPagination();
-                                setFilters({
-                                    ...filters,
-                                    assignedToMe: !filters.assignedToMe,
-                                    assigneeId: undefined,
-                                    unassigned: false,
-                                });
-                            }}
-                            className={pillClass(filters.assignedToMe)}
-                            data-testid="cases-filter-assigned"
-                        >
-                            Мои
-                        </button>
-                        {privilegedOwnerFilterVisible && (
-                            <select
-                                value={filters.unassigned ? "__unassigned__" : filters.assigneeId || ""}
-                                onChange={(event) => {
-                                    const nextValue = event.target.value;
-                                    resetPagination();
-                                    setFilters({
-                                        ...filters,
-                                        assignedToMe: false,
-                                        assigneeId: nextValue && nextValue !== "__unassigned__" ? nextValue : undefined,
-                                        unassigned: nextValue === "__unassigned__",
-                                    });
-                                }}
-                                className={selectClass}
-                                disabled={queueAssigneesLoading}
-                                data-testid="cases-filter-assignee"
-                            >
-                                <option value="">Все владельцы</option>
-                                <option value="__unassigned__">Без владельца</option>
-                                {queueAssignees.map((option) => (
-                                    <option key={option.agent_id} value={String(option.agent_id)}>
-                                        {formatQueueAssigneeOptionLabel(option)}
-                                    </option>
-                                ))}
-                            </select>
-                        )}
                         {!filtersCollapsed && (
                             <button
                                 type="button"
@@ -1437,16 +1356,27 @@ export default function CaseList({
                     <span className="rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary">
                         {activeQueueView?.label ?? "Все открытые"}
                     </span>
-                    {queueViewHasManualOverrides && (
-                        <span className="font-semibold text-amber-700">
-                            Есть ручные фильтры поверх режима
-                        </span>
+                    {filters.query && (
+                        <button
+                            type="button"
+                            onClick={() => setSearchValue("")}
+                            className="rounded-full border border-border/60 bg-card px-2 py-1 font-semibold text-foreground/80"
+                            data-testid="cases-search-summary"
+                        >
+                            Поиск: {filters.query} ×
+                        </button>
                     )}
-                    {(filters.assigneeId || filters.unassigned) && (
-                        <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700" data-testid="cases-owner-summary">
-                            {selectedAssigneeLabel}
-                        </span>
-                    )}
+                    {refinementChips.map((chip) => (
+                        <button
+                            key={chip.key}
+                            type="button"
+                            onClick={chip.onClear}
+                            className="rounded-full border border-border/60 bg-card px-2 py-1 font-semibold text-foreground/80"
+                            data-testid={chip.key === "owner" ? "cases-owner-summary" : `cases-filter-chip-${chip.key}`}
+                        >
+                            {chip.label} ×
+                        </button>
+                    ))}
                     {refreshStatusLabel && (
                         <span
                             className={`text-muted-foreground ${
@@ -1489,74 +1419,127 @@ export default function CaseList({
                 )}
                 {showAdvancedFiltersRow && (
                     <div
-                        className="flex w-full flex-wrap items-center gap-3 border-t border-border/60 pt-2"
+                        className="grid w-full gap-3 border-t border-border/60 pt-2 md:grid-cols-2 xl:grid-cols-4"
                         data-testid="cases-filters-advanced"
                     >
-                        {branchFilterEnabled && (
+                        <label className="space-y-1">
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                Статус
+                            </span>
                             <select
-                                value={filters.branchId || ""}
-                                onChange={(e) => { resetPagination(); setFilters({ ...filters, branchId: e.target.value || undefined }); }}
-                                className={selectClass}
-                                data-testid="cases-filter-branch"
+                                value={filters.status || ""}
+                                onChange={(e) => {
+                                    resetPagination();
+                                    setFilters({ ...filters, status: e.target.value || undefined });
+                                }}
+                                className={compactSelectClass}
+                                data-testid="cases-filter-status"
                             >
-                                <option value="">Все филиалы</option>
-                                {selectableBranches.map((branch) => (
-                                    <option key={branch.id} value={branch.id}>
-                                        {branch.name ?? branch.id}
+                                <option value="open">Открытые</option>
+                                <option value="">Все статусы</option>
+                                <option value="pending">Ожидает</option>
+                                <option value="active">В работе</option>
+                                <option value="resolved">Закрыта</option>
+                            </select>
+                        </label>
+                        <label className="space-y-1">
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                Порядок
+                            </span>
+                            <select
+                                value={filters.sortBy}
+                                onChange={(e) => {
+                                    resetPagination();
+                                    setFilters({ ...filters, sortBy: e.target.value as CaseFilters["sortBy"] });
+                                }}
+                                className={compactSelectClass}
+                                data-testid="cases-filter-sort-select"
+                            >
+                                {sortOptions.map((option) => (
+                                    <option key={option.id} value={option.id}>
+                                        {option.label}
                                     </option>
                                 ))}
                             </select>
+                        </label>
+                        {branchFilterEnabled && (
+                            <label className="space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    Филиал
+                                </span>
+                                <select
+                                    value={filters.branchId || ""}
+                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, branchId: e.target.value || undefined }); }}
+                                    className={compactSelectClass}
+                                    data-testid="cases-filter-branch"
+                                >
+                                    <option value="">Все филиалы</option>
+                                    {selectableBranches.map((branch) => (
+                                        <option key={branch.id} value={branch.id}>
+                                            {branch.name ?? branch.id}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
                         )}
-                        <div className="flex items-center gap-1">
-                            <span className="text-xs text-muted-foreground">С:</span>
-                            <input
-                                type="date"
-                                value={filters.dateFrom || ""}
-                                onChange={(e) => { resetPagination(); setFilters({ ...filters, dateFrom: e.target.value || undefined }); }}
-                                className="px-2 py-2 border border-border/60 rounded-lg text-xs bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                data-testid="cases-filter-date-from"
-                            />
+                        <div className="grid gap-3 sm:grid-cols-2 xl:col-span-2">
+                            <label className="space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    С
+                                </span>
+                                <input
+                                    type="date"
+                                    value={filters.dateFrom || ""}
+                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, dateFrom: e.target.value || undefined }); }}
+                                    className={compactSelectClass}
+                                    data-testid="cases-filter-date-from"
+                                />
+                            </label>
+                            <label className="space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    По
+                                </span>
+                                <input
+                                    type="date"
+                                    value={filters.dateTo || ""}
+                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, dateTo: e.target.value || undefined }); }}
+                                    className={compactSelectClass}
+                                    data-testid="cases-filter-date-to"
+                                />
+                            </label>
                         </div>
-                        <div className="flex items-center gap-1">
-                            <span className="text-xs text-muted-foreground">По:</span>
-                            <input
-                                type="date"
-                                value={filters.dateTo || ""}
-                                onChange={(e) => { resetPagination(); setFilters({ ...filters, dateTo: e.target.value || undefined }); }}
-                                className="px-2 py-2 border border-border/60 rounded-lg text-xs bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                data-testid="cases-filter-date-to"
-                            />
+                        <div className="flex flex-wrap items-center gap-3 xl:col-span-4">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={filters.hasDeliveryError}
+                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, hasDeliveryError: e.target.checked }); }}
+                                    className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                    data-testid="cases-filter-delivery-error"
+                                />
+                                <span className="text-sm text-foreground/80">Есть ошибки доставки</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={filters.hasPendingOutbox}
+                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, hasPendingOutbox: e.target.checked }); }}
+                                    className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                    data-testid="cases-filter-pending-outbox"
+                                />
+                                <span className="text-sm text-foreground/80">Есть исходящие в очереди</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={filters.hasHumanLock}
+                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, hasHumanLock: e.target.checked }); }}
+                                    className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                    data-testid="cases-filter-human-lock"
+                                />
+                                <span className="text-sm text-foreground/80">Бот на паузе</span>
+                            </label>
                         </div>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={filters.hasDeliveryError}
-                                onChange={(e) => { resetPagination(); setFilters({ ...filters, hasDeliveryError: e.target.checked }); }}
-                                className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                data-testid="cases-filter-delivery-error"
-                            />
-                            <span className="text-sm text-foreground/80">Есть ошибки</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={filters.hasPendingOutbox}
-                                onChange={(e) => { resetPagination(); setFilters({ ...filters, hasPendingOutbox: e.target.checked }); }}
-                                className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                data-testid="cases-filter-pending-outbox"
-                            />
-                            <span className="text-sm text-foreground/80">В очереди</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={filters.hasHumanLock}
-                                onChange={(e) => { resetPagination(); setFilters({ ...filters, hasHumanLock: e.target.checked }); }}
-                                className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                data-testid="cases-filter-human-lock"
-                            />
-                            <span className="text-sm text-foreground/80">Бот на паузе</span>
-                        </label>
                     </div>
                 )}
                 {!filtersCompact && (

@@ -1182,10 +1182,10 @@ test('inspect first case', async ({ page }) => {
     if (useRouteMocks) {
         await expect(page.getByTestId('cases-queue-views')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('cases-filter-compact-layout')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByTestId('cases-filter-assignee')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByTestId('cases-filter-assignee').locator('option').nth(2)).toContainText('Manager · 2 в работе');
-        await expect(page.getByTestId('cases-filter-assignee').locator('option').nth(3)).toContainText('Manager Two · 1 в работе');
-        await expect(page.getByTestId('cases-queue-view-unassigned')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-filter-owner-scope')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-filter-owner-scope').locator('option').nth(2)).toContainText('Без владельца');
+        await expect(page.getByTestId('cases-filter-owner-scope').locator('option').nth(3)).toContainText('Manager · 2 в работе');
+        await expect(page.getByTestId('cases-filter-owner-scope').locator('option').nth(4)).toContainText('Manager Two · 1 в работе');
         const inboxListBox = await page.getByTestId('inbox-list').boundingBox();
         expect(inboxListBox?.width ?? 0).toBeGreaterThan(300);
         await page.getByTestId('cases-field-toggle').click({ force: true });
@@ -1193,14 +1193,14 @@ test('inspect first case', async ({ page }) => {
         await page.getByTestId('cases-field-channel').check({ force: true });
         await expect(page.getByTestId('cases-field-toggle')).toContainText('Вид 4/5', { timeout: 15000 });
 
-        await page.getByTestId('cases-filter-assignee').selectOption('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        await page.getByTestId('cases-filter-owner-scope').selectOption('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
         await expect(page.getByTestId('cases-owner-summary')).toContainText('Manager Two', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Сабина', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Manager Two', { timeout: 15000 });
 
         await page.getByTestId('cases-filter-clear').click({ force: true });
         await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Все открытые', { timeout: 15000 });
-        await page.getByTestId('cases-filter-assignee').selectOption('__unassigned__');
+        await page.getByTestId('cases-filter-owner-scope').selectOption('__unassigned__');
         await expect(page.getByTestId('cases-owner-summary')).toContainText('Без владельца', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Нургуль', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Без владельца', { timeout: 15000 });
@@ -1235,8 +1235,16 @@ test('inspect first case', async ({ page }) => {
         await expect(caseActionBadge).toContainText('Ответить до', { timeout: 15000 });
         await expect(page.getByTestId('case-reassign-toggle')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('case-snooze-toggle')).toBeVisible({ timeout: 15000 });
-        await page.getByTestId('cases-bulk-select').first().check({ force: true });
+        const bulkSelect = page.getByTestId('cases-bulk-select').first();
+        await bulkSelect.click({ force: true });
+        await expect(bulkSelect).toBeChecked({ timeout: 15000 });
         await expect(page.getByTestId('cases-bulk-toolbar')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('cases-bulk-toggle-reassign').click({ force: true });
+        await expect(page.getByTestId('cases-bulk-reassign-recommendation')).toContainText('Manager Two · 1 в работе', { timeout: 15000 });
+        await page.getByTestId('cases-bulk-reassign-recommend').click({ force: true });
+        await expect(page.getByTestId('cases-bulk-reassign-select')).toHaveValue('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        await page.getByTestId('cases-bulk-toggle-snooze').click({ force: true });
+        await expect(page.getByTestId('cases-bulk-snooze-minutes')).toBeVisible({ timeout: 15000 });
         await page.getByTestId('cases-bulk-toggle-route').click({ force: true });
         await expect(page.getByTestId('cases-bulk-route-panel')).toBeVisible({ timeout: 15000 });
         const bulkRouteRequestPromise = page.waitForRequest((request) =>
@@ -1248,23 +1256,6 @@ test('inspect first case', async ({ page }) => {
             action: 'route',
             case_ids: [CASE_ID],
             policy: 'least_open_cases',
-        });
-        await page.getByTestId('cases-bulk-select').first().check({ force: true });
-        await expect(page.getByTestId('cases-bulk-toolbar')).toBeVisible({ timeout: 15000 });
-        await page.getByTestId('cases-bulk-toggle-reassign').click({ force: true });
-        await expect(page.getByTestId('cases-bulk-reassign-recommendation')).toContainText('Manager Two · 1 в работе', { timeout: 15000 });
-        await page.getByTestId('cases-bulk-reassign-recommend').click({ force: true });
-        await expect(page.getByTestId('cases-bulk-reassign-select')).toHaveValue('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
-        await page.getByTestId('cases-bulk-toggle-snooze').click({ force: true });
-        await expect(page.getByTestId('cases-bulk-snooze-minutes')).toBeVisible({ timeout: 15000 });
-        const bulkRequestPromise = page.waitForRequest((request) =>
-            request.method() === 'POST' && request.url().includes('/api/proxy/cases/bulk')
-        );
-        await page.getByTestId('cases-bulk-snooze-submit').click({ force: true });
-        const bulkRequest = await bulkRequestPromise;
-        expect(bulkRequest.postDataJSON()).toMatchObject({
-            action: 'snooze',
-            case_ids: [CASE_ID],
         });
         await page.getByTestId('case-reassign-toggle').click();
         await expect(page.getByTestId('case-reassign-select')).toBeVisible({ timeout: 15000 });

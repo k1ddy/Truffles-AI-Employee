@@ -172,7 +172,8 @@
 | Wave14 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave14-a1.md` | Split allowed and expected: `Part A backend queue-view contract`, `Part B frontend queue migration` | Перевести queue views на server-owned semantics и убрать local-only approximation из левой очереди. | Done (merged via `PR #936`) |
 | Wave15 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-a1.md` | Split allowed and expected: `Part A feedback contract`, `Part B action-specific receipts` | Убрать raw technical reason-codes из operator UX и разделить business outcome от secondary sync warnings. | Done (merged via `PR #937`) |
 | Wave15 Live Validation | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-live-validation-a1.md` | No feature PR; evidence gate after Wave15 merge | Подтвердить на live backend без mocks, что `reopen` и sync-bearing action больше не показывают raw technical feedback менеджеру. | Blocked with precise evidence: explicit safe `INSPECT_CASE_LIVE_CASE_ID` missing; dedicated live mutation test now skips instead of fake-pass |
-| Wave16 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave16-a1.md` | Split allowed and expected: `Part A case action surface`, `Part B queue rail simplification` | Полностью пересобрать перегруженные operator surfaces в `Заявках`: action area и левую очередь. | In progress (action hierarchy + initial rail simplification in branch) |
+| Wave16 | `TP-2026-03-06-inbox-calendar-ux-reconstruction-wave16-a1.md` | Split allowed and expected: `Part A case action surface`, `Part B queue rail simplification` | Полностью пересобрать перегруженные operator surfaces в `Заявках`: action area и левую очередь. | Done (merged via `PR #938`) |
+| Wave17 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-a1.md` | Split allowed and expected: `Part A filter contract`, `Part B rail UX cleanup` | Разделить queue mode, owner scope, advanced diagnostics и presentation prefs, чтобы фильтры в `Заявках` перестали конфликтовать логически и визуально. | In progress |
 
 ## Wave-by-wave closure contract (mandatory)
 1. `Wave5` closes only when SLA перестает быть абстрактным и становится action-driven на сервере и в ключевых UI surface.
@@ -188,6 +189,7 @@
 11. `Wave15` closes only when operator UI stops leaking raw technical reason-codes and clearly separates successful case state change from secondary sync warnings.
 12. `Wave15 Live Validation` closes only when live no-mocks evidence proves the new operator feedback semantics on a safe explicit case, or closes with a precise blocker instead of a fake pass.
 13. `Wave16` closes only when `Передать / Отложить / Вернуть в работу` and the left queue rail become readable, hierarchical, and business-clear without regressing the current workspace loop.
+14. `Wave17` closes only when queue view, owner scope, and advanced refinements stop fighting each other and the inbox first screen exposes one clear filtering model.
 
 ## TP/PR linkage rules (mandatory)
 - Если wave не помещается в один PR, split обязан быть зафиксирован прямо в wave TP до начала part-реализации.
@@ -247,7 +249,7 @@
 - `Expiry/trigger to stop deferral`: любой новый merge по `Заявки/Записи`, который не уменьшает один из этих residual gaps, требует отдельного owner-approved waiver.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: выполнить Wave15 feedback contract, затем отдельным evidence gate подтвердить его на live и только после этого переходить к Wave16 action/queue UX redesign.
+- `Next block objective`: выполнить Wave17 filter-contract reconstruction after Wave16 merge, while keeping Wave15 live validation recorded as a precise external blocker until a safe explicit live case is available.
 - `First deterministic check command`: `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_inbox_macros.py`
 - `Blocked-by conditions`: Wave15 must not regress reopen semantics, macro action receipts, or current workspace loop; live validation requires a safe explicit case/scenario.
 - `Owner role for closure`: Brain / Top Architect.
