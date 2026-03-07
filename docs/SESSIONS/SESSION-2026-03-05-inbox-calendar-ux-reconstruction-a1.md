@@ -2,26 +2,22 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave21-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
 - done:
+  - `PR #943` merged into `main` on 2026-03-07; Wave21 Part B booking-state propagation is shipped.
+  - Wave22 implementation started locally:
+    - deterministic validation now includes a manager history-mode matrix, proving that queue views disappear outside `Открытые`, role-gated owner scope does not leak privileged options, and `resolved/all/open` mode transitions emit stable query semantics.
+    - a dedicated validation runbook now documents deterministic/local and live no-mocks proof, including exact `pass | blocked | fail` classification for explicit safe-case mutation checks.
+  - Wave22 local evidence is green:
+    - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts` → `pass`
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` → `6 passed, 1 skipped`
+    - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
+    - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts -g "live action feedback validation requires explicit safe case" --project=chromium --reporter=line --workers=1` → `1 skipped` (`blocked` without explicit safe live case)
   - `PR #942` merged into `main` on 2026-03-07; Wave21 Part A semantic booking context is shipped.
-  - Wave21 Part B implemented locally:
-    - `calendar` booking mutations now return operator-safe `case_effects`, so managers see when a linked case was reopened for booking attention or when a rebooked visit was linked back to the same case.
-    - explicit no-show on a linked resolved case reopens that case internally for manager follow-up instead of leaving `Закрыта` + `Связаться после неявки` as a contradictory state.
-    - no-show follow-up with `rebooked_appointment_id` now validates/links the new booking back to the same case/conversation and rejects cross-case rebook contradictions.
-    - calendar full-page mutations now invalidate `case`/`cases` queries for focused case scope, so case workspace and calendar stop drifting after visit status changes.
-  - Wave21 Part B local evidence is green:
-    - `pytest -q truffles-api/tests/test_calendar_noshow_followup_router.py truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_console_cases_helpers.py` → `80 passed`
-    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
-    - `cd console-web && npm run generate:api` → `pass`
-    - `cd console-web && npm run lint -- --file src/components/CaseBookingsPanel.tsx --file src/app/calendar/page.tsx --file src/lib/calendar-bookings.ts --file e2e/inspect_case.spec.ts` → `pass`
-    - `cd console-web && npm run build` → `pass`
-    - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` → `5 passed, 1 skipped`
-    - `SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
   - `PR #941` merged into `main` on 2026-03-07; Wave20 inbox history/archive modes are shipped.
   - Wave21 Part A implemented locally: case detail API now returns a semantic `booking_summary`, inbox workspace shows `Почему заявка открыта` + `Что по записи`, details panel uses the same operator story, and the case-bookings panel refreshes case summary after booking mutations.
   - Wave21 local evidence is green:
@@ -172,9 +168,13 @@
   - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
   - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - After Wave15 merge, execute Wave15 live validation on a safe explicit live case.
-  - Then execute Wave16 action surface + queue rail redesign in bounded parts if needed.
+  - Open PR for Wave22 deterministic proof and wait for CI green.
+  - Then run full Wave22 live validation only with an explicit safe case id; otherwise keep the program in `blocked` live-proof state, not `pass`.
 - evidence:
+  - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` (`6 passed, 1 skipped`)
+  - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts -g "live action feedback validation requires explicit safe case" --project=chromium --reporter=line --workers=1` (`1 skipped`; `blocked` without explicit safe case)
   - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/lib/inbox-workspace.ts --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && npm run build` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`3 passed, 1 skipped`)

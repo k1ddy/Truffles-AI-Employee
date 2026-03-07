@@ -60,7 +60,7 @@
 ## Touch-list
 - `console-web/e2e/inspect_case.spec.ts`
 - `console-web/e2e/*` if split by scenario becomes necessary
-- `docs/runbooks/*` if a dedicated validation runbook is needed
+- `docs/runbooks/INBOX_SEMANTIC_WAVE22_VALIDATION.md`
 - `docs/SESSIONS/*`
 - `docs/TASK_PACKAGES/*` closeout docs
 
@@ -88,6 +88,7 @@
 ## Evidence
 - deterministic test output
 - live validation output
+- validation runbook with exact pass/blocked/fail classification rules
 - closeout note in session/master TP
 
 ## Rollback
