@@ -278,6 +278,52 @@ async function installConsoleMocks(
         attention_reason: 'Нужно подтвердить визит',
         created_at: '2026-03-05T09:20:00+05:00',
     } as Record<string, unknown>;
+    const buildMockBookingSummary = () => {
+        const status = String(bookingState.status || '');
+        const needsAction = Boolean(bookingState.needs_action);
+        const attentionReason = typeof bookingState.attention_reason === 'string'
+            ? bookingState.attention_reason
+            : null;
+        const startLabel = typeof bookingState.start_at === 'string'
+            ? new Date(bookingState.start_at).toLocaleString('ru-RU', {
+                day: '2-digit',
+                month: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+            })
+            : null;
+        const meta = [startLabel, bookingState.specialist_name, bookingState.service_type]
+            .filter((value) => typeof value === 'string' && value.length > 0)
+            .join(' · ');
+        let operatorSummary = `По заявке есть запись${meta ? ` ${meta}` : ''}.`;
+        if (status === 'PENDING_CONFIRMATION') {
+            operatorSummary = `По заявке создан визит${meta ? ` ${meta}` : ''} — нужно подтвердить запись.`;
+        } else if (status === 'COMPLETED') {
+            operatorSummary = `Визит по заявке завершен${meta ? `: ${meta}` : ''}.`;
+        } else if (status === 'NO_SHOW' && bookingState.no_show_followup_done) {
+            operatorSummary = bookingState.no_show_followup_result === 'rebooked'
+                ? 'После неявки клиента уже перезаписали.'
+                : 'После неявки с клиентом уже связались.';
+        } else if (status === 'NO_SHOW') {
+            operatorSummary = `Клиент не пришел на визит${meta ? ` ${meta}` : ''} — ${attentionReason || 'нужен follow-up'}.`;
+        }
+        return {
+            booking_id: bookingState.id,
+            status,
+            start_at: bookingState.start_at,
+            specialist_name: bookingState.specialist_name,
+            service_type: bookingState.service_type,
+            needs_action: needsAction,
+            attention_reason: attentionReason,
+            no_show_followup_done: Boolean(bookingState.no_show_followup_done),
+            no_show_followup_result: bookingState.no_show_followup_result,
+            operator_summary: operatorSummary,
+        };
+    };
+    const buildCaseDetailPayload = (state: Record<string, unknown>) => ({
+        ...state,
+        booking_summary: state.id === CASE_ID ? buildMockBookingSummary() : null,
+    });
     const macroStore = [
         {
             id: ACTION_MACRO_ID,
@@ -455,7 +501,7 @@ async function installConsoleMocks(
             await route.fallback();
             return;
         }
-        await toJsonResponse(route, { ...caseState });
+        await toJsonResponse(route, buildCaseDetailPayload(caseState));
     });
     await page.route(/.*\/api\/proxy\/inbox\/macros(?:\?.*)?$/, async (route) => {
         if (route.request().method() === 'GET') {
@@ -555,7 +601,7 @@ async function installConsoleMocks(
         await toJsonResponse(route, {
             success: true,
             macro: { ...macro },
-            case: { ...caseState },
+            case: buildCaseDetailPayload(caseState),
             sync: macro.action?.type === 'resolve_case'
                 ? {
                     telegram: { status: 'ok', operator_message: null },
@@ -584,7 +630,7 @@ async function installConsoleMocks(
         caseState.needs_reply = true;
         await toJsonResponse(route, {
             success: true,
-            case: { ...caseState },
+            case: buildCaseDetailPayload(caseState),
             sync: {
                 telegram: {
                     status: 'skipped',
@@ -1334,6 +1380,9 @@ test('inspect first case', async ({ page }) => {
         await expect(caseActionBadge).toContainText('Ответить до', { timeout: 15000 });
         await expect(page.getByTestId('case-reassign-toggle')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('case-snooze-toggle')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('case-origin-summary')).toContainText('Клиент написал, и заявка ушла менеджеру', { timeout: 15000 });
+        await expect(page.getByTestId('case-origin-summary')).toContainText('Клиент хочет маникюр и уточняет свободное время.', { timeout: 15000 });
+        await expect(page.getByTestId('case-booking-summary')).toContainText('нужно подтвердить запись', { timeout: 15000 });
         const bulkSelect = page.getByTestId('cases-bulk-select').first();
         await bulkSelect.click({ force: true });
         await expect(bulkSelect).toBeChecked({ timeout: 15000 });
@@ -1391,8 +1440,10 @@ test('inspect first case', async ({ page }) => {
         expect(page.url()).not.toContain('/calendar');
         if (useRouteMocks) {
             await expect(visibleBookingsPanel.locator('[data-testid=\"case-booking-card\"]').first()).toBeVisible({ timeout: 20000 });
+            await expect(visibleBookingsPanel.getByTestId('case-bookings-semantic-summary')).toContainText('нужно подтвердить запись', { timeout: 20000 });
             await visibleBookingsPanel.getByRole('button', { name: 'Пришел', exact: true }).click();
             await expect(visibleBookingsPanel.getByText('пришел', { exact: true }).first()).toBeVisible({ timeout: 20000 });
+            await expect(page.getByTestId('case-booking-summary')).toContainText('Визит по заявке завершен', { timeout: 20000 });
         }
 
         const openFullCalendar = visibleBookingsPanel.getByTestId('case-bookings-open-full-calendar');

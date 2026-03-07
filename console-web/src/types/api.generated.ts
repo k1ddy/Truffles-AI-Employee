@@ -4231,6 +4231,7 @@ export interface components {
             /** Snoozed By */
             snoozed_by?: string | null;
             telegram_trail?: components["schemas"]["ConsoleTelegramTrail"] | null;
+            booking_summary?: components["schemas"]["ConsoleCaseBookingSummary"] | null;
         };
         /** ConsoleCaseActionResponse */
         ConsoleCaseActionResponse: {
@@ -4274,6 +4275,38 @@ export interface components {
              * @default 0
              */
             open_case_count: number;
+        };
+        /** ConsoleCaseBookingSummary */
+        ConsoleCaseBookingSummary: {
+            /**
+             * Booking Id
+             * Format: uuid
+             */
+            booking_id: string;
+            /** Status */
+            status: string;
+            /** Start At */
+            start_at?: string | null;
+            /** Specialist Name */
+            specialist_name?: string | null;
+            /** Service Type */
+            service_type?: string | null;
+            /**
+             * Needs Action
+             * @default false
+             */
+            needs_action: boolean;
+            /** Attention Reason */
+            attention_reason?: string | null;
+            /**
+             * No Show Followup Done
+             * @default false
+             */
+            no_show_followup_done: boolean;
+            /** No Show Followup Result */
+            no_show_followup_result?: string | null;
+            /** Operator Summary */
+            operator_summary: string;
         };
         /** ConsoleCaseBulkActionRequest */
         ConsoleCaseBulkActionRequest: {

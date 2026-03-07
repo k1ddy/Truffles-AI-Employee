@@ -15,7 +15,9 @@ import type { Case, Message } from "@/types";
 import ChatInterface from "./ChatInterface";
 import {
     collectCaseActionFollowupMessages,
+    getCaseBookingSemanticSummary,
     getCaseBusinessStatusBadge,
+    getCaseOriginSummary,
     getCaseSlaIndicator,
 } from "@/utils/labels";
 
@@ -76,6 +78,41 @@ function showActionFollowupWarnings(sync?: CaseActionResponse["sync"] | null) {
         return;
     }
     toast(messages.join(" "), { icon: "⚠️" });
+}
+
+function SemanticSummaryCard({
+    eyebrow,
+    title,
+    detail,
+    badge,
+    badgeClassName = "bg-muted text-muted-foreground",
+    testId,
+}: {
+    eyebrow: string;
+    title: string;
+    detail?: string | null;
+    badge?: string | null;
+    badgeClassName?: string;
+    testId: string;
+}) {
+    return (
+        <div className="rounded-lg border border-border/60 bg-card p-3" data-testid={testId}>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                    {eyebrow}
+                </p>
+                {badge ? (
+                    <span className={`rounded px-2 py-0.5 text-[11px] font-semibold ${badgeClassName}`}>
+                        {badge}
+                    </span>
+                ) : null}
+            </div>
+            <p className="mt-2 text-sm font-semibold text-foreground">{title}</p>
+            {detail ? (
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{detail}</p>
+            ) : null}
+        </div>
+    );
 }
 
 const HUMAN_LOCK_SOURCE_LABELS: Record<string, string> = {
@@ -602,6 +639,8 @@ export default function CaseConversation({
         .join(" · ");
     const slaIndicator = getCaseSlaIndicator(caseDetail);
     const businessStatus = getCaseBusinessStatusBadge(caseDetail);
+    const originSummary = getCaseOriginSummary(caseDetail);
+    const bookingSemanticSummary = getCaseBookingSemanticSummary(caseDetail.booking_summary);
     const outreachBusy =
         sendOutreachMutation.isPending || pauseMutation.isPending || releasePauseMutation.isPending;
     const canSubmitOutreach = Boolean(outreachDestination.trim() && outreachContent.trim());
@@ -716,6 +755,7 @@ export default function CaseConversation({
     const actionPanelClass = `rounded-lg border border-border/60 bg-card px-4 py-3 text-sm ${
         isInboxLayout ? "mx-5" : ""
     }`;
+    const semanticSummaryClass = `${isInboxLayout ? "mx-5" : ""} grid gap-3 ${bookingSemanticSummary ? "xl:grid-cols-2" : ""}`;
     const actionPanelContent = actionPanel === "reassign" ? (
         <div className={actionPanelClass} data-testid="case-reassign-panel">
             <div className="flex items-start justify-between gap-3">
@@ -1133,6 +1173,27 @@ export default function CaseConversation({
                 {caseDetail.conversation_id && humanLockPanel}
             </div>
             {actionPanelContent}
+
+            <div className={semanticSummaryClass} data-testid="case-semantic-summary">
+                <SemanticSummaryCard
+                    eyebrow="Почему заявка открыта"
+                    title={originSummary.title}
+                    detail={originSummary.detail}
+                    badge={caseDetail.trigger_type ? (caseDetail.trigger_type === "manual" ? "Вручную" : "От бота") : null}
+                    badgeClassName="bg-slate-100 text-slate-700"
+                    testId="case-origin-summary"
+                />
+                {bookingSemanticSummary ? (
+                    <SemanticSummaryCard
+                        eyebrow="Что по записи"
+                        title={bookingSemanticSummary.operatorSummary}
+                        detail={bookingSemanticSummary.meta}
+                        badge={bookingSemanticSummary.label}
+                        badgeClassName={bookingSemanticSummary.className}
+                        testId="case-booking-summary"
+                    />
+                ) : null}
+            </div>
 
             <div className={contextClass}>
                 <div className="flex flex-wrap items-center justify-between text-xs text-muted-foreground mb-1">

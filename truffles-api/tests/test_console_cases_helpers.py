@@ -88,6 +88,28 @@ def test_build_sync_status_maps_operator_message_for_telegram_failure():
     assert status.operator_message == "Не удалось обновить отметку заявки в Telegram."
 
 
+def test_get_case_booking_attention_reason_maps_pending_confirmation():
+    assert (
+        console_router._get_case_booking_attention_reason(
+            "PENDING_CONFIRMATION",
+            followup_done=False,
+        )
+        == "Нужно подтвердить визит"
+    )
+
+
+def test_build_case_booking_operator_summary_marks_rebooked_no_show_as_closed_loop():
+    summary = console_router._build_case_booking_operator_summary(
+        status="NO_SHOW",
+        slot_label="06.03 10:00 · Айжан · Маникюр",
+        attention_reason="Связаться после неявки",
+        no_show_followup_done=True,
+        no_show_followup_result="rebooked",
+    )
+
+    assert summary == "После неявки клиента уже перезаписали."
+
+
 def test_parse_case_owner_filters_accepts_assignee_id():
     agent_id = uuid4()
 
