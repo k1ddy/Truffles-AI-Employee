@@ -3,6 +3,7 @@
 import type { CaseAssigneeOption } from "@/lib/api-client";
 import type {
     InboxCaseFilters,
+    InboxCaseModeScope,
     InboxOwnerScope,
     InboxQueueViewId,
     InboxSortBy,
@@ -15,11 +16,23 @@ export type OwnerScopeOption = {
     label: string;
 };
 
-const VALID_STATUS_VALUES = new Set(["open", "all", "pending", "active", "resolved"]);
-const VALID_SORT_VALUES = new Set(["activity", "created_at", "sla"]);
+const VALID_SORT_VALUES = new Set(["activity", "created_at", "sla", "resolved_at"]);
 
 export function getDefaultSortForQueueView(viewId: InboxQueueViewId): InboxSortBy {
     return viewId === "needs_reply" ? "sla" : "activity";
+}
+
+export function getDefaultSortForModeScope(
+    modeScope: InboxCaseModeScope,
+    queueViewId: InboxQueueViewId,
+): InboxSortBy {
+    if (modeScope === "open") {
+        return getDefaultSortForQueueView(queueViewId);
+    }
+    if (modeScope === "resolved") {
+        return "resolved_at";
+    }
+    return "created_at";
 }
 
 export function normalizeOwnerScopeForRole(ownerScope: InboxOwnerScope, privileged: boolean): InboxOwnerScope {
@@ -38,23 +51,14 @@ export function normalizeOwnerScopeForRole(ownerScope: InboxOwnerScope, privileg
     return { ...DEFAULT_OWNER_SCOPE };
 }
 
-export function normalizeStoredStatus(raw: unknown): InboxCaseFilters["status"] {
-    if (typeof raw !== "string") {
-        return undefined;
-    }
-    const value = raw.trim().toLowerCase();
-    if (!value || value === "open") {
-        return undefined;
-    }
-    return VALID_STATUS_VALUES.has(value) ? value : undefined;
-}
-
 export function normalizeStoredSortBy(
     raw: unknown,
     {
         activeViewId,
+        modeScope,
     }: {
         activeViewId: InboxQueueViewId;
+        modeScope?: InboxCaseModeScope;
     },
 ): InboxCaseFilters["sortBy"] {
     if (typeof raw !== "string") {
@@ -64,28 +68,46 @@ export function normalizeStoredSortBy(
     if (!VALID_SORT_VALUES.has(value)) {
         return undefined;
     }
-    return value === getDefaultSortForQueueView(activeViewId) ? undefined : (value as InboxSortBy);
-}
-
-export function resolveEffectiveStatus(status?: string): string | undefined {
-    if (!status || status === "open") {
-        return "open";
-    }
-    if (status === "all") {
+    if (modeScope !== "open" && value === "sla") {
         return undefined;
     }
-    return status;
+    if (modeScope !== "resolved" && value === "resolved_at") {
+        return undefined;
+    }
+    const defaultSort = getDefaultSortForModeScope(modeScope ?? "open", activeViewId);
+    return value === defaultSort ? undefined : (value as InboxSortBy);
 }
 
-export function resolveStatusSelectValue(status?: string): string {
-    if (!status || status === "open") {
+export function deriveModeScopeFromLegacyStatus(raw: unknown): InboxCaseModeScope {
+    if (typeof raw !== "string") {
         return "open";
     }
-    return status;
+    const value = raw.trim().toLowerCase();
+    if (value === "resolved") {
+        return "resolved";
+    }
+    if (value === "all") {
+        return "all";
+    }
+    return "open";
 }
 
-export function resolveEffectiveSortBy(activeViewId: InboxQueueViewId, sortBy?: InboxSortBy): InboxSortBy {
-    return sortBy ?? getDefaultSortForQueueView(activeViewId);
+export function resolveEffectiveStatusForMode(modeScope: InboxCaseModeScope): string | undefined {
+    if (modeScope === "resolved") {
+        return "resolved";
+    }
+    if (modeScope === "all") {
+        return undefined;
+    }
+    return "open";
+}
+
+export function resolveEffectiveSortBy(
+    modeScope: InboxCaseModeScope,
+    activeViewId: InboxQueueViewId,
+    sortBy?: InboxSortBy,
+): InboxSortBy {
+    return sortBy ?? getDefaultSortForModeScope(modeScope, activeViewId);
 }
 
 export function resolveOwnerScopeLabel(scope: InboxOwnerScope, assignees: CaseAssigneeOption[]): string {
@@ -168,18 +190,21 @@ export function hasAdvancedCaseRefinements(
 }
 
 export function hasAnyCaseFiltersApplied({
+    modeScope,
     activeViewId,
     filters,
     ownerScope,
     branchFilterEnabled,
 }: {
+    modeScope: InboxCaseModeScope;
     activeViewId: InboxQueueViewId;
     filters: InboxCaseFilters;
     ownerScope: InboxOwnerScope;
     branchFilterEnabled: boolean;
 }): boolean {
     return Boolean(
-        activeViewId !== "all_open"
+        modeScope !== "open"
+        || (modeScope === "open" && activeViewId !== "all_open")
         || ownerScope.kind !== "all"
         || filters.query
         || hasAdvancedCaseRefinements(filters, { branchFilterEnabled })
@@ -189,6 +214,7 @@ export function hasAnyCaseFiltersApplied({
 export function buildCaseListSearchParams({
     filters,
     ownerScope,
+    modeScope,
     activeViewId,
     privilegedOwnerFilterVisible,
     activeServerQueueView,
@@ -197,6 +223,7 @@ export function buildCaseListSearchParams({
 }: {
     filters: InboxCaseFilters;
     ownerScope: InboxOwnerScope;
+    modeScope: InboxCaseModeScope;
     activeViewId: InboxQueueViewId;
     privilegedOwnerFilterVisible: boolean;
     activeServerQueueView?: "needs_reply" | "waiting_client" | "snoozed" | "delivery";
@@ -205,8 +232,8 @@ export function buildCaseListSearchParams({
 }): URLSearchParams {
     const params = new URLSearchParams();
     const effectiveOwnerScope = normalizeOwnerScopeForRole(ownerScope, privilegedOwnerFilterVisible);
-    const effectiveStatus = resolveEffectiveStatus(filters.status);
-    const effectiveSort = resolveEffectiveSortBy(activeViewId, filters.sortBy);
+    const effectiveStatus = resolveEffectiveStatusForMode(modeScope);
+    const effectiveSort = resolveEffectiveSortBy(modeScope, activeViewId, filters.sortBy);
 
     if (effectiveStatus) {
         params.append("status", effectiveStatus);
@@ -219,11 +246,17 @@ export function buildCaseListSearchParams({
     if (filters.hasDeliveryError) params.append("has_delivery_error", "true");
     if (filters.hasPendingOutbox) params.append("has_pending_outbox", "true");
     if (filters.hasHumanLock) params.append("has_human_lock", "true");
-    if (filters.dateFrom) params.append("date_from", filters.dateFrom);
-    if (filters.dateTo) params.append("date_to", filters.dateTo);
-    if (activeServerQueueView) params.append("queue_view", activeServerQueueView);
+    if (modeScope === "resolved") {
+        if (filters.dateFrom) params.append("resolved_from", filters.dateFrom);
+        if (filters.dateTo) params.append("resolved_to", filters.dateTo);
+    } else {
+        if (filters.dateFrom) params.append("date_from", filters.dateFrom);
+        if (filters.dateTo) params.append("date_to", filters.dateTo);
+    }
+    if (modeScope === "open" && activeServerQueueView) params.append("queue_view", activeServerQueueView);
     if (effectiveSort === "activity") params.append("sort_by", "last_activity");
     if (effectiveSort === "created_at") params.append("sort_by", "created_at");
+    if (effectiveSort === "resolved_at") params.append("sort_by", "resolved_at");
     if (effectiveSort === "sla") params.append("sort_by", "sla");
     if (cursor) params.append("cursor", cursor);
     params.append("limit", String(limit));

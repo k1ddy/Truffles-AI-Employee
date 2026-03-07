@@ -216,6 +216,17 @@ def test_console_cases_list_contract_exposes_queue_view_param() -> None:
     assert _has_string_type(schema)
 
 
+def test_console_cases_list_contract_exposes_history_params() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+    path_item = _find_path(paths, "/cases") or {}
+    get_op = path_item.get("get") or {}
+    params = get_op.get("parameters") or []
+
+    assert any((param or {}).get("name") == "resolved_from" for param in params)
+    assert any((param or {}).get("name") == "resolved_to" for param in params)
+
+
 def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> None:
     spec = _load_console_contract()
     schemas = ((spec.get("components") or {}).get("schemas")) or {}

@@ -26,6 +26,11 @@ def test_parse_sort_param_accepts_sla():
     assert console_router._parse_sort_param("sort_by", "SLA") == "sla"
 
 
+def test_parse_sort_param_accepts_resolved_at():
+    assert console_router._parse_sort_param("sort_by", "resolved_at") == "resolved_at"
+    assert console_router._parse_sort_param("sort_by", "RESOLVED_AT") == "resolved_at"
+
+
 def test_parse_sort_param_rejects_invalid():
     with pytest.raises(ConsoleAPIError):
         console_router._parse_sort_param("sort_by", "oops")
@@ -316,6 +321,19 @@ def test_resolve_case_sort_cursor():
         sort_by="sla",
         last_activity_at=last_activity,
         created_at=created_at,
+    ) == created_at
+    resolved_at = created_at + timedelta(minutes=10)
+    assert console_router._resolve_case_sort_cursor(
+        sort_by="resolved_at",
+        last_activity_at=last_activity,
+        created_at=created_at,
+        resolved_at=resolved_at,
+    ) == resolved_at
+    assert console_router._resolve_case_sort_cursor(
+        sort_by="resolved_at",
+        last_activity_at=last_activity,
+        created_at=created_at,
+        resolved_at=None,
     ) == created_at
 
 

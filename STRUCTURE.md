@@ -185,6 +185,10 @@
 | `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-a1.md` | Wave17 Task Package for separating inbox filter contract into queue mode, owner scope, advanced refinements, and presentation prefs | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-closeout-a1.md` | Wave17 closeout review Task Package for deciding merge-go and whether any saved-views follow-up is actually required | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave18-a1.md` | Wave18 Task Package for fixing inbox filter-state correctness via explicit contract, precedence rules, and deterministic validation | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave19-a1.md` | Wave19 Task Package for semantic decomposition of the full bot->case->manager->booking->history operator chain | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave20-a1.md` | Wave20 Task Package for inbox panel IA reconstruction with explicit open/closed/all modes and history/archive access | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave21-a1.md` | Wave21 Task Package for cross-surface semantic integration between bot-origin cases and calendar bookings | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-a1.md` | Wave22 Task Package for forbidden-state matrix, deterministic acceptance, and live closeout of the new inbox semantic model | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |
