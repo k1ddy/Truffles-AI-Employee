@@ -99,6 +99,7 @@ export interface CalendarWorkspacePrefs {
     selectedDate: string;
     queueLane: BookingQueueLane;
     queueStatusFilter: BookingStatusFilter;
+    queueSearch?: string;
 }
 
 type StoredValue<T> = {

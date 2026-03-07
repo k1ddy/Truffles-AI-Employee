@@ -42,6 +42,7 @@ def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
     paths = spec.get("paths") or {}
 
     expected_methods = {
+        "/queue-state/current": {"get", "put"},
         "/calendar/specialists": {"get", "post"},
         "/calendar/specialists/{specialist_id}": {"patch"},
         "/calendar/specialists/{specialist_id}/enable": {"post"},
@@ -83,6 +84,8 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
         ("BookingCaseEffect",),
         ("BookingActionResponse",),
         ("BookingsListResponse",),
+        ("ConsoleQueueStateCurrentRequest",),
+        ("ConsoleQueueStateCurrentResponse",),
     ]
     for aliases in required_schema_aliases:
         assert any(name in schemas for name in aliases), (
@@ -160,6 +163,56 @@ def test_calendar_bookings_list_contract_exposes_conversation_filter() -> None:
     assert any((param or {}).get("name") == "lane" for param in params)
     assert any((param or {}).get("name") == "needs_action" for param in params)
     assert any((param or {}).get("name") == "cursor" for param in params)
+
+
+def test_queue_state_current_contract_exposes_surface_and_scope_params() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+    path_item = _find_path(paths, "/queue-state/current") or {}
+    get_op = path_item.get("get") or {}
+    put_op = path_item.get("put") or {}
+
+    get_params = get_op.get("parameters") or []
+    assert any((param or {}).get("name") == "surface" for param in get_params)
+    assert any((param or {}).get("name") == "case_id" for param in get_params)
+    assert any((param or {}).get("name") == "conversation_id" for param in get_params)
+
+    request_body = (put_op.get("requestBody") or {}).get("content", {}).get("application/json", {})
+    request_schema = request_body.get("schema") or {}
+    schema_ref = request_schema.get("$ref", "")
+    assert schema_ref.endswith("/ConsoleQueueStateCurrentRequest")
+
+    success_schema = (
+        (((put_op.get("responses") or {}).get("200") or {}).get("content") or {})
+        .get("application/json", {})
+        .get("schema")
+        or {}
+    )
+    assert (success_schema.get("$ref") or "").endswith("/ConsoleQueueStateCurrentResponse")
+
+
+def test_queue_state_current_response_contract_exposes_restore_payload() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    queue_state_response = schemas.get("ConsoleQueueStateCurrentResponse") or {}
+    properties = queue_state_response.get("properties") or {}
+
+    assert "found" in properties
+    assert (properties.get("found") or {}).get("type") == "boolean"
+    assert "surface" in properties
+    assert _has_string_type(properties.get("surface") or {})
+    assert "selected_branch_id" in properties
+    assert _has_string_type(properties.get("selected_branch_id") or {})
+    assert "case_id" in properties
+    assert _has_string_type(properties.get("case_id") or {})
+    assert "conversation_id" in properties
+    assert _has_string_type(properties.get("conversation_id") or {})
+    assert "version" in properties
+    assert _has_integer_type(properties.get("version") or {})
+    assert "query_state" in properties
+    assert (properties.get("query_state") or {}).get("type") == "object"
+    assert "updated_at" in properties
+    assert _has_string_type(properties.get("updated_at") or {})
 
 
 def test_bookings_list_response_contract_exposes_cursor_and_has_more() -> None:

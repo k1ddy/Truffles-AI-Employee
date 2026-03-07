@@ -20,6 +20,7 @@ from app.models.console_confirmation import ConsoleConfirmation
 from app.models.console_idempotency import ConsoleIdempotencyKey
 from app.models.console_macro import ConsoleMacro
 from app.models.console_ops_job import ConsoleOpsJob
+from app.models.console_queue_state import ConsoleQueueState
 from app.models.conversation import Conversation
 from app.models.conversation_human_lock import ConversationHumanLock
 from app.models.domain_capability_template import DomainCapabilityTemplate
@@ -81,6 +82,7 @@ __all__ = [
     "ConsoleIdempotencyKey",
     "ConsoleMacro",
     "ConsoleOpsJob",
+    "ConsoleQueueState",
     "ConversationHumanLock",
     "DomainCapabilityTemplate",
     "Prompt",

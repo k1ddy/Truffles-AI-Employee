@@ -293,6 +293,8 @@ from app.schemas.console import (
     ConsoleProviderLifecycleItem,
     ConsoleProviderLifecycleListResponse,
     ConsoleProviderOpsQueueItem,
+    ConsoleQueueStateCurrentRequest,
+    ConsoleQueueStateCurrentResponse,
     ConsoleReferencePack,
     ConsoleReferencePackListResponse,
     ConsoleReferencePackUpsertRequest,
@@ -582,6 +584,18 @@ from app.services.console_owner_admin import (
 )
 from app.services.console_owner_admin import (
     safe_int as _safe_int,
+)
+from app.services.console_queue_state import (
+    build_queue_state_scope as _build_queue_state_scope,
+)
+from app.services.console_queue_state import (
+    get_current_queue_state as _get_current_queue_state_record,
+)
+from app.services.console_queue_state import (
+    normalize_queue_state_payload as _normalize_queue_state_payload,
+)
+from app.services.console_queue_state import (
+    upsert_current_queue_state as _upsert_current_queue_state_record,
 )
 from app.services.console_router_utils import (
     dedupe_list as _dedupe_list,
@@ -10897,6 +10911,110 @@ async def get_me(request: Request, db: Session = Depends(get_db)) -> ConsoleMeRe
     if not context.agent or not context.client:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Console access missing")
     return _build_me_response(context)
+
+
+def _require_queue_state_permission(context: ConsoleAuthContext, surface: str) -> None:
+    if surface == "cases":
+        require_console_permission(context, "inbox", "read")
+        return
+    if surface == "calendar":
+        require_console_permission(context, "calendar", "read")
+        return
+    raise ConsoleAPIError(400, "INVALID_PARAM", "surface is invalid")
+
+
+def _build_current_queue_state_response(
+    *,
+    surface: str,
+    scope,
+    record,
+) -> ConsoleQueueStateCurrentResponse:
+    if record is None:
+        return ConsoleQueueStateCurrentResponse(
+            found=False,
+            surface=surface,
+            selected_branch_id=scope.selected_branch_id,
+            case_id=scope.case_id,
+            conversation_id=scope.conversation_id,
+            version=1,
+            query_state={},
+            updated_at=None,
+        )
+    return ConsoleQueueStateCurrentResponse(
+        found=True,
+        surface=surface,
+        selected_branch_id=record.selected_branch_id,
+        case_id=record.case_id,
+        conversation_id=record.conversation_id,
+        version=record.version,
+        query_state=dict(record.query_state or {}),
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
+@router.get(
+    "/queue-state/current",
+    response_model=ConsoleQueueStateCurrentResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_current_queue_state(
+    request: Request,
+    surface: str = Query(...),
+    case_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleQueueStateCurrentResponse:
+    context = get_console_context(request, db)
+    _reject_unknown_query_params(request, {"surface", "case_id", "conversation_id"})
+    _require_queue_state_permission(context, surface)
+    scope = _build_queue_state_scope(
+        context,
+        surface=surface,
+        case_id=_parse_uuid_param("case_id", case_id),
+        conversation_id=_parse_uuid_param("conversation_id", conversation_id),
+    )
+    record = _get_current_queue_state_record(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        surface=scope.surface,
+        scope_key=scope.scope_key,
+    )
+    return _build_current_queue_state_response(surface=scope.surface, scope=scope, record=record)
+
+
+@router.put(
+    "/queue-state/current",
+    response_model=ConsoleQueueStateCurrentResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def put_current_queue_state(
+    body: ConsoleQueueStateCurrentRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleQueueStateCurrentResponse:
+    context = get_console_context(request, db)
+    _require_queue_state_permission(context, body.surface)
+    scope = _build_queue_state_scope(
+        context,
+        surface=body.surface,
+        case_id=body.case_id,
+        conversation_id=body.conversation_id,
+    )
+    query_state = _normalize_queue_state_payload(
+        context,
+        surface=body.surface,
+        query_state=body.query_state,
+    )
+    record = _upsert_current_queue_state_record(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        scope=scope,
+        version=body.version,
+        query_state=query_state,
+    )
+    return _build_current_queue_state_response(surface=scope.surface, scope=scope, record=record)
 
 
 @router.get(

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthenticatedApi } from "@/hooks/useAuthenticatedApi";
 import Link from "next/link";
@@ -41,6 +42,12 @@ import {
     readInboxCaseListPrefs,
     writeInboxCaseListPrefs,
 } from "@/lib/inbox-workspace";
+import {
+    buildCasesQueueStatePayload,
+    readCasesQueueStateFromServer,
+    readCasesQueueStateFromUrl,
+    type CasesQueueStateSnapshot,
+} from "@/lib/queue-state";
 import toast from "react-hot-toast";
 
 // Filter state interface
@@ -431,10 +438,14 @@ export default function CaseList({
     viewerRole = "manager",
 }: CaseListProps) {
     const { data: session } = useSession();
+    const searchParams = useSearchParams();
     const api = useAuthenticatedApi();
     const queryClient = useQueryClient();
     const storageEnabled = Boolean(workspaceScope);
     const [stateReady, setStateReady] = useState(!storageEnabled);
+    const restoredQueueStateRef = useRef<string | null>(null);
+    const lastSavedQueueStateRef = useRef<string>("");
+    const hasToken = !!(session as { accessToken?: string } | null)?.accessToken;
 
     const [filters, setFilters] = useState<CaseFilters>(DEFAULT_FILTERS);
     const [ownerScope, setOwnerScope] = useState<InboxOwnerScope>(DEFAULT_OWNER_SCOPE);
@@ -482,38 +493,136 @@ export default function CaseList({
     );
     const privilegedOwnerFilterVisible = isPrivilegedQueueRole(viewerRole);
     const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
+    const urlQueueState = useMemo(
+        () =>
+            readCasesQueueStateFromUrl(searchParams, {
+                branchFilterEnabled,
+                privilegedOwnerFilterVisible,
+            }),
+        [branchFilterEnabled, privilegedOwnerFilterVisible, searchParams],
+    );
+    const urlQueueStateKey = useMemo(
+        () => JSON.stringify(urlQueueState ?? null),
+        [urlQueueState],
+    );
     const resetPagination = () => {
         setCursor(undefined);
     };
 
     useEffect(() => {
+        restoredQueueStateRef.current = null;
+        lastSavedQueueStateRef.current = "";
         setStateReady(!workspaceScope);
-    }, [workspaceScope]);
+    }, [urlQueueStateKey, workspaceScope]);
+
+    const currentQueueStateQuery = useQuery({
+        queryKey: ["queue-state", "cases", workspaceScope],
+        queryFn: async () => {
+            const response = await api.get("/queue-state/current", {
+                params: { surface: "cases" },
+            });
+            return response.data as {
+                found?: boolean;
+                query_state?: Record<string, unknown> | null;
+                updated_at?: string | null;
+            };
+        },
+        enabled: hasToken && !!workspaceScope,
+        retry: 1,
+        staleTime: 60_000,
+    });
 
     useEffect(() => {
         if (!workspaceScope) {
             setStateReady(true);
             return;
         }
+        const restoreKey = `${workspaceScope}::${urlQueueStateKey}`;
+        const currentQueueStateSettled = Boolean(urlQueueState)
+            || !hasToken
+            || currentQueueStateQuery.isFetched
+            || currentQueueStateQuery.isError;
+        if (!currentQueueStateSettled || restoredQueueStateRef.current === restoreKey) {
+            return;
+        }
         const restored = normalizeStoredPrefs(readInboxCaseListPrefs(workspaceScope), {
             branchFilterEnabled,
             privilegedOwnerFilterVisible,
         });
-        if (restored) {
-            setFilters(restored.filters);
-            setOwnerScope(restored.ownerScope ? normalizeInboxOwnerScope(restored.ownerScope) : { ...DEFAULT_OWNER_SCOPE });
-            setModeScope(restored.modeScope ?? "open");
-            setSearchValue(restored.searchValue);
-            setShowAdvancedFilters(restored.showAdvancedFilters);
-            setFiltersCollapsed(restored.filtersCollapsed);
-            setAutoRefreshEnabled(restored.autoRefreshEnabled);
-            setActiveViewId(restored.activeViewId ?? "all_open");
-            setVisibleFields(normalizeVisibleFields(restored.visibleFields));
-            setCursor(undefined);
-            setCaseItems([]);
+        const localSnapshot: CasesQueueStateSnapshot | null = restored
+            ? {
+                filters: restored.filters,
+                ownerScope: restored.ownerScope ? normalizeInboxOwnerScope(restored.ownerScope) : { ...DEFAULT_OWNER_SCOPE },
+                modeScope: restored.modeScope ?? "open",
+                activeViewId: restored.activeViewId ?? "all_open",
+                searchValue: restored.searchValue,
+            }
+            : null;
+        const serverSnapshot = readCasesQueueStateFromServer(currentQueueStateQuery.data, {
+            branchFilterEnabled,
+            privilegedOwnerFilterVisible,
+        });
+        const queueSnapshot = urlQueueState ?? serverSnapshot ?? localSnapshot;
+        const source = urlQueueState
+            ? "url"
+            : serverSnapshot
+                ? "server"
+                : localSnapshot
+                    ? "local"
+                    : "default";
+
+        if (queueSnapshot) {
+            setFilters(queueSnapshot.filters);
+            setOwnerScope(queueSnapshot.ownerScope);
+            setModeScope(queueSnapshot.modeScope);
+            setSearchValue(queueSnapshot.searchValue);
+            setActiveViewId(queueSnapshot.activeViewId);
+        } else {
+            setFilters(DEFAULT_FILTERS);
+            setOwnerScope({ ...DEFAULT_OWNER_SCOPE });
+            setModeScope("open");
+            setSearchValue("");
+            setActiveViewId("all_open");
         }
+        setShowAdvancedFilters(
+            source === "local" && restored
+                ? restored.showAdvancedFilters
+                : Boolean(
+                    restored?.showAdvancedFilters
+                    || (
+                        queueSnapshot
+                        && (
+                            queueSnapshot.modeScope !== "open"
+                            || hasAdvancedCaseRefinements(queueSnapshot.filters, { branchFilterEnabled })
+                        )
+                    )
+                ),
+        );
+        setFiltersCollapsed(restored?.filtersCollapsed ?? false);
+        setAutoRefreshEnabled(restored?.autoRefreshEnabled ?? true);
+        setVisibleFields(normalizeVisibleFields(restored?.visibleFields));
+        setCursor(undefined);
+        setCaseItems([]);
+        if (source === "server" && queueSnapshot) {
+            lastSavedQueueStateRef.current = JSON.stringify({
+                surface: "cases",
+                version: 1,
+                query_state: buildCasesQueueStatePayload(queueSnapshot, { branchFilterEnabled }),
+            });
+        }
+        restoredQueueStateRef.current = restoreKey;
         setStateReady(true);
-    }, [branchFilterEnabled, privilegedOwnerFilterVisible, workspaceScope]);
+    }, [
+        branchFilterEnabled,
+        currentQueueStateQuery.data,
+        currentQueueStateQuery.isError,
+        currentQueueStateQuery.isFetched,
+        hasToken,
+        privilegedOwnerFilterVisible,
+        urlQueueState,
+        urlQueueStateKey,
+        workspaceScope,
+    ]);
 
     useEffect(() => {
         if (queueViewMap.has(activeViewId)) {
@@ -552,8 +661,6 @@ export default function CaseList({
         };
     }, []);
 
-    // Check if we have a valid token
-    const hasToken = !!(session as { accessToken?: string } | null)?.accessToken;
     const activeMode = modeScopes.find((scope) => scope.id === modeScope) ?? modeScopes[0];
     const activeQueueView = queueViewMap.get(activeViewId) ?? queueViewMap.get("all_open") ?? queueViews[0];
     const activeServerQueueView = modeScope === "open" ? resolveServerQueueView(activeViewId) : undefined;
@@ -968,6 +1075,53 @@ export default function CaseList({
             visibleFields,
         });
     }, [workspaceScope, stateReady, effectiveFilters, effectiveOwnerScope, modeScope, searchValue, showAdvancedFilters, filtersCollapsed, autoRefreshEnabled, activeViewId, visibleFields]);
+
+    useEffect(() => {
+        if (!workspaceScope || !stateReady || !hasToken) {
+            return;
+        }
+        const payload = {
+            surface: "cases" as const,
+            version: 1,
+            query_state: buildCasesQueueStatePayload(
+                {
+                    filters: effectiveFilters,
+                    ownerScope: effectiveOwnerScope,
+                    modeScope,
+                    activeViewId,
+                    searchValue: effectiveFilters.query ?? searchValue,
+                },
+                { branchFilterEnabled },
+            ),
+        };
+        const fingerprint = JSON.stringify(payload);
+        if (lastSavedQueueStateRef.current === fingerprint) {
+            return;
+        }
+        const timeoutId = window.setTimeout(() => {
+            if (lastSavedQueueStateRef.current === fingerprint) {
+                return;
+            }
+            lastSavedQueueStateRef.current = fingerprint;
+            void api.put("/queue-state/current", payload).catch(() => {
+                if (lastSavedQueueStateRef.current === fingerprint) {
+                    lastSavedQueueStateRef.current = "";
+                }
+            });
+        }, 250);
+        return () => window.clearTimeout(timeoutId);
+    }, [
+        activeViewId,
+        api,
+        branchFilterEnabled,
+        effectiveFilters,
+        effectiveOwnerScope,
+        hasToken,
+        modeScope,
+        searchValue,
+        stateReady,
+        workspaceScope,
+    ]);
 
     useEffect(() => {
         if (!onCaseIdsChange) {

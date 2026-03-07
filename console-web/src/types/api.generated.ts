@@ -21,6 +21,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/queue-state/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Current Queue State */
+        get: operations["get_current_queue_state_console_v1_queue_state_current_get"];
+        /** Put Current Queue State */
+        put: operations["put_current_queue_state_console_v1_queue_state_current_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/agents": {
         parameters: {
             query?: never;
@@ -7847,6 +7865,53 @@ export interface components {
             /** Generated At */
             generated_at?: string | null;
         };
+        /** ConsoleQueueStateCurrentRequest */
+        ConsoleQueueStateCurrentRequest: {
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "cases" | "calendar";
+            /** Case Id */
+            case_id?: string | null;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Query State */
+            query_state?: Record<string, never>;
+        };
+        /** ConsoleQueueStateCurrentResponse */
+        ConsoleQueueStateCurrentResponse: {
+            /**
+             * Found
+             * @default false
+             */
+            found: boolean;
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "cases" | "calendar";
+            /** Selected Branch Id */
+            selected_branch_id?: string | null;
+            /** Case Id */
+            case_id?: string | null;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Query State */
+            query_state?: Record<string, never>;
+            /** Updated At */
+            updated_at?: string | null;
+        };
         /** ConsoleReferencePack */
         ConsoleReferencePack: {
             /**
@@ -9058,6 +9123,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    get_current_queue_state_console_v1_queue_state_current_get: {
+        parameters: {
+            query: {
+                surface: string;
+                case_id?: string | null;
+                conversation_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleQueueStateCurrentResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_current_queue_state_console_v1_queue_state_current_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleQueueStateCurrentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleQueueStateCurrentResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
