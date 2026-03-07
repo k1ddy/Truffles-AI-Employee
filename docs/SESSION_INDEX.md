@@ -4,7 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
-| 2026-03-05-inbox-calendar-ux-reconstruction-a1 | active | feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 | /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 | docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave16-a1.md | 2026-03-06T20:35:00+05:00 |
+| 2026-03-05-inbox-calendar-ux-reconstruction-a1 | active | feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 | /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 | docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-a1.md | 2026-03-07T09:05:00+05:00 |
 | 2026-03-04-runtime-hygiene-gate-a1 | active | rr-runtime-hygiene-20260304-a1 | /home/zhan/worktrees/rr-runtime-hygiene-20260304-a1 | docs/TASK_PACKAGES/TP-2026-01-30-agents-sync.md | 2026-03-04 |
 | 2026-03-03-uvc-ux-stage2-a705 | done | feat/2026-03-03-uvc-ux-stage2-a705 | /home/zhan/worktrees/2026-03-03-uvc-ux-stage2-a705 | docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage2-language-hints-a705.md | 2026-03-03 |
 | 2026-03-02-uvc-ux-stage1-pr-a705 | active | feat/2026-03-02-uvc-ux-stage1-pr-a705 | /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705 | docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave20-a705.md | 2026-03-05T18:58:00+05:00 |

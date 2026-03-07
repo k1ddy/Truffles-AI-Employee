@@ -2,12 +2,16 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave16-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
 - done:
+  - PR `#938` merged into `main` on 2026-03-07; Wave16 action/rail redesign is now shipped.
+  - Wave17 implementation progressed in branch: inbox filter contract now separates `queue view` from `owner scope`, removes duplicate owner queue presets, keeps only `queue mode + search + owner scope` on first screen, and moves status/sort/diagnostic/date refinements into the advanced layer with explicit removable chips.
+  - `CaseList` workspace persistence migrated to `v2`: legacy stored `mine/unassigned/assigneeId` filters normalize into a dedicated `ownerScope`, and owner scope no longer gets silently rewritten when queue mode changes.
+  - `inspect_case` deterministic lane updated for Wave17: mock coverage now targets the new owner-scope control and the simplified filter rail without the removed `unassigned` queue-view preset.
   - PR `#937` merged into `main` on 2026-03-06; Wave15 operator-safe feedback is now shipped.
   - Wave15 live validation executed as a precise blocker, not a fake pass: the dedicated no-mocks mutation lane now requires explicit `INSPECT_CASE_LIVE_CASE_ID` and skipped because no safe case is configured in the current live scope.
   - Wave16 implementation started in branch: the case action area now separates utility controls from case actions, `Передать` no longer turns into `Скрыть передачу`, the reassign panel was reduced to recommendation + one explicit confirm path, and the left inbox rail was widened with denser controls/cards reduced.
@@ -119,6 +123,10 @@
   - After Wave15 merge, execute Wave15 live validation on a safe explicit live case.
   - Then execute Wave16 action surface + queue rail redesign in bounded parts if needed.
 - evidence:
+  - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/lib/inbox-workspace.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`3 passed, 1 skipped`)
+  - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
   - `git worktree list`
   - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
   - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file src/utils/labels.ts --file e2e/inspect_case.spec.ts`

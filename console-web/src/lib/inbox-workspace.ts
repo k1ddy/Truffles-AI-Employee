@@ -4,7 +4,7 @@ import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 import type { BookingQueueLane, BookingStatusFilter } from "@/lib/calendar-bookings";
 
 const WORKSPACE_TTL_MS = 24 * 60 * 60 * 1000;
-const CASE_LIST_KEY_PREFIX = "console:inbox:case-list:v1:";
+const CASE_LIST_KEY_PREFIX = "console:inbox:case-list:v2:";
 const SELECTED_CASE_KEY_PREFIX = "console:inbox:selected-case:v1:";
 const SIDE_PANEL_KEY_PREFIX = "console:inbox:side-panel:v1:";
 const CALENDAR_PREFS_KEY_PREFIX = "console:calendar:prefs:v1:";
@@ -13,22 +13,23 @@ export type InboxSortBy = "created_at" | "sla" | "activity";
 export type InboxSidePanelMode = "details" | "bookings";
 export const INBOX_QUEUE_VIEW_IDS = [
     "all_open",
-    "mine",
     "needs_reply",
     "waiting_client",
     "snoozed",
     "delivery",
-    "unassigned",
 ] as const;
 export type InboxQueueViewId = (typeof INBOX_QUEUE_VIEW_IDS)[number];
+export type InboxOwnerScopeKind = "all" | "mine" | "unassigned" | "agent";
 export type InboxCaseVisibleField = "branch" | "owner" | "channel" | "activity" | "priority";
+
+export interface InboxOwnerScope {
+    kind: InboxOwnerScopeKind;
+    agentId?: string;
+}
 
 export interface InboxCaseFilters {
     status?: string;
     branchId?: string;
-    assignedToMe: boolean;
-    assigneeId?: string;
-    unassigned: boolean;
     query?: string;
     hasDeliveryError: boolean;
     hasPendingOutbox: boolean;
@@ -48,6 +49,7 @@ export interface InboxCaseVisibleFields {
 
 export interface InboxCaseListPrefs {
     filters: InboxCaseFilters;
+    ownerScope?: InboxOwnerScope;
     searchValue: string;
     showAdvancedFilters: boolean;
     filtersCollapsed: boolean;
@@ -60,10 +62,28 @@ export function normalizeInboxQueueViewId(raw: unknown): InboxQueueViewId {
     if (raw === "paused") {
         return "waiting_client";
     }
+    if (raw === "mine" || raw === "unassigned") {
+        return "all_open";
+    }
     if (typeof raw === "string" && (INBOX_QUEUE_VIEW_IDS as readonly string[]).includes(raw)) {
         return raw as InboxQueueViewId;
     }
     return "all_open";
+}
+
+export function normalizeInboxOwnerScope(raw: unknown): InboxOwnerScope {
+    if (!raw || typeof raw !== "object") {
+        return { kind: "all" };
+    }
+    const kind = (raw as { kind?: unknown }).kind;
+    const agentId = (raw as { agentId?: unknown }).agentId;
+    if (kind === "mine" || kind === "unassigned" || kind === "all") {
+        return { kind };
+    }
+    if (kind === "agent" && typeof agentId === "string" && agentId.trim()) {
+        return { kind: "agent", agentId };
+    }
+    return { kind: "all" };
 }
 
 export interface CalendarWorkspacePrefs {
