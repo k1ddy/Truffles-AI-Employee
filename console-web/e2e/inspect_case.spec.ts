@@ -944,10 +944,12 @@ async function openCaseDirectly(
         .getByTestId('case-conversation')
         .or(page.getByTestId('case-details'))
         .or(page.getByTestId('case-view'));
-    if (await casePane.first().isVisible().catch(() => false)) {
+    try {
+        await casePane.first().waitFor({ state: 'visible', timeout: 15000 });
         return true;
+    } catch {
+        return false;
     }
-    return false;
 }
 
 async function clearInboxWorkspaceStorage(page: import('@playwright/test').Page) {
@@ -1748,8 +1750,12 @@ test('live action feedback validation requires explicit safe case and hides raw 
         test.skip(true, `Explicit live case_id=${LIVE_CASE_ID} is not accessible.`);
     }
 
-    const reopenButton = page.getByTestId('case-reopen');
-    if (!(await reopenButton.isVisible().catch(() => false))) {
+    const reopenButton = page.getByTestId('case-reopen').or(
+        page.getByRole('button', { name: 'Вернуть в работу', exact: true }),
+    ).first();
+    try {
+        await reopenButton.waitFor({ state: 'visible', timeout: 15000 });
+    } catch {
         test.info().annotations.push({ type: 'blocked-by', description: `Explicit live case_id=${LIVE_CASE_ID} does not expose reopen control` });
         test.skip(true, `Explicit live case_id=${LIVE_CASE_ID} does not expose reopen control.`);
     }
@@ -1776,7 +1782,9 @@ test('live action feedback validation requires explicit safe case and hides raw 
     await expect(page.getByText('telegram_edit_failed')).toHaveCount(0);
 
     const returnToBotButton = page.getByRole('button', { name: 'Вернуть боту', exact: true });
-    if (!(await returnToBotButton.isVisible().catch(() => false))) {
+    try {
+        await returnToBotButton.waitFor({ state: 'visible', timeout: 15000 });
+    } catch {
         test.info().annotations.push({ type: 'blocked-by', description: `Explicit live case_id=${LIVE_CASE_ID} does not expose a sync-bearing return action after reopen` });
         test.skip(true, `Explicit live case_id=${LIVE_CASE_ID} does not expose a sync-bearing return action after reopen.`);
     }

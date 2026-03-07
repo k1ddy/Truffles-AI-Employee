@@ -18,7 +18,10 @@
     - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts` → `pass`
     - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` → `6 passed, 1 skipped`
     - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
-    - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --grep @wave22-live-proof --project=chromium --reporter=line --workers=1` → `1 skipped` (`blocked` without explicit safe live case)
+  - Wave22 live-proof execution with real case evidence:
+    - user-provided live case `01fdf4ed-ccdd-4752-9592-f44ee2614458` is accessible but not suitable for reopen-proof: live business status resolves to `В работе`, next action `Проверьте отправку`, and no reopen control is exposed after client hydration.
+    - read-only candidate discovery over live resolved cases found explicit reopen-safe cases in the demo tenant.
+    - tagged live lane `@wave22-live-proof` passed against `2e2de879-e4be-405e-83f6-c11dd95cad65`.
   - `PR #942` merged into `main` on 2026-03-07; Wave21 Part A semantic booking context is shipped.
   - `PR #941` merged into `main` on 2026-03-07; Wave20 inbox history/archive modes are shipped.
   - Wave21 Part A implemented locally: case detail API now returns a semantic `booking_summary`, inbox workspace shows `Почему заявка открыта` + `Что по записи`, details panel uses the same operator story, and the case-bookings panel refreshes case summary after booking mutations.
@@ -170,10 +173,12 @@
   - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
   - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - Keep the program in `blocked` state until Brain/Top Architect provide an approved safe live case id.
-  - Then run the tagged `@wave22-live-proof` lane and classify it only as `pass`, `fail`, or `blocked`.
+  - Open PR for the live-proof helper hardening + final evidence sync.
+  - After merge, close the Wave22 program with the recorded live pass against the resolved demo case.
 - evidence:
   - `PR #944` merged via `dc8b720f` on `origin/main`
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 INSPECT_CASE_LIVE_CASE_ID=01fdf4ed-ccdd-4752-9592-f44ee2614458 npx playwright test e2e/inspect_case.spec.ts --grep @wave22-live-proof --project=chromium --reporter=line --workers=1` (`1 skipped`; accessible but unsuitable live case without reopen control)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 INSPECT_CASE_LIVE_CASE_ID=2e2de879-e4be-405e-83f6-c11dd95cad65 npx playwright test e2e/inspect_case.spec.ts --grep @wave22-live-proof --project=chromium --reporter=line --workers=1` (`1 passed`)
   - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts` (`pass`)
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` (`6 passed, 1 skipped`)
   - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)

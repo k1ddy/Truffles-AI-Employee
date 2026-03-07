@@ -14,6 +14,10 @@ Deterministic and live validation SOP for the rebuilt `Заявки` semantic mo
 - Local console available on `http://localhost:3100` for deterministic validation.
 - Live validation uses explicit safe cases only.
 - Safe live env values, when mutation proof is required:
+- Safe case criteria for reopen/return proof:
+  - current business status = `Закрыта`
+  - `Вернуть в работу` control is visible before mutation
+  - demo/test operator context only; do not use an actively worked customer case
   - `INSPECT_CASE_LIVE_CASE_ID` = safe resolved case for reopen/operator-feedback mutation
   - `PLAYWRIGHT_BASE_URL=https://console.truffles.kz`
   - `INSPECT_CASE_USE_MOCKS=0`
