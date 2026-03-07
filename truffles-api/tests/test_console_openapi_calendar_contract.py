@@ -80,6 +80,7 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
         ("BookingStatusUpdateRequest",),
         ("BookingNoShowFollowUpRequest",),
         ("BookingResponse",),
+        ("BookingCaseEffect",),
         ("BookingActionResponse",),
         ("BookingsListResponse",),
     ]
@@ -126,6 +127,26 @@ def test_booking_response_contract_exposes_no_show_followup_flag() -> None:
     assert (properties.get("needs_action") or {}).get("type") == "boolean"
     assert "attention_reason" in properties
     assert _has_string_type(properties.get("attention_reason") or {})
+
+
+def test_booking_action_response_contract_exposes_case_effects() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    booking_action = schemas.get("BookingActionResponse") or {}
+    action_props = booking_action.get("properties") or {}
+
+    assert "case_effects" in action_props
+    case_effects_schema = action_props.get("case_effects") or {}
+    assert case_effects_schema.get("type") == "array"
+
+    effect_schema = schemas.get("BookingCaseEffect") or {}
+    effect_props = effect_schema.get("properties") or {}
+    assert "case_id" in effect_props
+    assert _has_string_type(effect_props.get("case_id") or {})
+    assert "action" in effect_props
+    assert _has_string_type(effect_props.get("action") or {})
+    assert "message" in effect_props
+    assert _has_string_type(effect_props.get("message") or {})
 
 
 def test_calendar_bookings_list_contract_exposes_conversation_filter() -> None:

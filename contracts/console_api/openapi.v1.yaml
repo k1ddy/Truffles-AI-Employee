@@ -7034,11 +7034,36 @@ components:
           title: Success
         booking:
           $ref: '#/components/schemas/BookingResponse'
+        case_effects:
+          items:
+            $ref: '#/components/schemas/BookingCaseEffect'
+          type: array
+          title: Case Effects
       type: object
       required:
       - success
       - booking
       title: BookingActionResponse
+    BookingCaseEffect:
+      properties:
+        case_id:
+          type: string
+          title: Case Id
+        action:
+          type: string
+          enum:
+          - reopened_for_booking_attention
+          - linked_rebooked_booking
+          title: Action
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - case_id
+      - action
+      - message
+      title: BookingCaseEffect
     BookingCreate:
       properties:
         specialist_id:

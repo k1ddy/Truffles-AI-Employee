@@ -8,6 +8,20 @@
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
 - done:
+  - `PR #942` merged into `main` on 2026-03-07; Wave21 Part A semantic booking context is shipped.
+  - Wave21 Part B implemented locally:
+    - `calendar` booking mutations now return operator-safe `case_effects`, so managers see when a linked case was reopened for booking attention or when a rebooked visit was linked back to the same case.
+    - explicit no-show on a linked resolved case reopens that case internally for manager follow-up instead of leaving `Закрыта` + `Связаться после неявки` as a contradictory state.
+    - no-show follow-up with `rebooked_appointment_id` now validates/links the new booking back to the same case/conversation and rejects cross-case rebook contradictions.
+    - calendar full-page mutations now invalidate `case`/`cases` queries for focused case scope, so case workspace and calendar stop drifting after visit status changes.
+  - Wave21 Part B local evidence is green:
+    - `pytest -q truffles-api/tests/test_calendar_noshow_followup_router.py truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_console_cases_helpers.py` → `80 passed`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/components/CaseBookingsPanel.tsx --file src/app/calendar/page.tsx --file src/lib/calendar-bookings.ts --file e2e/inspect_case.spec.ts` → `pass`
+    - `cd console-web && npm run build` → `pass`
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` → `5 passed, 1 skipped`
+    - `SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
   - `PR #941` merged into `main` on 2026-03-07; Wave20 inbox history/archive modes are shipped.
   - Wave21 Part A implemented locally: case detail API now returns a semantic `booking_summary`, inbox workspace shows `Почему заявка открыта` + `Что по записи`, details panel uses the same operator story, and the case-bookings panel refreshes case summary after booking mutations.
   - Wave21 local evidence is green:
