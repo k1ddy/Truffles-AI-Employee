@@ -2,12 +2,15 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-closeout-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
 - scope: Связать вкладки Заявки/Записи, убрать UX-фрикции менеджера, улучшить SLA-copy и календарный flow без дублирования.
 - done:
+  - PR `#939` opened for Wave17: `feat(console): simplify inbox filter model`.
+  - Branch synced with `origin/main` after PR open; `PR #939` is no longer behind base after merge-forward.
+  - Wave17 closeout review started: current verdict is `merge-go if checks are green`, and no separate Wave18 follow-up is required now for queue filters.
   - PR `#938` merged into `main` on 2026-03-07; Wave16 action/rail redesign is now shipped.
   - Wave17 implementation progressed in branch: inbox filter contract now separates `queue view` from `owner scope`, removes duplicate owner queue presets, keeps only `queue mode + search + owner scope` on first screen, and moves status/sort/diagnostic/date refinements into the advanced layer with explicit removable chips.
   - `CaseList` workspace persistence migrated to `v2`: legacy stored `mine/unassigned/assigneeId` filters normalize into a dedicated `ownerScope`, and owner scope no longer gets silently rewritten when queue mode changes.
