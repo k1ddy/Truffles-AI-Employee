@@ -8124,6 +8124,12 @@ export interface components {
              * @enum {string}
              */
             surface: "cases" | "calendar";
+            /**
+             * Scope
+             * @default personal
+             * @enum {string}
+             */
+            scope: "personal" | "team";
             /** Name */
             name: string;
             /**
@@ -8138,6 +8144,17 @@ export interface components {
              * @default false
              */
             is_default: boolean;
+            /**
+             * Is Applicable
+             * @default true
+             */
+            is_applicable: boolean;
+            /** Created By Agent Id */
+            created_by_agent_id?: string | null;
+            /** Target Branch Id */
+            target_branch_id?: string | null;
+            /** Target Role */
+            target_role?: ("owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer") | null;
             /** Created At */
             created_at?: string | null;
             /** Updated At */
@@ -8150,6 +8167,12 @@ export interface components {
              * @enum {string}
              */
             surface: "cases" | "calendar";
+            /**
+             * Scope
+             * @default personal
+             * @enum {string}
+             */
+            scope: "personal" | "team";
             /** Name */
             name: string;
             /**
@@ -8164,6 +8187,10 @@ export interface components {
              * @default false
              */
             is_default: boolean;
+            /** Target Branch Id */
+            target_branch_id?: string | null;
+            /** Target Role */
+            target_role?: ("owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer") | null;
         };
         /** ConsoleSavedViewListResponse */
         ConsoleSavedViewListResponse: {
@@ -8180,6 +8207,10 @@ export interface components {
             query_state?: Record<string, never> | null;
             /** Is Default */
             is_default?: boolean | null;
+            /** Target Branch Id */
+            target_branch_id?: string | null;
+            /** Target Role */
+            target_role?: ("owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer") | null;
         };
         /** ConsoleSettingsResponse */
         ConsoleSettingsResponse: {

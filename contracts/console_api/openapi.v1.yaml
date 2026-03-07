@@ -17313,6 +17313,13 @@ components:
           - cases
           - calendar
           title: Surface
+        scope:
+          type: string
+          enum:
+          - personal
+          - team
+          title: Scope
+          default: personal
         name:
           type: string
           title: Name
@@ -17327,6 +17334,35 @@ components:
           type: boolean
           title: Is Default
           default: false
+        is_applicable:
+          type: boolean
+          title: Is Applicable
+          default: true
+        created_by_agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Created By Agent Id
+        target_branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Target Branch Id
+        target_role:
+          anyOf:
+          - type: string
+            enum:
+            - owner
+            - admin
+            - manager
+            - support
+            - platform_admin
+            - specialist
+            - viewer
+          - type: 'null'
+          title: Target Role
         created_at:
           anyOf:
           - type: string
@@ -17351,6 +17387,13 @@ components:
           - cases
           - calendar
           title: Surface
+        scope:
+          type: string
+          enum:
+          - personal
+          - team
+          title: Scope
+          default: personal
         name:
           type: string
           title: Name
@@ -17366,6 +17409,25 @@ components:
           type: boolean
           title: Is Default
           default: false
+        target_branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Target Branch Id
+        target_role:
+          anyOf:
+          - type: string
+            enum:
+            - owner
+            - admin
+            - manager
+            - support
+            - platform_admin
+            - specialist
+            - viewer
+          - type: 'null'
+          title: Target Role
       additionalProperties: false
       type: object
       required:
@@ -17406,6 +17468,25 @@ components:
           - type: boolean
           - type: 'null'
           title: Is Default
+        target_branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Target Branch Id
+        target_role:
+          anyOf:
+          - type: string
+            enum:
+            - owner
+            - admin
+            - manager
+            - support
+            - platform_admin
+            - specialist
+            - viewer
+          - type: 'null'
+          title: Target Role
       additionalProperties: false
       type: object
       title: ConsoleSavedViewUpdateRequest

@@ -39,6 +39,10 @@ export interface QueueStateSavedViewLike {
     name?: string;
     query_state?: Record<string, unknown> | null;
     is_default?: boolean;
+    scope?: "personal" | "team";
+    is_applicable?: boolean;
+    target_branch_id?: string | null;
+    target_role?: string | null;
 }
 
 export interface CasesQueueStateSnapshot {
@@ -297,6 +301,66 @@ export function getSavedViewFingerprint(
         return JSON.stringify({});
     }
     return JSON.stringify(savedView.query_state);
+}
+
+export function isTeamSavedView(savedView: QueueStateSavedViewLike | null | undefined): boolean {
+    return savedView?.scope === "team";
+}
+
+export function isApplicableTeamSavedView(savedView: QueueStateSavedViewLike | null | undefined): boolean {
+    return isTeamSavedView(savedView) && savedView?.is_applicable !== false;
+}
+
+export function findManagedDefaultSavedView<T extends QueueStateSavedViewLike>(
+    savedViews: T[],
+): T | null {
+    return savedViews.find((view) => isApplicableTeamSavedView(view) && view.is_default) ?? null;
+}
+
+export function findPersonalDefaultSavedView<T extends QueueStateSavedViewLike>(
+    savedViews: T[],
+): T | null {
+    return savedViews.find((view) => !isTeamSavedView(view) && view.is_default) ?? null;
+}
+
+export function findPreferredDefaultSavedView<T extends QueueStateSavedViewLike>(
+    savedViews: T[],
+): T | null {
+    return findManagedDefaultSavedView(savedViews) ?? findPersonalDefaultSavedView(savedViews);
+}
+
+function getSavedViewMatchPriority(savedView: QueueStateSavedViewLike): number {
+    if (!isTeamSavedView(savedView)) {
+        return 2;
+    }
+    return savedView.is_applicable === false ? 0 : 1;
+}
+
+export function findSavedViewByFingerprint<T extends QueueStateSavedViewLike>(
+    savedViews: T[],
+    fingerprint: string,
+    {
+        includeNonApplicableTeam = true,
+    }: {
+        includeNonApplicableTeam?: boolean;
+    } = {},
+): T | null {
+    let bestMatch: T | null = null;
+    let bestPriority = -1;
+    for (const view of savedViews) {
+        if (getSavedViewFingerprint(view) !== fingerprint) {
+            continue;
+        }
+        const priority = getSavedViewMatchPriority(view);
+        if (!includeNonApplicableTeam && priority === 0) {
+            continue;
+        }
+        if (priority > bestPriority) {
+            bestMatch = view;
+            bestPriority = priority;
+        }
+    }
+    return bestMatch;
 }
 
 export function buildCasesQueueUrlParams(

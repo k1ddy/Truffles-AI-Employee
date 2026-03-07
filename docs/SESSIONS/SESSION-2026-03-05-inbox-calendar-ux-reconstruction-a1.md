@@ -2,12 +2,24 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave25-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave26-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Реализовать Wave25 personal named saved views для `Заявки` и `Записи` поверх Wave24 `Queue State Canon`: server-owned saved-view catalog, default-per-surface semantics, and bounded save/apply/update/delete UX without opening managed presets/share URLs/routing.
+- scope: Реализовать Wave26 managed team presets для `Заявки` и `Записи` поверх Wave25 saved-view object: branch/role-targeted admin-managed defaults, one shared catalog for personal+team views, and restore precedence `URL override -> server current -> managed team default -> personal default -> local fallback` without opening shareable URLs or richer routing.
 - done:
+  - Wave26 implementation completed locally:
+    - backend extends `console_saved_views` with managed scope/targeting (`scope`, `created_by_agent_id`, `target_branch_id`, `target_role`) and keeps personal/team presets on one canonical queue-state object;
+    - `/console/v1/queue-state/views` now returns personal views plus applicable/all team presets depending on permission, and owner/admin mutations enforce `team.write` ACL plus branch/role targeting validation;
+    - frontend cases/calendar now surface team presets in the same catalog, allow owner/admin-managed branch/role/default controls, and restore defaults in precedence `URL override -> server current -> managed team default -> personal default -> local fallback`.
+  - Wave26 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `38 passed`
+    - `cd truffles-api && ruff check app/models/__init__.py app/models/console_saved_view.py app/services/console_saved_views.py app/routers/console.py app/schemas/console.py tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/queue-state.ts --file src/lib/api-client.ts --file src/components/CaseList.tsx --file src/app/calendar/page.tsx` → `pass`
+    - `cd console-web && npm run build` → `pass`
+    - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
   - `PR #947` opened for Wave24 foundation: `https://github.com/k1ddy/Truffles-AI-Employee/pull/947`.
   - Wave25 implementation completed locally:
     - backend added `console_saved_views` model + migration + CRUD service + `/console/v1/queue-state/views` `GET/POST/PATCH/DELETE`;
@@ -205,8 +217,8 @@
   - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
   - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - Wave24 foundation is locally green; the next valid product block is named saved views / managed presets on top of the proven queue-state canon, not richer routing.
-  - Do not open shareable catalog URLs or richer routing directly; they remain blocked by the same queue-state foundation and, for routing, by later bookings supervisor-grade governance.
+  - Wave26 managed presets are locally green; the next valid product block is shareable queue URLs on top of the same `view_id` catalog, not richer routing.
+  - Do not open richer routing directly; it remains blocked by later bookings supervisor-grade governance (`follow-up owner/due/history`) even after queue-state canon and managed presets exist.
 - evidence:
   - `truffles-api/app/models/console_queue_state.py`
   - `truffles-api/app/services/console_queue_state.py`
