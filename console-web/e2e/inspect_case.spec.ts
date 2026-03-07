@@ -1521,6 +1521,54 @@ test('inspect first case', async ({ page }) => {
     }
 });
 
+test('manager history modes hide queue views and keep owner scope role-gated', async ({ page }) => {
+    test.skip(!useRouteMocks, 'manager history matrix is covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page, { viewerRole: 'manager' });
+    await ensureLoggedIn(page);
+    await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
+    await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
+
+    await expect(page.getByTestId('cases-filter-owner-scope').locator('option')).toHaveCount(2);
+    await expect(page.getByTestId('cases-queue-views')).toBeVisible({ timeout: 15000 });
+
+    const resolvedRequest = await waitForCasesListRequest(page, async () => {
+        await page.getByTestId('cases-mode-scope-resolved').click({ force: true });
+    });
+    expect(resolvedRequest.searchParams.get('status')).toBe('resolved');
+    expect(resolvedRequest.searchParams.get('sort_by')).toBe('resolved_at');
+    expect(resolvedRequest.searchParams.get('assigned_to_me')).toBeNull();
+    expect(resolvedRequest.searchParams.get('assignee_id')).toBeNull();
+    expect(resolvedRequest.searchParams.get('unassigned')).toBeNull();
+    await expect(page.getByTestId('cases-queue-views')).toHaveCount(0);
+    await expect(page.getByTestId('cases-history-hint')).toContainText('История закрытых заявок', { timeout: 15000 });
+    await expect(page.getByTestId('cases-row').first()).toContainText('Сабина Архив', { timeout: 15000 });
+
+    const mineHistoryRequest = await waitForCasesListRequest(page, async () => {
+        await page.getByTestId('cases-filter-owner-scope').selectOption('__mine__');
+    });
+    expect(mineHistoryRequest.searchParams.get('status')).toBe('resolved');
+    expect(mineHistoryRequest.searchParams.get('assigned_to_me')).toBe('true');
+    await expect(page.getByTestId('cases-owner-summary')).toContainText('Мои заявки', { timeout: 15000 });
+
+    const allModeRequest = await waitForCasesListRequest(page, async () => {
+        await page.getByTestId('cases-mode-scope-all').click({ force: true });
+    });
+    expect(allModeRequest.searchParams.get('status')).toBeNull();
+    expect(allModeRequest.searchParams.get('sort_by')).toBe('created_at');
+    expect(allModeRequest.searchParams.get('assigned_to_me')).toBe('true');
+    await expect(page.getByTestId('cases-queue-views')).toHaveCount(0);
+    await expect(page.getByTestId('cases-history-hint')).toContainText('Поиск по открытым и закрытым заявкам', { timeout: 15000 });
+
+    const backToOpenRequest = await waitForCasesListRequest(page, async () => {
+        await page.getByTestId('cases-mode-scope-open').click({ force: true });
+    });
+    expect(backToOpenRequest.searchParams.get('status')).toBe('open');
+    expect(backToOpenRequest.searchParams.get('assigned_to_me')).toBe('true');
+    await expect(page.getByTestId('cases-queue-views')).toBeVisible({ timeout: 15000 });
+});
+
 test('role-gated owner scope is normalized before first queue request', async ({ page }) => {
     test.setTimeout(60000);
     test.skip(!useRouteMocks, 'Deterministic stale-storage validation runs only with route mocks.');
