@@ -54,6 +54,7 @@ def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
         "/calendar/bookings/{booking_id}/cancel": {"post"},
         "/calendar/bookings/{booking_id}/status": {"post"},
         "/calendar/bookings/{booking_id}/no-show-followup": {"post"},
+        "/calendar/bookings/{booking_id}/follow-up-governance": {"post"},
         "/calendar/google/connect": {"get"},
         "/calendar/google/callback": {"get"},
         "/calendar/google/status": {"get"},
@@ -82,6 +83,7 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
         ("BookingCreate",),
         ("BookingStatusUpdateRequest",),
         ("BookingNoShowFollowUpRequest",),
+        ("BookingFollowUpGovernanceRequest",),
         ("BookingResponse",),
         ("BookingCaseEffect",),
         ("BookingActionResponse",),
@@ -128,6 +130,14 @@ def test_booking_response_contract_exposes_no_show_followup_flag() -> None:
     assert _has_string_type(properties.get("no_show_followup_closed_by") or {})
     assert "no_show_followup_rebooked_appointment_id" in properties
     assert _has_string_type(properties.get("no_show_followup_rebooked_appointment_id") or {})
+    assert "follow_up_owner_id" in properties
+    assert _has_string_type(properties.get("follow_up_owner_id") or {})
+    assert "follow_up_owner_name" in properties
+    assert _has_string_type(properties.get("follow_up_owner_name") or {})
+    assert "follow_up_due_at" in properties
+    assert _has_string_type(properties.get("follow_up_due_at") or {})
+    assert "follow_up_overdue" in properties
+    assert (properties.get("follow_up_overdue") or {}).get("type") == "boolean"
     assert "conversation_id" in properties
     assert _has_string_type(properties.get("conversation_id") or {})
     assert "case_id" in properties
@@ -168,7 +178,23 @@ def test_calendar_bookings_list_contract_exposes_conversation_filter() -> None:
     assert any((param or {}).get("name") == "case_id" for param in params)
     assert any((param or {}).get("name") == "lane" for param in params)
     assert any((param or {}).get("name") == "needs_action" for param in params)
+    assert any((param or {}).get("name") == "follow_up_owner_id" for param in params)
+    assert any((param or {}).get("name") == "follow_up_overdue" for param in params)
     assert any((param or {}).get("name") == "cursor" for param in params)
+
+
+def test_booking_follow_up_governance_contract_exposes_request_body() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+    path_item = _find_path(paths, "/calendar/bookings/{booking_id}/follow-up-governance") or {}
+    post_op = path_item.get("post") or {}
+
+    request_schema = (
+        (((post_op.get("requestBody") or {}).get("content") or {}).get("application/json") or {})
+        .get("schema")
+        or {}
+    )
+    assert (request_schema.get("$ref") or "").endswith("/BookingFollowUpGovernanceRequest")
 
 
 def test_queue_state_current_contract_exposes_surface_and_scope_params() -> None:

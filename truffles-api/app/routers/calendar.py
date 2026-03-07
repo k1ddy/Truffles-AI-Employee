@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.logging_config import get_logger
+from app.models.agent import Agent
 from app.models.appointment import Appointment
 from app.models.appointment_audit import AppointmentAudit
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
@@ -33,7 +34,12 @@ from app.services.appointment_service import (
 )
 from app.services.audit_service import record_audit_event
 from app.services.calendar_sync_service import enqueue_appointment_sync
-from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
+from app.services.console_auth import (
+    ConsoleAuthContext,
+    get_console_context,
+    has_console_permission,
+    require_console_permission,
+)
 from app.services.console_errors import ConsoleAPIError
 from app.services.google_calendar_service import GoogleCalendarService
 from app.services.onboarding_state import OnboardingStep, ensure_onboarding_step
@@ -42,6 +48,8 @@ from app.services.state_service import manager_reopen as state_manager_reopen
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/calendar", tags=["Calendar"])
+
+_DEFAULT_NO_SHOW_FOLLOW_UP_WINDOW = timedelta(hours=2)
 
 def _resolve_calendar_branch(context: ConsoleAuthContext) -> UUID:
     if context.effective_branch_id:
@@ -133,6 +141,11 @@ class BookingNoShowFollowUpRequest(BaseModel):
     note: Optional[str] = Field(default=None, max_length=500)
 
 
+class BookingFollowUpGovernanceRequest(BaseModel):
+    owner_agent_id: Optional[str] = None
+    due_at: Optional[datetime] = None
+
+
 class BookingResponse(BaseModel):
     id: str
     specialist_id: str
@@ -148,6 +161,10 @@ class BookingResponse(BaseModel):
     no_show_followup_closed_at: Optional[str] = None
     no_show_followup_closed_by: Optional[str] = None
     no_show_followup_rebooked_appointment_id: Optional[str] = None
+    follow_up_owner_id: Optional[str] = None
+    follow_up_owner_name: Optional[str] = None
+    follow_up_due_at: Optional[str] = None
+    follow_up_overdue: bool = False
     google_event_id: Optional[str] = None
     conversation_id: Optional[str] = None
     case_id: Optional[str] = None
@@ -373,6 +390,61 @@ def _serialize_no_show_followup_state(audit_row: Optional[AppointmentAudit]) -> 
     }
 
 
+def _can_manage_follow_up_governance(context: ConsoleAuthContext) -> bool:
+    return has_console_permission(context.role, "team", "write")
+
+
+def _require_follow_up_governance_permission(context: ConsoleAuthContext) -> None:
+    if _can_manage_follow_up_governance(context):
+        return
+    raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin can manage booking follow-up ownership")
+
+
+def _normalize_follow_up_due_at(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _resolve_follow_up_owner_agent(
+    *,
+    context: ConsoleAuthContext,
+    db: Session,
+    owner_agent_id: UUID,
+) -> Agent:
+    agent = (
+        db.query(Agent)
+        .filter(
+            Agent.id == owner_agent_id,
+            Agent.client_id == context.client.id,
+            Agent.is_active.is_(True),
+        )
+        .first()
+    )
+    if not agent:
+        raise ConsoleAPIError(404, "AGENT_NOT_FOUND", "Follow-up owner not found")
+    if agent.branch_id and context.allowed_branch_ids and agent.branch_id not in context.allowed_branch_ids:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this agent branch denied")
+    if not has_console_permission(agent.role, "calendar", "write"):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "owner_agent_id is not eligible for booking follow-up")
+    return agent
+
+
+def _booking_follow_up_overdue(
+    *,
+    booking: Appointment,
+    followup_done: bool,
+    now: Optional[datetime] = None,
+) -> bool:
+    follow_up_due_at = getattr(booking, "follow_up_due_at", None)
+    if (booking.status or "").upper() != "NO_SHOW" or followup_done or not follow_up_due_at:
+        return False
+    resolved_now = now or datetime.now(timezone.utc)
+    return follow_up_due_at < resolved_now
+
+
 _CASE_SNOOZE_META_KEYS = (
     "snoozed_until",
     "snoozed_at",
@@ -582,6 +654,15 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
     specialist = None
     if booking.specialist_id:
         specialist = db.query(Specialist).filter(Specialist.id == booking.specialist_id).first()
+    follow_up_owner_id = getattr(booking, "follow_up_owner_id", None)
+    follow_up_due_at = getattr(booking, "follow_up_due_at", None)
+    follow_up_owner_name = None
+    if follow_up_owner_id:
+        follow_up_owner_name = (
+            db.query(Agent.name)
+            .filter(Agent.id == follow_up_owner_id)
+            .scalar()
+        )
     service_name = (
         db.query(AppointmentServiceModel.service_name)
         .filter(AppointmentServiceModel.appointment_id == booking.id)
@@ -622,6 +703,10 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         booking.status,
         followup_done=bool(no_show_followup_state["done"]),
     )
+    follow_up_overdue = _booking_follow_up_overdue(
+        booking=booking,
+        followup_done=bool(no_show_followup_state["done"]),
+    )
     return BookingResponse(
         id=str(booking.id),
         specialist_id=str(booking.specialist_id),
@@ -637,6 +722,10 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         no_show_followup_closed_at=no_show_followup_state["closed_at"],
         no_show_followup_closed_by=no_show_followup_state["closed_by"],
         no_show_followup_rebooked_appointment_id=no_show_followup_state["rebooked_appointment_id"],
+        follow_up_owner_id=str(follow_up_owner_id) if follow_up_owner_id else None,
+        follow_up_owner_name=follow_up_owner_name,
+        follow_up_due_at=follow_up_due_at.isoformat() if follow_up_due_at else None,
+        follow_up_overdue=follow_up_overdue,
         google_event_id=google_event_id,
         conversation_id=str(booking.conversation_id) if booking.conversation_id else None,
         case_id=case_id,
@@ -1022,6 +1111,8 @@ async def list_bookings(
     case_id: Optional[str] = None,
     lane: Literal["attention", "all"] = "all",
     needs_action: Optional[bool] = None,
+    follow_up_owner_id: Optional[str] = None,
+    follow_up_overdue: Optional[bool] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     status: Optional[str] = None,
@@ -1049,6 +1140,7 @@ async def list_bookings(
     specialist_uuid = _parse_uuid(specialist_id, field_name="specialist_id") if specialist_id else None
     conversation_uuid = _parse_uuid(conversation_id, field_name="conversation_id") if conversation_id else None
     case_uuid = _parse_uuid(case_id, field_name="case_id") if case_id else None
+    follow_up_owner_uuid = _parse_uuid(follow_up_owner_id, field_name="follow_up_owner_id") if follow_up_owner_id else None
     cursor_payload = _parse_booking_cursor(cursor)
     cursor_start_at = cursor_payload[0] if cursor_payload else None
     cursor_id = cursor_payload[1] if cursor_payload else None
@@ -1065,6 +1157,8 @@ async def list_bookings(
         status_filters=status_filters,
         lane=lane,
         needs_action=needs_action,
+        follow_up_owner_id=follow_up_owner_uuid,
+        follow_up_overdue=follow_up_overdue,
         cursor_start_at=cursor_start_at,
         cursor_id=cursor_id,
         limit=resolved_limit + 1,
@@ -1078,10 +1172,19 @@ async def list_bookings(
     
     appointment_ids = [b.id for b in bookings]
     specialist_ids = {b.specialist_id for b in bookings if b.specialist_id}
+    follow_up_owner_ids = {
+        getattr(booking, "follow_up_owner_id", None)
+        for booking in bookings
+        if getattr(booking, "follow_up_owner_id", None)
+    }
     specialists_map = {
         s.id: s.name
         for s in db.query(Specialist).filter(Specialist.id.in_(specialist_ids)).all()
     }
+    follow_up_owner_map = {
+        agent.id: agent.name
+        for agent in db.query(Agent).filter(Agent.id.in_(follow_up_owner_ids)).all()
+    } if follow_up_owner_ids else {}
 
     services_map = {}
     if appointment_ids:
@@ -1145,6 +1248,13 @@ async def list_bookings(
                 no_show_followup_closed_at=followup_state.get("closed_at"),
                 no_show_followup_closed_by=followup_state.get("closed_by"),
                 no_show_followup_rebooked_appointment_id=followup_state.get("rebooked_appointment_id"),
+                follow_up_owner_id=str(getattr(booking, "follow_up_owner_id", None)) if getattr(booking, "follow_up_owner_id", None) else None,
+                follow_up_owner_name=follow_up_owner_map.get(getattr(booking, "follow_up_owner_id", None)),
+                follow_up_due_at=getattr(booking, "follow_up_due_at", None).isoformat() if getattr(booking, "follow_up_due_at", None) else None,
+                follow_up_overdue=_booking_follow_up_overdue(
+                    booking=booking,
+                    followup_done=bool(followup_state.get("done", False)),
+                ),
                 google_event_id=sync_map.get(booking.id),
                 conversation_id=str(booking.conversation_id) if booking.conversation_id else None,
                 case_id=str(linked_case_id) if linked_case_id else None,
@@ -1266,6 +1376,10 @@ async def update_booking_status(
 
     case_effects: list[BookingCaseEffect] = []
     if (booking.status or "").upper() == "NO_SHOW":
+        if getattr(booking, "follow_up_owner_id", None) is None:
+            booking.follow_up_owner_id = context.agent.id
+        if getattr(booking, "follow_up_due_at", None) is None:
+            booking.follow_up_due_at = datetime.now(timezone.utc) + _DEFAULT_NO_SHOW_FOLLOW_UP_WINDOW
         case_effects = _maybe_reopen_linked_case_for_booking_attention(
             db=db,
             context=context,
@@ -1464,6 +1578,85 @@ async def register_booking_no_show_followup(
         success=True,
         booking=_build_booking_response(db, booking),
         case_effects=case_effects,
+    )
+
+
+@router.post("/bookings/{booking_id}/follow-up-governance", response_model=BookingActionResponse)
+async def update_booking_follow_up_governance(
+    request: Request,
+    booking_id: str,
+    data: BookingFollowUpGovernanceRequest,
+    db: Session = Depends(get_db),
+):
+    """Update no-show follow-up owner/due governance for a booking."""
+    context = get_console_context(request, db)
+    require_console_permission(context, "calendar", "write")
+    _require_follow_up_governance_permission(context)
+
+    booking_uuid = _parse_uuid(booking_id, field_name="booking_id")
+    booking = _resolve_booking_for_context(context, db, booking_uuid)
+    if (booking.status or "").upper() != "NO_SHOW":
+        raise ConsoleAPIError(
+            409,
+            "BOOKING_STATUS_REQUIRED",
+            "Booking status must be NO_SHOW for follow-up governance",
+            details={"current_status": booking.status, "required_status": "NO_SHOW"},
+        )
+
+    existing_followup = (
+        db.query(AppointmentAudit)
+        .filter(
+            AppointmentAudit.appointment_id == booking.id,
+            AppointmentAudit.action == "no_show_followup",
+        )
+        .order_by(AppointmentAudit.created_at.desc())
+        .first()
+    )
+    followup_state = _serialize_no_show_followup_state(existing_followup)
+    if followup_state["done"]:
+        raise ConsoleAPIError(409, "FOLLOW_UP_ALREADY_CLOSED", "No-show follow-up is already closed")
+
+    body_fields = data.model_dump(exclude_unset=True)
+    if not body_fields:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "At least one governance field is required")
+
+    owner_agent_uuid: Optional[UUID] = None
+    if "owner_agent_id" in body_fields:
+        owner_agent_id = data.owner_agent_id.strip() if data.owner_agent_id else None
+        if owner_agent_id:
+            owner_agent_uuid = _parse_uuid(owner_agent_id, field_name="owner_agent_id")
+            _resolve_follow_up_owner_agent(
+                context=context,
+                db=db,
+                owner_agent_id=owner_agent_uuid,
+            )
+        booking.follow_up_owner_id = owner_agent_uuid
+
+    if "due_at" in body_fields:
+        normalized_due_at = _normalize_follow_up_due_at(data.due_at)
+        if normalized_due_at and normalized_due_at <= datetime.now(timezone.utc) - timedelta(days=30):
+            raise ConsoleAPIError(400, "INVALID_PARAM", "due_at is too far in the past")
+        booking.follow_up_due_at = normalized_due_at
+
+    db.add(booking)
+    db.commit()
+    db.refresh(booking)
+
+    logger.info(
+        "Booking follow-up governance updated",
+        extra={
+            "context": {
+                "agent": context.agent.name,
+                "booking_id": booking_id,
+                "follow_up_owner_id": str(booking.follow_up_owner_id) if booking.follow_up_owner_id else None,
+                "follow_up_due_at": booking.follow_up_due_at.isoformat() if booking.follow_up_due_at else None,
+            }
+        },
+    )
+    return BookingActionResponse(
+        success=True,
+        booking=_build_booking_response(db, booking),
+        case_effects=[],
     )
 
 

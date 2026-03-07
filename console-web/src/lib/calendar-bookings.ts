@@ -15,6 +15,10 @@ export interface Booking {
     no_show_followup_closed_at?: string | null;
     no_show_followup_closed_by?: string | null;
     no_show_followup_rebooked_appointment_id?: string | null;
+    follow_up_owner_id?: string | null;
+    follow_up_owner_name?: string | null;
+    follow_up_due_at?: string | null;
+    follow_up_overdue?: boolean;
     conversation_id?: string | null;
     case_id?: string | null;
     needs_action?: boolean;
@@ -45,6 +49,11 @@ export interface BookingNoShowFollowUpRequest {
     note?: string;
 }
 
+export interface BookingFollowUpGovernanceRequest {
+    owner_agent_id?: string | null;
+    due_at?: string | null;
+}
+
 export interface BookingActionResponse {
     success: boolean;
     booking: Booking;
@@ -62,6 +71,7 @@ export interface BookingsListResponse {
 }
 
 export type BookingQueueLane = "attention" | "all";
+export type BookingQueueMode = "ops" | "history";
 export type BookingStatusFilter = "all" | "scheduled" | "completed" | "no_show" | "cancelled";
 
 export async function fetchBookings(options?: {
@@ -71,6 +81,8 @@ export async function fetchBookings(options?: {
     lane?: BookingQueueLane;
     status?: BookingStatusFilter;
     needsAction?: boolean;
+    followUpOwnerId?: string;
+    followUpOverdue?: boolean;
     cursor?: string;
 }): Promise<BookingsListResponse> {
     const params = new URLSearchParams();
@@ -92,6 +104,12 @@ export async function fetchBookings(options?: {
     }
     if (typeof options?.needsAction === "boolean") {
         params.set("needs_action", String(options.needsAction));
+    }
+    if (options?.followUpOwnerId) {
+        params.set("follow_up_owner_id", options.followUpOwnerId);
+    }
+    if (typeof options?.followUpOverdue === "boolean") {
+        params.set("follow_up_overdue", String(options.followUpOverdue));
     }
     if (options?.cursor) {
         params.set("cursor", options.cursor);
@@ -116,6 +134,14 @@ export async function registerNoShowFollowUp(
     data: BookingNoShowFollowUpRequest = {},
 ): Promise<BookingActionResponse> {
     const response = await api.post(`/calendar/bookings/${bookingId}/no-show-followup`, data);
+    return response.data;
+}
+
+export async function updateBookingFollowUpGovernance(
+    bookingId: string,
+    data: BookingFollowUpGovernanceRequest,
+): Promise<BookingActionResponse> {
+    const response = await api.post(`/calendar/bookings/${bookingId}/follow-up-governance`, data);
     return response.data;
 }
 

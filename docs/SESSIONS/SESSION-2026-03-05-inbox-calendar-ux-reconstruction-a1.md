@@ -2,12 +2,23 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave28-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Реализовать Wave27 shareable queue URLs для `Заявки` и `Записи` поверх Wave24-26 canon: explicit queue params + optional `view_id`, URL restore precedence, and copyable handoff links without touching richer routing or supervisor-grade booking governance.
+- scope: Реализовать Wave28 supervisor-grade booking governance для `Записи`: explicit `follow-up owner` + `due time` for no-show backlog and explicit `history/archive` mode on the existing queue-state/share-URL canon, without opening richer routing yet.
 - done:
+  - Wave28 implementation completed locally:
+    - backend adds explicit booking governance fields `appointments.follow_up_owner_id` and `appointments.follow_up_due_at`, deterministic `NO_SHOW` defaults, `/calendar/bookings` filters for `follow_up_owner_id` and `follow_up_overdue`, and bounded owner/admin mutation `POST /calendar/bookings/{booking_id}/follow-up-governance`;
+    - calendar queue-state canon now persists/restores `queue_mode`, `follow_up_owner_id`, and `follow_up_overdue_only` on the same Wave24-27 server/current/saved-view/share-link contract;
+    - frontend calendar now exposes explicit `Операции / История` modes, follow-up owner/overdue filters, owner/due/overdue chips on booking cards, and supervisor reassignment/due controls for pending no-show follow-up.
+  - Wave28 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_calendar_noshow_followup_router.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `40 passed`
+    - `cd truffles-api && ruff check app/models/appointment.py app/routers/calendar.py app/services/appointment_service.py app/services/console_queue_state.py tests/test_calendar_noshow_followup_router.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/calendar-bookings.ts --file src/lib/queue-state.ts --file src/lib/inbox-workspace.ts --file src/app/calendar/page.tsx` → `pass`
+    - `cd console-web && npm run build` → `pass`
   - Wave27 implementation completed locally:
     - backend adds `GET /console/v1/queue-state/views/{view_id}` so a specific saved view can be resolved with the same ACL semantics as the existing catalog;
     - frontend `CaseList` and `calendar/page.tsx` now restore queue state by precedence `URL queue params -> URL view_id -> server current -> managed team default -> personal default -> local fallback`;
@@ -228,9 +239,28 @@
   - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
   - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - Wave27 shareable queue URLs are locally green; the next valid product block is supervisor-grade booking governance (`follow-up owner`, `due`, `history/archive`) before richer routing.
-  - Do not open richer routing directly; it remains blocked until booking governance becomes explicit even after queue-state canon, saved views, managed presets, and shareable URLs exist.
+  - Wave28 supervisor-grade booking governance is locally green; the next valid product block is richer routing v1 as recommendation-first scoring over explicit queue-state plus booking `follow-up owner`/`due`/`history` inputs.
+  - Do not re-open status-only routing heuristics; any routing expansion is blocked until it consumes the explicit Wave28 governance contract.
 - evidence:
+  - `truffles-api/app/models/appointment.py`
+  - `truffles-api/migrations/055_add_booking_follow_up_governance.sql`
+  - `truffles-api/app/routers/calendar.py`
+  - `truffles-api/app/services/appointment_service.py`
+  - `truffles-api/app/services/console_queue_state.py`
+  - `truffles-api/tests/test_calendar_noshow_followup_router.py`
+  - `truffles-api/tests/test_console_queue_state_api.py`
+  - `console-web/src/lib/calendar-bookings.ts`
+  - `console-web/src/lib/inbox-workspace.ts`
+  - `console-web/src/lib/queue-state.ts`
+  - `console-web/src/app/calendar/page.tsx`
+  - `contracts/console_api/openapi.v1.yaml`
+  - `console-web/src/types/api.generated.ts`
+  - `cd truffles-api && pytest -q tests/test_calendar_noshow_followup_router.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` (`40 passed`)
+  - `cd truffles-api && ruff check app/models/appointment.py app/routers/calendar.py app/services/appointment_service.py app/services/console_queue_state.py tests/test_calendar_noshow_followup_router.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` (`pass`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd console-web && npm run lint -- --file src/lib/calendar-bookings.ts --file src/lib/queue-state.ts --file src/lib/inbox-workspace.ts --file src/app/calendar/page.tsx` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
   - `truffles-api/app/models/console_queue_state.py`
   - `truffles-api/app/services/console_queue_state.py`
   - `truffles-api/migrations/052_add_console_queue_states.sql`

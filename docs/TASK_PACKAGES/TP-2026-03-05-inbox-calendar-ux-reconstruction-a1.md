@@ -212,6 +212,7 @@
 | Wave25 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave25-a1.md` | Split allowed and expected: `Part A personal catalog backend`, `Part B save/apply frontend UX` | Добавить personal named saved views для `Заявки` и `Записи` поверх `Queue State Canon`, не смешивая их с team presets/share URLs. | Done locally; `PR #947` updated |
 | Wave26 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave26-a1.md` | Split allowed and expected: `Part A managed preset backend`, `Part B frontend governance/default rollout` | Добавить managed team presets для `Заявки` и `Записи` на том же saved-view object: owner/admin-managed branch/role defaults without forking a second preset model. | Done locally; opened `PR #948` |
 | Wave27 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md` | Split allowed: `Part A single-view read contract`, `Part B URL sync + copy-link UX` | Добавить shareable queue URLs для `Заявки` и `Записи` через explicit queue params + optional `view_id`, без opaque blobs и без richer routing. | Done locally; `PR #948` updated |
+| Wave28 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave28-a1.md` | Split allowed: `Part A follow-up governance contract`, `Part B history mode + queue UX rollout` | Поднять `Записи` до supervisor-grade governance: explicit `follow-up owner`, `due`, and `history/archive` mode before richer routing. | Done locally; `PR #948` updated |
 
 ## Wave-by-wave closure contract (mandatory)
 1. `Wave5` closes only when SLA перестает быть абстрактным и становится action-driven на сервере и в ключевых UI surface.
@@ -294,14 +295,14 @@
 - If calendar follow-up ownership/history is skipped, future routing will optimize against an incomplete operational model.
 
 ## Residual architecture debt (mandatory)
-- `Current residuals accepted in this block`: the original reconstruction remains closed, but post-closeout maturity work is still pending: shareable queue URLs, bookings supervisor-grade governance, and richer routing.
+- `Current residuals accepted in this block`: the original reconstruction remains closed, and after Wave24-28 the only remaining post-closeout maturity block is richer routing on top of explicit queue-state and booking governance inputs.
 - `Why not in this block`: this master refresh only records the correct post-closeout sequence; it does not reopen product/runtime delivery.
 - `Risk if deferred`: the team may slip back into ad-hoc spot fixes or start routing/saved-view work on top of fragmented local state.
-- `Linked follow-up Task Package(s)`: `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave23-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave25-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave26-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md`.
+- `Linked follow-up Task Package(s)`: `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave23-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave25-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave26-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave28-a1.md`.
 - `Expiry/trigger to stop deferral`: any future inbox/calendar maturity work must either execute `Wave24` or explicitly supersede it with a new owner-approved TP that preserves the same queue-state-first invariant.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: add supervisor-grade booking governance (`follow-up owner`, `due`, `history/archive`) before any richer routing expands beyond `least_open_cases`.
-- `First deterministic check command`: `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "Wave27|follow-up owner|history/archive" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md`
-- `Blocked-by conditions`: any regression in Wave24-27 queue-state/saved-view/share-URL contracts, or any attempt to open richer routing before explicit booking ownership/history semantics exist, blocks the block immediately.
+- `Next block objective`: implement richer routing v1 as recommendation-first scoring over explicit booking governance (`follow-up owner`, `due`, `history`) and stable queue-state inputs.
+- `First deterministic check command`: `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "Wave28|follow-up owner|follow_up_due_at|queue_mode" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave28-a1.md`
+- `Blocked-by conditions`: any regression in Wave24-28 queue-state/saved-view/share-URL/governance contracts, or any routing proposal that bypasses explicit booking ownership/due/history semantics, blocks the block immediately.
 - `Owner role for closure`: Brain / Top Architect.

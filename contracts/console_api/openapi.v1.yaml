@@ -7060,6 +7060,22 @@ paths:
           - type: boolean
           - type: 'null'
           title: Needs Action
+      - name: follow_up_owner_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Follow Up Owner Id
+      - name: follow_up_overdue
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Follow Up Overdue
       - name: date_from
         in: query
         required: false
@@ -7202,6 +7218,39 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/BookingNoShowFollowUpRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/calendar/bookings/{booking_id}/follow-up-governance:
+    post:
+      tags:
+      - Calendar
+      summary: Update Booking Follow Up Governance
+      description: Update no-show follow-up owner/due governance for a booking.
+      operationId: update_booking_follow_up_governance_console_v1_calendar_bookings__booking_id__follow_up_governance_post
+      parameters:
+      - name: booking_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Booking Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingFollowUpGovernanceRequest'
       responses:
         '200':
           description: Successful Response
@@ -7397,6 +7446,21 @@ components:
       - start_at
       - end_at
       title: BookingCreate
+    BookingFollowUpGovernanceRequest:
+      properties:
+        owner_agent_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Owner Agent Id
+        due_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Due At
+      type: object
+      title: BookingFollowUpGovernanceRequest
     BookingNoShowFollowUpRequest:
       properties:
         result:
@@ -7478,6 +7542,25 @@ components:
           - type: string
           - type: 'null'
           title: No Show Followup Rebooked Appointment Id
+        follow_up_owner_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Follow Up Owner Id
+        follow_up_owner_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Follow Up Owner Name
+        follow_up_due_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Follow Up Due At
+        follow_up_overdue:
+          type: boolean
+          title: Follow Up Overdue
+          default: false
         google_event_id:
           anyOf:
           - type: string
