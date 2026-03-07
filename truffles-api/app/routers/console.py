@@ -9008,7 +9008,7 @@ def _parse_sort_param(name: str, value: Optional[str], default: str = "last_acti
     if value is None or str(value).strip() == "":
         return default
     normalized = str(value).strip().lower()
-    if normalized not in {"last_activity", "created_at", "sla"}:
+    if normalized not in {"last_activity", "created_at", "sla", "resolved_at"}:
         raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
     return normalized
 
@@ -9054,9 +9054,12 @@ def _resolve_case_sort_cursor(
     sort_by: str,
     last_activity_at: Optional[datetime],
     created_at: datetime,
+    resolved_at: Optional[datetime] = None,
 ) -> datetime:
     if sort_by == "last_activity":
         return last_activity_at or created_at
+    if sort_by == "resolved_at":
+        return resolved_at or created_at
     return created_at
 
 
@@ -10838,6 +10841,8 @@ async def list_cases(
     sort_by: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    resolved_from: Optional[str] = None,
+    resolved_to: Optional[str] = None,
     cursor: Optional[str] = None,
     limit: int = 20,
     db: Session = Depends(get_db),
@@ -10862,6 +10867,8 @@ async def list_cases(
             "sort_by",
             "date_from",
             "date_to",
+            "resolved_from",
+            "resolved_to",
             "cursor",
             "limit",
         },
@@ -10944,6 +10951,22 @@ async def list_cases(
         to_date = _parse_date_param("date_to", date_to)
         end_of_day = datetime.combine(to_date, time.max).replace(tzinfo=timezone.utc)
         base_query = base_query.filter(Handover.created_at <= end_of_day)
+
+    if resolved_from is not None:
+        resolved_from_date = _parse_date_param("resolved_from", resolved_from)
+        resolved_from_dt = datetime.combine(resolved_from_date, time.min).replace(tzinfo=timezone.utc)
+        base_query = base_query.filter(
+            Handover.resolved_at.isnot(None),
+            Handover.resolved_at >= resolved_from_dt,
+        )
+
+    if resolved_to is not None:
+        resolved_to_date = _parse_date_param("resolved_to", resolved_to)
+        resolved_to_dt = datetime.combine(resolved_to_date, time.max).replace(tzinfo=timezone.utc)
+        base_query = base_query.filter(
+            Handover.resolved_at.isnot(None),
+            Handover.resolved_at <= resolved_to_dt,
+        )
 
     # Assigned to me
     if assigned_to_me:
@@ -11142,6 +11165,8 @@ async def list_cases(
     sort_desc = True
     if sort_by_value == "last_activity":
         sort_expr = func.coalesce(latest_message_subq.c.created_at, Handover.created_at)
+    elif sort_by_value == "resolved_at":
+        sort_expr = func.coalesce(Handover.resolved_at, Handover.created_at)
     elif sort_by_value == "sla":
         sort_expr = Handover.created_at
         sort_desc = False
@@ -11199,6 +11224,7 @@ async def list_cases(
             sort_by=sort_by_value,
             last_activity_at=last_activity_at,
             created_at=last_handover.created_at,
+            resolved_at=last_handover.resolved_at,
         )
         next_cursor = cursor_value.isoformat()
     else:

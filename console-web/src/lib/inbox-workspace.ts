@@ -4,13 +4,14 @@ import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 import type { BookingQueueLane, BookingStatusFilter } from "@/lib/calendar-bookings";
 
 const WORKSPACE_TTL_MS = 24 * 60 * 60 * 1000;
-const CASE_LIST_KEY_PREFIX = "console:inbox:case-list:v3:";
+const CASE_LIST_KEY_PREFIX = "console:inbox:case-list:v5:";
 const SELECTED_CASE_KEY_PREFIX = "console:inbox:selected-case:v1:";
 const SIDE_PANEL_KEY_PREFIX = "console:inbox:side-panel:v1:";
 const CALENDAR_PREFS_KEY_PREFIX = "console:calendar:prefs:v1:";
 
-export type InboxSortBy = "created_at" | "sla" | "activity";
+export type InboxSortBy = "created_at" | "sla" | "activity" | "resolved_at";
 export type InboxSidePanelMode = "details" | "bookings";
+export type InboxCaseModeScope = "open" | "resolved" | "all";
 export const INBOX_QUEUE_VIEW_IDS = [
     "all_open",
     "needs_reply",
@@ -50,6 +51,7 @@ export interface InboxCaseVisibleFields {
 export interface InboxCaseListPrefs {
     filters: InboxCaseFilters;
     ownerScope?: InboxOwnerScope;
+    modeScope?: InboxCaseModeScope;
     searchValue: string;
     showAdvancedFilters: boolean;
     filtersCollapsed: boolean;
@@ -69,6 +71,13 @@ export function normalizeInboxQueueViewId(raw: unknown): InboxQueueViewId {
         return raw as InboxQueueViewId;
     }
     return "all_open";
+}
+
+export function normalizeInboxCaseModeScope(raw: unknown): InboxCaseModeScope {
+    if (raw === "resolved" || raw === "all" || raw === "open") {
+        return raw;
+    }
+    return "open";
 }
 
 export function normalizeInboxOwnerScope(raw: unknown): InboxOwnerScope {

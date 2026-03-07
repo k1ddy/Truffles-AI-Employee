@@ -16,25 +16,26 @@ import {
     buildCaseListSearchParams,
     buildOwnerScopeOptions,
     DEFAULT_OWNER_SCOPE,
-    getDefaultSortForQueueView,
+    deriveModeScopeFromLegacyStatus,
+    getDefaultSortForModeScope,
     hasAdvancedCaseRefinements,
     hasAnyCaseFiltersApplied,
     normalizeOwnerScopeForRole,
     normalizeStoredSortBy,
-    normalizeStoredStatus,
     ownerScopeToSelectValue,
     parseOwnerScopeValue,
     resolveEffectiveSortBy,
     resolveOwnerScopeLabel,
-    resolveStatusSelectValue,
 } from "@/lib/inbox-case-filters";
 import {
     type InboxCaseFilters,
     type InboxCaseListPrefs,
+    type InboxCaseModeScope,
     type InboxCaseVisibleField,
     type InboxCaseVisibleFields,
     type InboxOwnerScope,
     type InboxQueueViewId,
+    normalizeInboxCaseModeScope,
     normalizeInboxOwnerScope,
     normalizeInboxQueueViewId,
     readInboxCaseListPrefs,
@@ -66,6 +67,11 @@ type QueueViewDefinition = {
     description: string;
     serverView?: "needs_reply" | "waiting_client" | "snoozed" | "delivery";
 };
+type ModeScopeDefinition = {
+    id: InboxCaseModeScope;
+    label: string;
+    description: string;
+};
 
 function resolveServerQueueView(viewId: InboxQueueViewId): QueueViewDefinition["serverView"] {
     if (
@@ -77,6 +83,26 @@ function resolveServerQueueView(viewId: InboxQueueViewId): QueueViewDefinition["
         return viewId;
     }
     return undefined;
+}
+
+function buildModeScopes(): ModeScopeDefinition[] {
+    return [
+        {
+            id: "open",
+            label: "Открытые",
+            description: "Текущая операционная очередь для работы менеджера.",
+        },
+        {
+            id: "resolved",
+            label: "Закрытые",
+            description: "Уже завершённые заявки и недавняя история.",
+        },
+        {
+            id: "all",
+            label: "Все",
+            description: "Общий поиск по открытым и закрытым заявкам.",
+        },
+    ];
 }
 
 interface CaseListProps {
@@ -235,6 +261,30 @@ function formatCompactActivityLabel(value: string) {
     });
 }
 
+function getCasePrimaryTimelineBadge(caseItem: Case, modeScope: InboxCaseModeScope) {
+    const resolvedLabel = caseItem.resolved_at
+        ? `Закрыта ${formatCompactActivityLabel(caseItem.resolved_at)}`
+        : "Закрыта";
+    if (modeScope === "resolved" || (modeScope === "all" && caseItem.status === "resolved")) {
+        return {
+            label: resolvedLabel,
+            className: "bg-emerald-100 text-emerald-900",
+            state: "resolved",
+        };
+    }
+    return getCaseSlaIndicator(caseItem);
+}
+
+function getCaseActivityValue(caseItem: Case, modeScope: InboxCaseModeScope) {
+    if (modeScope === "resolved" && caseItem.resolved_at) {
+        return caseItem.resolved_at;
+    }
+    if (modeScope === "all" && caseItem.status === "resolved" && caseItem.resolved_at) {
+        return caseItem.resolved_at;
+    }
+    return caseItem.last_activity_at || caseItem.last_inbound_at || caseItem.created_at;
+}
+
 function isPrivilegedQueueRole(role?: string): boolean {
     return role === "owner" || role === "admin" || role === "platform_admin";
 }
@@ -306,6 +356,9 @@ function normalizeStoredPrefs(
     }
     const rawActiveViewId = raw.activeViewId as string | undefined;
     const activeViewId = normalizeInboxQueueViewId(rawActiveViewId);
+    const modeScope = normalizeInboxCaseModeScope(
+        raw.modeScope ?? deriveModeScopeFromLegacyStatus(filters.status),
+    );
     const legacyFilters = raw.filters as Partial<{
         assignedToMe: boolean;
         assigneeId: string;
@@ -322,23 +375,24 @@ function normalizeStoredPrefs(
                     : { ...DEFAULT_OWNER_SCOPE };
     const ownerScope = normalizeOwnerScopeForRole(rawOwnerScope, privilegedOwnerFilterVisible);
     const normalizedFilters: InboxCaseFilters = {
-        status: normalizeStoredStatus(filters.status),
+        status: undefined,
         branchId: branchFilterEnabled && typeof filters.branchId === "string" && filters.branchId.trim()
             ? filters.branchId
             : undefined,
         query: typeof filters.query === "string" && filters.query.trim()
             ? filters.query.trim()
             : undefined,
-        hasDeliveryError: Boolean(filters.hasDeliveryError),
-        hasPendingOutbox: Boolean(filters.hasPendingOutbox),
-        hasHumanLock: rawActiveViewId === "paused" ? false : Boolean(filters.hasHumanLock),
+        hasDeliveryError: modeScope === "open" ? Boolean(filters.hasDeliveryError) : false,
+        hasPendingOutbox: modeScope === "open" ? Boolean(filters.hasPendingOutbox) : false,
+        hasHumanLock: modeScope === "open" && rawActiveViewId !== "paused" ? Boolean(filters.hasHumanLock) : false,
         dateFrom: typeof filters.dateFrom === "string" && filters.dateFrom ? filters.dateFrom : undefined,
         dateTo: typeof filters.dateTo === "string" && filters.dateTo ? filters.dateTo : undefined,
-        sortBy: normalizeStoredSortBy(filters.sortBy, { activeViewId }),
+        sortBy: normalizeStoredSortBy(filters.sortBy, { activeViewId, modeScope }),
     };
     return {
         filters: normalizedFilters,
         ownerScope,
+        modeScope,
         searchValue: typeof raw.searchValue === "string" ? raw.searchValue : normalizedFilters.query ?? "",
         showAdvancedFilters: Boolean(raw.showAdvancedFilters),
         filtersCollapsed: Boolean(raw.filtersCollapsed),
@@ -390,6 +444,7 @@ export default function CaseList({
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const [filtersCollapsed, setFiltersCollapsed] = useState(false);
     const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+    const [modeScope, setModeScope] = useState<InboxCaseModeScope>("open");
     const [activeViewId, setActiveViewId] = useState<InboxQueueViewId>("all_open");
     const [visibleFields, setVisibleFields] = useState<InboxCaseVisibleFields>(DEFAULT_VISIBLE_FIELDS);
     const [fieldPanelOpen, setFieldPanelOpen] = useState(false);
@@ -403,6 +458,10 @@ export default function CaseList({
     const isCompact = variant === "compact";
     const filtersCompact = isCompact && !!selectedCaseId;
     const headingLabel = isCompact ? "Очередь" : "Заявки";
+    const modeScopes = useMemo(
+        () => buildModeScopes(),
+        [],
+    );
     const queueViews = useMemo(
         () => buildQueueViews(),
         [],
@@ -412,9 +471,10 @@ export default function CaseList({
         [queueViews],
     );
     const sortOptions: { id: NonNullable<CaseFilters["sortBy"]>; label: string }[] = [
-        { id: "activity", label: "Активные" },
-        { id: "created_at", label: "Новые" },
-        { id: "sla", label: "Срочные" },
+        { id: "activity", label: "По активности" },
+        { id: "created_at", label: "По созданию" },
+        { id: "resolved_at", label: "По закрытию" },
+        { id: "sla", label: "По SLA" },
     ];
     const selectableBranches = branches.filter((branch) => !!branch.id);
     const branchMap = new Map(
@@ -442,6 +502,7 @@ export default function CaseList({
         if (restored) {
             setFilters(restored.filters);
             setOwnerScope(restored.ownerScope ? normalizeInboxOwnerScope(restored.ownerScope) : { ...DEFAULT_OWNER_SCOPE });
+            setModeScope(restored.modeScope ?? "open");
             setSearchValue(restored.searchValue);
             setShowAdvancedFilters(restored.showAdvancedFilters);
             setFiltersCollapsed(restored.filtersCollapsed);
@@ -493,32 +554,41 @@ export default function CaseList({
 
     // Check if we have a valid token
     const hasToken = !!(session as { accessToken?: string } | null)?.accessToken;
+    const activeMode = modeScopes.find((scope) => scope.id === modeScope) ?? modeScopes[0];
     const activeQueueView = queueViewMap.get(activeViewId) ?? queueViewMap.get("all_open") ?? queueViews[0];
-    const activeServerQueueView = resolveServerQueueView(activeViewId);
+    const activeServerQueueView = modeScope === "open" ? resolveServerQueueView(activeViewId) : undefined;
     const effectiveOwnerScope = useMemo(
         () => normalizeOwnerScopeForRole(ownerScope, privilegedOwnerFilterVisible),
         [ownerScope, privilegedOwnerFilterVisible],
     );
     const effectiveFilters = useMemo<CaseFilters>(
         () => ({
-            status: normalizeStoredStatus(filters.status),
+            status: undefined,
             branchId: branchFilterEnabled ? filters.branchId : undefined,
             query: typeof filters.query === "string" && filters.query.trim()
                 ? filters.query.trim()
                 : undefined,
-            hasDeliveryError: Boolean(filters.hasDeliveryError),
-            hasPendingOutbox: Boolean(filters.hasPendingOutbox),
-            hasHumanLock: Boolean(filters.hasHumanLock),
+            hasDeliveryError: modeScope === "open" ? Boolean(filters.hasDeliveryError) : false,
+            hasPendingOutbox: modeScope === "open" ? Boolean(filters.hasPendingOutbox) : false,
+            hasHumanLock: modeScope === "open" ? Boolean(filters.hasHumanLock) : false,
             dateFrom: filters.dateFrom,
             dateTo: filters.dateTo,
-            sortBy: normalizeStoredSortBy(filters.sortBy, { activeViewId }),
+            sortBy: normalizeStoredSortBy(filters.sortBy, { activeViewId, modeScope }),
         }),
-        [activeViewId, branchFilterEnabled, filters],
+        [activeViewId, branchFilterEnabled, filters, modeScope],
     );
-    const effectiveSortBy = resolveEffectiveSortBy(activeViewId, effectiveFilters.sortBy);
-    const defaultSortBy = getDefaultSortForQueueView(activeViewId);
+    const visibleSortOptions = sortOptions.filter((option) => {
+        if (modeScope === "open") {
+            return option.id !== "resolved_at";
+        }
+        if (modeScope === "resolved") {
+            return option.id === "created_at" || option.id === "resolved_at";
+        }
+        return option.id === "activity" || option.id === "created_at";
+    });
+    const effectiveSortBy = resolveEffectiveSortBy(modeScope, activeViewId, effectiveFilters.sortBy);
+    const defaultSortBy = getDefaultSortForModeScope(modeScope, activeViewId);
     const defaultSortLabel = sortOptions.find((option) => option.id === defaultSortBy)?.label ?? "По умолчанию";
-    const statusFilterActive = Boolean(effectiveFilters.status);
     const advancedFiltersActive = hasAdvancedCaseRefinements(effectiveFilters, { branchFilterEnabled });
     const filtersToggleLabel = filtersCollapsed
         ? advancedFiltersActive
@@ -526,8 +596,8 @@ export default function CaseList({
             : "Фильтры"
         : "Скрыть фильтры";
     const showAdvancedFiltersRow = !filtersCollapsed && showAdvancedFilters;
-    const advancedToggleLabel = showAdvancedFilters ? "Скрыть уточнения" : "Уточнить очередь";
     const hasAnyFiltersApplied = hasAnyCaseFiltersApplied({
+        modeScope,
         activeViewId,
         filters: effectiveFilters,
         ownerScope: effectiveOwnerScope,
@@ -551,6 +621,11 @@ export default function CaseList({
     }`;
     const compactSearchInputClass = "w-full rounded-xl border border-border/60 bg-card px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40";
     const compactSelectClass = "w-full min-w-0 rounded-xl border border-border/60 bg-card px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40";
+    const timelineColumnLabel = modeScope === "resolved"
+        ? "Закрыта"
+        : modeScope === "all"
+            ? "Действие / итог"
+            : "Следующее действие";
 
     const pillClass = (active: boolean) => (
         `rounded-full border px-3 py-1 text-xs font-semibold transition ${
@@ -568,12 +643,13 @@ export default function CaseList({
     }, [filtersCompact]);
 
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuery({
-        queryKey: ["cases", effectiveFilters, effectiveOwnerScope, activeServerQueueView || activeViewId, cursor],
+        queryKey: ["cases", modeScope, effectiveFilters, effectiveOwnerScope, activeServerQueueView || activeViewId, cursor],
         queryFn: async (): Promise<CasesResponse> => {
             const buildParams = (includeSort: boolean) => {
                 return buildCaseListSearchParams({
                     filters: includeSort ? effectiveFilters : { ...effectiveFilters, sortBy: undefined },
                     ownerScope: effectiveOwnerScope,
+                    modeScope,
                     activeViewId,
                     privilegedOwnerFilterVisible,
                     activeServerQueueView,
@@ -706,6 +782,16 @@ export default function CaseList({
         [bulkAssignees],
     );
     const refinementChips = [
+        modeScope !== "open"
+            ? {
+                key: "mode",
+                label: activeMode.label,
+                onClear: () => {
+                    resetPagination();
+                    setModeScope("open");
+                },
+            }
+            : null,
         effectiveOwnerScope.kind !== "all"
             ? {
                 key: "owner",
@@ -726,24 +812,6 @@ export default function CaseList({
                 },
             }
             : null,
-        statusFilterActive
-            ? {
-                key: "status",
-                label: `Статус: ${
-                    effectiveFilters.status === "resolved"
-                        ? "Закрыта"
-                        : effectiveFilters.status === "active"
-                            ? "В работе"
-                            : effectiveFilters.status === "pending"
-                                ? "Ожидает"
-                                : "Все статусы"
-                }`,
-                onClear: () => {
-                    resetPagination();
-                    setFilters((prev) => ({ ...prev, status: DEFAULT_FILTERS.status }));
-                },
-            }
-            : null,
         effectiveFilters.sortBy
             ? {
                 key: "sort",
@@ -757,7 +825,7 @@ export default function CaseList({
         effectiveFilters.dateFrom || effectiveFilters.dateTo
             ? {
                 key: "dates",
-                label: `Период: ${effectiveFilters.dateFrom || "..." } — ${effectiveFilters.dateTo || "..."}`,
+                label: `${modeScope === "resolved" ? "Закрыта" : "Создана"}: ${effectiveFilters.dateFrom || "..." } — ${effectiveFilters.dateTo || "..."}`,
                 onClear: () => {
                     resetPagination();
                     setFilters((prev) => ({ ...prev, dateFrom: undefined, dateTo: undefined }));
@@ -891,6 +959,7 @@ export default function CaseList({
         writeInboxCaseListPrefs(workspaceScope, {
             filters: effectiveFilters,
             ownerScope: effectiveOwnerScope,
+            modeScope,
             searchValue,
             showAdvancedFilters,
             filtersCollapsed,
@@ -898,7 +967,7 @@ export default function CaseList({
             activeViewId,
             visibleFields,
         });
-    }, [workspaceScope, stateReady, effectiveFilters, effectiveOwnerScope, searchValue, showAdvancedFilters, filtersCollapsed, autoRefreshEnabled, activeViewId, visibleFields]);
+    }, [workspaceScope, stateReady, effectiveFilters, effectiveOwnerScope, modeScope, searchValue, showAdvancedFilters, filtersCollapsed, autoRefreshEnabled, activeViewId, visibleFields]);
 
     useEffect(() => {
         if (!onCaseIdsChange) {
@@ -925,6 +994,9 @@ export default function CaseList({
     };
 
     const applyQueueView = (viewId: InboxQueueViewId) => {
+        if (modeScope !== "open") {
+            return;
+        }
         if (!queueViewMap.has(viewId)) {
             return;
         }
@@ -932,6 +1004,36 @@ export default function CaseList({
         resetPagination();
         setSelectedCaseIds([]);
         setActiveViewId(viewId);
+    };
+
+    const applyModeScope = (nextModeScope: InboxCaseModeScope) => {
+        setBulkSummary(null);
+        resetPagination();
+        setSelectedCaseIds([]);
+        setModeScope(nextModeScope);
+        setFilters((prev) => {
+            const crossesResolvedBoundary = (modeScope === "resolved" || nextModeScope === "resolved")
+                && modeScope !== nextModeScope;
+            let nextSortBy = prev.sortBy;
+            if (nextModeScope !== "open" && nextSortBy === "sla") {
+                nextSortBy = undefined;
+            }
+            if (nextModeScope !== "resolved" && nextSortBy === "resolved_at") {
+                nextSortBy = undefined;
+            }
+            return {
+                ...prev,
+                hasDeliveryError: nextModeScope === "open" ? prev.hasDeliveryError : false,
+                hasPendingOutbox: nextModeScope === "open" ? prev.hasPendingOutbox : false,
+                hasHumanLock: nextModeScope === "open" ? prev.hasHumanLock : false,
+                dateFrom: crossesResolvedBoundary ? undefined : prev.dateFrom,
+                dateTo: crossesResolvedBoundary ? undefined : prev.dateTo,
+                sortBy: nextSortBy,
+            };
+        });
+        if (nextModeScope !== "open") {
+            setShowAdvancedFilters(true);
+        }
     };
 
     const updateVisibleField = (field: InboxCaseVisibleField, enabled: boolean) => {
@@ -986,6 +1088,7 @@ export default function CaseList({
         setBulkSummary(null);
         setFieldPanelOpen(false);
         resetPagination();
+        setModeScope("open");
         setActiveViewId("all_open");
         setFilters({ ...DEFAULT_FILTERS });
         setOwnerScope({ ...DEFAULT_OWNER_SCOPE });
@@ -1094,22 +1197,47 @@ export default function CaseList({
                 className={filterContainerClass}
                 data-testid="cases-filters"
             >
-                <div className="flex w-full flex-wrap items-center gap-2 border-b border-border/60 pb-2" data-testid="cases-queue-views">
+                <div className="flex w-full flex-wrap items-center gap-2 border-b border-border/60 pb-2" data-testid="cases-mode-scopes">
                     <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        Режимы
+                        Список
                     </span>
-                    {queueViews.map((view) => (
+                    {modeScopes.map((scope) => (
                         <button
-                            key={view.id}
+                            key={scope.id}
                             type="button"
-                            onClick={() => applyQueueView(view.id)}
-                            className={pillClass(activeViewId === view.id)}
-                            data-testid={`cases-queue-view-${view.id}`}
+                            onClick={() => applyModeScope(scope.id)}
+                            className={pillClass(modeScope === scope.id)}
+                            data-testid={`cases-mode-scope-${scope.id}`}
                         >
-                            {view.label}
+                            {scope.label}
                         </button>
                     ))}
                 </div>
+                {modeScope === "open" && (
+                    <div className="flex w-full flex-wrap items-center gap-2 border-b border-border/60 pb-2" data-testid="cases-queue-views">
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                            Очередь
+                        </span>
+                        {queueViews.map((view) => (
+                            <button
+                                key={view.id}
+                                type="button"
+                                onClick={() => applyQueueView(view.id)}
+                                className={pillClass(activeViewId === view.id)}
+                                data-testid={`cases-queue-view-${view.id}`}
+                            >
+                                {view.label}
+                            </button>
+                        ))}
+                    </div>
+                )}
+                {modeScope !== "open" && (
+                    <div className="rounded-xl border border-border/60 bg-card/80 px-3 py-2 text-xs text-muted-foreground" data-testid="cases-history-hint">
+                        {modeScope === "resolved"
+                            ? "История закрытых заявок. Очередные режимы скрыты, чтобы не смешивать архив с текущей работой."
+                            : "Поиск по открытым и закрытым заявкам. Очередные режимы доступны только в списке открытых заявок."}
+                    </div>
+                )}
                 {isCompact ? (
                     <div className="grid w-full gap-3" data-testid="cases-filter-compact-layout">
                         <input
@@ -1147,7 +1275,7 @@ export default function CaseList({
                                 className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
                                 data-testid="cases-filter-advanced-toggle"
                             >
-                                {advancedToggleLabel}
+                                {showAdvancedFilters ? "Скрыть фильтры" : "Фильтры"}
                             </button>
                             {hasAnyFiltersApplied && (
                                 <button
@@ -1190,7 +1318,7 @@ export default function CaseList({
                                 className="text-xs text-muted-foreground hover:text-foreground whitespace-nowrap"
                                 data-testid="cases-filter-advanced-toggle"
                             >
-                                {advancedToggleLabel}
+                                {showAdvancedFilters ? "Скрыть фильтры" : "Фильтры"}
                             </button>
                         )}
                         {hasAnyFiltersApplied && (
@@ -1206,8 +1334,13 @@ export default function CaseList({
                 )}
                 <div className="flex flex-wrap items-center gap-2 text-[11px]" data-testid="cases-queue-view-summary">
                     <span className="rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary">
-                        {activeQueueView?.label ?? "Все открытые"}
+                        {activeMode.label}
                     </span>
+                    {modeScope === "open" && activeViewId !== "all_open" && (
+                        <span className="rounded-full border border-border/60 bg-card px-2 py-1 font-semibold text-foreground/80">
+                            {activeQueueView?.label ?? "Все открытые"}
+                        </span>
+                    )}
                     {effectiveFilters.query && (
                         <button
                             type="button"
@@ -1276,30 +1409,6 @@ export default function CaseList({
                     >
                         <label className="space-y-1">
                             <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                Статус
-                            </span>
-                            <select
-                                value={resolveStatusSelectValue(effectiveFilters.status)}
-                                onChange={(e) => {
-                                    resetPagination();
-                                    const nextStatus = e.target.value;
-                                    setFilters({
-                                        ...filters,
-                                        status: nextStatus === "open" ? undefined : nextStatus,
-                                    });
-                                }}
-                                className={compactSelectClass}
-                                data-testid="cases-filter-status"
-                            >
-                                <option value="open">Открытые</option>
-                                <option value="all">Все статусы</option>
-                                <option value="pending">Ожидает</option>
-                                <option value="active">В работе</option>
-                                <option value="resolved">Закрыта</option>
-                            </select>
-                        </label>
-                        <label className="space-y-1">
-                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                                 Порядок
                             </span>
                             <select
@@ -1320,7 +1429,7 @@ export default function CaseList({
                                 <option value="__default__">
                                     По умолчанию для режима ({defaultSortLabel})
                                 </option>
-                                {sortOptions.map((option) => (
+                                {visibleSortOptions.map((option) => (
                                     <option key={option.id} value={option.id}>
                                         {option.label}
                                     </option>
@@ -1350,7 +1459,7 @@ export default function CaseList({
                         <div className="grid gap-3 sm:grid-cols-2 xl:col-span-2">
                             <label className="space-y-1">
                                 <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                    С
+                                    {modeScope === "resolved" ? "Закрыта с" : "Создана с"}
                                 </span>
                                 <input
                                     type="date"
@@ -1362,7 +1471,7 @@ export default function CaseList({
                             </label>
                             <label className="space-y-1">
                                 <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                    По
+                                    {modeScope === "resolved" ? "Закрыта по" : "Создана по"}
                                 </span>
                                 <input
                                     type="date"
@@ -1373,38 +1482,40 @@ export default function CaseList({
                                 />
                             </label>
                         </div>
-                        <div className="flex flex-wrap items-center gap-3 xl:col-span-4">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={filters.hasDeliveryError}
-                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, hasDeliveryError: e.target.checked }); }}
-                                    className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                    data-testid="cases-filter-delivery-error"
-                                />
-                                <span className="text-sm text-foreground/80">Есть ошибки доставки</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={filters.hasPendingOutbox}
-                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, hasPendingOutbox: e.target.checked }); }}
-                                    className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                    data-testid="cases-filter-pending-outbox"
-                                />
-                                <span className="text-sm text-foreground/80">Есть исходящие в очереди</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={filters.hasHumanLock}
-                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, hasHumanLock: e.target.checked }); }}
-                                    className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                    data-testid="cases-filter-human-lock"
-                                />
-                                <span className="text-sm text-foreground/80">Бот на паузе</span>
-                            </label>
-                        </div>
+                        {modeScope === "open" && (
+                            <div className="flex flex-wrap items-center gap-3 xl:col-span-4">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={filters.hasDeliveryError}
+                                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasDeliveryError: e.target.checked }); }}
+                                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                        data-testid="cases-filter-delivery-error"
+                                    />
+                                    <span className="text-sm text-foreground/80">Есть ошибки доставки</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={filters.hasPendingOutbox}
+                                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasPendingOutbox: e.target.checked }); }}
+                                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                        data-testid="cases-filter-pending-outbox"
+                                    />
+                                    <span className="text-sm text-foreground/80">Есть исходящие в очереди</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={filters.hasHumanLock}
+                                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasHumanLock: e.target.checked }); }}
+                                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                        data-testid="cases-filter-human-lock"
+                                    />
+                                    <span className="text-sm text-foreground/80">Бот на паузе</span>
+                                </label>
+                            </div>
+                        )}
                     </div>
                 )}
                 {!filtersCompact && (
@@ -1688,18 +1799,20 @@ export default function CaseList({
             {isCompact ? (
                 <div className="mt-3 flex flex-1 flex-col gap-3 overflow-y-auto pr-1" data-testid="cases-table">
                     {visibleCases.map((c) => {
-                        const sla = getCaseSlaIndicator(c);
+                        const primaryTimelineBadge = getCasePrimaryTimelineBadge(c, modeScope);
                         const businessStatus = getCaseBusinessStatusBadge(c);
                         const branchName = branchMap.get(c.branch_id || "") || "-";
-                        const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
-                        const activityLabel = formatCompactActivityLabel(lastActivity);
+                        const activityValue = getCaseActivityValue(c, modeScope);
+                        const activityLabel = formatCompactActivityLabel(activityValue);
                         const contactName = c.customer_name || c.customer_phone || c.customer_remote_jid?.split("@")[0] || "Клиент";
                         const contactPhone = c.customer_phone || c.customer_remote_jid?.split("@")[0] || "";
                         const preview = c.last_message_preview || c.user_message || "-";
                         const isSelected = selectedCaseId === c.id;
                         const isBulkSelected = selectedCaseIdSet.has(c.id);
                         const priorityChip = getPriorityChip(c.priority_tier);
-                        const secondaryAttention = c.attention_reason && !sla.state?.startsWith("reply") && sla.state !== "overdue"
+                        const secondaryAttention = c.attention_reason
+                            && !primaryTimelineBadge.state?.startsWith("reply")
+                            && primaryTimelineBadge.state !== "overdue"
                             ? c.attention_reason
                             : null;
                         const ownerLabel = c.assigned_to_name || "Без владельца";
@@ -1731,8 +1844,8 @@ export default function CaseList({
                                     {preview}
                                 </p>
                                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
-                                    <span className={`rounded-full px-2 py-1 font-semibold ${sla.className}`}>
-                                        {sla.label}
+                                    <span className={`rounded-full px-2 py-1 font-semibold ${primaryTimelineBadge.className}`}>
+                                        {primaryTimelineBadge.label}
                                     </span>
                                     {metaParts.slice(0, 2).map((part) => (
                                         <span key={part} className="text-muted-foreground">
@@ -1807,7 +1920,7 @@ export default function CaseList({
                                 )}
                                 <th className="p-4 text-sm font-medium text-muted-foreground">ID</th>
                                 <th className="p-4 text-sm font-medium text-muted-foreground">Статус</th>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">SLA</th>
+                                <th className="p-4 text-sm font-medium text-muted-foreground">{timelineColumnLabel}</th>
                                 {visibleFields.branch && (
                                     <th className="p-4 text-sm font-medium text-muted-foreground">Филиал</th>
                                 )}
@@ -1829,11 +1942,11 @@ export default function CaseList({
                         </thead>
                         <tbody>
                             {visibleCases.map((c) => {
-                                const sla = getCaseSlaIndicator(c);
+                                const primaryTimelineBadge = getCasePrimaryTimelineBadge(c, modeScope);
                                 const businessStatus = getCaseBusinessStatusBadge(c);
                                 const branchName = branchMap.get(c.branch_id || "") || "-";
                                 const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
-                                const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
+                                const lastActivity = getCaseActivityValue(c, modeScope);
                                 const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
                                 const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
                                 const priorityChip = getPriorityChip(c.priority_tier);
@@ -1867,8 +1980,8 @@ export default function CaseList({
                                             </div>
                                         </td>
                                         <td className="p-4">
-                                            <span className={`px-2 py-1 rounded text-xs font-medium ${sla.className}`}>
-                                                {sla.label}
+                                            <span className={`px-2 py-1 rounded text-xs font-medium ${primaryTimelineBadge.className}`}>
+                                                {primaryTimelineBadge.label}
                                             </span>
                                         </td>
                                         {visibleFields.branch && <td className="p-4 text-sm">{branchName}</td>}
@@ -1898,7 +2011,9 @@ export default function CaseList({
                                                         Ошибка
                                                     </span>
                                                 )}
-                                                {c.attention_reason && !sla.state?.startsWith("reply") && sla.state !== "overdue" && (
+                                                {c.attention_reason
+                                                    && !primaryTimelineBadge.state?.startsWith("reply")
+                                                    && primaryTimelineBadge.state !== "overdue" && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-primary/10 text-primary">
                                                         {c.attention_reason}
                                                     </span>

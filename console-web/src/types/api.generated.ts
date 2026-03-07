@@ -9120,6 +9120,8 @@ export interface operations {
                 sort_by?: string | null;
                 date_from?: string | null;
                 date_to?: string | null;
+                resolved_from?: string | null;
+                resolved_to?: string | null;
                 cursor?: string | null;
                 limit?: number;
             };
