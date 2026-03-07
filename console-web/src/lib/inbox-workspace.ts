@@ -4,7 +4,7 @@ import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 import type { BookingQueueLane, BookingStatusFilter } from "@/lib/calendar-bookings";
 
 const WORKSPACE_TTL_MS = 24 * 60 * 60 * 1000;
-const CASE_LIST_KEY_PREFIX = "console:inbox:case-list:v2:";
+const CASE_LIST_KEY_PREFIX = "console:inbox:case-list:v3:";
 const SELECTED_CASE_KEY_PREFIX = "console:inbox:selected-case:v1:";
 const SIDE_PANEL_KEY_PREFIX = "console:inbox:side-panel:v1:";
 const CALENDAR_PREFS_KEY_PREFIX = "console:calendar:prefs:v1:";
@@ -36,7 +36,7 @@ export interface InboxCaseFilters {
     hasHumanLock: boolean;
     dateFrom?: string;
     dateTo?: string;
-    sortBy: InboxSortBy;
+    sortBy?: InboxSortBy;
 }
 
 export interface InboxCaseVisibleFields {

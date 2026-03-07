@@ -30,9 +30,24 @@ function toJsonResponse(route: import('@playwright/test').Route, payload: unknow
     });
 }
 
-async function installConsoleMocks(page: import('@playwright/test').Page) {
+async function waitForCasesListRequest(
+    page: import('@playwright/test').Page,
+    action: () => Promise<void>,
+) {
+    const requestPromise = page.waitForRequest((request) => (
+        request.method() === 'GET' && request.url().includes('/api/proxy/cases?')
+    ));
+    await action();
+    return new URL((await requestPromise).url());
+}
+
+async function installConsoleMocks(
+    page: import('@playwright/test').Page,
+    options?: { viewerRole?: 'admin' | 'manager' | 'owner' },
+) {
     lastMacroCreatePayload = null;
     lastMacroExecutePayload = null;
+    const viewerRole = options?.viewerRole ?? 'admin';
     await page.route('**/api/auth/session**', async (route) => {
         if (route.request().method() !== 'GET') {
             await route.fallback();
@@ -75,7 +90,7 @@ async function installConsoleMocks(page: import('@playwright/test').Page) {
             agent: {
                 id: AGENT_ID,
                 name: 'Manager',
-                role: 'admin',
+                role: viewerRole,
                 client_id: CLIENT_ID,
                 branch_id: BRANCH_ID,
                 is_active: true,
@@ -1193,10 +1208,42 @@ test('inspect first case', async ({ page }) => {
         await page.getByTestId('cases-field-channel').check({ force: true });
         await expect(page.getByTestId('cases-field-toggle')).toContainText('Вид 4/5', { timeout: 15000 });
 
-        await page.getByTestId('cases-filter-owner-scope').selectOption('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        const selectedAssigneeId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        const ownerScopeRequest = await waitForCasesListRequest(page, async () => {
+            await page.getByTestId('cases-filter-owner-scope').selectOption(selectedAssigneeId);
+        });
+        expect(ownerScopeRequest.searchParams.get('assignee_id')).toBe(selectedAssigneeId);
+        expect(ownerScopeRequest.searchParams.get('queue_view')).toBeNull();
+        expect(ownerScopeRequest.searchParams.get('sort_by')).toBe('last_activity');
         await expect(page.getByTestId('cases-owner-summary')).toContainText('Manager Two', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Сабина', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Manager Two', { timeout: 15000 });
+
+        await page.getByTestId('cases-filter-advanced-toggle').click({ force: true });
+        await expect(page.getByTestId('cases-filters-advanced')).toBeVisible({ timeout: 15000 });
+        const statusRequest = await waitForCasesListRequest(page, async () => {
+            await page.getByTestId('cases-filter-status').selectOption('resolved');
+        });
+        expect(statusRequest.searchParams.get('status')).toBe('resolved');
+        expect(statusRequest.searchParams.get('assignee_id')).toBe(selectedAssigneeId);
+        await page.getByTestId('cases-filter-advanced-toggle').click({ force: true });
+        await expect(page.getByTestId('cases-filters-advanced')).toHaveCount(0);
+        await page.getByTestId('cases-filter-advanced-toggle').click({ force: true });
+        await expect(page.getByTestId('cases-filters-advanced')).toBeVisible({ timeout: 15000 });
+        const sortRequest = await waitForCasesListRequest(page, async () => {
+            await page.getByTestId('cases-filter-sort-select').selectOption('created_at');
+        });
+        expect(sortRequest.searchParams.get('status')).toBe('resolved');
+        expect(sortRequest.searchParams.get('sort_by')).toBe('created_at');
+        const preservedRequest = await waitForCasesListRequest(page, async () => {
+            await page.getByTestId('cases-queue-view-waiting_client').evaluate((element) => {
+                (element as HTMLButtonElement).click();
+            });
+        });
+        expect(preservedRequest.searchParams.get('queue_view')).toBe('waiting_client');
+        expect(preservedRequest.searchParams.get('assignee_id')).toBe(selectedAssigneeId);
+        expect(preservedRequest.searchParams.get('status')).toBe('resolved');
+        expect(preservedRequest.searchParams.get('sort_by')).toBe('created_at');
 
         await page.getByTestId('cases-filter-clear').click({ force: true });
         await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Все открытые', { timeout: 15000 });
@@ -1344,6 +1391,65 @@ test('inspect first case', async ({ page }) => {
     } else {
         console.log('case-open-calendar button is not visible for this case.');
     }
+});
+
+test('role-gated owner scope is normalized before first queue request', async ({ page }) => {
+    test.setTimeout(60000);
+    test.skip(!useRouteMocks, 'Deterministic stale-storage validation runs only with route mocks.');
+
+    const staleScopeKey = `console:inbox:case-list:v3:manager:${AGENT_ID}:${CLIENT_ID}:${BRANCH_ID}`;
+    const stalePrefs = {
+        savedAt: Date.now(),
+        value: {
+            filters: {
+                status: 'resolved',
+                query: 'Сабина',
+                hasDeliveryError: false,
+                hasPendingOutbox: false,
+                hasHumanLock: false,
+                sortBy: 'created_at',
+            },
+            ownerScope: {
+                kind: 'agent',
+                agentId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            },
+            searchValue: 'Сабина',
+            showAdvancedFilters: false,
+            filtersCollapsed: false,
+            autoRefreshEnabled: true,
+            activeViewId: 'all_open',
+            visibleFields: {
+                branch: true,
+                owner: false,
+                channel: false,
+                activity: true,
+                priority: false,
+            },
+        },
+    };
+
+    await page.addInitScript(
+        ([key, value]) => {
+            window.localStorage.setItem(key, JSON.stringify(value));
+        },
+        [staleScopeKey, stalePrefs] as const,
+    );
+    await installConsoleMocks(page, { viewerRole: 'manager' });
+    const firstQueueRequestPromise = page.waitForRequest((request) => (
+        request.method() === 'GET' && request.url().includes('/api/proxy/cases?')
+    ));
+    await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
+
+    const firstQueueRequest = await firstQueueRequestPromise;
+    const requestUrl = new URL(firstQueueRequest.url());
+    expect(requestUrl.searchParams.get('assignee_id')).toBeNull();
+    expect(requestUrl.searchParams.get('unassigned')).toBeNull();
+    expect(requestUrl.searchParams.get('status')).toBe('resolved');
+    expect(requestUrl.searchParams.get('sort_by')).toBe('created_at');
+
+    await expect(page.getByTestId('cases-filter-owner-scope').locator('option')).toHaveCount(2);
+    await expect(page.getByTestId('cases-owner-summary')).toHaveCount(0);
+    await expect(page.getByTestId('cases-search-summary')).toContainText('Сабина', { timeout: 15000 });
 });
 
 test('manage and apply action macro', async ({ page }) => {

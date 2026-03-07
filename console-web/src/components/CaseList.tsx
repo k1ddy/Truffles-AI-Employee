@@ -13,6 +13,22 @@ import {
     type CaseBulkActionResponse,
 } from "@/lib/api-client";
 import {
+    buildCaseListSearchParams,
+    buildOwnerScopeOptions,
+    DEFAULT_OWNER_SCOPE,
+    getDefaultSortForQueueView,
+    hasAdvancedCaseRefinements,
+    hasAnyCaseFiltersApplied,
+    normalizeOwnerScopeForRole,
+    normalizeStoredSortBy,
+    normalizeStoredStatus,
+    ownerScopeToSelectValue,
+    parseOwnerScopeValue,
+    resolveEffectiveSortBy,
+    resolveOwnerScopeLabel,
+    resolveStatusSelectValue,
+} from "@/lib/inbox-case-filters";
+import {
     type InboxCaseFilters,
     type InboxCaseListPrefs,
     type InboxCaseVisibleField,
@@ -49,13 +65,6 @@ type QueueViewDefinition = {
     label: string;
     description: string;
     serverView?: "needs_reply" | "waiting_client" | "snoozed" | "delivery";
-    applyFilters: (prev: CaseFilters) => CaseFilters;
-    matchesFilters: (filters: CaseFilters) => boolean;
-};
-
-type OwnerScopeOption = {
-    value: string;
-    label: string;
 };
 
 function resolveServerQueueView(viewId: InboxQueueViewId): QueueViewDefinition["serverView"] {
@@ -89,7 +98,7 @@ interface BulkSummary {
 }
 
 const DEFAULT_FILTERS: CaseFilters = {
-    status: "open",
+    status: undefined,
     branchId: undefined,
     query: undefined,
     hasDeliveryError: false,
@@ -97,9 +106,8 @@ const DEFAULT_FILTERS: CaseFilters = {
     hasHumanLock: false,
     dateFrom: undefined,
     dateTo: undefined,
-    sortBy: "activity",
+    sortBy: undefined,
 };
-const DEFAULT_OWNER_SCOPE: InboxOwnerScope = { kind: "all" };
 
 const DEFAULT_VISIBLE_FIELDS: InboxCaseVisibleFields = {
     branch: true,
@@ -140,10 +148,6 @@ function sortAssigneeOptionsByLoad(options: CaseAssigneeOption[]) {
 
 function sortAssigneeOptionsByName(options: CaseAssigneeOption[]) {
     return [...options].sort((left, right) => left.agent_name.localeCompare(right.agent_name, "ru"));
-}
-
-function formatQueueAssigneeOptionLabel(option: CaseAssigneeOption) {
-    return `${option.agent_name} · ${option.open_case_count ?? 0} в работе`;
 }
 
 function formatBulkAssigneeOptionLabel(option: CaseAssigneeOption) {
@@ -235,16 +239,6 @@ function isPrivilegedQueueRole(role?: string): boolean {
     return role === "owner" || role === "admin" || role === "platform_admin";
 }
 
-function matchesViewFilters(filters: CaseFilters, target: Partial<CaseFilters>): boolean {
-    return (
-        (target.status ?? DEFAULT_FILTERS.status) === filters.status
-        && (target.hasDeliveryError ?? DEFAULT_FILTERS.hasDeliveryError) === filters.hasDeliveryError
-        && (target.hasPendingOutbox ?? DEFAULT_FILTERS.hasPendingOutbox) === filters.hasPendingOutbox
-        && (target.hasHumanLock ?? DEFAULT_FILTERS.hasHumanLock) === filters.hasHumanLock
-        && (target.sortBy ?? DEFAULT_FILTERS.sortBy) === filters.sortBy
-    );
-}
-
 function normalizeVisibleFields(raw?: InboxCaseVisibleFields | null): InboxCaseVisibleFields {
     if (!raw || typeof raw !== "object") {
         return { ...DEFAULT_VISIBLE_FIELDS };
@@ -258,159 +252,51 @@ function normalizeVisibleFields(raw?: InboxCaseVisibleFields | null): InboxCaseV
     };
 }
 
-function getDefaultSortForQueueView(viewId: InboxQueueViewId): CaseFilters["sortBy"] {
-    return viewId === "needs_reply" ? "sla" : "activity";
-}
-
-function resolveOwnerScopeLabel(scope: InboxOwnerScope, assignees: CaseAssigneeOption[]): string {
-    if (scope.kind === "mine") {
-        return "Мои заявки";
-    }
-    if (scope.kind === "unassigned") {
-        return "Без владельца";
-    }
-    if (scope.kind === "agent") {
-        return assignees.find((item) => String(item.agent_id) === scope.agentId)?.agent_name
-            ?? scope.agentId
-            ?? "Менеджер";
-    }
-    return "Все заявки";
-}
-
-function buildOwnerScopeOptions({
-    privileged,
-    assignees,
-}: {
-    privileged: boolean;
-    assignees: CaseAssigneeOption[];
-}): OwnerScopeOption[] {
-    const options: OwnerScopeOption[] = [
-        { value: "__all__", label: "Все заявки" },
-        { value: "__mine__", label: "Мои заявки" },
-    ];
-    if (privileged) {
-        options.push({ value: "__unassigned__", label: "Без владельца" });
-        assignees.forEach((option) => {
-            options.push({
-                value: String(option.agent_id),
-                label: formatQueueAssigneeOptionLabel(option),
-            });
-        });
-    }
-    return options;
-}
-
 function buildQueueViews(): QueueViewDefinition[] {
     const sharedViews: QueueViewDefinition[] = [
         {
             id: "all_open",
             label: "Все открытые",
             description: "Базовая очередь для менеджера.",
-            applyFilters: (prev) => ({
-                ...prev,
-                status: "open",
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
-            matchesFilters: (filters) => matchesViewFilters(filters, {
-                status: "open",
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
         },
         {
             id: "needs_reply",
             label: "Требуют ответа",
             description: "Срочный фокус на кейсах, где клиент ждёт менеджера.",
             serverView: "needs_reply",
-            applyFilters: (prev) => ({
-                ...prev,
-                status: "open",
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "sla",
-            }),
-            matchesFilters: (filters) => matchesViewFilters(filters, {
-                status: "open",
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "sla",
-            }),
         },
         {
             id: "waiting_client",
             label: "Ждём клиента",
             description: "Диалоги, где менеджер уже ответил и ждёт следующий шаг клиента.",
             serverView: "waiting_client",
-            applyFilters: (prev) => ({
-                ...prev,
-                status: "open",
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
-            matchesFilters: (filters) => matchesViewFilters(filters, {
-                status: "open",
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
         },
         {
             id: "snoozed",
             label: "Отложенные",
             description: "Диалоги, которые менеджер сознательно отложил до следующего срока.",
             serverView: "snoozed",
-            applyFilters: (prev) => ({
-                ...prev,
-                status: "open",
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
-            matchesFilters: (filters) => matchesViewFilters(filters, {
-                status: "open",
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
         },
         {
             id: "delivery",
             label: "Проблемы доставки",
             description: "Ошибки отправки и зависшие исходящие.",
             serverView: "delivery",
-            applyFilters: (prev) => ({
-                ...prev,
-                status: "open",
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
-            matchesFilters: (filters) => matchesViewFilters(filters, {
-                status: "open",
-                hasDeliveryError: false,
-                hasPendingOutbox: false,
-                hasHumanLock: false,
-                sortBy: "activity",
-            }),
         },
     ];
     return sharedViews;
 }
 
-function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPrefs | null {
+function normalizeStoredPrefs(
+    raw: InboxCaseListPrefs | null,
+    {
+        branchFilterEnabled,
+        privilegedOwnerFilterVisible,
+    }: {
+        branchFilterEnabled: boolean;
+        privilegedOwnerFilterVisible: boolean;
+    },
+): InboxCaseListPrefs | null {
     if (!raw || typeof raw !== "object") {
         return null;
     }
@@ -418,18 +304,14 @@ function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPref
     if (!filters || typeof filters !== "object") {
         return null;
     }
-    const sortBy = filters.sortBy;
-    if (sortBy !== "activity" && sortBy !== "created_at" && sortBy !== "sla") {
-        return null;
-    }
     const rawActiveViewId = raw.activeViewId as string | undefined;
-    const normalizedActiveViewId = normalizeInboxQueueViewId(rawActiveViewId);
+    const activeViewId = normalizeInboxQueueViewId(rawActiveViewId);
     const legacyFilters = raw.filters as Partial<{
         assignedToMe: boolean;
         assigneeId: string;
         unassigned: boolean;
     }>;
-    const ownerScope = raw.ownerScope
+    const rawOwnerScope = raw.ownerScope
         ? normalizeInboxOwnerScope(raw.ownerScope)
         : legacyFilters.assignedToMe
             ? { kind: "mine" as const }
@@ -438,24 +320,30 @@ function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPref
                 : typeof legacyFilters.assigneeId === "string" && legacyFilters.assigneeId
                     ? { kind: "agent" as const, agentId: legacyFilters.assigneeId }
                     : { ...DEFAULT_OWNER_SCOPE };
+    const ownerScope = normalizeOwnerScopeForRole(rawOwnerScope, privilegedOwnerFilterVisible);
+    const normalizedFilters: InboxCaseFilters = {
+        status: normalizeStoredStatus(filters.status),
+        branchId: branchFilterEnabled && typeof filters.branchId === "string" && filters.branchId.trim()
+            ? filters.branchId
+            : undefined,
+        query: typeof filters.query === "string" && filters.query.trim()
+            ? filters.query.trim()
+            : undefined,
+        hasDeliveryError: Boolean(filters.hasDeliveryError),
+        hasPendingOutbox: Boolean(filters.hasPendingOutbox),
+        hasHumanLock: rawActiveViewId === "paused" ? false : Boolean(filters.hasHumanLock),
+        dateFrom: typeof filters.dateFrom === "string" && filters.dateFrom ? filters.dateFrom : undefined,
+        dateTo: typeof filters.dateTo === "string" && filters.dateTo ? filters.dateTo : undefined,
+        sortBy: normalizeStoredSortBy(filters.sortBy, { activeViewId }),
+    };
     return {
-        filters: {
-            status: filters.status,
-            branchId: filters.branchId,
-            query: filters.query,
-            hasDeliveryError: Boolean(filters.hasDeliveryError),
-            hasPendingOutbox: Boolean(filters.hasPendingOutbox),
-            hasHumanLock: rawActiveViewId === "paused" ? false : Boolean(filters.hasHumanLock),
-            dateFrom: filters.dateFrom,
-            dateTo: filters.dateTo,
-            sortBy,
-        },
+        filters: normalizedFilters,
         ownerScope,
-        searchValue: typeof raw.searchValue === "string" ? raw.searchValue : "",
+        searchValue: typeof raw.searchValue === "string" ? raw.searchValue : normalizedFilters.query ?? "",
         showAdvancedFilters: Boolean(raw.showAdvancedFilters),
         filtersCollapsed: Boolean(raw.filtersCollapsed),
         autoRefreshEnabled: typeof raw.autoRefreshEnabled === "boolean" ? raw.autoRefreshEnabled : true,
-        activeViewId: normalizedActiveViewId,
+        activeViewId,
         visibleFields: normalizeVisibleFields(raw.visibleFields),
     };
 }
@@ -523,11 +411,17 @@ export default function CaseList({
         () => new Map(queueViews.map((view) => [view.id, view])),
         [queueViews],
     );
-    const sortOptions: { id: CaseFilters["sortBy"]; label: string }[] = [
+    const sortOptions: { id: NonNullable<CaseFilters["sortBy"]>; label: string }[] = [
         { id: "activity", label: "Активные" },
         { id: "created_at", label: "Новые" },
         { id: "sla", label: "Срочные" },
     ];
+    const selectableBranches = branches.filter((branch) => !!branch.id);
+    const branchMap = new Map(
+        selectableBranches.map((branch) => [branch.id as string, branch.name ?? branch.id as string])
+    );
+    const privilegedOwnerFilterVisible = isPrivilegedQueueRole(viewerRole);
+    const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
     const resetPagination = () => {
         setCursor(undefined);
     };
@@ -541,7 +435,10 @@ export default function CaseList({
             setStateReady(true);
             return;
         }
-        const restored = normalizeStoredPrefs(readInboxCaseListPrefs(workspaceScope));
+        const restored = normalizeStoredPrefs(readInboxCaseListPrefs(workspaceScope), {
+            branchFilterEnabled,
+            privilegedOwnerFilterVisible,
+        });
         if (restored) {
             setFilters(restored.filters);
             setOwnerScope(restored.ownerScope ? normalizeInboxOwnerScope(restored.ownerScope) : { ...DEFAULT_OWNER_SCOPE });
@@ -555,7 +452,7 @@ export default function CaseList({
             setCaseItems([]);
         }
         setStateReady(true);
-    }, [workspaceScope]);
+    }, [branchFilterEnabled, privilegedOwnerFilterVisible, workspaceScope]);
 
     useEffect(() => {
         if (queueViewMap.has(activeViewId)) {
@@ -596,51 +493,46 @@ export default function CaseList({
 
     // Check if we have a valid token
     const hasToken = !!(session as { accessToken?: string } | null)?.accessToken;
-
-    const selectableBranches = branches.filter((branch) => !!branch.id);
-    const branchMap = new Map(
-        selectableBranches.map((branch) => [branch.id as string, branch.name ?? branch.id as string])
-    );
-    const privilegedOwnerFilterVisible = isPrivilegedQueueRole(viewerRole);
-    const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
     const activeQueueView = queueViewMap.get(activeViewId) ?? queueViewMap.get("all_open") ?? queueViews[0];
     const activeServerQueueView = resolveServerQueueView(activeViewId);
-    const statusFilterActive = filters.status !== "open";
-    const advancedFiltersActive = Boolean(
-        statusFilterActive
-        || (branchFilterEnabled && filters.branchId)
-        || filters.dateFrom
-        || filters.dateTo
-        || filters.hasDeliveryError
-        || filters.hasPendingOutbox
-        || filters.hasHumanLock
-        || filters.sortBy !== getDefaultSortForQueueView(activeViewId)
+    const effectiveOwnerScope = useMemo(
+        () => normalizeOwnerScopeForRole(ownerScope, privilegedOwnerFilterVisible),
+        [ownerScope, privilegedOwnerFilterVisible],
     );
-    const advancedFiltersVisible = showAdvancedFilters || advancedFiltersActive;
+    const effectiveFilters = useMemo<CaseFilters>(
+        () => ({
+            status: normalizeStoredStatus(filters.status),
+            branchId: branchFilterEnabled ? filters.branchId : undefined,
+            query: typeof filters.query === "string" && filters.query.trim()
+                ? filters.query.trim()
+                : undefined,
+            hasDeliveryError: Boolean(filters.hasDeliveryError),
+            hasPendingOutbox: Boolean(filters.hasPendingOutbox),
+            hasHumanLock: Boolean(filters.hasHumanLock),
+            dateFrom: filters.dateFrom,
+            dateTo: filters.dateTo,
+            sortBy: normalizeStoredSortBy(filters.sortBy, { activeViewId }),
+        }),
+        [activeViewId, branchFilterEnabled, filters],
+    );
+    const effectiveSortBy = resolveEffectiveSortBy(activeViewId, effectiveFilters.sortBy);
+    const defaultSortBy = getDefaultSortForQueueView(activeViewId);
+    const defaultSortLabel = sortOptions.find((option) => option.id === defaultSortBy)?.label ?? "По умолчанию";
+    const statusFilterActive = Boolean(effectiveFilters.status);
+    const advancedFiltersActive = hasAdvancedCaseRefinements(effectiveFilters, { branchFilterEnabled });
     const filtersToggleLabel = filtersCollapsed
         ? advancedFiltersActive
             ? "Фильтры активны"
             : "Фильтры"
         : "Скрыть фильтры";
-    const showAdvancedFiltersRow = !filtersCollapsed && advancedFiltersVisible;
-    const advancedToggleLabel = advancedFiltersActive
-        ? "Уточнения активны"
-        : advancedFiltersVisible
-            ? "Скрыть уточнения"
-            : "Уточнить очередь";
-    const hasAnyFiltersApplied = Boolean(
-        activeViewId !== "all_open"
-        || statusFilterActive
-        || (branchFilterEnabled && filters.branchId)
-        || filters.dateFrom
-        || filters.dateTo
-        || ownerScope.kind !== "all"
-        || filters.query
-        || filters.hasDeliveryError
-        || filters.hasPendingOutbox
-        || filters.hasHumanLock
-        || filters.sortBy !== getDefaultSortForQueueView(activeViewId)
-    );
+    const showAdvancedFiltersRow = !filtersCollapsed && showAdvancedFilters;
+    const advancedToggleLabel = showAdvancedFilters ? "Скрыть уточнения" : "Уточнить очередь";
+    const hasAnyFiltersApplied = hasAnyCaseFiltersApplied({
+        activeViewId,
+        filters: effectiveFilters,
+        ownerScope: effectiveOwnerScope,
+        branchFilterEnabled,
+    });
     const headingClass = filtersCompact ? "text-base" : isCompact ? "text-lg" : "text-xl";
     const isTight = filtersCompact || filtersCollapsed;
     const autoRefreshLabel = autoRefreshEnabled ? "Автообновление: Вкл" : "Автообновление: Выкл";
@@ -672,56 +564,22 @@ export default function CaseList({
     useEffect(() => {
         if (!filtersCompact) {
             setFiltersCollapsed(false);
-            return;
         }
-        if (advancedFiltersActive && filtersCollapsed) {
-            setFiltersCollapsed(false);
-        }
-    }, [filtersCompact, advancedFiltersActive, filtersCollapsed]);
-
-    useEffect(() => {
-        if (!branchFilterEnabled && filters.branchId) {
-            setCursor(undefined);
-            setCaseItems([]);
-            setFilters((prev) => ({ ...prev, branchId: undefined }));
-        }
-    }, [branchFilterEnabled, filters.branchId]);
-
-    useEffect(() => {
-        if (privilegedOwnerFilterVisible) {
-            return;
-        }
-        if (ownerScope.kind === "agent" || ownerScope.kind === "unassigned") {
-            resetPagination();
-            setOwnerScope({ ...DEFAULT_OWNER_SCOPE });
-        }
-    }, [ownerScope.kind, privilegedOwnerFilterVisible]);
+    }, [filtersCompact]);
 
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuery({
-        queryKey: ["cases", filters, ownerScope, activeServerQueueView || activeViewId, cursor],
+        queryKey: ["cases", effectiveFilters, effectiveOwnerScope, activeServerQueueView || activeViewId, cursor],
         queryFn: async (): Promise<CasesResponse> => {
             const buildParams = (includeSort: boolean) => {
-                const params = new URLSearchParams();
-                if (filters.status) params.append("status", filters.status);
-                if (filters.branchId) params.append("branch_id", filters.branchId);
-                if (ownerScope.kind === "mine") params.append("assigned_to_me", "true");
-                if (ownerScope.kind === "agent" && ownerScope.agentId) params.append("assignee_id", ownerScope.agentId);
-                if (ownerScope.kind === "unassigned") params.append("unassigned", "true");
-                if (filters.query) params.append("q", filters.query);
-                if (filters.hasDeliveryError) params.append("has_delivery_error", "true");
-                if (filters.hasPendingOutbox) params.append("has_pending_outbox", "true");
-                if (filters.hasHumanLock) params.append("has_human_lock", "true");
-                if (filters.dateFrom) params.append("date_from", filters.dateFrom);
-                if (filters.dateTo) params.append("date_to", filters.dateTo);
-                if (activeServerQueueView) params.append("queue_view", activeServerQueueView);
-                if (includeSort) {
-                    if (filters.sortBy === "activity") params.append("sort_by", "last_activity");
-                    if (filters.sortBy === "created_at") params.append("sort_by", "created_at");
-                    if (filters.sortBy === "sla") params.append("sort_by", "sla");
-                }
-                if (cursor) params.append("cursor", cursor);
-                params.append("limit", "20");
-                return params;
+                return buildCaseListSearchParams({
+                    filters: includeSort ? effectiveFilters : { ...effectiveFilters, sortBy: undefined },
+                    ownerScope: effectiveOwnerScope,
+                    activeViewId,
+                    privilegedOwnerFilterVisible,
+                    activeServerQueueView,
+                    cursor,
+                    limit: 20,
+                });
             };
 
             const fetchCases = async (includeSort: boolean) => {
@@ -823,9 +681,9 @@ export default function CaseList({
         [bulkAssigneesData?.items],
     );
     const { data: queueAssigneesData, isFetching: queueAssigneesLoading } = useQuery({
-        queryKey: ["case-assignees-queue", filters.branchId || "all", viewerRole],
+        queryKey: ["case-assignees-queue", effectiveFilters.branchId || "all", viewerRole],
         queryFn: async () => {
-            const response = await casesApi.listQueueAssignees(filters.branchId);
+            const response = await casesApi.listQueueAssignees(effectiveFilters.branchId);
             return response.data;
         },
         enabled: privilegedOwnerFilterVisible,
@@ -841,14 +699,14 @@ export default function CaseList({
         }),
         [privilegedOwnerFilterVisible, queueAssignees],
     );
-    const ownerScopeValue = ownerScope.kind === "agent" ? ownerScope.agentId || "__all__" : `__${ownerScope.kind}__`;
-    const ownerScopeLabel = resolveOwnerScopeLabel(ownerScope, queueAssignees);
+    const ownerScopeValue = ownerScopeToSelectValue(effectiveOwnerScope);
+    const ownerScopeLabel = resolveOwnerScopeLabel(effectiveOwnerScope, queueAssignees);
     const recommendedBulkAssignee = useMemo(
         () => resolveRecommendedAssignee(bulkAssignees),
         [bulkAssignees],
     );
     const refinementChips = [
-        ownerScope.kind !== "all"
+        effectiveOwnerScope.kind !== "all"
             ? {
                 key: "owner",
                 label: `Ответственный: ${ownerScopeLabel}`,
@@ -858,10 +716,10 @@ export default function CaseList({
                 },
             }
             : null,
-        branchFilterEnabled && filters.branchId
+        branchFilterEnabled && effectiveFilters.branchId
             ? {
                 key: "branch",
-                label: `Филиал: ${branchMap.get(filters.branchId) ?? filters.branchId}`,
+                label: `Филиал: ${branchMap.get(effectiveFilters.branchId) ?? effectiveFilters.branchId}`,
                 onClear: () => {
                     resetPagination();
                     setFilters((prev) => ({ ...prev, branchId: undefined }));
@@ -871,34 +729,42 @@ export default function CaseList({
         statusFilterActive
             ? {
                 key: "status",
-                label: `Статус: ${filters.status === "resolved" ? "Закрыта" : filters.status === "active" ? "В работе" : filters.status === "pending" ? "Ожидает" : filters.status ?? "Все"}`,
+                label: `Статус: ${
+                    effectiveFilters.status === "resolved"
+                        ? "Закрыта"
+                        : effectiveFilters.status === "active"
+                            ? "В работе"
+                            : effectiveFilters.status === "pending"
+                                ? "Ожидает"
+                                : "Все статусы"
+                }`,
                 onClear: () => {
                     resetPagination();
                     setFilters((prev) => ({ ...prev, status: DEFAULT_FILTERS.status }));
                 },
             }
             : null,
-        filters.sortBy !== getDefaultSortForQueueView(activeViewId)
+        effectiveFilters.sortBy
             ? {
                 key: "sort",
-                label: `Порядок: ${sortOptions.find((option) => option.id === filters.sortBy)?.label ?? filters.sortBy}`,
+                label: `Порядок: ${sortOptions.find((option) => option.id === effectiveSortBy)?.label ?? effectiveSortBy}`,
                 onClear: () => {
                     resetPagination();
-                    setFilters((prev) => ({ ...prev, sortBy: getDefaultSortForQueueView(activeViewId) }));
+                    setFilters((prev) => ({ ...prev, sortBy: undefined }));
                 },
             }
             : null,
-        filters.dateFrom || filters.dateTo
+        effectiveFilters.dateFrom || effectiveFilters.dateTo
             ? {
                 key: "dates",
-                label: `Период: ${filters.dateFrom || "..." } — ${filters.dateTo || "..."}`,
+                label: `Период: ${effectiveFilters.dateFrom || "..." } — ${effectiveFilters.dateTo || "..."}`,
                 onClear: () => {
                     resetPagination();
                     setFilters((prev) => ({ ...prev, dateFrom: undefined, dateTo: undefined }));
                 },
             }
             : null,
-        filters.hasDeliveryError
+        effectiveFilters.hasDeliveryError
             ? {
                 key: "delivery-error",
                 label: "Есть ошибки доставки",
@@ -908,7 +774,7 @@ export default function CaseList({
                 },
             }
             : null,
-        filters.hasPendingOutbox
+        effectiveFilters.hasPendingOutbox
             ? {
                 key: "pending-outbox",
                 label: "Есть исходящие в очереди",
@@ -918,7 +784,7 @@ export default function CaseList({
                 },
             }
             : null,
-        filters.hasHumanLock
+        effectiveFilters.hasHumanLock
             ? {
                 key: "human-lock",
                 label: "Бот на паузе",
@@ -1023,8 +889,8 @@ export default function CaseList({
             return;
         }
         writeInboxCaseListPrefs(workspaceScope, {
-            filters,
-            ownerScope,
+            filters: effectiveFilters,
+            ownerScope: effectiveOwnerScope,
             searchValue,
             showAdvancedFilters,
             filtersCollapsed,
@@ -1032,7 +898,7 @@ export default function CaseList({
             activeViewId,
             visibleFields,
         });
-    }, [workspaceScope, stateReady, filters, ownerScope, searchValue, showAdvancedFilters, filtersCollapsed, autoRefreshEnabled, activeViewId, visibleFields]);
+    }, [workspaceScope, stateReady, effectiveFilters, effectiveOwnerScope, searchValue, showAdvancedFilters, filtersCollapsed, autoRefreshEnabled, activeViewId, visibleFields]);
 
     useEffect(() => {
         if (!onCaseIdsChange) {
@@ -1053,31 +919,19 @@ export default function CaseList({
 
     const applyOwnerScopeValue = (nextValue: string) => {
         resetPagination();
-        if (!nextValue || nextValue === "__all__") {
-            setOwnerScope({ ...DEFAULT_OWNER_SCOPE });
-            return;
-        }
-        if (nextValue === "__mine__") {
-            setOwnerScope({ kind: "mine" });
-            return;
-        }
-        if (nextValue === "__unassigned__") {
-            setOwnerScope({ kind: "unassigned" });
-            return;
-        }
-        setOwnerScope({ kind: "agent", agentId: nextValue });
+        setOwnerScope(
+            parseOwnerScopeValue(nextValue, privilegedOwnerFilterVisible),
+        );
     };
 
     const applyQueueView = (viewId: InboxQueueViewId) => {
-        const nextView = queueViewMap.get(viewId);
-        if (!nextView) {
+        if (!queueViewMap.has(viewId)) {
             return;
         }
         setBulkSummary(null);
         resetPagination();
         setSelectedCaseIds([]);
         setActiveViewId(viewId);
-        setFilters((prev) => nextView.applyFilters(prev));
     };
 
     const updateVisibleField = (field: InboxCaseVisibleField, enabled: boolean) => {
@@ -1290,9 +1144,8 @@ export default function CaseList({
                             <button
                                 type="button"
                                 onClick={() => setShowAdvancedFilters((prev) => !prev)}
-                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
                                 data-testid="cases-filter-advanced-toggle"
-                                disabled={advancedFiltersActive}
                             >
                                 {advancedToggleLabel}
                             </button>
@@ -1334,9 +1187,8 @@ export default function CaseList({
                             <button
                                 type="button"
                                 onClick={() => setShowAdvancedFilters((prev) => !prev)}
-                                className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap"
+                                className="text-xs text-muted-foreground hover:text-foreground whitespace-nowrap"
                                 data-testid="cases-filter-advanced-toggle"
-                                disabled={advancedFiltersActive}
                             >
                                 {advancedToggleLabel}
                             </button>
@@ -1356,14 +1208,14 @@ export default function CaseList({
                     <span className="rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary">
                         {activeQueueView?.label ?? "Все открытые"}
                     </span>
-                    {filters.query && (
+                    {effectiveFilters.query && (
                         <button
                             type="button"
                             onClick={() => setSearchValue("")}
                             className="rounded-full border border-border/60 bg-card px-2 py-1 font-semibold text-foreground/80"
                             data-testid="cases-search-summary"
                         >
-                            Поиск: {filters.query} ×
+                            Поиск: {effectiveFilters.query} ×
                         </button>
                     )}
                     {refinementChips.map((chip) => (
@@ -1427,16 +1279,20 @@ export default function CaseList({
                                 Статус
                             </span>
                             <select
-                                value={filters.status || ""}
+                                value={resolveStatusSelectValue(effectiveFilters.status)}
                                 onChange={(e) => {
                                     resetPagination();
-                                    setFilters({ ...filters, status: e.target.value || undefined });
+                                    const nextStatus = e.target.value;
+                                    setFilters({
+                                        ...filters,
+                                        status: nextStatus === "open" ? undefined : nextStatus,
+                                    });
                                 }}
                                 className={compactSelectClass}
                                 data-testid="cases-filter-status"
                             >
                                 <option value="open">Открытые</option>
-                                <option value="">Все статусы</option>
+                                <option value="all">Все статусы</option>
                                 <option value="pending">Ожидает</option>
                                 <option value="active">В работе</option>
                                 <option value="resolved">Закрыта</option>
@@ -1447,14 +1303,23 @@ export default function CaseList({
                                 Порядок
                             </span>
                             <select
-                                value={filters.sortBy}
+                                value={effectiveFilters.sortBy ?? "__default__"}
                                 onChange={(e) => {
                                     resetPagination();
-                                    setFilters({ ...filters, sortBy: e.target.value as CaseFilters["sortBy"] });
+                                    const nextSortBy = e.target.value;
+                                    setFilters({
+                                        ...filters,
+                                        sortBy: nextSortBy === "__default__"
+                                            ? undefined
+                                            : nextSortBy as NonNullable<CaseFilters["sortBy"]>,
+                                    });
                                 }}
                                 className={compactSelectClass}
                                 data-testid="cases-filter-sort-select"
                             >
+                                <option value="__default__">
+                                    По умолчанию для режима ({defaultSortLabel})
+                                </option>
                                 {sortOptions.map((option) => (
                                     <option key={option.id} value={option.id}>
                                         {option.label}
