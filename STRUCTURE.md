@@ -191,6 +191,8 @@
 | `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave21-a1.md` | Wave21 Task Package for cross-surface semantic integration between bot-origin cases and calendar bookings | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-a1.md` | Wave22 Task Package for forbidden-state matrix, deterministic acceptance, and live closeout of the new inbox semantic model | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-live-proof-a1.md` | Wave22 live-proof closure Task Package for explicit safe-case validation and blocker classification | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave23-a1.md` | Wave23 Task Package for post-closeout defect clustering and the queue-state-first maturity sequence for Inbox/Calendar | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md` | Wave24 Task Package for server-owned `Queue State Canon` across Inbox/Calendar before saved views, presets, and shareable URLs | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |

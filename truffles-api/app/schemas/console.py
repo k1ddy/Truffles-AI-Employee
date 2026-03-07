@@ -1073,6 +1073,28 @@ class ConsoleCaseListResponse(BaseModel):
     total: Optional[int] = None
 
 
+ConsoleQueueStateSurface = Literal["cases", "calendar"]
+
+
+class ConsoleQueueStateCurrentRequest(ConsoleRequestModel):
+    surface: ConsoleQueueStateSurface
+    case_id: Optional[UUID] = None
+    conversation_id: Optional[UUID] = None
+    version: int = Field(default=1, ge=1)
+    query_state: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConsoleQueueStateCurrentResponse(BaseModel):
+    found: bool = False
+    surface: ConsoleQueueStateSurface
+    selected_branch_id: Optional[UUID] = None
+    case_id: Optional[UUID] = None
+    conversation_id: Optional[UUID] = None
+    version: int = 1
+    query_state: dict[str, Any] = Field(default_factory=dict)
+    updated_at: Optional[str] = None
+
+
 class ConsoleSyncStatus(BaseModel):
     status: Literal["ok", "skipped", "failed"]
     detail: Optional[str] = None

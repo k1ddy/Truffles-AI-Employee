@@ -27,6 +27,11 @@ import {
     type InboxSidePanelMode,
     writeCalendarWorkspacePrefs,
 } from "@/lib/inbox-workspace";
+import {
+    buildCalendarQueueStatePayload,
+    readCalendarQueueStateFromServer,
+    readCalendarQueueStateFromUrl,
+} from "@/lib/queue-state";
 import { getBookingStatusLabel, getBookingStatusColor } from "@/utils/labels";
 import AccessDenied from "@/components/AccessDenied";
 import { authApi, canAccessConsole } from "@/lib/api-client";
@@ -112,7 +117,21 @@ export default function CalendarPage() {
         [inboxWorkspaceScope, focusedCaseId, focusedConversationId],
     );
     const restoredCalendarScopeRef = useRef<string | null>(null);
+    const lastSavedQueueStateRef = useRef<string>("");
     const defaultSelectedDate = focusedConversationId || focusedCaseId ? "" : today;
+    const defaultQueueLane: BookingQueueLane = focusedConversationId ? "all" : "attention";
+    const urlQueueState = useMemo(
+        () =>
+            readCalendarQueueStateFromUrl(searchParams, {
+                defaultSelectedDate,
+                defaultQueueLane,
+            }),
+        [defaultQueueLane, defaultSelectedDate, searchParams],
+    );
+    const urlQueueStateKey = useMemo(
+        () => JSON.stringify(urlQueueState ?? null),
+        [urlQueueState],
+    );
 
     // Form state
     const [selectedSpecialist, setSelectedSpecialist] = useState<string>("");
@@ -126,31 +145,152 @@ export default function CalendarPage() {
     const [showPastDates, setShowPastDates] = useState(false);
     const [statusUpdateBookingId, setStatusUpdateBookingId] = useState<string | null>(null);
     const [followUpBookingId, setFollowUpBookingId] = useState<string | null>(null);
-    const [queueLane, setQueueLane] = useState<BookingQueueLane>(focusedConversationId ? "all" : "attention");
+    const [queueLane, setQueueLane] = useState<BookingQueueLane>(defaultQueueLane);
     const [queueStatusFilter, setQueueStatusFilter] = useState<BookingStatusFilter>("all");
     const [queueSearch, setQueueSearch] = useState("");
 
+    const currentQueueStateQuery = useQuery({
+        queryKey: ["queue-state", "calendar", calendarWorkspaceScope, focusedCaseId, focusedConversationId],
+        queryFn: async () => {
+            const response = await api.get("/queue-state/current", {
+                params: {
+                    surface: "calendar",
+                    case_id: focusedCaseId || undefined,
+                    conversation_id: focusedConversationId || undefined,
+                },
+            });
+            return response.data as {
+                found?: boolean;
+                query_state?: Record<string, unknown> | null;
+                updated_at?: string | null;
+            };
+        },
+        enabled: !!session && canReadCalendar && !!calendarWorkspaceScope,
+        retry: 1,
+        staleTime: 60_000,
+    });
+
     useEffect(() => {
-        if (!calendarWorkspaceScope || restoredCalendarScopeRef.current === calendarWorkspaceScope) {
+        restoredCalendarScopeRef.current = null;
+        lastSavedQueueStateRef.current = "";
+    }, [calendarWorkspaceScope, urlQueueStateKey]);
+
+    useEffect(() => {
+        if (!calendarWorkspaceScope) {
+            return;
+        }
+        const restoreKey = `${calendarWorkspaceScope}::${urlQueueStateKey}`;
+        const currentQueueStateSettled = Boolean(urlQueueState)
+            || !session
+            || currentQueueStateQuery.isFetched
+            || currentQueueStateQuery.isError;
+        if (!currentQueueStateSettled || restoredCalendarScopeRef.current === restoreKey) {
             return;
         }
         const prefs = readCalendarWorkspacePrefs(calendarWorkspaceScope);
-        setSelectedDate(prefs?.selectedDate ?? defaultSelectedDate);
-        setQueueLane(prefs?.queueLane ?? (focusedConversationId ? "all" : "attention"));
-        setQueueStatusFilter(prefs?.queueStatusFilter ?? "all");
-        restoredCalendarScopeRef.current = calendarWorkspaceScope;
-    }, [calendarWorkspaceScope, defaultSelectedDate, focusedConversationId]);
+        const localSnapshot = prefs
+            ? {
+                selectedDate: prefs.selectedDate ?? defaultSelectedDate,
+                queueLane: prefs.queueLane ?? defaultQueueLane,
+                queueStatusFilter: prefs.queueStatusFilter ?? "all",
+                queueSearch: prefs.queueSearch ?? "",
+            }
+            : null;
+        const serverSnapshot = readCalendarQueueStateFromServer(currentQueueStateQuery.data, {
+            defaultSelectedDate,
+            defaultQueueLane,
+        });
+        const queueSnapshot = urlQueueState ?? serverSnapshot ?? localSnapshot;
+        const source = urlQueueState
+            ? "url"
+            : serverSnapshot
+                ? "server"
+                : localSnapshot
+                    ? "local"
+                    : "default";
+        setSelectedDate(queueSnapshot?.selectedDate ?? defaultSelectedDate);
+        setQueueLane(queueSnapshot?.queueLane ?? defaultQueueLane);
+        setQueueStatusFilter(queueSnapshot?.queueStatusFilter ?? "all");
+        setQueueSearch(queueSnapshot?.queueSearch ?? "");
+        if (source === "server" && queueSnapshot) {
+            lastSavedQueueStateRef.current = JSON.stringify({
+                surface: "calendar",
+                case_id: focusedCaseId || undefined,
+                conversation_id: focusedConversationId || undefined,
+                version: 1,
+                query_state: buildCalendarQueueStatePayload(queueSnapshot),
+            });
+        }
+        restoredCalendarScopeRef.current = restoreKey;
+    }, [
+        calendarWorkspaceScope,
+        currentQueueStateQuery.data,
+        currentQueueStateQuery.isError,
+        currentQueueStateQuery.isFetched,
+        defaultQueueLane,
+        defaultSelectedDate,
+        focusedCaseId,
+        focusedConversationId,
+        session,
+        urlQueueState,
+        urlQueueStateKey,
+    ]);
 
     useEffect(() => {
-        if (!calendarWorkspaceScope || restoredCalendarScopeRef.current !== calendarWorkspaceScope) {
+        if (!calendarWorkspaceScope || !restoredCalendarScopeRef.current) {
             return;
         }
         writeCalendarWorkspacePrefs(calendarWorkspaceScope, {
             selectedDate,
             queueLane,
             queueStatusFilter,
+            queueSearch,
         });
-    }, [calendarWorkspaceScope, selectedDate, queueLane, queueStatusFilter]);
+    }, [calendarWorkspaceScope, queueLane, queueSearch, queueStatusFilter, selectedDate]);
+
+    useEffect(() => {
+        if (!calendarWorkspaceScope || !session || !canReadCalendar || !restoredCalendarScopeRef.current) {
+            return;
+        }
+        const payload = {
+            surface: "calendar" as const,
+            case_id: focusedCaseId || undefined,
+            conversation_id: focusedConversationId || undefined,
+            version: 1,
+            query_state: buildCalendarQueueStatePayload({
+                selectedDate,
+                queueLane,
+                queueStatusFilter,
+                queueSearch,
+            }),
+        };
+        const fingerprint = JSON.stringify(payload);
+        if (lastSavedQueueStateRef.current === fingerprint) {
+            return;
+        }
+        const timeoutId = window.setTimeout(() => {
+            if (lastSavedQueueStateRef.current === fingerprint) {
+                return;
+            }
+            lastSavedQueueStateRef.current = fingerprint;
+            void api.put("/queue-state/current", payload).catch(() => {
+                if (lastSavedQueueStateRef.current === fingerprint) {
+                    lastSavedQueueStateRef.current = "";
+                }
+            });
+        }, 250);
+        return () => window.clearTimeout(timeoutId);
+    }, [
+        calendarWorkspaceScope,
+        canReadCalendar,
+        focusedCaseId,
+        focusedConversationId,
+        queueLane,
+        queueSearch,
+        queueStatusFilter,
+        selectedDate,
+        session,
+    ]);
 
     // Queries
     const { data: specialistsData, isError: specialistsError, error: specialistsErrorData } = useQuery({

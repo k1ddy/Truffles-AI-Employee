@@ -39,6 +39,96 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
+  /console/v1/queue-state/current:
+    get:
+      tags:
+      - console
+      summary: Get Current Queue State
+      operationId: get_current_queue_state_console_v1_queue_state_current_get
+      parameters:
+      - name: surface
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Surface
+      - name: case_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Id
+      - name: conversation_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Conversation Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleQueueStateCurrentResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - console
+      summary: Put Current Queue State
+      operationId: put_current_queue_state_console_v1_queue_state_current_put
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleQueueStateCurrentRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleQueueStateCurrentResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/agents:
     get:
       tags:
@@ -16669,6 +16759,85 @@ components:
       - priority
       - recommended_action
       title: ConsoleProviderOpsQueueItem
+    ConsoleQueueStateCurrentRequest:
+      properties:
+        surface:
+          type: string
+          enum:
+          - cases
+          - calendar
+          title: Surface
+        case_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Case Id
+        conversation_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Conversation Id
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
+          default: 1
+        query_state:
+          type: object
+          title: Query State
+      additionalProperties: false
+      type: object
+      required:
+      - surface
+      title: ConsoleQueueStateCurrentRequest
+    ConsoleQueueStateCurrentResponse:
+      properties:
+        found:
+          type: boolean
+          title: Found
+          default: false
+        surface:
+          type: string
+          enum:
+          - cases
+          - calendar
+          title: Surface
+        selected_branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Selected Branch Id
+        case_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Case Id
+        conversation_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Conversation Id
+        version:
+          type: integer
+          title: Version
+          default: 1
+        query_state:
+          type: object
+          title: Query State
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - surface
+      title: ConsoleQueueStateCurrentResponse
     ConsoleReferencePack:
       properties:
         id:
