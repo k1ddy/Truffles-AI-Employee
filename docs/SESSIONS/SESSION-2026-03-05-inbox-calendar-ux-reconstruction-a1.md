@@ -2,11 +2,11 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave34-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave35-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Выполнить `Wave34` Calendar surface decomposition: отделить queue triage `Записи` от filters, saved views/share, booking governance/actions и scheduling, затем переподтвердить calendar-linked operator workflow lane.
+- scope: Закрыть `Wave35` operator workflow/layout proof: покрыть saved views, team presets, share URLs, follow-up governance, routing-profile restrictions и medium-width layout assertions на rebuilt Inbox/Calendar surfaces.
 - done:
   - Wave32 docs-only audit started and canonized:
     - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md` and artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-08-inbox-calendar-ux-logic-audit-a1.md`;
@@ -489,6 +489,10 @@
       - `cd console-web && npm run build` (`pass`)
       - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "inspect first case|manager history modes hide queue views and keep owner scope role-gated|manage and apply action macro|action feedback hides raw sync reason codes and keeps reopen internal-only|booking no-show reopens resolved case and preserves case-booking semantics"` (`5 passed`)
       - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+  - Wave35 TP activated before implementation:
+    - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave35-a1.md` as the bounded acceptance closeout block after Wave33/Wave34;
+    - switched the active session/task-package pointer from Wave34 to Wave35 and updated the master Inbox/Calendar execution map accordingly;
+    - canonized one mandatory implementation search on official Playwright assertions/emulation docs to keep medium-width/layout proof inside the existing deterministic operator lane.
   - Wave34 Calendar decomposition completed locally:
     - created and activated `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave34-a1.md` as the bounded follow-up to the Wave32/Wave33 audit chain;
     - rebuilt `console-web/src/app/calendar/page.tsx` so the first screen keeps queue triage and summary only, while filters, saved views/share, scheduling, and booking governance/actions now live in explicit secondary panels/sheets;
@@ -497,4 +501,15 @@
       - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file e2e/inspect_case.spec.ts` (`pass`)
       - `cd console-web && npm run build` (`pass`)
       - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "inspect first case|manager history modes hide queue views and keep owner scope role-gated|booking no-show reopens resolved case and preserves case-booking semantics|calendar secondary panels isolate filters and booking actions"` (`4 passed`)
-- last_updated: 2026-03-08T11:54:26+05:00
+  - Wave35 operator proof completed locally:
+    - extended `console-web/e2e/inspect_case.spec.ts` with route-backed queue-state current/saved-view CRUD mocks, clipboard capture, follow-up-governance mutation proof, routing-profile restriction assertions, and medium-width layout assertions;
+    - covered the required proof matrix on rebuilt surfaces: inbox saved views/team presets/share URLs, calendar follow-up governance from the booking action panel, routing-profile-disabled reassignment states, and medium-width layout checks for both primary surfaces;
+    - local evidence:
+      - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts --file src/components/CaseList.tsx --file src/app/calendar/page.tsx` (`pass`)
+      - `cd console-web && npm run build` (`pass`)
+      - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "inspect first case|saved views, team presets, and share urls stay reachable from inbox secondary surfaces|follow-up governance stays inside the calendar booking panel|routing profile restrictions stay visible in reassignment panel|medium-width inbox and calendar keep primary queue surfaces visible|calendar secondary panels isolate filters and booking actions|booking no-show reopens resolved case and preserves case-booking semantics"` (`7 passed`)
+      - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+  - Separate PRs opened for the bounded decomposition prerequisites:
+    - `PR #952` — Wave33 Inbox first-screen decomposition
+    - `PR #953` — Wave34 Calendar first-screen decomposition (stacked on Wave33)
+- last_updated: 2026-03-08T12:52:49+05:00
