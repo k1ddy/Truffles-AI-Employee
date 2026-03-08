@@ -2,12 +2,23 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave28-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave29-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Реализовать Wave28 supervisor-grade booking governance для `Записи`: explicit `follow-up owner` + `due time` for no-show backlog and explicit `history/archive` mode on the existing queue-state/share-URL canon, without opening richer routing yet.
+- scope: Реализовать Wave29 richer routing v1 как explainable opt-in policy поверх Wave28 booking governance: добавить `follow_up_sla_balance` без тихой подмены `least_open_cases`, с server-owned score/explainability contract и explicit policy selection в текущих reassignment surfaces.
 - done:
+  - Wave29 richer routing v1 implemented locally:
+    - backend adds explainable policy `follow_up_sla_balance` on top of current assignee eligibility/load, explicit booking `NO_SHOW` follow-up continuity, and SLA-weighted load balancing while preserving `least_open_cases`;
+    - `/cases/{case_id}/assignees` now accepts explicit `policy`, and routing responses/actions carry `recommended_score`, `current_score`, and `score_breakdown`;
+    - frontend `CaseConversation` and `CaseList` now expose explicit routing-policy selectors in the existing single-case and bulk surfaces, defaulting the UI to the richer policy without silently replacing the backend default.
+  - Wave29 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `87 passed`
+    - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py app/services/console_case_routing.py tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/api-client.ts --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx` → `pass`
+    - `cd console-web && npm run build` → `pass`
   - Wave28 implementation completed locally:
     - backend adds explicit booking governance fields `appointments.follow_up_owner_id` and `appointments.follow_up_due_at`, deterministic `NO_SHOW` defaults, `/calendar/bookings` filters for `follow_up_owner_id` and `follow_up_overdue`, and bounded owner/admin mutation `POST /calendar/bookings/{booking_id}/follow-up-governance`;
     - calendar queue-state canon now persists/restores `queue_mode`, `follow_up_owner_id`, and `follow_up_overdue_only` on the same Wave24-27 server/current/saved-view/share-link contract;
@@ -239,9 +250,21 @@
   - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
   - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - Wave28 supervisor-grade booking governance is locally green; the next valid product block is richer routing v1 as recommendation-first scoring over explicit queue-state plus booking `follow-up owner`/`due`/`history` inputs.
-  - Do not re-open status-only routing heuristics; any routing expansion is blocked until it consumes the explicit Wave28 governance contract.
+  - Wave29 richer routing v1 is locally green; the next valid product question is whether the platform needs capability/presence-aware routing inputs or a bounded routing v2, not another queue-state or status-only heuristic patch.
+  - Do not invent `skills` / `presence` / `availability` as frontend-only selectors; any further routing wave is blocked until those signals are server-owned.
 - evidence:
+  - `truffles-api/app/services/console_case_routing.py`
+  - `truffles-api/app/routers/console.py`
+  - `truffles-api/app/schemas/console.py`
+  - `truffles-api/tests/test_console_cases_helpers.py`
+  - `truffles-api/tests/test_console_queue_state_api.py`
+  - `truffles-api/tests/test_console_openapi_calendar_contract.py`
+  - `contracts/console_api/openapi.v1.yaml`
+  - `console-web/src/lib/api-client.ts`
+  - `console-web/src/components/CaseConversation.tsx`
+  - `console-web/src/components/CaseList.tsx`
+  - `console-web/src/types/api.generated.ts`
+  - `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave29-a1.md`
   - `truffles-api/app/models/appointment.py`
   - `truffles-api/migrations/055_add_booking_follow_up_governance.sql`
   - `truffles-api/app/routers/calendar.py`

@@ -503,6 +503,8 @@ export type CaseBulkActionResponse = components["schemas"]["ConsoleCaseBulkActio
 export type CaseBulkActionResult = components["schemas"]["ConsoleCaseBulkActionResult"];
 export type CaseReassignRequest = components["schemas"]["ConsoleCaseReassignRequest"];
 export type CaseSnoozeRequest = components["schemas"]["ConsoleCaseSnoozeRequest"];
+export type CaseRoutingPolicy = "least_open_cases" | "follow_up_sla_balance";
+export const DEFAULT_CASE_ROUTING_POLICY: CaseRoutingPolicy = "follow_up_sla_balance";
 export type QueueStateSurface = components["schemas"]["ConsoleQueueStateCurrentRequest"]["surface"];
 export type QueueSavedView = components["schemas"]["ConsoleSavedView"];
 export type QueueSavedViewCreateRequest = components["schemas"]["ConsoleSavedViewCreateRequest"];
@@ -1259,8 +1261,10 @@ export const casesApi = {
             params: branchId ? { branch_id: branchId } : undefined,
         }),
 
-    listAssignees: (caseId: string) =>
-        apiClient.get<CaseAssigneeListResponse>(`/cases/${caseId}/assignees`),
+    listAssignees: (caseId: string, policy?: CaseRoutingPolicy) =>
+        apiClient.get<CaseAssigneeListResponse>(`/cases/${caseId}/assignees`, {
+            params: policy ? { policy } : undefined,
+        }),
 
     take: (caseId: string) =>
         apiClient.post<CaseActionResponse>(`/cases/${caseId}/take`),

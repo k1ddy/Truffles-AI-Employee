@@ -626,6 +626,17 @@ paths:
           type: string
           format: uuid
           title: Case Id
+      - name: policy
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - least_open_cases
+            - follow_up_sla_balance
+            type: string
+          - type: 'null'
+          title: Policy
       responses:
         '200':
           description: Successful Response
@@ -10696,7 +10707,10 @@ components:
           title: Agent Id
         policy:
           anyOf:
-          - const: least_open_cases
+          - type: string
+            enum:
+            - least_open_cases
+            - follow_up_sla_balance
           - type: 'null'
           title: Policy
         minutes:
@@ -10831,7 +10845,10 @@ components:
           default: manual
         policy:
           anyOf:
-          - const: least_open_cases
+          - type: string
+            enum:
+            - least_open_cases
+            - follow_up_sla_balance
           - type: 'null'
           title: Policy
       additionalProperties: false
@@ -10840,7 +10857,10 @@ components:
     ConsoleCaseRoutingDecision:
       properties:
         policy:
-          const: least_open_cases
+          type: string
+          enum:
+          - least_open_cases
+          - follow_up_sla_balance
           title: Policy
         recommended_agent_id:
           type: string
@@ -10879,6 +10899,21 @@ components:
         reason_summary:
           type: string
           title: Reason Summary
+        recommended_score:
+          type: integer
+          title: Recommended Score
+          default: 0
+        current_score:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Current Score
+        score_breakdown:
+          items:
+            $ref: '#/components/schemas/ConsoleCaseRoutingScoreFactor'
+          type: array
+          title: Score Breakdown
+          default: []
       type: object
       required:
       - policy
@@ -10887,6 +10922,23 @@ components:
       - reason_code
       - reason_summary
       title: ConsoleCaseRoutingDecision
+    ConsoleCaseRoutingScoreFactor:
+      properties:
+        code:
+          type: string
+          title: Code
+        label:
+          type: string
+          title: Label
+        value:
+          type: integer
+          title: Value
+      type: object
+      required:
+      - code
+      - label
+      - value
+      title: ConsoleCaseRoutingScoreFactor
     ConsoleCaseSnoozeRequest:
       properties:
         minutes:

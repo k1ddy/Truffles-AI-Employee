@@ -7,9 +7,11 @@ import Link from "next/link";
 import toast from "react-hot-toast";
 import {
     casesApi,
+    DEFAULT_CASE_ROUTING_POLICY,
     outreachApi,
     type CaseActionResponse,
     type CaseAssigneeOption,
+    type CaseRoutingPolicy,
 } from "@/lib/api-client";
 import type { Case, Message } from "@/types";
 import ChatInterface from "./ChatInterface";
@@ -133,6 +135,16 @@ const ASSIGNEE_ROLE_LABELS: Record<string, string> = {
     manager: "Manager",
 };
 
+const CASE_ROUTING_POLICY_LABELS: Record<CaseRoutingPolicy, string> = {
+    follow_up_sla_balance: "Follow-up + SLA баланс",
+    least_open_cases: "Меньше всего открытых",
+};
+
+const CASE_ROUTING_POLICY_HINTS: Record<CaseRoutingPolicy, string> = {
+    follow_up_sla_balance: "Сохраняет continuity по no-show follow-up и сильнее учитывает нагрузку, если у заявки уже есть SLA-риск.",
+    least_open_cases: "Распределяет только по текущему числу открытых заявок и сохраняет владельца при равной нагрузке.",
+};
+
 const CASE_SNOOZE_PRESETS = [30, 60, 120, 240];
 
 type ActionPanel = "reassign" | "snooze" | null;
@@ -172,6 +184,9 @@ function formatRoutingRecommendationCopy(
     recommendedAssignee: CaseAssigneeOption | null,
     currentAssignee: CaseAssigneeOption | null,
 ) {
+    if (recommendation?.reason_summary) {
+        return recommendation.reason_summary;
+    }
     if (recommendedAssignee && currentAssignee) {
         return `Сейчас у ${currentAssignee.agent_name} ${formatAssigneeLoadLabel(currentAssignee)}. Лучше передать ${recommendedAssignee.agent_name}, у него ${formatAssigneeLoadLabel(recommendedAssignee)}.`;
     }
@@ -315,6 +330,7 @@ export default function CaseConversation({
     const isResolved = caseDetail.status === "resolved";
     const defaultDestination = caseDetail.customer_phone || caseDetail.customer_remote_jid || "";
     const [actionPanel, setActionPanel] = useState<ActionPanel>(null);
+    const [selectedRoutingPolicy, setSelectedRoutingPolicy] = useState<CaseRoutingPolicy>(DEFAULT_CASE_ROUTING_POLICY);
     const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
     const [snoozeMinutes, setSnoozeMinutes] = useState(60);
     const [snoozeReason, setSnoozeReason] = useState("");
@@ -330,6 +346,7 @@ export default function CaseConversation({
 
     useEffect(() => {
         setActionPanel(null);
+        setSelectedRoutingPolicy(DEFAULT_CASE_ROUTING_POLICY);
         setSelectedAssigneeId("");
         setSnoozeMinutes(60);
         setSnoozeReason("");
@@ -344,9 +361,9 @@ export default function CaseConversation({
     }, [caseId, caseDetail.customer_phone, caseDetail.customer_remote_jid, layout]);
 
     const assigneeOptionsQuery = useQuery({
-        queryKey: ["case-assignees", caseId],
+        queryKey: ["case-assignees", caseId, selectedRoutingPolicy],
         queryFn: async () => {
-            const response = await casesApi.listAssignees(caseId);
+            const response = await casesApi.listAssignees(caseId, selectedRoutingPolicy);
             return response.data;
         },
         enabled: canWrite && isActive && actionPanel === "reassign",
@@ -376,8 +393,10 @@ export default function CaseConversation({
     const reassignMutation = useMutation({
         mutationFn: async (mode: "manual" | "policy") => {
             if (mode === "policy") {
-                const policy = assigneeOptionsQuery.data?.routing?.policy ?? "least_open_cases";
-                const response = await casesApi.reassign(caseId, { mode: "policy", policy });
+                const response = await casesApi.reassign(caseId, {
+                    mode: "policy",
+                    policy: selectedRoutingPolicy,
+                });
                 return { response: response.data, mode };
             }
             const agentId = selectedAssigneeId.trim();
@@ -789,6 +808,27 @@ export default function CaseConversation({
                         </p>
                     </div>
                 )}
+                <div className="rounded-xl border border-border/60 bg-muted/20 px-3 py-3">
+                    <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        Политика
+                    </label>
+                    <select
+                        value={selectedRoutingPolicy}
+                        onChange={(event) => setSelectedRoutingPolicy(event.target.value as CaseRoutingPolicy)}
+                        disabled={caseActionBusy || assigneeOptionsQuery.isLoading}
+                        className="mt-2 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm text-foreground disabled:opacity-50"
+                        data-testid="case-reassign-policy-select"
+                    >
+                        {Object.entries(CASE_ROUTING_POLICY_LABELS).map(([value, label]) => (
+                            <option key={value} value={value}>
+                                {label}
+                            </option>
+                        ))}
+                    </select>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                        {CASE_ROUTING_POLICY_HINTS[selectedRoutingPolicy]}
+                    </p>
+                </div>
                 {recommendedAssignee && (
                     <div
                         className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3"
@@ -801,6 +841,9 @@ export default function CaseConversation({
                             <div className="space-y-1">
                                 <p className="text-sm font-semibold text-emerald-950">
                                     {recommendedAssignee.agent_name}
+                                </p>
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-900/70">
+                                    {CASE_ROUTING_POLICY_LABELS[selectedRoutingPolicy]}
                                 </p>
                                 <p className="text-xs text-emerald-900/80">
                                     {formatAssigneeMetaLabel(recommendedAssignee)}

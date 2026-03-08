@@ -4427,7 +4427,7 @@ export interface components {
             /** Agent Id */
             agent_id?: string | null;
             /** Policy */
-            policy?: "least_open_cases" | null;
+            policy?: ("least_open_cases" | "follow_up_sla_balance") | null;
             /** Minutes */
             minutes?: number | null;
             /** Reason */
@@ -4494,15 +4494,15 @@ export interface components {
              */
             mode: "manual" | "policy";
             /** Policy */
-            policy?: "least_open_cases" | null;
+            policy?: ("least_open_cases" | "follow_up_sla_balance") | null;
         };
         /** ConsoleCaseRoutingDecision */
         ConsoleCaseRoutingDecision: {
             /**
              * Policy
-             * @constant
+             * @enum {string}
              */
-            policy: "least_open_cases";
+            policy: "least_open_cases" | "follow_up_sla_balance";
             /**
              * Recommended Agent Id
              * Format: uuid
@@ -4530,6 +4530,27 @@ export interface components {
             reason_code: string;
             /** Reason Summary */
             reason_summary: string;
+            /**
+             * Recommended Score
+             * @default 0
+             */
+            recommended_score: number;
+            /** Current Score */
+            current_score?: number | null;
+            /**
+             * Score Breakdown
+             * @default []
+             */
+            score_breakdown: components["schemas"]["ConsoleCaseRoutingScoreFactor"][];
+        };
+        /** ConsoleCaseRoutingScoreFactor */
+        ConsoleCaseRoutingScoreFactor: {
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
         };
         /** ConsoleCaseSnoozeRequest */
         ConsoleCaseSnoozeRequest: {
@@ -9866,7 +9887,9 @@ export interface operations {
     };
     list_case_assignees_console_v1_cases__case_id__assignees_get: {
         parameters: {
-            query?: never;
+            query?: {
+                policy?: ("least_open_cases" | "follow_up_sla_balance") | null;
+            };
             header?: never;
             path: {
                 case_id: string;
