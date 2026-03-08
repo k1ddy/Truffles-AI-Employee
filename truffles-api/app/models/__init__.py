@@ -21,6 +21,7 @@ from app.models.console_idempotency import ConsoleIdempotencyKey
 from app.models.console_macro import ConsoleMacro
 from app.models.console_ops_job import ConsoleOpsJob
 from app.models.console_queue_state import ConsoleQueueState
+from app.models.console_routing_profile import ConsoleRoutingProfile
 from app.models.console_saved_view import ConsoleSavedView
 from app.models.conversation import Conversation
 from app.models.conversation_human_lock import ConversationHumanLock
@@ -84,6 +85,7 @@ __all__ = [
     "ConsoleMacro",
     "ConsoleOpsJob",
     "ConsoleQueueState",
+    "ConsoleRoutingProfile",
     "ConsoleSavedView",
     "ConversationHumanLock",
     "DomainCapabilityTemplate",

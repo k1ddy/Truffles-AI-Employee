@@ -74,6 +74,10 @@ function extractErrorCode(error: unknown): string | undefined {
     return (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
 }
 
+function extractErrorMessage(error: unknown): string | undefined {
+    return (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message;
+}
+
 function showActionFollowupWarnings(sync?: CaseActionResponse["sync"] | null) {
     const messages = collectCaseActionFollowupMessages(sync);
     if (messages.length === 0) {
@@ -179,6 +183,42 @@ function formatAssigneeMetaLabel(option: CaseAssigneeOption) {
     return parts.join(" · ");
 }
 
+function formatAssigneeAvailabilityLabel(option: CaseAssigneeOption) {
+    const parts: string[] = [];
+    if (option.routing_status === "paused") {
+        parts.push("пауза для новых заявок");
+    } else if (option.routing_status === "follow_up_only") {
+        parts.push("только follow-up continuity");
+    } else if (option.routing_profile_source === "branch") {
+        parts.push("branch override");
+    } else if (option.routing_profile_source === "client") {
+        parts.push("client profile");
+    }
+    if (option.max_open_case_count != null) {
+        parts.push(`лимит ${option.open_case_count ?? 0}/${option.max_open_case_count}`);
+    }
+    return parts.join(" · ");
+}
+
+function formatAssigneeUnavailableReason(option: CaseAssigneeOption) {
+    if (option.assignment_eligible) {
+        return null;
+    }
+    if (option.assignment_block_reason_code === "paused") {
+        return "Новые заявки временно отключены этим routing profile.";
+    }
+    if (option.assignment_block_reason_code === "follow_up_only") {
+        return "Можно назначать только на явный follow-up continuity кейс.";
+    }
+    if (option.assignment_block_reason_code === "at_capacity") {
+        if (option.max_open_case_count != null) {
+            return `Достигнут лимит ${option.open_case_count ?? 0}/${option.max_open_case_count}.`;
+        }
+        return "Достигнут лимит открытых заявок.";
+    }
+    return "Сейчас недоступен для назначения.";
+}
+
 function formatRoutingRecommendationCopy(
     recommendation: { reason_summary?: string | null } | null | undefined,
     recommendedAssignee: CaseAssigneeOption | null,
@@ -201,6 +241,9 @@ function sortAssigneeOptionsByLoad(options: CaseAssigneeOption[]) {
         if (left.is_current !== right.is_current) {
             return left.is_current ? -1 : 1;
         }
+        if (left.assignment_eligible !== right.assignment_eligible) {
+            return left.assignment_eligible ? -1 : 1;
+        }
         const leftLoad = left.open_case_count ?? 0;
         const rightLoad = right.open_case_count ?? 0;
         if (leftLoad !== rightLoad) {
@@ -217,7 +260,9 @@ function resolveRecommendedAssignee(
     const currentOption = currentAssigneeId
         ? options.find((item) => String(item.agent_id) === currentAssigneeId)
         : null;
-    const candidateOptions = options.filter((item) => String(item.agent_id) !== (currentAssigneeId ?? ""));
+    const candidateOptions = options.filter(
+        (item) => item.assignment_eligible && String(item.agent_id) !== (currentAssigneeId ?? ""),
+    );
     if (candidateOptions.length === 0) {
         return null;
     }
@@ -379,14 +424,16 @@ export default function CaseConversation({
             return;
         }
         setSelectedAssigneeId((current) => {
-            if (current && items.some((item) => item.agent_id === current)) {
+            if (current && items.some((item) => item.agent_id === current && item.assignment_eligible)) {
                 return current;
             }
             const routedTargetId = assigneeOptionsQuery.data?.routing?.recommended_agent_id;
-            const preferred = items.find((item) => String(item.agent_id) === String(routedTargetId))
-                ?? items.find((item) => !item.is_current)
-                ?? items[0];
-            return preferred.agent_id;
+            const preferred = items.find(
+                (item) => item.assignment_eligible && String(item.agent_id) === String(routedTargetId),
+            )
+                ?? items.find((item) => item.assignment_eligible && !item.is_current)
+                ?? null;
+            return preferred ? String(preferred.agent_id) : "";
         });
     }, [actionPanel, assigneeOptionsQuery.data]);
 
@@ -429,6 +476,10 @@ export default function CaseConversation({
             }
             if (code === "CASE_NOT_ACTIVE") {
                 toast.error("Передача доступна только для активной заявки");
+                return;
+            }
+            if (code === "ASSIGNEE_UNAVAILABLE") {
+                toast.error(extractErrorMessage(error) || "Выбранный менеджер сейчас недоступен для назначения");
                 return;
             }
             toast.error("Не удалось передать заявку");
@@ -597,9 +648,17 @@ export default function CaseConversation({
         () => sortedAssigneeOptions.find((item) => item.is_current) ?? null,
         [sortedAssigneeOptions],
     );
+    const selectedAssigneeOption = useMemo(
+        () => sortedAssigneeOptions.find((item) => String(item.agent_id) === selectedAssigneeId) ?? null,
+        [selectedAssigneeId, sortedAssigneeOptions],
+    );
     const transferableAssigneeOptions = useMemo(
         () => sortedAssigneeOptions.filter((item) => !item.is_current),
         [sortedAssigneeOptions],
+    );
+    const eligibleTransferableCount = useMemo(
+        () => transferableAssigneeOptions.filter((item) => item.assignment_eligible).length,
+        [transferableAssigneeOptions],
     );
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
     const compactContextLimit = layout === "inbox" ? 110 : 180;
@@ -862,7 +921,7 @@ export default function CaseConversation({
                                     setSelectedAssigneeId(String(recommendedAssignee.agent_id));
                                     reassignMutation.mutate("manual");
                                 }}
-                                disabled={caseActionBusy}
+                                disabled={caseActionBusy || !recommendedAssignee.assignment_eligible}
                                 className="rounded bg-emerald-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                                 data-testid="case-reassign-recommend-submit"
                             >
@@ -885,7 +944,7 @@ export default function CaseConversation({
                                 <button
                                     type="button"
                                     onClick={() => reassignMutation.mutate("policy")}
-                                    disabled={caseActionBusy || assigneeOptionsQuery.isLoading || !sortedAssigneeOptions.length}
+                                    disabled={caseActionBusy || assigneeOptionsQuery.isLoading || !recommendedAssignee}
                                     className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 disabled:opacity-50"
                                     data-testid="case-reassign-policy-submit"
                                 >
@@ -900,26 +959,46 @@ export default function CaseConversation({
                                     <button
                                         key={item.agent_id}
                                         type="button"
-                                        onClick={() => setSelectedAssigneeId(String(item.agent_id))}
+                                        onClick={() => {
+                                            if (!item.assignment_eligible) {
+                                                return;
+                                            }
+                                            setSelectedAssigneeId(String(item.agent_id));
+                                        }}
+                                        disabled={!item.assignment_eligible}
                                         className={`flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-3 text-left transition ${
                                             isSelected
                                                 ? "border-primary bg-primary/5"
-                                                : "border-border/60 bg-background hover:bg-muted/40"
+                                                : item.assignment_eligible
+                                                    ? "border-border/60 bg-background hover:bg-muted/40"
+                                                    : "border-amber-200 bg-amber-50/70 opacity-80"
                                         }`}
                                         data-testid={isSelected ? "case-reassign-select" : undefined}
                                     >
                                         <div className="space-y-1">
                                             <p className="text-sm font-semibold text-foreground">{item.agent_name}</p>
                                             <p className="text-xs text-muted-foreground">{formatAssigneeMetaLabel(item)}</p>
+                                            {formatAssigneeAvailabilityLabel(item) ? (
+                                                <p className="text-[11px] text-muted-foreground">
+                                                    {formatAssigneeAvailabilityLabel(item)}
+                                                </p>
+                                            ) : null}
+                                            {formatAssigneeUnavailableReason(item) ? (
+                                                <p className="text-[11px] text-amber-700">
+                                                    {formatAssigneeUnavailableReason(item)}
+                                                </p>
+                                            ) : null}
                                         </div>
                                         <span
                                             className={`mt-0.5 rounded-full px-2 py-1 text-[10px] font-semibold ${
                                                 isSelected
                                                     ? "bg-primary text-primary-foreground"
-                                                    : "bg-muted text-muted-foreground"
+                                                    : item.assignment_eligible
+                                                        ? "bg-muted text-muted-foreground"
+                                                        : "bg-amber-100 text-amber-800"
                                             }`}
                                         >
-                                            {isSelected ? "Выбрано" : "Выбрать"}
+                                            {!item.assignment_eligible ? "Недоступен" : isSelected ? "Выбрано" : "Выбрать"}
                                         </span>
                                     </button>
                                 );
@@ -945,8 +1024,9 @@ export default function CaseConversation({
                         disabled={
                             caseActionBusy
                             || assigneeOptionsQuery.isLoading
-                            || !transferableAssigneeOptions.length
-                            || !selectedAssigneeId
+                            || eligibleTransferableCount === 0
+                            || !selectedAssigneeOption
+                            || !selectedAssigneeOption.assignment_eligible
                         }
                         className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
                         data-testid="case-reassign-submit"

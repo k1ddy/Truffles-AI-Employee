@@ -1946,6 +1946,41 @@ export interface paths {
         patch: operations["update_membership_console_v1_admin_memberships__membership_id__patch"];
         trace?: never;
     };
+    "/console/v1/admin/routing-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Routing Profiles */
+        get: operations["list_routing_profiles_console_v1_admin_routing_profiles_get"];
+        /** Upsert Routing Profile */
+        put: operations["upsert_routing_profile_console_v1_admin_routing_profiles_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/routing-profiles/{agent_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Routing Profile */
+        delete: operations["delete_routing_profile_console_v1_admin_routing_profiles__agent_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/admin/agents/{agent_id}/disable": {
         parameters: {
             query?: never;
@@ -4382,6 +4417,32 @@ export interface components {
              * @default 0
              */
             open_case_count: number;
+            /**
+             * Routing Status
+             * @default available
+             * @enum {string}
+             */
+            routing_status: "available" | "paused" | "follow_up_only";
+            /**
+             * Routing Profile Source
+             * @default default
+             * @enum {string}
+             */
+            routing_profile_source: "default" | "client" | "branch";
+            /** Max Open Case Count */
+            max_open_case_count?: number | null;
+            /**
+             * At Capacity
+             * @default false
+             */
+            at_capacity: boolean;
+            /**
+             * Assignment Eligible
+             * @default true
+             */
+            assignment_eligible: boolean;
+            /** Assignment Block Reason Code */
+            assignment_block_reason_code?: string | null;
         };
         /** ConsoleCaseBookingSummary */
         ConsoleCaseBookingSummary: {
@@ -8171,6 +8232,83 @@ export interface components {
             skipped: number;
             /** Matched */
             matched: number;
+        };
+        /** ConsoleRoutingProfile */
+        ConsoleRoutingProfile: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Agent Id
+             * Format: uuid
+             */
+            agent_id: string;
+            /** Agent Name */
+            agent_name?: string | null;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Scope
+             * @default client
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /**
+             * Routing Status
+             * @default available
+             * @enum {string}
+             */
+            routing_status: "available" | "paused" | "follow_up_only";
+            /** Max Open Case Count */
+            max_open_case_count?: number | null;
+            /** Updated By Agent Id */
+            updated_by_agent_id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleRoutingProfileDeleteResponse */
+        ConsoleRoutingProfileDeleteResponse: {
+            /** Success */
+            success: boolean;
+        };
+        /** ConsoleRoutingProfileListResponse */
+        ConsoleRoutingProfileListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleRoutingProfile"][];
+        };
+        /** ConsoleRoutingProfileUpsertRequest */
+        ConsoleRoutingProfileUpsertRequest: {
+            /**
+             * Agent Id
+             * Format: uuid
+             */
+            agent_id: string;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Routing Status
+             * @default available
+             * @enum {string}
+             */
+            routing_status: "available" | "paused" | "follow_up_only";
+            /** Max Open Case Count */
+            max_open_case_count?: number | null;
+            /** Reason */
+            reason?: string | null;
         };
         /** ConsoleSavedView */
         ConsoleSavedView: {
@@ -15316,6 +15454,161 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleAgentMembership"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_routing_profiles_console_v1_admin_routing_profiles_get: {
+        parameters: {
+            query: {
+                client_id: string;
+                agent_id?: string | null;
+                branch_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleRoutingProfileListResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_routing_profile_console_v1_admin_routing_profiles_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleRoutingProfileUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleRoutingProfile"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_routing_profile_console_v1_admin_routing_profiles__agent_id__delete: {
+        parameters: {
+            query: {
+                client_id: string;
+                branch_id?: string | null;
+                reason?: string | null;
+            };
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleRoutingProfileDeleteResponse"];
                 };
             };
             /** @description Forbidden */

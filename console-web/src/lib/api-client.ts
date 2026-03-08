@@ -510,6 +510,10 @@ export type QueueSavedView = components["schemas"]["ConsoleSavedView"];
 export type QueueSavedViewCreateRequest = components["schemas"]["ConsoleSavedViewCreateRequest"];
 export type QueueSavedViewListResponse = components["schemas"]["ConsoleSavedViewListResponse"];
 export type QueueSavedViewUpdateRequest = components["schemas"]["ConsoleSavedViewUpdateRequest"];
+export type RoutingProfile = components["schemas"]["ConsoleRoutingProfile"];
+export type RoutingProfileDeleteResponse = components["schemas"]["ConsoleRoutingProfileDeleteResponse"];
+export type RoutingProfileListResponse = components["schemas"]["ConsoleRoutingProfileListResponse"];
+export type RoutingProfileStatus = components["schemas"]["ConsoleRoutingProfile"]["routing_status"];
 export type QueueSavedViewCreateInput = Omit<QueueSavedViewCreateRequest, "query_state"> & {
     query_state?: Record<string, unknown>;
 };
@@ -1494,6 +1498,15 @@ export const adminApi = {
         apiClient.post<IntegrationBranchActionResponse>(`/admin/integrations/${branchId}/reconcile`, data),
     listMemberships: (params?: ListMembershipsParams) =>
         apiClient.get<components["schemas"]["ConsoleMembershipListResponse"]>("/admin/memberships", { params }),
+    listRoutingProfiles: (params: { client_id: string; agent_id?: string; branch_id?: string }) =>
+        apiClient.get<RoutingProfileListResponse>("/admin/routing-profiles", { params }),
+    upsertRoutingProfile: (data: components["schemas"]["ConsoleRoutingProfileUpsertRequest"]) =>
+        apiClient.put<RoutingProfile>("/admin/routing-profiles", data),
+    deleteRoutingProfile: (
+        agentId: string,
+        params: { client_id: string; branch_id?: string; reason?: string },
+    ) =>
+        apiClient.delete<RoutingProfileDeleteResponse>(`/admin/routing-profiles/${agentId}`, { params }),
     createCompany: (data: components["schemas"]["ConsoleCompanyCreateRequest"]) =>
         apiClient.post<components["schemas"]["ConsoleCompanyCreateResponse"]>("/admin/companies", data),
     patchCompany: (companyId: string, data: components["schemas"]["ConsoleCompanyUpdateRequest"]) =>

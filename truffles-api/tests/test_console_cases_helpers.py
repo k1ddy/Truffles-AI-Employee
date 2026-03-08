@@ -10,6 +10,7 @@ from app.schemas.console import ConsoleCaseAssigneeOption
 from app.services.console_case_routing import (
     CaseRoutingBookingContext,
     CaseRoutingSignalContext,
+    annotate_case_assignee_options,
 )
 from app.services.console_errors import ConsoleAPIError
 
@@ -312,6 +313,97 @@ def test_build_case_routing_decision_prefers_follow_up_owner_when_no_show_is_ove
     assert decision.recommended_score > decision.current_score
     assert any(item.code == "follow_up_owner" for item in decision.score_breakdown)
     assert any(item.code == "follow_up_overdue" for item in decision.score_breakdown)
+
+
+def test_annotate_case_assignee_options_blocks_paused_and_at_capacity_agents() -> None:
+    paused_agent_id = uuid4()
+    capped_agent_id = uuid4()
+    options = [
+        ConsoleCaseAssigneeOption(
+            agent_id=paused_agent_id,
+            agent_name="Paused Manager",
+            role="manager",
+            open_case_count=0,
+            routing_status="paused",
+        ),
+        ConsoleCaseAssigneeOption(
+            agent_id=capped_agent_id,
+            agent_name="Busy Manager",
+            role="manager",
+            open_case_count=4,
+            routing_status="available",
+            max_open_case_count=4,
+        ),
+    ]
+
+    annotate_case_assignee_options(
+        options,
+        current_assignee_id=None,
+        booking_context=None,
+    )
+
+    assert options[0].assignment_eligible is False
+    assert options[0].assignment_block_reason_code == "paused"
+    assert options[1].assignment_eligible is False
+    assert options[1].assignment_block_reason_code == "at_capacity"
+    assert options[1].at_capacity is True
+
+
+def test_annotate_case_assignee_options_allows_follow_up_only_owner_for_matching_follow_up() -> None:
+    follow_up_owner_id = uuid4()
+    option = ConsoleCaseAssigneeOption(
+        agent_id=follow_up_owner_id,
+        agent_name="Follow-up Manager",
+        role="manager",
+        open_case_count=1,
+        routing_status="follow_up_only",
+    )
+
+    annotate_case_assignee_options(
+        [option],
+        current_assignee_id=None,
+        booking_context=CaseRoutingBookingContext(
+            appointment_id=uuid4(),
+            follow_up_owner_id=follow_up_owner_id,
+            follow_up_due_at=datetime.now(timezone.utc),
+            follow_up_overdue=False,
+        ),
+    )
+
+    assert option.assignment_eligible is True
+    assert option.assignment_block_reason_code is None
+
+
+def test_build_case_routing_decision_skips_paused_candidate_even_with_lower_load() -> None:
+    current_agent_id = uuid4()
+    paused_agent_id = uuid4()
+    decision, target_option = console_router._build_case_routing_decision(
+        assignee_options=[
+            ConsoleCaseAssigneeOption(
+                agent_id=current_agent_id,
+                agent_name="Current Manager",
+                role="manager",
+                is_current=True,
+                open_case_count=3,
+                routing_status="available",
+            ),
+            ConsoleCaseAssigneeOption(
+                agent_id=paused_agent_id,
+                agent_name="Paused Manager",
+                role="manager",
+                is_current=False,
+                open_case_count=0,
+                routing_status="paused",
+            ),
+        ],
+        current_assignee_id=str(current_agent_id),
+        policy="least_open_cases",
+    )
+
+    assert target_option is not None
+    assert decision is not None
+    assert target_option.agent_id == current_agent_id
+    assert decision.reason_code == "current_owner_kept"
 
 
 def test_adjust_case_routing_loads_rebalances_counts() -> None:

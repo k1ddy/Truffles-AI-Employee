@@ -45,6 +45,8 @@ def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
         "/queue-state/current": {"get", "put"},
         "/queue-state/views": {"get", "post"},
         "/queue-state/views/{view_id}": {"get", "patch", "delete"},
+        "/admin/routing-profiles": {"get", "put"},
+        "/admin/routing-profiles/{agent_id}": {"delete"},
         "/calendar/specialists": {"get", "post"},
         "/calendar/specialists/{specialist_id}": {"patch"},
         "/calendar/specialists/{specialist_id}/enable": {"post"},
@@ -94,6 +96,10 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
         ("ConsoleSavedViewListResponse",),
         ("ConsoleSavedViewCreateRequest",),
         ("ConsoleSavedViewUpdateRequest",),
+        ("ConsoleRoutingProfile",),
+        ("ConsoleRoutingProfileDeleteResponse",),
+        ("ConsoleRoutingProfileListResponse",),
+        ("ConsoleRoutingProfileUpsertRequest",),
     ]
     for aliases in required_schema_aliases:
         assert any(name in schemas for name in aliases), (
@@ -373,6 +379,9 @@ def test_console_case_action_paths_expose_wave6_single_case_actions() -> None:
     assignees_get = ((_find_path(paths, "/cases/{case_id}/assignees") or {}).get("get") or {})
     assignees_params = assignees_get.get("parameters") or []
     assert any((param or {}).get("name") == "policy" for param in assignees_params)
+    assert _find_path(paths, "/admin/routing-profiles") is not None
+    assert "get" in ((_find_path(paths, "/admin/routing-profiles") or {}).keys())
+    assert "put" in ((_find_path(paths, "/admin/routing-profiles") or {}).keys())
 
 
 def test_console_cases_list_contract_exposes_queue_view_param() -> None:
@@ -447,6 +456,14 @@ def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> No
     assert (assignee_props.get("is_current") or {}).get("type") == "boolean"
     assert "open_case_count" in assignee_props
     assert _has_integer_type(assignee_props.get("open_case_count") or {})
+    routing_status_schema = assignee_props.get("routing_status") or {}
+    assert routing_status_schema.get("enum") == ["available", "paused", "follow_up_only"]
+    assert "routing_profile_source" in assignee_props
+    assert (assignee_props.get("routing_profile_source") or {}).get("enum") == ["default", "client", "branch"]
+    assert _has_integer_type(assignee_props.get("max_open_case_count") or {})
+    assert (assignee_props.get("at_capacity") or {}).get("type") == "boolean"
+    assert (assignee_props.get("assignment_eligible") or {}).get("type") == "boolean"
+    assert _has_string_type(assignee_props.get("assignment_block_reason_code") or {})
 
     assignee_list_schema = schemas.get("ConsoleCaseAssigneeListResponse") or {}
     assignee_list_props = assignee_list_schema.get("properties") or {}
@@ -489,6 +506,24 @@ def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> No
 
     action_response_schema = schemas.get("ConsoleCaseActionResponse") or {}
     assert "routing" in (action_response_schema.get("properties") or {})
+
+    routing_profile_schema = schemas.get("ConsoleRoutingProfile") or {}
+    routing_profile_props = routing_profile_schema.get("properties") or {}
+    assert _has_string_type(routing_profile_props.get("agent_id") or {})
+    assert _has_string_type(routing_profile_props.get("client_id") or {})
+    assert (routing_profile_props.get("scope") or {}).get("enum") == ["client", "branch"]
+    assert (routing_profile_props.get("routing_status") or {}).get("enum") == ["available", "paused", "follow_up_only"]
+    assert _has_integer_type(routing_profile_props.get("max_open_case_count") or {})
+
+    routing_profile_list_schema = schemas.get("ConsoleRoutingProfileListResponse") or {}
+    assert "items" in (routing_profile_list_schema.get("properties") or {})
+
+    routing_profile_upsert_schema = schemas.get("ConsoleRoutingProfileUpsertRequest") or {}
+    routing_profile_upsert_props = routing_profile_upsert_schema.get("properties") or {}
+    assert _has_string_type(routing_profile_upsert_props.get("agent_id") or {})
+    assert _has_string_type(routing_profile_upsert_props.get("client_id") or {})
+    assert (routing_profile_upsert_props.get("routing_status") or {}).get("enum") == ["available", "paused", "follow_up_only"]
+    assert _has_integer_type(routing_profile_upsert_props.get("max_open_case_count") or {})
 
     snooze_schema = schemas.get("ConsoleCaseSnoozeRequest") or {}
     snooze_props = snooze_schema.get("properties") or {}

@@ -10,6 +10,10 @@ from app.schemas.console import (
     ConsoleCaseRoutingDecision,
     ConsoleCaseRoutingScoreFactor,
 )
+from app.services.console_routing_profiles import (
+    ROUTING_STATUS_FOLLOW_UP_ONLY,
+    ROUTING_STATUS_PAUSED,
+)
 
 CASE_ROUTING_POLICY_DEFAULT = "least_open_cases"
 CASE_ROUTING_POLICY_FOLLOW_UP_SLA_BALANCE = "follow_up_sla_balance"
@@ -46,6 +50,14 @@ class _RoutingScoreEvaluation:
     option: ConsoleCaseAssigneeOption
     score: int
     breakdown: list[ConsoleCaseRoutingScoreFactor]
+
+
+@dataclass(frozen=True)
+class AssigneeAssignmentEvaluation:
+    option: ConsoleCaseAssigneeOption
+    assignment_eligible: bool
+    at_capacity: bool
+    block_reason_code: str | None = None
 
 
 def normalize_case_routing_policy(policy: Optional[str], *, default: str = CASE_ROUTING_POLICY_DEFAULT) -> str:
@@ -88,10 +100,20 @@ def build_case_routing_decision(
     if not assignee_options:
         return None, None
 
+    assignment_evaluations = annotate_case_assignee_options(
+        assignee_options,
+        current_assignee_id=current_assignee_id,
+        booking_context=booking_context,
+        load_overrides=load_overrides,
+    )
+    eligible_options = [item.option for item in assignment_evaluations if item.assignment_eligible]
+    if not eligible_options:
+        return None, None
+
     current_option = next(
         (
             option
-            for option in assignee_options
+            for option in eligible_options
             if current_assignee_id and str(option.agent_id) == current_assignee_id
         ),
         None,
@@ -99,7 +121,7 @@ def build_case_routing_decision(
 
     if policy == CASE_ROUTING_POLICY_DEFAULT:
         recommended_option = min(
-            assignee_options,
+            eligible_options,
             key=lambda option: (
                 _resolve_assignee_load(option, load_overrides),
                 0 if current_assignee_id and str(option.agent_id) == current_assignee_id else 1,
@@ -173,7 +195,7 @@ def build_case_routing_decision(
                 booking_context=booking_context,
                 signal_context=signal_context,
             )
-            for option in assignee_options
+            for option in eligible_options
         ),
         key=lambda item: (
             -item.score,
@@ -226,6 +248,29 @@ def build_case_routing_decision(
     )
 
 
+def annotate_case_assignee_options(
+    assignee_options: list[ConsoleCaseAssigneeOption],
+    *,
+    current_assignee_id: Optional[str],
+    booking_context: Optional[CaseRoutingBookingContext] = None,
+    load_overrides: Optional[dict[UUID, int]] = None,
+) -> list[AssigneeAssignmentEvaluation]:
+    evaluations = [
+        _evaluate_case_assignee_assignment(
+            option,
+            current_assignee_id=current_assignee_id,
+            booking_context=booking_context,
+            load_overrides=load_overrides,
+        )
+        for option in assignee_options
+    ]
+    for evaluation in evaluations:
+        evaluation.option.at_capacity = evaluation.at_capacity
+        evaluation.option.assignment_eligible = evaluation.assignment_eligible
+        evaluation.option.assignment_block_reason_code = evaluation.block_reason_code
+    return evaluations
+
+
 def _resolve_assignee_load(
     option: ConsoleCaseAssigneeOption,
     load_overrides: Optional[dict[UUID, int]] = None,
@@ -245,6 +290,62 @@ def _resolve_sla_load_weight(signal_context: Optional[CaseRoutingSignalContext])
     if action_state == "reply_due" or sla_status == "warning":
         return _MEDIUM_SLA_LOAD_WEIGHT
     return _LOW_SLA_LOAD_WEIGHT
+
+
+def _evaluate_case_assignee_assignment(
+    option: ConsoleCaseAssigneeOption,
+    *,
+    current_assignee_id: Optional[str],
+    booking_context: Optional[CaseRoutingBookingContext],
+    load_overrides: Optional[dict[UUID, int]],
+) -> AssigneeAssignmentEvaluation:
+    is_current = bool(current_assignee_id and str(option.agent_id) == current_assignee_id)
+    load = _resolve_assignee_load(option, load_overrides)
+    at_capacity = option.max_open_case_count is not None and load >= int(option.max_open_case_count)
+    status = str(option.routing_status or "available").lower()
+
+    if is_current:
+        return AssigneeAssignmentEvaluation(
+            option=option,
+            assignment_eligible=True,
+            at_capacity=at_capacity,
+        )
+
+    if status == ROUTING_STATUS_PAUSED:
+        return AssigneeAssignmentEvaluation(
+            option=option,
+            assignment_eligible=False,
+            at_capacity=at_capacity,
+            block_reason_code="paused",
+        )
+
+    if status == ROUTING_STATUS_FOLLOW_UP_ONLY:
+        follow_up_match = bool(
+            booking_context
+            and booking_context.follow_up_owner_id
+            and booking_context.follow_up_owner_id == option.agent_id
+        )
+        if not follow_up_match:
+            return AssigneeAssignmentEvaluation(
+                option=option,
+                assignment_eligible=False,
+                at_capacity=at_capacity,
+                block_reason_code="follow_up_only",
+            )
+
+    if at_capacity:
+        return AssigneeAssignmentEvaluation(
+            option=option,
+            assignment_eligible=False,
+            at_capacity=True,
+            block_reason_code="at_capacity",
+        )
+
+    return AssigneeAssignmentEvaluation(
+        option=option,
+        assignment_eligible=True,
+        at_capacity=at_capacity,
+    )
 
 
 def _build_follow_up_sla_balance_evaluation(

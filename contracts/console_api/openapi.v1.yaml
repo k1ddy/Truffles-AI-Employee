@@ -5548,6 +5548,157 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/routing-profiles:
+    get:
+      tags:
+      - console
+      summary: List Routing Profiles
+      operationId: list_routing_profiles_console_v1_admin_routing_profiles_get
+      parameters:
+      - name: client_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Client Id
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Id
+      - name: branch_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Branch Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleRoutingProfileListResponse'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - console
+      summary: Upsert Routing Profile
+      operationId: upsert_routing_profile_console_v1_admin_routing_profiles_put
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleRoutingProfileUpsertRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleRoutingProfile'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/routing-profiles/{agent_id}:
+    delete:
+      tags:
+      - console
+      summary: Delete Routing Profile
+      operationId: delete_routing_profile_console_v1_admin_routing_profiles__agent_id__delete
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Agent Id
+      - name: client_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Client Id
+      - name: branch_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Branch Id
+      - name: reason
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleRoutingProfileDeleteResponse'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/agents/{agent_id}/disable:
     post:
       tags:
@@ -10627,6 +10778,41 @@ components:
           type: integer
           title: Open Case Count
           default: 0
+        routing_status:
+          type: string
+          enum:
+          - available
+          - paused
+          - follow_up_only
+          title: Routing Status
+          default: available
+        routing_profile_source:
+          type: string
+          enum:
+          - default
+          - client
+          - branch
+          title: Routing Profile Source
+          default: default
+        max_open_case_count:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Open Case Count
+        at_capacity:
+          type: boolean
+          title: At Capacity
+          default: false
+        assignment_eligible:
+          type: boolean
+          title: Assignment Eligible
+          default: true
+        assignment_block_reason_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assignment Block Reason Code
       type: object
       required:
       - agent_id
@@ -17474,6 +17660,134 @@ components:
       - skipped
       - matched
       title: ConsoleReminderRetryResponse
+    ConsoleRoutingProfile:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        agent_id:
+          type: string
+          format: uuid
+          title: Agent Id
+        agent_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Name
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        scope:
+          type: string
+          enum:
+          - client
+          - branch
+          title: Scope
+          default: client
+        routing_status:
+          type: string
+          enum:
+          - available
+          - paused
+          - follow_up_only
+          title: Routing Status
+          default: available
+        max_open_case_count:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Open Case Count
+        updated_by_agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Updated By Agent Id
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - id
+      - agent_id
+      - client_id
+      title: ConsoleRoutingProfile
+    ConsoleRoutingProfileDeleteResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+      type: object
+      required:
+      - success
+      title: ConsoleRoutingProfileDeleteResponse
+    ConsoleRoutingProfileListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleRoutingProfile'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: ConsoleRoutingProfileListResponse
+    ConsoleRoutingProfileUpsertRequest:
+      properties:
+        agent_id:
+          type: string
+          format: uuid
+          title: Agent Id
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        routing_status:
+          type: string
+          enum:
+          - available
+          - paused
+          - follow_up_only
+          title: Routing Status
+          default: available
+        max_open_case_count:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Open Case Count
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      type: object
+      required:
+      - agent_id
+      - client_id
+      title: ConsoleRoutingProfileUpsertRequest
     ConsoleSavedView:
       properties:
         id:

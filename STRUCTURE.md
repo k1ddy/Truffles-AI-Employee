@@ -198,6 +198,8 @@
 | `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md` | Wave27 Task Package for shareable inbox/calendar queue URLs via explicit params plus optional `view_id` on the same queue-state/saved-view canon | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave28-a1.md` | Wave28 Task Package for supervisor-grade booking governance (`follow-up owner`, `due`, `history`) on top of the calendar queue-state/share-URL canon | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave29-a1.md` | Wave29 Task Package for explainable richer routing v1 (`follow_up_sla_balance`) on top of explicit booking governance and queue-state canon | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave30-a1.md` | Wave30 Task Package for server-owned assignee routing profiles (`available/paused/follow_up_only` + optional capacity) before any skill/presence-aware routing | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave31-a1.md` | Wave31 planning Task Package to decide whether any routing v2/capability-input layer is justified after Wave30 or whether the product should stop at routing profiles | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |

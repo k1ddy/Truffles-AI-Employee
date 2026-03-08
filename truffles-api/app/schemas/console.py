@@ -63,6 +63,9 @@ ConsoleAgentRole = Literal[
     "viewer",
 ]
 ConsoleMembershipScope = Literal["company", "client", "branch"]
+ConsoleRoutingProfileScope = Literal["client", "branch"]
+ConsoleRoutingProfileSource = Literal["default", "client", "branch"]
+ConsoleRoutingStatus = Literal["available", "paused", "follow_up_only"]
 ConsoleGoLiveState = Literal["pending", "approved", "rejected"]
 
 
@@ -948,6 +951,37 @@ class ConsoleMembershipUpdateRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class ConsoleRoutingProfile(BaseModel):
+    id: UUID
+    agent_id: UUID
+    agent_name: Optional[str] = None
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    scope: ConsoleRoutingProfileScope = "client"
+    routing_status: ConsoleRoutingStatus = "available"
+    max_open_case_count: Optional[int] = Field(default=None, ge=1)
+    updated_by_agent_id: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleRoutingProfileListResponse(BaseModel):
+    items: list[ConsoleRoutingProfile]
+
+
+class ConsoleRoutingProfileDeleteResponse(BaseModel):
+    success: bool
+
+
+class ConsoleRoutingProfileUpsertRequest(BaseModel):
+    agent_id: UUID
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    routing_status: ConsoleRoutingStatus = "available"
+    max_open_case_count: Optional[int] = Field(default=None, ge=1)
+    reason: Optional[str] = None
+
+
 class ConsoleAgentLifecycleActionRequest(BaseModel):
     reason: str
 
@@ -1206,6 +1240,12 @@ class ConsoleCaseAssigneeOption(BaseModel):
     branch_id: Optional[UUID] = None
     is_current: bool = False
     open_case_count: int = 0
+    routing_status: ConsoleRoutingStatus = "available"
+    routing_profile_source: ConsoleRoutingProfileSource = "default"
+    max_open_case_count: Optional[int] = Field(default=None, ge=1)
+    at_capacity: bool = False
+    assignment_eligible: bool = True
+    assignment_block_reason_code: Optional[str] = None
 
 
 class ConsoleCaseAssigneeListResponse(BaseModel):
