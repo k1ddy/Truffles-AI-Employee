@@ -1,32 +1,108 @@
 "use client";
 
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
+import type { BookingQueueLane, BookingQueueMode, BookingStatusFilter } from "@/lib/calendar-bookings";
 
 const WORKSPACE_TTL_MS = 24 * 60 * 60 * 1000;
-const CASE_LIST_KEY_PREFIX = "console:inbox:case-list:v1:";
+const CASE_LIST_KEY_PREFIX = "console:inbox:case-list:v5:";
 const SELECTED_CASE_KEY_PREFIX = "console:inbox:selected-case:v1:";
+const SIDE_PANEL_KEY_PREFIX = "console:inbox:side-panel:v1:";
+const CALENDAR_PREFS_KEY_PREFIX = "console:calendar:prefs:v1:";
 
-export type InboxSortBy = "created_at" | "sla" | "activity";
+export type InboxSortBy = "created_at" | "sla" | "activity" | "resolved_at";
+export type InboxSidePanelMode = "details" | "bookings";
+export type InboxCaseModeScope = "open" | "resolved" | "all";
+export const INBOX_QUEUE_VIEW_IDS = [
+    "all_open",
+    "needs_reply",
+    "waiting_client",
+    "snoozed",
+    "delivery",
+] as const;
+export type InboxQueueViewId = (typeof INBOX_QUEUE_VIEW_IDS)[number];
+export type InboxOwnerScopeKind = "all" | "mine" | "unassigned" | "agent";
+export type InboxCaseVisibleField = "branch" | "owner" | "channel" | "activity" | "priority";
+
+export interface InboxOwnerScope {
+    kind: InboxOwnerScopeKind;
+    agentId?: string;
+}
 
 export interface InboxCaseFilters {
     status?: string;
     branchId?: string;
-    assignedToMe: boolean;
     query?: string;
     hasDeliveryError: boolean;
     hasPendingOutbox: boolean;
     hasHumanLock: boolean;
     dateFrom?: string;
     dateTo?: string;
-    sortBy: InboxSortBy;
+    sortBy?: InboxSortBy;
+}
+
+export interface InboxCaseVisibleFields {
+    branch: boolean;
+    owner: boolean;
+    channel: boolean;
+    activity: boolean;
+    priority: boolean;
 }
 
 export interface InboxCaseListPrefs {
     filters: InboxCaseFilters;
+    ownerScope?: InboxOwnerScope;
+    modeScope?: InboxCaseModeScope;
     searchValue: string;
     showAdvancedFilters: boolean;
     filtersCollapsed: boolean;
     autoRefreshEnabled: boolean;
+    activeViewId?: InboxQueueViewId;
+    visibleFields?: InboxCaseVisibleFields;
+}
+
+export function normalizeInboxQueueViewId(raw: unknown): InboxQueueViewId {
+    if (raw === "paused") {
+        return "waiting_client";
+    }
+    if (raw === "mine" || raw === "unassigned") {
+        return "all_open";
+    }
+    if (typeof raw === "string" && (INBOX_QUEUE_VIEW_IDS as readonly string[]).includes(raw)) {
+        return raw as InboxQueueViewId;
+    }
+    return "all_open";
+}
+
+export function normalizeInboxCaseModeScope(raw: unknown): InboxCaseModeScope {
+    if (raw === "resolved" || raw === "all" || raw === "open") {
+        return raw;
+    }
+    return "open";
+}
+
+export function normalizeInboxOwnerScope(raw: unknown): InboxOwnerScope {
+    if (!raw || typeof raw !== "object") {
+        return { kind: "all" };
+    }
+    const kind = (raw as { kind?: unknown }).kind;
+    const agentId = (raw as { agentId?: unknown }).agentId;
+    if (kind === "mine" || kind === "unassigned" || kind === "all") {
+        return { kind };
+    }
+    if (kind === "agent" && typeof agentId === "string" && agentId.trim()) {
+        return { kind: "agent", agentId };
+    }
+    return { kind: "all" };
+}
+
+export interface CalendarWorkspacePrefs {
+    selectedDate: string;
+    queueMode?: BookingQueueMode;
+    queueLane: BookingQueueLane;
+    queueStatusFilter: BookingStatusFilter;
+    queueSearch?: string;
+    followUpOwnerId?: string;
+    followUpOverdueOnly?: boolean;
 }
 
 type StoredValue<T> = {
@@ -110,4 +186,34 @@ export function readInboxSelectedCase(scope: string): string | null {
 
 export function writeInboxSelectedCase(scope: string, caseId: string | null) {
     writeStoredValue(buildScopedKey(SELECTED_CASE_KEY_PREFIX, scope), caseId);
+}
+
+export function readInboxSidePanelMode(scope: string): InboxSidePanelMode | null {
+    return readStoredValue<InboxSidePanelMode>(buildScopedKey(SIDE_PANEL_KEY_PREFIX, scope));
+}
+
+export function writeInboxSidePanelMode(scope: string, mode: InboxSidePanelMode | null) {
+    writeStoredValue(buildScopedKey(SIDE_PANEL_KEY_PREFIX, scope), mode);
+}
+
+export function buildCalendarWorkspaceScope({
+    scope,
+    caseId,
+    conversationId,
+}: {
+    scope: string;
+    caseId?: string | null;
+    conversationId?: string | null;
+}): string {
+    const safeCaseId = (caseId || "all").trim() || "all";
+    const safeConversationId = (conversationId || "all").trim() || "all";
+    return `${scope}:${safeCaseId}:${safeConversationId}`;
+}
+
+export function readCalendarWorkspacePrefs(scope: string): CalendarWorkspacePrefs | null {
+    return readStoredValue<CalendarWorkspacePrefs>(buildScopedKey(CALENDAR_PREFS_KEY_PREFIX, scope));
+}
+
+export function writeCalendarWorkspacePrefs(scope: string, prefs: CalendarWorkspacePrefs | null) {
+    writeStoredValue(buildScopedKey(CALENDAR_PREFS_KEY_PREFIX, scope), prefs);
 }

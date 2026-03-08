@@ -52,6 +52,13 @@
 - **External reuse:** <libs/tools/containers/services considered>
 - **Why not reinvent the wheel:** <concrete reasons and constraints>
 
+## Execution profile (mandatory for non-doc blocks)
+- **TP mode:** `implementation` | `closure_review` | `doc_only`
+- **Doc touch budget (files):** <N>
+- **Code dominance:** `required` | `off`
+- **Override token:** `none` | `<UPPERCASE_OVERRIDE_TOKEN>`
+- **Why this profile fits:** <1-3 lines>
+
 ## Invariant
 - <что защищаем>
 

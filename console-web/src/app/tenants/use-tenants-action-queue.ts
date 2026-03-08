@@ -96,7 +96,7 @@ function resolveActionLabel(intent: ActionQueueIntent): string {
         return "Открыть Integrations";
     }
     if (intent === "open_ops") {
-        return "Открыть OPS";
+        return "Открыть Ops";
     }
     if (intent === "open_workspace" || intent === "open_workspace_execute") {
         return "Открыть Workspace";

@@ -1,11 +1,83 @@
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
 
 from app.routers import console as console_router
 from app.schemas.console import ConsoleBranchChangePublishRequest, ConsoleBranchChangeRollbackRequest
+from app.services.console_branch_changes import (
+    apply_branch_change_publish_failed_state,
+    apply_branch_change_publish_runtime_error_state,
+    apply_branch_change_published_state,
+    apply_branch_change_rollback_failed_state,
+    apply_branch_change_rolled_back_state,
+    apply_branch_change_validation_result,
+    build_branch_change_diff,
+    build_branch_change_list_response,
+    build_branch_change_response,
+    get_branch_by_id,
+    get_branch_change_draft_payload,
+    get_branch_for_change_context,
+    normalize_branch_change_patch,
+    prepare_branch_change_payload,
+    prepare_branch_change_rollback_payload,
+)
 from app.services.console_errors import ConsoleAPIError
+
+
+def _normalize_patch_for_branch_change(
+    *,
+    db: object,
+    branch: object,
+    patch_payload: dict,
+) -> tuple[dict[str, object], list[str]]:
+    return normalize_branch_change_patch(
+        db=db,  # type: ignore[arg-type]
+        branch=branch,  # type: ignore[arg-type]
+        patch_payload=patch_payload,
+        validation_error_type=ConsoleAPIError,
+        ensure_unique_branch_field=console_router._ensure_unique_branch_field,
+        normalize_slug=console_router._normalize_slug,
+        normalize_required_text=console_router._normalize_required_text,
+        normalize_timezone_name=console_router._normalize_timezone_name,
+        normalize_optional_text=console_router._normalize_optional_text,
+        normalize_branch_phone=console_router._normalize_branch_phone,
+        normalize_telegram_chat_id=console_router._normalize_telegram_chat_id,
+        normalize_knowledge_tag=console_router._normalize_knowledge_tag,
+        require_branch_go_live_gate=lambda current_branch: console_router._require_branch_go_live_gate(
+            current_branch,
+            operation="branch_activate",
+        ),
+        require_branch_scorecard_ready=lambda current_db, current_branch: console_router._require_branch_scorecard_ready(
+            current_db,
+            current_branch,
+            operation="branch_activate",
+        ),
+    )
+
+
+def _build_branch_change_row(*, created_at: datetime, status: str = "draft") -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid4(),
+        branch_id=uuid4(),
+        status=status,
+        reason="test",
+        draft_payload={},
+        diff_payload={},
+        validation_payload={"ok": True, "errors": []},
+        base_snapshot={},
+        published_snapshot=None,
+        rollback_snapshot=None,
+        publish_error=None,
+        rollback_error=None,
+        created_at=created_at,
+        updated_at=created_at,
+        validated_at=None,
+        published_at=None,
+        rolled_back_at=None,
+    )
 
 
 def test_build_branch_change_diff_skips_unchanged_fields():
@@ -19,11 +91,188 @@ def test_build_branch_change_diff_skips_unchanged_fields():
         "name": "Branch B",
         "is_active": False,
     }
-    diff = console_router._build_branch_change_diff(base, patch)
+    diff = build_branch_change_diff(base, patch)
 
     assert "slug" not in diff
     assert diff["name"] == {"before": "Branch A", "after": "Branch B"}
     assert diff["is_active"] == {"before": True, "after": False}
+
+
+def test_build_branch_change_rollback_patch_only_includes_changed_fields():
+    base_snapshot = {
+        "slug": "branch-a",
+        "name": "Branch A",
+        "instance_id": "inst-a",
+        "is_active": True,
+    }
+    current_snapshot = {
+        "slug": "branch-a",
+        "name": "Branch B",
+        "instance_id": "inst-a",
+        "is_active": False,
+    }
+
+    rollback_patch = console_router._build_branch_change_rollback_patch(
+        base_snapshot=base_snapshot,
+        current_snapshot=current_snapshot,
+    )
+
+    assert rollback_patch == {
+        "name": "Branch A",
+        "is_active": True,
+    }
+
+
+def test_build_branch_change_response_with_branch():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = _build_branch_change_row(created_at=now, status="validated")
+    branch = SimpleNamespace(id=uuid4(), slug="branch-a")
+
+    response = build_branch_change_response(
+        change=change,  # type: ignore[arg-type]
+        branch=branch,  # type: ignore[arg-type]
+        serialize_branch=lambda item: {
+            "id": str(item.id),
+            "slug": item.slug,
+            "name": "Branch A",
+            "is_active": True,
+        },
+    )
+
+    assert response.change.id == change.id
+    assert response.branch is not None
+    assert response.branch.id == branch.id
+    assert response.branch.slug == "branch-a"
+    assert response.branch.name == "Branch A"
+    assert response.branch.is_active is True
+
+
+def test_build_branch_change_response_without_branch():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = _build_branch_change_row(created_at=now, status="draft")
+
+    response = build_branch_change_response(
+        change=change,  # type: ignore[arg-type]
+        branch=None,
+        serialize_branch=lambda item: {"id": str(item.id)},
+    )
+
+    assert response.change.id == change.id
+    assert response.branch is None
+
+
+def test_get_branch_change_draft_payload_returns_dict_payload():
+    change = SimpleNamespace(draft_payload={"name": "Branch A"})
+    payload = get_branch_change_draft_payload(change)  # type: ignore[arg-type]
+    assert payload == {"name": "Branch A"}
+
+
+def test_get_branch_change_draft_payload_returns_empty_for_non_dict():
+    change = SimpleNamespace(draft_payload="invalid")
+    payload = get_branch_change_draft_payload(change)  # type: ignore[arg-type]
+    assert payload == {}
+
+
+def test_get_branch_by_id_returns_branch_or_none():
+    branch = SimpleNamespace(id=uuid4())
+    query = Mock()
+    query.filter.return_value = query
+    query.first.return_value = branch
+    db = SimpleNamespace(query=Mock(return_value=query))
+
+    resolved = get_branch_by_id(db=db, branch_id=branch.id)  # type: ignore[arg-type]
+
+    assert resolved is branch
+
+    missing_query = Mock()
+    missing_query.filter.return_value = missing_query
+    missing_query.first.return_value = None
+    missing_db = SimpleNamespace(query=Mock(return_value=missing_query))
+    assert get_branch_by_id(db=missing_db, branch_id=uuid4()) is None  # type: ignore[arg-type]
+
+
+def test_get_branch_for_change_context_requires_access():
+    branch = SimpleNamespace(id=uuid4(), client_id=uuid4())
+    change = SimpleNamespace(branch_id=branch.id)
+    query = Mock()
+    query.filter.return_value = query
+    query.first.return_value = branch
+    db = SimpleNamespace(query=Mock(return_value=query))
+    require_client_access = Mock()
+
+    resolved = get_branch_for_change_context(
+        db=db,  # type: ignore[arg-type]
+        change=change,  # type: ignore[arg-type]
+        require_client_access=require_client_access,
+    )
+
+    assert resolved is branch
+    require_client_access.assert_called_once_with(branch.client_id)
+
+
+def test_get_branch_for_change_context_raises_when_branch_missing():
+    change = SimpleNamespace(branch_id=uuid4())
+    query = Mock()
+    query.filter.return_value = query
+    query.first.return_value = None
+    db = SimpleNamespace(query=Mock(return_value=query))
+    require_client_access = Mock()
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        get_branch_for_change_context(
+            db=db,  # type: ignore[arg-type]
+            change=change,  # type: ignore[arg-type]
+            require_client_access=require_client_access,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.code == "NOT_FOUND"
+    require_client_access.assert_not_called()
+
+
+def test_build_branch_change_list_response_builds_page_and_cursor():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    rows = [
+        _build_branch_change_row(created_at=now, status="draft"),
+        _build_branch_change_row(created_at=now - timedelta(minutes=1), status="draft"),
+        _build_branch_change_row(created_at=now - timedelta(minutes=2), status="draft"),
+    ]
+    query = Mock()
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.limit.return_value = query
+    query.all.return_value = rows
+
+    response = build_branch_change_list_response(
+        query=query,
+        status="draft",
+        cursor_date=None,
+        limit=2,
+    )
+
+    assert len(response.items) == 2
+    assert response.has_more is True
+    assert response.cursor == rows[1].created_at.isoformat()
+    query.filter.assert_called_once()
+    query.order_by.assert_called_once()
+    query.limit.assert_called_once_with(3)
+
+
+def test_build_branch_change_list_response_rejects_invalid_status():
+    with pytest.raises(ValueError, match="Invalid status"):
+        build_branch_change_list_response(
+            query=Mock(),
+            status="unknown",
+            cursor_date=None,
+            limit=10,
+        )
+
+
+def test_normalize_branch_change_status_filter():
+    assert console_router._normalize_branch_change_status_filter(" validated ") == "validated"
+    assert console_router._normalize_branch_change_status_filter(None) is None
+    with pytest.raises(ValueError, match="Invalid status"):
+        console_router._normalize_branch_change_status_filter("unknown")
 
 
 def test_normalize_branch_change_patch_requires_instance_for_activation(monkeypatch):
@@ -40,7 +289,7 @@ def test_normalize_branch_change_patch_requires_instance_for_activation(monkeypa
     monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "_require_branch_scorecard_ready", lambda *args, **kwargs: None)
 
-    normalized, errors = console_router._normalize_branch_change_patch(
+    normalized, errors = _normalize_patch_for_branch_change(
         db=SimpleNamespace(),
         branch=branch,
         patch_payload={"is_active": True},
@@ -74,7 +323,7 @@ def test_normalize_branch_change_patch_rejects_invalid_inputs(monkeypatch, patch
     monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "_require_branch_scorecard_ready", lambda *args, **kwargs: None)
 
-    _normalized, errors = console_router._normalize_branch_change_patch(
+    _normalized, errors = _normalize_patch_for_branch_change(
         db=SimpleNamespace(),
         branch=branch,
         patch_payload=patch,
@@ -97,7 +346,7 @@ def test_normalize_branch_change_patch_normalizes_knowledge_tag(monkeypatch):
     monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "_require_branch_scorecard_ready", lambda *args, **kwargs: None)
 
-    normalized, errors = console_router._normalize_branch_change_patch(
+    normalized, errors = _normalize_patch_for_branch_change(
         db=SimpleNamespace(),
         branch=branch,
         patch_payload={"knowledge_tag": "Demo_Tag"},
@@ -105,6 +354,306 @@ def test_normalize_branch_change_patch_normalizes_knowledge_tag(monkeypatch):
 
     assert errors == []
     assert normalized["knowledge_tag"] == "demo_tag"
+
+
+def test_prepare_branch_change_payload_reports_no_effective_changes(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        slug="branch-a",
+        name="Branch A",
+        timezone="UTC",
+        instance_id="inst-1",
+        phone="+77000000000",
+        telegram_chat_id="123456",
+        knowledge_tag="demo_tag",
+        working_hours={"monday": ["09:00-18:00"]},
+        booking_settings={"enabled": True},
+        is_active=False,
+        go_live_state="approved",
+        go_live_reason=None,
+        go_live_waiver_until=None,
+    )
+    monkeypatch.setattr(console_router, "_ensure_unique_branch_field", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_require_branch_scorecard_ready", lambda *args, **kwargs: None)
+
+    normalized, errors, diff_payload, base_snapshot = prepare_branch_change_payload(
+        db=SimpleNamespace(),
+        branch=branch,
+        patch_payload={"name": "Branch A"},
+        validation_error_type=ConsoleAPIError,
+        ensure_unique_branch_field=console_router._ensure_unique_branch_field,
+        normalize_slug=console_router._normalize_slug,
+        normalize_required_text=console_router._normalize_required_text,
+        normalize_timezone_name=console_router._normalize_timezone_name,
+        normalize_optional_text=console_router._normalize_optional_text,
+        normalize_branch_phone=console_router._normalize_branch_phone,
+        normalize_telegram_chat_id=console_router._normalize_telegram_chat_id,
+        normalize_knowledge_tag=console_router._normalize_knowledge_tag,
+        require_branch_go_live_gate=lambda current_branch: console_router._require_branch_go_live_gate(
+            current_branch,
+            operation="branch_activate",
+        ),
+        require_branch_scorecard_ready=lambda current_db, current_branch: console_router._require_branch_scorecard_ready(
+            current_db,
+            current_branch,
+            operation="branch_activate",
+        ),
+    )
+
+    assert normalized["name"] == "Branch A"
+    assert diff_payload == {}
+    assert "No effective branch changes detected" in errors
+    assert base_snapshot["name"] == "Branch A"
+
+
+def test_prepare_branch_change_rollback_payload_normalizes_patch():
+    db = SimpleNamespace()
+    branch = SimpleNamespace(id=uuid4())
+    normalize_call: dict[str, object] = {}
+
+    def normalize_patch(**kwargs):
+        normalize_call.update(kwargs)
+        return {"name": "Branch A"}, []
+
+    normalized, errors = prepare_branch_change_rollback_payload(
+        db=db,  # type: ignore[arg-type]
+        branch=branch,  # type: ignore[arg-type]
+        rollback_patch={"name": "Branch A"},
+        validation_error_type=ConsoleAPIError,
+        normalize_branch_change_patch=normalize_patch,
+        normalize_kwargs={"marker": "rollback"},
+    )
+
+    assert normalized == {"name": "Branch A"}
+    assert errors == []
+    assert normalize_call["db"] is db
+    assert normalize_call["branch"] is branch
+    assert normalize_call["patch_payload"] == {"name": "Branch A"}
+    assert normalize_call["marker"] == "rollback"
+
+
+def test_prepare_branch_change_rollback_payload_maps_validation_error():
+    def raise_error(**_kwargs):
+        raise ConsoleAPIError(409, "CHANGE_VALIDATION_FAILED", "validation failed")
+
+    normalized, errors = prepare_branch_change_rollback_payload(
+        db=SimpleNamespace(),  # type: ignore[arg-type]
+        branch=SimpleNamespace(id=uuid4()),  # type: ignore[arg-type]
+        rollback_patch={"name": "Branch A"},
+        validation_error_type=ConsoleAPIError,
+        normalize_branch_change_patch=raise_error,
+        normalize_kwargs={},
+    )
+
+    assert normalized == {}
+    assert errors == ["validation failed"]
+
+
+def test_apply_branch_change_validation_result_marks_validated():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = SimpleNamespace(
+        draft_payload=None,
+        diff_payload=None,
+        base_snapshot=None,
+        base_branch_updated_at=None,
+        validation_payload=None,
+        status="draft",
+        validated_at=None,
+        updated_at=None,
+    )
+    branch = SimpleNamespace(updated_at=now)
+
+    apply_branch_change_validation_result(
+        change=change,
+        branch=branch,
+        normalized_patch={"name": "Branch B"},
+        diff_payload={"name": {"before": "Branch A", "after": "Branch B"}},
+        base_snapshot={"name": "Branch A"},
+        errors=[],
+        now=now,
+    )
+
+    assert change.status == "validated"
+    assert change.validated_at == now
+    assert change.updated_at == now
+    assert change.base_branch_updated_at == now
+    assert change.validation_payload == {"ok": True, "errors": []}
+    assert change.draft_payload == {"name": "Branch B"}
+
+
+def test_apply_branch_change_validation_result_marks_draft_on_errors():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = SimpleNamespace(
+        draft_payload=None,
+        diff_payload=None,
+        base_snapshot=None,
+        base_branch_updated_at=None,
+        validation_payload=None,
+        status="validated",
+        validated_at=now,
+        updated_at=None,
+    )
+    branch = SimpleNamespace(updated_at=now - timedelta(minutes=5))
+
+    apply_branch_change_validation_result(
+        change=change,
+        branch=branch,
+        normalized_patch={"is_active": True},
+        diff_payload={"is_active": {"before": False, "after": True}},
+        base_snapshot={"is_active": False},
+        errors=["instance_id required to activate branch"],
+        now=now,
+    )
+
+    assert change.status == "draft"
+    assert change.validated_at is None
+    assert change.updated_at == now
+    assert change.base_branch_updated_at == branch.updated_at
+    assert change.validation_payload == {
+        "ok": False,
+        "errors": ["instance_id required to activate branch"],
+    }
+
+
+def test_apply_branch_change_publish_failed_state_sets_error_payload():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = SimpleNamespace(
+        status="validated",
+        publish_error=None,
+        validation_payload=None,
+        updated_at=None,
+    )
+
+    message = apply_branch_change_publish_failed_state(
+        change=change,
+        errors=["err-1", "err-2"],
+        now=now,
+    )
+
+    assert message == "err-1; err-2"
+    assert change.status == "publish_failed"
+    assert change.publish_error == "err-1; err-2"
+    assert change.validation_payload == {"ok": False, "errors": ["err-1", "err-2"]}
+    assert change.updated_at == now
+
+
+def test_apply_branch_change_publish_runtime_error_state_sets_publish_failed():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = SimpleNamespace(
+        status="validated",
+        publish_error=None,
+        updated_at=None,
+    )
+
+    apply_branch_change_publish_runtime_error_state(
+        change=change,
+        error_message="runtime-failed",
+        now=now,
+    )
+
+    assert change.status == "publish_failed"
+    assert change.publish_error == "runtime-failed"
+    assert change.updated_at == now
+
+
+def test_apply_branch_change_published_state_sets_snapshot_and_actor():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    actor_id = uuid4()
+    change = SimpleNamespace(
+        status="validated",
+        publish_error="old-error",
+        published_snapshot=None,
+        published_at=None,
+        published_by=None,
+        updated_at=None,
+    )
+
+    apply_branch_change_published_state(
+        change=change,
+        published_snapshot={"name": "Branch A", "is_active": True},
+        actor_id=actor_id,
+        now=now,
+    )
+
+    assert change.status == "published"
+    assert change.publish_error is None
+    assert change.published_snapshot == {"name": "Branch A", "is_active": True}
+    assert change.published_at == now
+    assert change.published_by == actor_id
+    assert change.updated_at == now
+
+
+def test_apply_branch_change_published_state_preserves_none_snapshot():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    actor_id = uuid4()
+    change = SimpleNamespace(
+        status="validated",
+        publish_error="old-error",
+        published_snapshot={"name": "Branch A"},
+        published_at=None,
+        published_by=None,
+        updated_at=None,
+    )
+
+    apply_branch_change_published_state(
+        change=change,
+        published_snapshot=None,
+        actor_id=actor_id,
+        now=now,
+    )
+
+    assert change.status == "published"
+    assert change.publish_error is None
+    assert change.published_snapshot is None
+    assert change.published_at == now
+    assert change.published_by == actor_id
+    assert change.updated_at == now
+
+
+def test_apply_branch_change_rollback_failed_state_sets_error():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    change = SimpleNamespace(
+        rollback_error=None,
+        updated_at=None,
+    )
+
+    apply_branch_change_rollback_failed_state(
+        change=change,
+        error_message="rollback-failed",
+        now=now,
+    )
+
+    assert change.rollback_error == "rollback-failed"
+    assert change.updated_at == now
+
+
+def test_apply_branch_change_rolled_back_state_sets_snapshot_and_actor():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    actor_id = uuid4()
+    change = SimpleNamespace(
+        status="published",
+        rollback_error="old-error",
+        rollback_snapshot=None,
+        rolled_back_at=None,
+        rolled_back_by=None,
+        updated_at=None,
+    )
+
+    apply_branch_change_rolled_back_state(
+        change=change,
+        rollback_snapshot={"name": "Branch A", "is_active": False},
+        actor_id=actor_id,
+        now=now,
+    )
+
+    assert change.status == "rolled_back"
+    assert change.rollback_error is None
+    assert change.rollback_snapshot == {"name": "Branch A", "is_active": False}
+    assert change.rolled_back_at == now
+    assert change.rolled_back_by == actor_id
+    assert change.updated_at == now
 
 
 @pytest.mark.asyncio

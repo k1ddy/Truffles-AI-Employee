@@ -2,12 +2,24 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave29-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave30-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Реализовать Wave29 richer routing v1 как explainable opt-in policy поверх Wave28 booking governance: добавить `follow_up_sla_balance` без тихой подмены `least_open_cases`, с server-owned score/explainability contract и explicit policy selection в текущих reassignment surfaces.
+- scope: Реализовать Wave30 server-owned assignee routing profiles поверх Wave29 explainable routing: добавить admin-managed routing status/capacity/manual restrictions без fake skills/presence и встроить их в текущие reassignment surfaces и Team governance.
 - done:
+  - Wave30 implementation completed locally:
+    - backend adds `console_routing_profiles` model + migration + service, explicit admin list/upsert/delete API, and deterministic precedence `branch override -> client profile -> default`;
+    - assignee options now expose routing-profile facts (`routing_status`, source, capacity, eligibility, block reason), and both routing policies plus manual reassignment honor paused/capacity/follow-up-only constraints without hiding the current owner;
+    - Team page now exposes bounded routing-profile governance in the existing users surface, while `CaseConversation` and `CaseList` show disabled/unavailable assignee states instead of treating all visible assignees as assignable.
+  - Wave30 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_routing_profiles_api.py tests/test_console_openapi_calendar_contract.py` → `87 passed`
+    - `cd truffles-api && ruff check app/models/console_routing_profile.py app/models/__init__.py app/schemas/console.py app/services/console_routing_profiles.py app/services/console_case_routing.py app/routers/console.py tests/test_console_cases_helpers.py tests/test_console_routing_profiles_api.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/api-client.ts --file src/app/team/page.tsx --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx` → `pass`
+    - `cd console-web && npm run build` → `pass`
+    - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
   - Wave29 richer routing v1 implemented locally:
     - backend adds explainable policy `follow_up_sla_balance` on top of current assignee eligibility/load, explicit booking `NO_SHOW` follow-up continuity, and SLA-weighted load balancing while preserving `least_open_cases`;
     - `/cases/{case_id}/assignees` now accepts explicit `policy`, and routing responses/actions carry `recommended_score`, `current_score`, and `score_breakdown`;
@@ -250,8 +262,8 @@
   - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
   - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
 - next:
-  - Wave29 richer routing v1 is locally green; the next valid product question is whether the platform needs capability/presence-aware routing inputs or a bounded routing v2, not another queue-state or status-only heuristic patch.
-  - Do not invent `skills` / `presence` / `availability` as frontend-only selectors; any further routing wave is blocked until those signals are server-owned.
+  - Wave30 must introduce server-owned assignee routing profiles (`status + capacity + follow_up_only`) before any skill/presence discussion or routing v2.
+  - Do not invent `skills` / `presence` / `availability` as frontend-only selectors; any further routing wave remains blocked until those signals are server-owned.
 - evidence:
   - `truffles-api/app/services/console_case_routing.py`
   - `truffles-api/app/routers/console.py`

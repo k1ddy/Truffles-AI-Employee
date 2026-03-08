@@ -225,27 +225,27 @@ function workspaceIncidentSteps(item: IncidentItem): string[] {
         return [
             "Проверьте webhook и ID канала (instance_id) в панели WhatsApp для выбранного филиала.",
             "Запустите «Проверить без записи» (integration_reconcile dry-run).",
-            "Если результат подтверждает drift, выполните execute и перепроверьте метрики в OPS.",
+            "Если результат подтверждает drift, выполните execute и перепроверьте метрики в Ops.",
         ];
     }
     if (item.reason_code === "provider_auth" || item.reason_code === "provider_unavailable" || item.reason_code === "provider_rate_limited" || item.reason_code === "provider_billing_blocked") {
         return [
             "Проверьте данные канала у провайдера (ответственный, оплачено до, статус webhook).",
             "Выполните целевое действие провайдера в режиме проверки или выполнения.",
-            "После действия откройте OPS и проверьте, что ошибки отправки за 24 часа снижаются.",
+            "После действия откройте Ops и проверьте, что ошибки отправки за 24 часа снижаются.",
         ];
     }
     if (item.reason_code === "outbox_backlog") {
         return [
-            "Откройте OPS для очереди отправки и текущего backlog.",
-            "Запустите outbox_process в dry-run/execute в OPS.",
+            "Откройте Ops для очереди отправки и текущего backlog.",
+            "Запустите outbox_process в dry-run/execute в Ops.",
             "Вернитесь в Workspace и проверьте, что интеграция филиала не в деградации.",
         ];
     }
     return [
         "Зафиксируйте branch/client контекст инцидента.",
         "Выполните безопасную диагностику через dry-run действие.",
-        "Подтвердите эффект в OPS и зафиксируйте evidence в журнале.",
+        "Подтвердите эффект в Ops и зафиксируйте evidence в журнале.",
     ];
 }
 
@@ -1102,6 +1102,9 @@ export default function CompanyWorkspacePage() {
                         источник подсказки: {recommendedActionSourceLabel(recommendedActionContext?.source)}
                     </span>
                 </div>
+                <div className="mt-3 rounded-lg border border-sky-300/60 bg-sky-50 p-3 text-xs text-sky-900" data-testid="workspace-intent-map">
+                    Роль вкладки: <span className="font-semibold">действие</span>. Здесь выполняем шаг по филиалу, затем переходим в Ops для проверки и возвращаемся к следующей задаче.
+                </div>
 
                 {recommendedActionContext && (!scopeBranchId || recommendedActionContext.branch_id === scopeBranchId) ? (
                     <div className="mt-3 space-y-3">
@@ -1199,7 +1202,7 @@ export default function CompanyWorkspacePage() {
                     <div>
                         <h2 className="text-lg font-semibold">Инцидентный гайд для филиала</h2>
                         <p className="mt-1 text-xs text-muted-foreground">
-                            Быстрый путь: что исправлять в Workspace, когда идти в OPS и как закрыть причину с evidence.
+                            Быстрый путь: что исправлять в Workspace, когда идти в Ops и как закрыть причину с evidence.
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -1208,7 +1211,7 @@ export default function CompanyWorkspacePage() {
                                 href={`/ops${workspaceIncident ? `?incident_id=${encodeURIComponent(workspaceIncident.id)}&reason=${encodeURIComponent(workspaceIncident.reason_code)}&severity=${encodeURIComponent(workspaceIncident.severity)}` : ""}`}
                                 className="btn-ghost"
                             >
-                                Открыть OPS
+                                Открыть Ops
                             </Link>
                         )}
                         <button
@@ -1277,7 +1280,7 @@ export default function CompanyWorkspacePage() {
                                         href={`/ops?incident_id=${encodeURIComponent(workspaceIncident.id)}&reason=${encodeURIComponent(workspaceIncident.reason_code)}&severity=${encodeURIComponent(workspaceIncident.severity)}`}
                                         className="btn-ghost text-xs"
                                     >
-                                        {action.title} (в OPS)
+                                        {action.title} (в Ops)
                                     </Link>
                                 ) : (
                                     <span key={action.id} className="rounded-full border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">

@@ -20,6 +20,7 @@ class Appointment(Base):
     specialist_id = Column(UUID(as_uuid=True), ForeignKey("specialists.id"), nullable=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True)
+    case_id = Column(UUID(as_uuid=True), ForeignKey("handovers.id"), nullable=True)
 
     status = Column(Text, nullable=False)
     source = Column(Text, nullable=False)
@@ -36,6 +37,8 @@ class Appointment(Base):
     version = Column(Integer, default=1, nullable=False)
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
+    follow_up_owner_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
+    follow_up_due_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -43,3 +46,4 @@ class Appointment(Base):
     branch = relationship("Branch")
     specialist = relationship("Specialist")
     user = relationship("User")
+    follow_up_owner = relationship("Agent", foreign_keys=[follow_up_owner_id])

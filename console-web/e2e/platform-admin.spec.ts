@@ -1,9 +1,14 @@
 import { expect, test } from '@playwright/test';
+import {
+    buildSignInUrl,
+    loginThroughKeycloak,
+    shouldStayOnBaseOrigin,
+} from './support/keycloak-auth';
 
 const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
 const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
-const stayOnBaseOrigin = /localhost|127\.0\.0\.1/.test(baseURL);
+const stayOnBaseOrigin = shouldStayOnBaseOrigin(baseURL);
 let resolvedBaseURL = baseURL;
 const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
@@ -13,14 +18,6 @@ const TENANTS_FIXTURE_CLIENT_ID = '22222222-2222-4222-8222-222222222222';
 const TENANTS_FIXTURE_BRANCH_ID = '33333333-3333-4333-8333-333333333333';
 const TENANTS_FIXTURE_AGENT_ID = '44444444-4444-4444-8444-444444444444';
 const TENANTS_FIXTURE_NOW = '2026-02-22T12:00:00.000Z';
-
-function buildSignInUrl(origin: string, callbackOrigin = origin) {
-    return `${origin}/api/auth/signin?callbackUrl=${encodeURIComponent(callbackOrigin)}`;
-}
-
-function resolvePreferredOrigin(actionOrigin: string) {
-    return stayOnBaseOrigin ? baseURL : actionOrigin;
-}
 
 function urlPathPattern(path: string) {
     return new RegExp(`${path.replace(/\//g, '\\/')}(\\?|$)`);
@@ -609,6 +606,123 @@ async function mockTenantsDeterministicApis(
     });
 }
 
+async function mockOpsDeterministicApis(
+    page: import('@playwright/test').Page,
+    fixtureNow = TENANTS_FIXTURE_NOW,
+) {
+    await page.route('**/api/proxy/health**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            status: 'ok',
+            version: 'e2e',
+            database: 'ok',
+            redis: 'ok',
+            outbox_backlog: 12,
+        });
+    });
+    await page.route('**/api/proxy/metrics/daily**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            date: '2026-03-03',
+            total_cases: 24,
+            pending_cases: 5,
+            active_cases: 8,
+            resolved_cases: 11,
+            avg_resolution_hours: 1.2,
+        });
+    });
+    await page.route('**/api/proxy/telegram/health**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            status: 'ok',
+            webhook_alive: true,
+            last_success_at: fixtureNow,
+            last_error_at: null,
+            last_error_message: null,
+            error_rate_24h: 0.01,
+            pending_messages: 1,
+        });
+    });
+    await page.route('**/api/proxy/ops/outbox**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [],
+            cursor: null,
+            has_more: false,
+            counts: { pending: 1, processing: 2, failed: 3 },
+        });
+    });
+    await page.route('**/api/proxy/ops/reminders**', async (route) => {
+        if (route.request().method() === 'POST') {
+            await toJsonResponse(route, { success: true, retried: 0, skipped: 0, matched: 0 });
+            return;
+        }
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [],
+            cursor: null,
+            has_more: false,
+            counts: { pending: 2, sent: 10, failed: 1, due_now: 2, overdue_15m: 0 },
+            error_buckets: [],
+        });
+    });
+    await page.route('**/api/proxy/ops/jobs**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        const requestPath = new URL(route.request().url()).pathname;
+        if (requestPath.endsWith('/ops/jobs/catalog')) {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, { items: [], cursor: null, has_more: false });
+    });
+    await page.route('**/api/proxy/ops/jobs/catalog**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [
+                {
+                    job_type: 'outbox_process',
+                    label: 'Обработать очередь',
+                    description: 'Проверка и обработка очереди отправки.',
+                    supports_dry_run: true,
+                },
+            ],
+        });
+    });
+    await page.route('**/api/proxy/admin/incidents**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            generated_at: fixtureNow,
+            scope: 'fleet',
+            summary: { total: 0, critical: 0, warn: 0, info: 0 },
+            items: [],
+        });
+    });
+}
+
 function tenantsSection(page: import('@playwright/test').Page, title: string) {
     return page.locator('section').filter({ has: page.getByRole('heading', { name: title }) }).first();
 }
@@ -618,11 +732,32 @@ async function resolveAuthOrigin(page: import('@playwright/test').Page) {
     const providerForm = page.locator('form[action*="keycloak"]').first();
     const action = await providerForm.getAttribute('action');
     const actionOrigin = action ? new URL(action).origin : baseURL;
-    resolvedBaseURL = resolvePreferredOrigin(actionOrigin);
+    resolvedBaseURL = stayOnBaseOrigin ? baseURL : actionOrigin;
 }
 
 async function gotoConsoleRoot(page: import('@playwright/test').Page) {
     await page.goto(resolvedBaseURL, { waitUntil: 'domcontentloaded' });
+}
+
+function keycloakAuthOptions() {
+    return {
+        baseURL,
+        consoleHostPattern,
+        keycloakHostPattern,
+        stayOnBaseOrigin,
+        authWaitTimeoutMs: 15000,
+        onResolvedOrigin: (origin: string) => {
+            resolvedBaseURL = origin;
+        },
+    };
+}
+
+async function loginWithSharedHelper(page: import('@playwright/test').Page) {
+    await loginThroughKeycloak(page, {
+        ...keycloakAuthOptions(),
+        loginUser,
+        loginPassword,
+    });
 }
 
 async function selectOptionIfNeeded(selector: import('@playwright/test').Locator) {
@@ -680,48 +815,6 @@ async function resolveSelectionGate(page: import('@playwright/test').Page) {
     await selectOptionIfNeeded(page.getByTestId('context-branch-select'));
 }
 
-async function startKeycloakLogin(page: import('@playwright/test').Page) {
-    await page.goto(buildSignInUrl(baseURL), { waitUntil: 'domcontentloaded' });
-    let providerForm = page.locator('form[action*="keycloak"]').first();
-    const action = await providerForm.getAttribute('action');
-    const actionOrigin = action ? new URL(action).origin : baseURL;
-    if (actionOrigin !== baseURL) {
-        const callbackOrigin = stayOnBaseOrigin ? baseURL : actionOrigin;
-        await page.goto(buildSignInUrl(actionOrigin, callbackOrigin), { waitUntil: 'domcontentloaded' });
-        providerForm = page.locator('form[action*="keycloak"]').first();
-    }
-    resolvedBaseURL = resolvePreferredOrigin(actionOrigin);
-    const providerButton = page.getByRole('button', { name: /sign in with keycloak/i });
-    if (await providerButton.isVisible().catch(() => false)) {
-        await providerButton.click();
-    } else if (await providerForm.isVisible().catch(() => false)) {
-        await providerForm.waitFor({ state: 'visible', timeout: 15000 });
-        const submitButton = providerForm.locator('button[type="submit"], input[type="submit"]').first();
-        await submitButton.click();
-    } else {
-        return false;
-    }
-    await Promise.race([
-        page.waitForURL(keycloakHostPattern, { timeout: 15000 }),
-        page.waitForURL(consoleHostPattern, { timeout: 15000 }),
-    ]);
-    return true;
-}
-
-async function loginThroughKeycloak(page: import('@playwright/test').Page) {
-    const started = await startKeycloakLogin(page);
-    if (!started) {
-        return;
-    }
-    if (!(await page.locator('#username').isVisible().catch(() => false))) {
-        return;
-    }
-    await page.fill('#username', loginUser);
-    await page.fill('#password', loginPassword);
-    await page.click('#kc-login');
-    await page.waitForURL(consoleHostPattern);
-}
-
 async function ensureLoggedIn(page: import('@playwright/test').Page) {
     if (deterministicAuthEnabled) {
         await mockDeterministicAuthSession(page);
@@ -735,7 +828,7 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     const logoutButton = page.getByTestId('logout-button');
     await page.waitForSelector('[data-testid="login-button"], [data-testid="logout-button"]', { timeout: 15000 });
     if (!(await logoutButton.isVisible().catch(() => false)) && (await loginButton.isVisible().catch(() => false))) {
-        await loginThroughKeycloak(page);
+        await loginWithSharedHelper(page);
         await gotoConsoleRoot(page);
     }
     await resolveSelectionGate(page);
@@ -1233,6 +1326,8 @@ test.describe('Platform Admin Navigation', () => {
 
         const opsPage = page.getByTestId('ops-page');
         await expect(opsPage).toBeVisible();
+        await expect(page.getByTestId('ops-intent-map')).toBeVisible();
+        await expect(page.getByTestId('ops-intent-map')).toContainText('проверка');
         await expect(page.getByTestId('ops-telegram-verify')).toContainText('Проверить связь');
         await expect(page.getByTestId('ops-telegram-test')).toContainText('Отправить тест');
 
@@ -1271,6 +1366,8 @@ test.describe('Platform Admin Integrations', () => {
     test('should keep Integrations as fact-only handoff layer with explicit context gate @smoke', async ({ page }) => {
         await openIntegrations(page);
         await expect(page.getByTestId('integrations-workspace-guidance')).toBeVisible();
+        await expect(page.getByTestId('integrations-intent-map')).toBeVisible();
+        await expect(page.getByTestId('integrations-intent-map')).toContainText('Факт');
 
         const scopeCta = page.getByTestId('integrations-open-workspace-scope');
         await expect(scopeCta).toBeVisible();
@@ -1455,6 +1552,7 @@ test.describe('Platform Admin Tenants', () => {
     test('should switch Tenants workspace modes @smoke', async ({ page }) => {
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
+            await expect(page.getByTestId('tenants-intent-map')).toBeVisible();
             await expect(page.getByTestId('tenants-context-lens')).toBeVisible();
             await expect(
                 page.getByTestId('tenants-lifecycle-controls').getByRole('button', { name: /^Все$/ }),
@@ -1509,6 +1607,7 @@ test.describe('Platform Admin Tenants', () => {
         await onboardingRun.click();
         await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
         await expect(page.getByTestId('tenants-onboarding-loop-hint')).toBeVisible();
+        await expect(page.getByTestId('tenants-onboarding-loop-hint')).toContainText('откройте Workspace');
         await expect(page.getByTestId('tenants-onboarding-open-ops')).toBeVisible();
     });
 
@@ -1520,6 +1619,8 @@ test.describe('Platform Admin Tenants', () => {
         await expect(openWorkspaceButton).toBeVisible();
         await openWorkspaceWithRetry(page, openWorkspaceButton);
         await expect(page.getByTestId('workspace-recommended-open-execute')).toBeVisible();
+        await expect(page.getByTestId('workspace-intent-map')).toBeVisible();
+        await mockOpsDeterministicApis(page);
 
         const deepLinkParams = await page.evaluate(() => ({
             branchId: new URL(window.location.href).searchParams.get('branch_id'),
@@ -1532,22 +1633,30 @@ test.describe('Platform Admin Tenants', () => {
 
         const nextStepOps = page.getByTestId('workspace-next-step-ops');
         await expect(nextStepOps).toBeVisible();
+        const opsHref = await nextStepOps.getAttribute('href');
+        expect(opsHref).toBeTruthy();
         await nextStepOps.click();
         await Promise.race([
             page.waitForURL(urlPathPattern('/ops'), { timeout: 15000 }),
             page.waitForURL(urlPathPattern('/login'), { timeout: 15000 }),
         ]);
         if (page.url().includes('/login')) {
-            await loginThroughKeycloak(page);
-            await gotoConsoleRoot(page);
-            await resolveSelectionGate(page);
-            await openOps(page);
+            await ensureLoggedIn(page);
+            if (opsHref) {
+                const restoredOpsUrl = opsHref.startsWith('http') ? opsHref : `${resolvedBaseURL}${opsHref}`;
+                await page.goto(restoredOpsUrl, { waitUntil: 'domcontentloaded' });
+            } else {
+                await openOps(page);
+            }
+            await expect(page).toHaveURL(urlPathPattern('/ops'));
         } else {
             await expect(page).toHaveURL(urlPathPattern('/ops'));
         }
-        await expect(page.getByTestId('ops-back-workspace')).toBeVisible();
+        await expect(page.getByTestId('ops-title')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('ops-intent-map')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('ops-back-workspace')).toBeVisible({ timeout: 15000 });
         const opsBackTenants = page.getByTestId('ops-back-tenants');
-        await expect(opsBackTenants).toBeVisible();
+        await expect(opsBackTenants).toBeVisible({ timeout: 15000 });
         await expect(opsBackTenants).toHaveAttribute('href', '/tenants');
     });
 
@@ -1572,6 +1681,7 @@ test.describe('Platform Admin Tenants', () => {
         await expect(recommendationSection).toContainText('Причины');
         await expect(recommendationSection).toContainText('нужна перепривязка канала');
         await expect(recommendationSection).toContainText('источник подсказки:');
+        await expect(recommendationSection).not.toContainText('Открыть OPS');
         await expect(recommendationSection).not.toContainText('source:');
     });
 

@@ -21,6 +21,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/queue-state/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Current Queue State */
+        get: operations["get_current_queue_state_console_v1_queue_state_current_get"];
+        /** Put Current Queue State */
+        put: operations["put_current_queue_state_console_v1_queue_state_current_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/queue-state/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Queue State Views */
+        get: operations["list_queue_state_views_console_v1_queue_state_views_get"];
+        put?: never;
+        /** Create Queue State View */
+        post: operations["create_queue_state_view_console_v1_queue_state_views_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/queue-state/views/{view_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Queue State View */
+        get: operations["get_queue_state_view_console_v1_queue_state_views__view_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Queue State View */
+        delete: operations["delete_queue_state_view_console_v1_queue_state_views__view_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Queue State View */
+        patch: operations["update_queue_state_view_console_v1_queue_state_views__view_id__patch"];
+        trace?: never;
+    };
     "/console/v1/agents": {
         parameters: {
             query?: never;
@@ -66,6 +121,108 @@ export interface paths {
         get: operations["list_cases_console_v1_cases_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk Case Action */
+        post: operations["bulk_case_action_console_v1_cases_bulk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/assignees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Queue Case Assignees */
+        get: operations["list_queue_case_assignees_console_v1_cases_assignees_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/{case_id}/assignees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Case Assignees */
+        get: operations["list_case_assignees_console_v1_cases__case_id__assignees_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/{case_id}/reassign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reassign Case */
+        post: operations["reassign_case_console_v1_cases__case_id__reassign_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/{case_id}/snooze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Snooze Case */
+        post: operations["snooze_case_console_v1_cases__case_id__snooze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/{case_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reopen Case */
+        post: operations["reopen_case_console_v1_cases__case_id__reopen_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -140,6 +297,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/cases/{case_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Case Updates
+         * @description SSE stream for a single case with polling fallback on the frontend.
+         */
+        get: operations["stream_case_updates_console_v1_cases__case_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/inbox/macros": {
         parameters: {
             query?: never;
@@ -173,6 +350,23 @@ export interface paths {
         head?: never;
         /** Update Inbox Macro */
         patch: operations["update_inbox_macro_console_v1_inbox_macros__macro_id__patch"];
+        trace?: never;
+    };
+    "/console/v1/inbox/macros/{macro_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execute Inbox Macro */
+        post: operations["execute_inbox_macro_console_v1_inbox_macros__macro_id__execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/console/v1/cases/{case_id}": {
@@ -1752,6 +1946,41 @@ export interface paths {
         patch: operations["update_membership_console_v1_admin_memberships__membership_id__patch"];
         trace?: never;
     };
+    "/console/v1/admin/routing-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Routing Profiles */
+        get: operations["list_routing_profiles_console_v1_admin_routing_profiles_get"];
+        /** Upsert Routing Profile */
+        put: operations["upsert_routing_profile_console_v1_admin_routing_profiles_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/routing-profiles/{agent_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Routing Profile */
+        delete: operations["delete_routing_profile_console_v1_admin_routing_profiles__agent_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/admin/agents/{agent_id}/disable": {
         parameters: {
             query?: never;
@@ -2377,6 +2606,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/calendar/bookings/{booking_id}/follow-up-governance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update Booking Follow Up Governance
+         * @description Update no-show follow-up owner/due governance for a booking.
+         */
+        post: operations["update_booking_follow_up_governance_console_v1_calendar_bookings__booking_id__follow_up_governance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/calendar/google/connect": {
         parameters: {
             query?: never;
@@ -2470,6 +2719,20 @@ export interface components {
             /** Success */
             success: boolean;
             booking: components["schemas"]["BookingResponse"];
+            /** Case Effects */
+            case_effects?: components["schemas"]["BookingCaseEffect"][];
+        };
+        /** BookingCaseEffect */
+        BookingCaseEffect: {
+            /** Case Id */
+            case_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "reopened_for_booking_attention" | "linked_rebooked_booking";
+            /** Message */
+            message: string;
         };
         /** BookingCreate */
         BookingCreate: {
@@ -2495,6 +2758,15 @@ export interface components {
             notes?: string | null;
             /** Conversation Id */
             conversation_id?: string | null;
+            /** Case Id */
+            case_id?: string | null;
+        };
+        /** BookingFollowUpGovernanceRequest */
+        BookingFollowUpGovernanceRequest: {
+            /** Owner Agent Id */
+            owner_agent_id?: string | null;
+            /** Due At */
+            due_at?: string | null;
         };
         /** BookingNoShowFollowUpRequest */
         BookingNoShowFollowUpRequest: {
@@ -2542,8 +2814,30 @@ export interface components {
             no_show_followup_closed_by?: string | null;
             /** No Show Followup Rebooked Appointment Id */
             no_show_followup_rebooked_appointment_id?: string | null;
+            /** Follow Up Owner Id */
+            follow_up_owner_id?: string | null;
+            /** Follow Up Owner Name */
+            follow_up_owner_name?: string | null;
+            /** Follow Up Due At */
+            follow_up_due_at?: string | null;
+            /**
+             * Follow Up Overdue
+             * @default false
+             */
+            follow_up_overdue: boolean;
             /** Google Event Id */
             google_event_id?: string | null;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Case Id */
+            case_id?: string | null;
+            /**
+             * Needs Action
+             * @default false
+             */
+            needs_action: boolean;
+            /** Attention Reason */
+            attention_reason?: string | null;
             /** Created At */
             created_at: string;
         };
@@ -2558,6 +2852,13 @@ export interface components {
         BookingsListResponse: {
             /** Items */
             items: components["schemas"]["BookingResponse"][];
+            /** Cursor */
+            cursor?: string | null;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
         };
         /** CapabilitiesPayload */
         "CapabilitiesPayload-Input": {
@@ -3980,6 +4281,10 @@ export interface components {
             conversation_id: string;
             /** Status */
             status: string;
+            /** Business Status Code */
+            business_status_code?: string | null;
+            /** Business Status Label */
+            business_status_label?: string | null;
             /** Trigger Type */
             trigger_type: string;
             /** Trigger Value */
@@ -3988,6 +4293,8 @@ export interface components {
             context_summary?: string | null;
             /** User Message */
             user_message?: string | null;
+            /** Assigned To Id */
+            assigned_to_id?: string | null;
             /** Assigned To Name */
             assigned_to_name?: string | null;
             /** First Response At */
@@ -4007,6 +4314,16 @@ export interface components {
              * @default ok
              */
             sla_status: string | null;
+            /** Sla Action State */
+            sla_action_state?: string | null;
+            /** Sla Overdue Minutes */
+            sla_overdue_minutes?: number | null;
+            /** Priority Tier */
+            priority_tier?: string | null;
+            /** Attention Reason */
+            attention_reason?: string | null;
+            /** Target Response At */
+            target_response_at?: string | null;
             /** Customer Name */
             customer_name?: string | null;
             /** Customer Phone */
@@ -4049,7 +4366,14 @@ export interface components {
             human_lock_reason?: string | null;
             /** Human Lock By */
             human_lock_by?: string | null;
+            /** Snoozed Until */
+            snoozed_until?: string | null;
+            /** Snoozed Reason */
+            snoozed_reason?: string | null;
+            /** Snoozed By */
+            snoozed_by?: string | null;
             telegram_trail?: components["schemas"]["ConsoleTelegramTrail"] | null;
+            booking_summary?: components["schemas"]["ConsoleCaseBookingSummary"] | null;
         };
         /** ConsoleCaseActionResponse */
         ConsoleCaseActionResponse: {
@@ -4057,11 +4381,157 @@ export interface components {
             success: boolean;
             case: components["schemas"]["ConsoleCase"];
             sync?: components["schemas"]["ConsoleCaseActionSync"] | null;
+            routing?: components["schemas"]["ConsoleCaseRoutingDecision"] | null;
         };
         /** ConsoleCaseActionSync */
         ConsoleCaseActionSync: {
             telegram?: components["schemas"]["ConsoleSyncStatus"] | null;
             client_notify?: components["schemas"]["ConsoleSyncStatus"] | null;
+        };
+        /** ConsoleCaseAssigneeListResponse */
+        ConsoleCaseAssigneeListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleCaseAssigneeOption"][];
+            routing?: components["schemas"]["ConsoleCaseRoutingDecision"] | null;
+        };
+        /** ConsoleCaseAssigneeOption */
+        ConsoleCaseAssigneeOption: {
+            /**
+             * Agent Id
+             * Format: uuid
+             */
+            agent_id: string;
+            /** Agent Name */
+            agent_name: string;
+            /** Role */
+            role: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Is Current
+             * @default false
+             */
+            is_current: boolean;
+            /**
+             * Open Case Count
+             * @default 0
+             */
+            open_case_count: number;
+            /**
+             * Routing Status
+             * @default available
+             * @enum {string}
+             */
+            routing_status: "available" | "paused" | "follow_up_only";
+            /**
+             * Routing Profile Source
+             * @default default
+             * @enum {string}
+             */
+            routing_profile_source: "default" | "client" | "branch";
+            /** Max Open Case Count */
+            max_open_case_count?: number | null;
+            /**
+             * At Capacity
+             * @default false
+             */
+            at_capacity: boolean;
+            /**
+             * Assignment Eligible
+             * @default true
+             */
+            assignment_eligible: boolean;
+            /** Assignment Block Reason Code */
+            assignment_block_reason_code?: string | null;
+        };
+        /** ConsoleCaseBookingSummary */
+        ConsoleCaseBookingSummary: {
+            /**
+             * Booking Id
+             * Format: uuid
+             */
+            booking_id: string;
+            /** Status */
+            status: string;
+            /** Start At */
+            start_at?: string | null;
+            /** Specialist Name */
+            specialist_name?: string | null;
+            /** Service Type */
+            service_type?: string | null;
+            /**
+             * Needs Action
+             * @default false
+             */
+            needs_action: boolean;
+            /** Attention Reason */
+            attention_reason?: string | null;
+            /**
+             * No Show Followup Done
+             * @default false
+             */
+            no_show_followup_done: boolean;
+            /** No Show Followup Result */
+            no_show_followup_result?: string | null;
+            /** Operator Summary */
+            operator_summary: string;
+        };
+        /** ConsoleCaseBulkActionRequest */
+        ConsoleCaseBulkActionRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "reassign" | "snooze" | "route";
+            /** Case Ids */
+            case_ids: string[];
+            /** Agent Id */
+            agent_id?: string | null;
+            /** Policy */
+            policy?: ("least_open_cases" | "follow_up_sla_balance") | null;
+            /** Minutes */
+            minutes?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** ConsoleCaseBulkActionResponse */
+        ConsoleCaseBulkActionResponse: {
+            /** Success */
+            success: boolean;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "reassign" | "snooze" | "route";
+            /** Requested Count */
+            requested_count: number;
+            /** Processed Count */
+            processed_count: number;
+            /** Skipped Count */
+            skipped_count: number;
+            /** Failed Count */
+            failed_count: number;
+            /** Items */
+            items: components["schemas"]["ConsoleCaseBulkActionResult"][];
+        };
+        /** ConsoleCaseBulkActionResult */
+        ConsoleCaseBulkActionResult: {
+            /**
+             * Case Id
+             * Format: uuid
+             */
+            case_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "processed" | "skipped" | "failed";
+            /** Code */
+            code: string;
+            /** Message */
+            message?: string | null;
+            case?: components["schemas"]["ConsoleCase"] | null;
+            routing?: components["schemas"]["ConsoleCaseRoutingDecision"] | null;
         };
         /** ConsoleCaseListResponse */
         ConsoleCaseListResponse: {
@@ -4073,6 +4543,85 @@ export interface components {
             has_more: boolean;
             /** Total */
             total?: number | null;
+        };
+        /** ConsoleCaseReassignRequest */
+        ConsoleCaseReassignRequest: {
+            /** Agent Id */
+            agent_id?: string | null;
+            /**
+             * Mode
+             * @default manual
+             * @enum {string}
+             */
+            mode: "manual" | "policy";
+            /** Policy */
+            policy?: ("least_open_cases" | "follow_up_sla_balance") | null;
+        };
+        /** ConsoleCaseRoutingDecision */
+        ConsoleCaseRoutingDecision: {
+            /**
+             * Policy
+             * @enum {string}
+             */
+            policy: "least_open_cases" | "follow_up_sla_balance";
+            /**
+             * Recommended Agent Id
+             * Format: uuid
+             */
+            recommended_agent_id: string;
+            /** Recommended Agent Name */
+            recommended_agent_name: string;
+            /**
+             * Recommended Open Case Count
+             * @default 0
+             */
+            recommended_open_case_count: number;
+            /** Current Agent Id */
+            current_agent_id?: string | null;
+            /** Current Agent Name */
+            current_agent_name?: string | null;
+            /** Current Open Case Count */
+            current_open_case_count?: number | null;
+            /**
+             * Will Reassign
+             * @default true
+             */
+            will_reassign: boolean;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Summary */
+            reason_summary: string;
+            /**
+             * Recommended Score
+             * @default 0
+             */
+            recommended_score: number;
+            /** Current Score */
+            current_score?: number | null;
+            /**
+             * Score Breakdown
+             * @default []
+             */
+            score_breakdown: components["schemas"]["ConsoleCaseRoutingScoreFactor"][];
+        };
+        /** ConsoleCaseRoutingScoreFactor */
+        ConsoleCaseRoutingScoreFactor: {
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
+        };
+        /** ConsoleCaseSnoozeRequest */
+        ConsoleCaseSnoozeRequest: {
+            /**
+             * Minutes
+             * @default 30
+             */
+            minutes: number;
+            /** Reason */
+            reason?: string | null;
         };
         /** ConsoleClient */
         ConsoleClient: {
@@ -5259,12 +5808,25 @@ export interface components {
             label: string;
             /** Body */
             body: string;
+            action?: components["schemas"]["ConsoleMacroAction"] | null;
             /** Is Active */
             is_active: boolean;
             /** Created At */
             created_at?: string | null;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /** ConsoleMacroAction */
+        ConsoleMacroAction: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "take_case" | "resolve_case" | "return_to_bot" | "reopen_case" | "snooze_case";
+            /** Minutes */
+            minutes?: number | null;
+            /** Reason */
+            reason?: string | null;
         };
         /** ConsoleMacroCreateRequest */
         ConsoleMacroCreateRequest: {
@@ -5277,6 +5839,7 @@ export interface components {
             label: string;
             /** Body */
             body: string;
+            action?: components["schemas"]["ConsoleMacroAction"] | null;
             /**
              * Is Active
              * @default true
@@ -5286,6 +5849,22 @@ export interface components {
         /** ConsoleMacroCreateResponse */
         ConsoleMacroCreateResponse: {
             macro: components["schemas"]["ConsoleMacro"];
+        };
+        /** ConsoleMacroExecuteRequest */
+        ConsoleMacroExecuteRequest: {
+            /**
+             * Case Id
+             * Format: uuid
+             */
+            case_id: string;
+        };
+        /** ConsoleMacroExecuteResponse */
+        ConsoleMacroExecuteResponse: {
+            /** Success */
+            success: boolean;
+            macro: components["schemas"]["ConsoleMacro"];
+            case: components["schemas"]["ConsoleCase"];
+            sync?: components["schemas"]["ConsoleCaseActionSync"] | null;
         };
         /** ConsoleMacroListResponse */
         ConsoleMacroListResponse: {
@@ -5298,6 +5877,7 @@ export interface components {
             label?: string | null;
             /** Body */
             body?: string | null;
+            action?: components["schemas"]["ConsoleMacroAction"] | null;
             /** Is Active */
             is_active?: boolean | null;
         };
@@ -6032,6 +6612,18 @@ export interface components {
             first_response_missing_total?: number | null;
             /** First Response Status */
             first_response_status?: ("fact" | "estimate" | "need") | null;
+            /** Queue Lag Seconds */
+            queue_lag_seconds?: number | null;
+            /** Queue Lag Status */
+            queue_lag_status?: ("fact" | "estimate" | "need") | null;
+            /** Stale View Rate */
+            stale_view_rate?: number | null;
+            /** Stale View Status */
+            stale_view_status?: ("fact" | "estimate" | "need") | null;
+            /** Case Action Apply Latency Seconds */
+            case_action_apply_latency_seconds?: number | null;
+            /** Case Action Apply Latency Status */
+            case_action_apply_latency_status?: ("fact" | "estimate" | "need") | null;
             /** After Hours Total */
             after_hours_total?: number | null;
             /** After Hours Covered */
@@ -7430,6 +8022,53 @@ export interface components {
             /** Generated At */
             generated_at?: string | null;
         };
+        /** ConsoleQueueStateCurrentRequest */
+        ConsoleQueueStateCurrentRequest: {
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "cases" | "calendar";
+            /** Case Id */
+            case_id?: string | null;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Query State */
+            query_state?: Record<string, never>;
+        };
+        /** ConsoleQueueStateCurrentResponse */
+        ConsoleQueueStateCurrentResponse: {
+            /**
+             * Found
+             * @default false
+             */
+            found: boolean;
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "cases" | "calendar";
+            /** Selected Branch Id */
+            selected_branch_id?: string | null;
+            /** Case Id */
+            case_id?: string | null;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Query State */
+            query_state?: Record<string, never>;
+            /** Updated At */
+            updated_at?: string | null;
+        };
         /** ConsoleReferencePack */
         ConsoleReferencePack: {
             /**
@@ -7593,6 +8232,183 @@ export interface components {
             skipped: number;
             /** Matched */
             matched: number;
+        };
+        /** ConsoleRoutingProfile */
+        ConsoleRoutingProfile: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Agent Id
+             * Format: uuid
+             */
+            agent_id: string;
+            /** Agent Name */
+            agent_name?: string | null;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Scope
+             * @default client
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /**
+             * Routing Status
+             * @default available
+             * @enum {string}
+             */
+            routing_status: "available" | "paused" | "follow_up_only";
+            /** Max Open Case Count */
+            max_open_case_count?: number | null;
+            /** Updated By Agent Id */
+            updated_by_agent_id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleRoutingProfileDeleteResponse */
+        ConsoleRoutingProfileDeleteResponse: {
+            /** Success */
+            success: boolean;
+        };
+        /** ConsoleRoutingProfileListResponse */
+        ConsoleRoutingProfileListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleRoutingProfile"][];
+        };
+        /** ConsoleRoutingProfileUpsertRequest */
+        ConsoleRoutingProfileUpsertRequest: {
+            /**
+             * Agent Id
+             * Format: uuid
+             */
+            agent_id: string;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Routing Status
+             * @default available
+             * @enum {string}
+             */
+            routing_status: "available" | "paused" | "follow_up_only";
+            /** Max Open Case Count */
+            max_open_case_count?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** ConsoleSavedView */
+        ConsoleSavedView: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "cases" | "calendar";
+            /**
+             * Scope
+             * @default personal
+             * @enum {string}
+             */
+            scope: "personal" | "team";
+            /** Name */
+            name: string;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Query State */
+            query_state?: Record<string, never>;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+            /**
+             * Is Applicable
+             * @default true
+             */
+            is_applicable: boolean;
+            /** Created By Agent Id */
+            created_by_agent_id?: string | null;
+            /** Target Branch Id */
+            target_branch_id?: string | null;
+            /** Target Role */
+            target_role?: ("owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer") | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleSavedViewCreateRequest */
+        ConsoleSavedViewCreateRequest: {
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "cases" | "calendar";
+            /**
+             * Scope
+             * @default personal
+             * @enum {string}
+             */
+            scope: "personal" | "team";
+            /** Name */
+            name: string;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Query State */
+            query_state?: Record<string, never>;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+            /** Target Branch Id */
+            target_branch_id?: string | null;
+            /** Target Role */
+            target_role?: ("owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer") | null;
+        };
+        /** ConsoleSavedViewListResponse */
+        ConsoleSavedViewListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleSavedView"][];
+        };
+        /** ConsoleSavedViewUpdateRequest */
+        ConsoleSavedViewUpdateRequest: {
+            /** Name */
+            name?: string | null;
+            /** Version */
+            version?: number | null;
+            /** Query State */
+            query_state?: Record<string, never> | null;
+            /** Is Default */
+            is_default?: boolean | null;
+            /** Target Branch Id */
+            target_branch_id?: string | null;
+            /** Target Role */
+            target_role?: ("owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer") | null;
         };
         /** ConsoleSettingsResponse */
         ConsoleSettingsResponse: {
@@ -7951,6 +8767,8 @@ export interface components {
             status: "ok" | "skipped" | "failed";
             /** Detail */
             detail?: string | null;
+            /** Operator Message */
+            operator_message?: string | null;
         };
         /** ConsoleTeamManagerPerformanceItem */
         ConsoleTeamManagerPerformanceItem: {
@@ -8643,6 +9461,359 @@ export interface operations {
             };
         };
     };
+    get_current_queue_state_console_v1_queue_state_current_get: {
+        parameters: {
+            query: {
+                surface: string;
+                case_id?: string | null;
+                conversation_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleQueueStateCurrentResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_current_queue_state_console_v1_queue_state_current_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleQueueStateCurrentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleQueueStateCurrentResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_queue_state_views_console_v1_queue_state_views_get: {
+        parameters: {
+            query: {
+                surface: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSavedViewListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_queue_state_view_console_v1_queue_state_views_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleSavedViewCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSavedView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_queue_state_view_console_v1_queue_state_views__view_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSavedView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_queue_state_view_console_v1_queue_state_views__view_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_queue_state_view_console_v1_queue_state_views__view_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleSavedViewUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSavedView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_agents_console_v1_agents_get: {
         parameters: {
             query?: never;
@@ -8734,9 +9905,12 @@ export interface operations {
         parameters: {
             query?: {
                 status?: string | null;
+                queue_view?: string | null;
                 q?: string | null;
                 branch_id?: string | null;
                 assigned_to_me?: boolean;
+                assignee_id?: string | null;
+                unassigned?: boolean;
                 phone?: string | null;
                 has_delivery_error?: boolean;
                 has_pending_outbox?: boolean;
@@ -8745,6 +9919,8 @@ export interface operations {
                 sort_by?: string | null;
                 date_from?: string | null;
                 date_to?: string | null;
+                resolved_from?: string | null;
+                resolved_to?: string | null;
                 cursor?: string | null;
                 limit?: number;
             };
@@ -8770,6 +9946,204 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_case_action_console_v1_cases_bulk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCaseBulkActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseBulkActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_queue_case_assignees_console_v1_cases_assignees_get: {
+        parameters: {
+            query?: {
+                branch_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseAssigneeListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_case_assignees_console_v1_cases__case_id__assignees_get: {
+        parameters: {
+            query?: {
+                policy?: ("least_open_cases" | "follow_up_sla_balance") | null;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseAssigneeListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reassign_case_console_v1_cases__case_id__reassign_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCaseReassignRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    snooze_case_console_v1_cases__case_id__snooze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCaseSnoozeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reopen_case_console_v1_cases__case_id__reopen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCaseActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8906,6 +10280,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleMessageListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_case_updates_console_v1_cases__case_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9063,6 +10478,77 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_inbox_macro_console_v1_inbox_macros__macro_id__execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                macro_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMacroExecuteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMacroExecuteResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13999,6 +15485,161 @@ export interface operations {
             };
         };
     };
+    list_routing_profiles_console_v1_admin_routing_profiles_get: {
+        parameters: {
+            query: {
+                client_id: string;
+                agent_id?: string | null;
+                branch_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleRoutingProfileListResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_routing_profile_console_v1_admin_routing_profiles_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleRoutingProfileUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleRoutingProfile"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_routing_profile_console_v1_admin_routing_profiles__agent_id__delete: {
+        parameters: {
+            query: {
+                client_id: string;
+                branch_id?: string | null;
+                reason?: string | null;
+            };
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleRoutingProfileDeleteResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     disable_agent_access_console_v1_admin_agents__agent_id__disable_post: {
         parameters: {
             query?: never;
@@ -15562,9 +17203,16 @@ export interface operations {
         parameters: {
             query?: {
                 specialist_id?: string | null;
+                conversation_id?: string | null;
+                case_id?: string | null;
+                lane?: "attention" | "all";
+                needs_action?: boolean | null;
+                follow_up_owner_id?: string | null;
+                follow_up_overdue?: boolean | null;
                 date_from?: string | null;
                 date_to?: string | null;
                 status?: string | null;
+                cursor?: string | null;
                 limit?: number;
             };
             header?: never;
@@ -15706,6 +17354,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["BookingNoShowFollowUpRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_booking_follow_up_governance_console_v1_calendar_bookings__booking_id__follow_up_governance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                booking_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingFollowUpGovernanceRequest"];
             };
         };
         responses: {

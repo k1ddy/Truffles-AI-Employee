@@ -1,6 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Case, DecisionTraceEntry, Message } from "@/types";
-import { getChannelLabel, getSlaLabel, getStatusLabel, getTriggerLabel } from "@/utils/labels";
+import {
+    getCaseBookingSemanticSummary,
+    getCaseOriginSummary,
+    getCaseSlaIndicator,
+    getChannelLabel,
+    getStatusLabel,
+    getTriggerLabel,
+} from "@/utils/labels";
 
 function formatTimestamp(value?: string | null) {
     if (!value) {
@@ -22,6 +29,16 @@ function formatDuration(seconds?: number | null) {
         return `${hours} ч ${minutes % 60} мин`;
     }
     return `${minutes} мин`;
+}
+
+function formatTimeOnly(value?: string | null) {
+    if (!value) {
+        return "—";
+    }
+    return new Date(value).toLocaleTimeString("ru-RU", {
+        hour: "2-digit",
+        minute: "2-digit",
+    });
 }
 
 function getRoleLabel(role: string) {
@@ -184,6 +201,9 @@ export default function CaseDetailsPanel({
     canViewDiagnostics?: boolean;
 }) {
     const contact = getPrimaryContact(caseDetail);
+    const slaIndicator = getCaseSlaIndicator(caseDetail);
+    const originSummary = getCaseOriginSummary(caseDetail);
+    const bookingSemanticSummary = getCaseBookingSemanticSummary(caseDetail.booking_summary);
     const summaryText = caseDetail.context_summary || null;
     const userMessage = caseDetail.user_message || null;
     const contextText = summaryText || userMessage || "Контекст недоступен";
@@ -276,11 +296,27 @@ export default function CaseDetailsPanel({
                             <span>{getStatusLabel(caseDetail.status)}</span>
                         </div>
                         <div className="flex items-center justify-between text-xs mt-2">
-                            <span className="text-muted-foreground">SLA:</span>
-                            <span>{caseDetail.sla_status ? getSlaLabel(caseDetail.sla_status) : "—"}</span>
+                            <span className="text-muted-foreground">Следующее действие:</span>
+                            <span>{slaIndicator.label}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs mt-2">
+                            <span className="text-muted-foreground">Дедлайн ответа:</span>
+                            <span>
+                                {slaIndicator.state === "reply_due" || slaIndicator.state === "overdue"
+                                    ? formatTimeOnly(caseDetail.target_response_at)
+                                    : "—"}
+                            </span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs mt-2">
+                            <span className="text-muted-foreground">Отложено до:</span>
+                            <span>{formatTimestamp(caseDetail.snoozed_until)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs mt-2">
+                            <span className="text-muted-foreground">Причина отсрочки:</span>
+                            <span>{caseDetail.snoozed_reason || "—"}</span>
                         </div>
                     </SectionCard>
-                    <SectionCard title="Источник обращения">
+                    <SectionCard title="Почему заявка открыта">
                         <div className="flex items-center justify-between text-xs">
                             <span className="text-muted-foreground">Канал:</span>
                             <span>{getChannelLabel(caseDetail.channel)}</span>
@@ -289,11 +325,20 @@ export default function CaseDetailsPanel({
                             <span className="text-muted-foreground">Повод:</span>
                             <span>{getTriggerLabel(caseDetail.trigger_type)}</span>
                         </div>
-                        {caseDetail.trigger_value && (
-                            <div className="mt-2 text-xs text-muted-foreground">
-                                Детали: {caseDetail.trigger_value}
+                        <div className="mt-3 rounded border border-border/60 bg-muted/40 px-3 py-2">
+                            <p className="text-xs font-semibold text-foreground">{originSummary.title}</p>
+                            {originSummary.detail ? (
+                                <p className="mt-1 text-xs text-muted-foreground">{originSummary.detail}</p>
+                            ) : null}
+                        </div>
+                        {bookingSemanticSummary ? (
+                            <div className="mt-3 rounded border border-border/60 bg-muted/40 px-3 py-2">
+                                <p className="text-xs font-semibold text-foreground">{bookingSemanticSummary.operatorSummary}</p>
+                                {bookingSemanticSummary.meta ? (
+                                    <p className="mt-1 text-xs text-muted-foreground">{bookingSemanticSummary.meta}</p>
+                                ) : null}
                             </div>
-                        )}
+                        ) : null}
                     </SectionCard>
                     <SectionCard title="Активность">
                         <div className="space-y-2 text-xs">
@@ -337,6 +382,10 @@ export default function CaseDetailsPanel({
                         <div className="flex items-center justify-between text-xs">
                             <span className="text-muted-foreground">Менеджер:</span>
                             <span>{caseDetail.assigned_to_name ?? "Не назначен"}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs mt-2">
+                            <span className="text-muted-foreground">Кто отложил:</span>
+                            <span>{caseDetail.snoozed_by ?? "—"}</span>
                         </div>
                         <div className="flex items-center justify-between text-xs mt-2">
                             <span className="text-muted-foreground">Статус работы:</span>

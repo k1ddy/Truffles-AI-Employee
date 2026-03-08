@@ -10,11 +10,13 @@ Prerequisites
 
 ## Quickstart (single entrypoint)
 
-Local deterministic run (default: KPI + anti-drift):
+Local deterministic run (default: KPI + anti-drift + audit governance):
 
 ```bash
 scripts/platform_admin_control_loop.sh --run-id local-<id> --run-e2e 0
 ```
+
+The run also generates remediation assist artifacts from KPI guard status by default.
 
 Optional local run with e2e lane:
 
@@ -28,6 +30,10 @@ scripts/platform_admin_control_loop.sh \
 Artifacts:
 - `/tmp/platform_admin_control_loop/<run-id>/summary.json`
 - `/tmp/platform_admin_control_loop/<run-id>/kpi_snapshot.json`
+- `/tmp/platform_admin_control_loop/<run-id>/governance_audit.json`
+- `/tmp/platform_admin_control_loop/<run-id>/remediation_plan.json`
+- `/tmp/platform_admin_control_loop/<run-id>/remediation_brief.md`
+- `/tmp/platform_admin_control_loop/<run-id>/remediation_commands.sh`
 
 CI automation:
 - Workflow: `.github/workflows/platform-admin-control-loop.yml`
@@ -144,6 +150,32 @@ Recommended sequence:
 1. `dry_run` with archive preview and pending split.
 2. Small `execute` batch with archive enabled.
 3. Re-run KPI snapshot and SQL reason breakdown before next batch.
+
+## Assisted remediation loop (Wave steady-state ops)
+
+Use deterministic assist generator directly (if control-loop artifacts already exist):
+
+```bash
+python3 ops/platform_admin_remediation_assist.py \
+  --kpi-snapshot /tmp/platform_admin_control_loop/<run-id>/kpi_snapshot.json \
+  --output-dir /tmp/platform_admin_control_loop/<run-id> \
+  --run-id <run-id>
+```
+
+Strict gate mode (returns non-zero when rollout must stay blocked):
+
+```bash
+python3 ops/platform_admin_remediation_assist.py \
+  --kpi-snapshot /tmp/platform_admin_control_loop/<run-id>/kpi_snapshot.json \
+  --output-dir /tmp/platform_admin_control_loop/<run-id> \
+  --run-id <run-id> \
+  --strict
+```
+
+Decision contract:
+- `decision.rollout=proceed`: observation mode, no remediation execute actions.
+- `decision.rollout=caution`: remediation/escalation needed before next wave decision.
+- `decision.rollout=blocked`: stop-the-line for rollout until remediation verification passes.
 
 ## 5) Evidence package for PR/session
 

@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import os
@@ -19,9 +20,9 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy import and_, case, delete, event, func, or_, text
+from sqlalchemy import DateTime, and_, case, cast, delete, event, func, or_, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
@@ -72,8 +73,12 @@ from app.models import (
 from app.models import (
     ConsoleMacro as ConsoleMacroModel,
 )
+from app.models import (
+    ConsoleRoutingProfile as ConsoleRoutingProfileModel,
+)
 from app.models.appointment import Appointment
 from app.models.appointment_audit import AppointmentAudit
+from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.models.reminder_job import ReminderJob
 from app.schemas.capabilities import (
     CAPABILITIES_SCHEMA_VERSION,
@@ -135,7 +140,17 @@ from app.schemas.console import (
     ConsoleCase,
     ConsoleCaseActionResponse,
     ConsoleCaseActionSync,
+    ConsoleCaseAssigneeListResponse,
+    ConsoleCaseAssigneeOption,
+    ConsoleCaseBookingSummary,
+    ConsoleCaseBulkActionRequest,
+    ConsoleCaseBulkActionResponse,
+    ConsoleCaseBulkActionResult,
     ConsoleCaseListResponse,
+    ConsoleCaseReassignRequest,
+    ConsoleCaseRoutingDecision,
+    ConsoleCaseRoutingPolicyType,
+    ConsoleCaseSnoozeRequest,
     ConsoleClient,
     ConsoleClientCreateRequest,
     ConsoleClientCreateResponse,
@@ -195,6 +210,8 @@ from app.schemas.console import (
     ConsoleLearningCandidateListResponse,
     ConsoleMacroCreateRequest,
     ConsoleMacroCreateResponse,
+    ConsoleMacroExecuteRequest,
+    ConsoleMacroExecuteResponse,
     ConsoleMacroListResponse,
     ConsoleMacroUpdateRequest,
     ConsoleManagerMessageRequest,
@@ -243,10 +260,6 @@ from app.schemas.console import (
     ConsoleOnboardingIntakeQualityMatrix,
     ConsoleOnboardingOperationalPipeline,
     ConsoleOnboardingOperationalStage,
-    ConsoleOnboardingReadinessDimension,
-    ConsoleOnboardingReadinessHardGate,
-    ConsoleOnboardingReadinessKernel,
-    ConsoleOnboardingReadinessQuestion,
     ConsoleOnboardingScorecardCheck,
     ConsoleOnboardingScorecardResponse,
     ConsoleOnboardingSlaControlLoop,
@@ -284,6 +297,8 @@ from app.schemas.console import (
     ConsoleProviderLifecycleItem,
     ConsoleProviderLifecycleListResponse,
     ConsoleProviderOpsQueueItem,
+    ConsoleQueueStateCurrentRequest,
+    ConsoleQueueStateCurrentResponse,
     ConsoleReferencePack,
     ConsoleReferencePackListResponse,
     ConsoleReferencePackUpsertRequest,
@@ -293,6 +308,14 @@ from app.schemas.console import (
     ConsoleReminderListResponse,
     ConsoleReminderRetryRequest,
     ConsoleReminderRetryResponse,
+    ConsoleRoutingProfile,
+    ConsoleRoutingProfileDeleteResponse,
+    ConsoleRoutingProfileListResponse,
+    ConsoleRoutingProfileUpsertRequest,
+    ConsoleSavedView,
+    ConsoleSavedViewCreateRequest,
+    ConsoleSavedViewListResponse,
+    ConsoleSavedViewUpdateRequest,
     ConsoleSettingsResponse,
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
@@ -334,6 +357,9 @@ from app.schemas.console import (
 from app.schemas.console import (
     ConsoleMacro as ConsoleMacroSchema,
 )
+from app.schemas.console import (
+    ConsoleMacroAction as ConsoleMacroActionSchema,
+)
 from app.schemas.onboarding_contract import (
     ONBOARDING_CONTRACT_SCHEMA_VERSION,
     OnboardingContractPayload,
@@ -371,9 +397,130 @@ from app.services.compliance_policy_registry_service import (
     resolve_effective_compliance_policy_version,
     rollback_compliance_policy_version,
 )
-from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
+from app.services.console_auth import (
+    ConsoleAuthContext,
+    get_console_context,
+    has_console_permission,
+    require_console_permission,
+)
+from app.services.console_branch_changes import (
+    BRANCH_CHANGE_MUTABLE_STATUSES as _BRANCH_CHANGE_MUTABLE_STATUSES,
+)
+from app.services.console_branch_changes import (
+    apply_branch_change_publish_failed_state as _apply_branch_change_publish_failed_state,
+)
+from app.services.console_branch_changes import (
+    apply_branch_change_publish_runtime_error_state as _apply_branch_change_publish_runtime_error_state,
+)
+from app.services.console_branch_changes import (
+    apply_branch_change_published_state as _apply_branch_change_published_state,
+)
+from app.services.console_branch_changes import (
+    apply_branch_change_rollback_failed_state as _apply_branch_change_rollback_failed_state,
+)
+from app.services.console_branch_changes import (
+    apply_branch_change_rolled_back_state as _apply_branch_change_rolled_back_state,
+)
+from app.services.console_branch_changes import (
+    apply_branch_change_validation_result as _apply_branch_change_validation_result,
+)
+from app.services.console_branch_changes import (
+    build_branch_change_list_response as _build_branch_change_list_response,
+)
+from app.services.console_branch_changes import (
+    build_branch_change_response as _build_branch_change_response_for_context,
+)
+from app.services.console_branch_changes import (
+    build_branch_change_rollback_patch as _build_branch_change_rollback_patch,
+)
+from app.services.console_branch_changes import (
+    build_branch_update_request as _build_branch_update_request,
+)
+from app.services.console_branch_changes import (
+    get_branch_by_id as _get_branch_by_id_for_change_context,
+)
+from app.services.console_branch_changes import (
+    get_branch_change_draft_payload as _get_branch_change_draft_payload,
+)
+from app.services.console_branch_changes import (
+    get_branch_change_for_context as _get_branch_change_for_context_row,
+)
+from app.services.console_branch_changes import (
+    get_branch_for_change_context as _get_branch_for_change_context_row,
+)
+from app.services.console_branch_changes import (
+    normalize_branch_change_patch as _normalize_branch_change_patch_payload,
+)
+from app.services.console_branch_changes import (
+    normalize_branch_change_status_filter as _normalize_branch_change_status_filter,
+)
+from app.services.console_branch_changes import (
+    prepare_branch_change_payload as _prepare_branch_change_payload_for_context,
+)
+from app.services.console_branch_changes import (
+    prepare_branch_change_rollback_payload as _prepare_branch_change_rollback_payload_for_context,
+)
+from app.services.console_branch_changes import (
+    query_branch_changes_for_context as _query_branch_changes_for_context,
+)
+from app.services.console_branch_changes import (
+    serialize_branch_change_record as _serialize_branch_change_record,
+)
+from app.services.console_branch_changes import (
+    snapshot_branch_for_change as _snapshot_branch_for_change,
+)
+from app.services.console_case_routing import (
+    CASE_ROUTING_POLICY_DEFAULT,
+    CaseRoutingBookingContext,
+    CaseRoutingSignalContext,
+)
+from app.services.console_case_routing import (
+    adjust_case_routing_loads as _adjust_case_routing_loads_service,
+)
+from app.services.console_case_routing import (
+    annotate_case_assignee_options as _annotate_case_assignee_options_service,
+)
+from app.services.console_case_routing import (
+    build_case_routing_decision as _build_case_routing_decision_service,
+)
+from app.services.console_case_routing import (
+    normalize_case_routing_policy as _normalize_case_routing_policy_service,
+)
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
+from app.services.console_control_tower_program import (
+    build_admin_control_tower_action_center_response as _build_admin_control_tower_action_center_response,
+)
+from app.services.console_control_tower_program import (
+    build_admin_control_tower_drift_board_response as _build_admin_control_tower_drift_board_response,
+)
+from app.services.console_control_tower_program import (
+    build_admin_control_tower_migration_program_response as _build_admin_control_tower_migration_program_response,
+)
+from app.services.console_control_tower_program import (
+    build_admin_control_tower_readiness_board_response as _build_admin_control_tower_readiness_board_response,
+)
+from app.services.console_control_tower_utils import (
+    build_admin_control_tower_migration_wave_detail as _build_admin_control_tower_migration_wave_detail,
+)
+from app.services.console_control_tower_utils import (
+    build_control_tower_issue_counts as _build_control_tower_issue_counts,
+)
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
+from app.services.console_fleet_state import CLIENT_STATUS_ACTIVE as _CLIENT_STATUS_ACTIVE
+from app.services.console_fleet_state import FLEET_COMMERCIAL_STATES as _FLEET_COMMERCIAL_STATES
+from app.services.console_fleet_state import FLEET_LIFECYCLE_STATES as _FLEET_LIFECYCLE_STATES
+from app.services.console_fleet_state import FLEET_NEXT_ACTION_STATES as _FLEET_NEXT_ACTION_STATES
+from app.services.console_fleet_state import FLEET_PAYMENT_STATES as _FLEET_PAYMENT_STATES
+from app.services.console_fleet_state import FLEET_SERVICE_STATES as _FLEET_SERVICE_STATES
+from app.services.console_fleet_state import is_client_active_status as _is_client_active_status
+from app.services.console_fleet_state import normalize_fleet_payment_status as _normalize_fleet_payment_status
+from app.services.console_fleet_state import parse_fleet_lifecycle_param as _parse_fleet_lifecycle_param
+from app.services.console_fleet_state import parse_fleet_payment_param as _parse_fleet_payment_param
+from app.services.console_fleet_state import parse_fleet_service_param as _parse_fleet_service_param
+from app.services.console_fleet_state import resolve_fleet_commercial_state as _resolve_fleet_commercial_state
+from app.services.console_fleet_state import resolve_fleet_lifecycle_state as _resolve_fleet_lifecycle_state
+from app.services.console_fleet_state import resolve_fleet_next_action as _resolve_fleet_next_action
+from app.services.console_fleet_state import resolve_fleet_service_state as _resolve_fleet_service_state
 from app.services.console_idempotency import (
     finalize_idempotency,
     release_idempotency,
@@ -384,6 +531,57 @@ from app.services.console_knowledge_preflight import (
     build_knowledge_draft_hash,
     build_knowledge_validate_payload,
     has_recent_knowledge_preflight,
+)
+from app.services.console_membership_state import (
+    ensure_agent_lifecycle_is_mutable as _ensure_agent_lifecycle_is_mutable,
+)
+from app.services.console_membership_state import (
+    ensure_membership_agent_is_mutable as _ensure_membership_agent_is_mutable,
+)
+from app.services.console_membership_state import (
+    ensure_membership_change_keeps_privileged_access as _ensure_membership_change_keeps_privileged_access,
+)
+from app.services.console_membership_state import (
+    ensure_membership_role_is_assignable as _ensure_membership_role_is_assignable,
+)
+from app.services.console_membership_state import (
+    ensure_role_not_deprecated_for_assignment as _ensure_role_not_deprecated_for_assignment,
+)
+from app.services.console_membership_state import (
+    has_other_privileged_access_for_client as _has_other_privileged_access_for_client,
+)
+from app.services.console_membership_state import (
+    is_privileged_access_role as _is_privileged_access_role,
+)
+from app.services.console_onboarding_readiness import (
+    BRANCH_GO_LIVE_DEFAULT_STATE as _BRANCH_GO_LIVE_DEFAULT_STATE,
+)
+from app.services.console_onboarding_readiness import (
+    coerce_utc_datetime as _coerce_utc,
+)
+from app.services.console_onboarding_readiness import (
+    ensure_branch_go_live_gate as _require_branch_go_live_gate,
+)
+from app.services.console_onboarding_readiness import (
+    is_branch_go_live_allowed as _is_branch_go_live_allowed,
+)
+from app.services.console_onboarding_readiness import (
+    is_branch_go_live_waiver_active as _is_branch_go_live_waiver_active,
+)
+from app.services.console_onboarding_readiness import (
+    is_readiness_hard_gate_enforced_for_branch as _is_readiness_hard_gate_enforced_for_branch,
+)
+from app.services.console_onboarding_readiness import (
+    normalize_branch_go_live_state as _normalize_branch_go_live_state,
+)
+from app.services.console_onboarding_readiness import (
+    normalize_go_live_waiver_ttl_hours as _normalize_go_live_waiver_ttl_hours,
+)
+from app.services.console_onboarding_readiness import (
+    resolve_readiness_hard_gate_blockers as _resolve_readiness_hard_gate_blockers,
+)
+from app.services.console_onboarding_readiness import (
+    serialize_onboarding_readiness_kernel as _serialize_onboarding_readiness_kernel,
 )
 from app.services.console_owner_admin import (
     build_data_trust_actions as _build_data_trust_actions,
@@ -420,6 +618,81 @@ from app.services.console_owner_admin import (
 )
 from app.services.console_owner_admin import (
     safe_int as _safe_int,
+)
+from app.services.console_queue_state import (
+    build_queue_state_scope as _build_queue_state_scope,
+)
+from app.services.console_queue_state import (
+    get_current_queue_state as _get_current_queue_state_record,
+)
+from app.services.console_queue_state import (
+    normalize_queue_state_payload as _normalize_queue_state_payload,
+)
+from app.services.console_queue_state import (
+    upsert_current_queue_state as _upsert_current_queue_state_record,
+)
+from app.services.console_router_utils import (
+    dedupe_list as _dedupe_list,
+)
+from app.services.console_router_utils import (
+    parse_bool_param as _parse_bool_param_util,
+)
+from app.services.console_router_utils import (
+    parse_env_bool as _parse_env_bool,
+)
+from app.services.console_router_utils import (
+    parse_env_csv_set as _parse_env_csv_set,
+)
+from app.services.console_router_utils import (
+    parse_env_int as _parse_env_int,
+)
+from app.services.console_router_utils import (
+    parse_uuid_param as _parse_uuid_param_util,
+)
+from app.services.console_router_utils import (
+    reject_unknown_query_params as _reject_unknown_query_params_util,
+)
+from app.services.console_router_utils import (
+    request_with_query_params as _request_with_query_params,
+)
+from app.services.console_router_utils import (
+    validate_limit as _validate_limit_util,
+)
+from app.services.console_routing_profiles import (
+    ROUTING_STATUS_AVAILABLE as _ROUTING_STATUS_AVAILABLE,
+)
+from app.services.console_routing_profiles import (
+    delete_routing_profile as _delete_routing_profile_service,
+)
+from app.services.console_routing_profiles import (
+    list_routing_profiles as _list_routing_profiles_service,
+)
+from app.services.console_routing_profiles import (
+    resolve_routing_profile_map as _resolve_routing_profile_map_service,
+)
+from app.services.console_routing_profiles import (
+    upsert_routing_profile as _upsert_routing_profile_service,
+)
+from app.services.console_saved_views import (
+    create_saved_view as _create_saved_view,
+)
+from app.services.console_saved_views import (
+    delete_saved_view as _delete_saved_view,
+)
+from app.services.console_saved_views import (
+    get_saved_view_for_client as _get_saved_view_for_client,
+)
+from app.services.console_saved_views import (
+    list_saved_views as _list_saved_views,
+)
+from app.services.console_saved_views import (
+    normalize_saved_view_scope as _normalize_saved_view_scope,
+)
+from app.services.console_saved_views import (
+    saved_view_applies_to_context as _saved_view_applies_to_context,
+)
+from app.services.console_saved_views import (
+    update_saved_view as _update_saved_view,
 )
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import resolve_telegram_routing
@@ -547,6 +820,8 @@ from app.services.sla_profile_registry_service import (
     resolve_effective_profile_version,
     rollback_profile_version,
 )
+from app.services.state_service import manager_reassign as state_manager_reassign
+from app.services.state_service import manager_reopen as state_manager_reopen
 from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_return as state_manager_return
 from app.services.state_service import manager_take as state_manager_take
@@ -623,13 +898,1071 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
     )
 
 
-def _calculate_sla_status(created_at: datetime) -> str:
-    time_since_creation = (datetime.now(timezone.utc) - created_at).total_seconds()
-    if time_since_creation > 7200:  # 2 hours
+_CASE_REPLY_WINDOW_MINUTES = 60
+_CASE_DUE_SOON_MINUTES = 15
+_CASE_ASSIGNABLE_ROLES = {"owner", "admin", "manager"}
+_CASE_SNOOZE_DEFAULT_REASON = "case_snooze"
+_CASE_BULK_MAX_ITEMS = 50
+_CASE_ROUTING_POLICY_DEFAULT = CASE_ROUTING_POLICY_DEFAULT
+_CASE_SNOOZE_META_KEYS = (
+    "snoozed_until",
+    "snoozed_at",
+    "snooze_reason",
+    "snoozed_by_id",
+    "snoozed_by_name",
+)
+
+
+def _resolve_case_reply_deadline(created_at: datetime) -> datetime:
+    return created_at + timedelta(minutes=_CASE_REPLY_WINDOW_MINUTES)
+
+
+def _calculate_sla_status(*, deadline_at: datetime, now_utc: datetime) -> str:
+    remaining_seconds = (deadline_at - now_utc).total_seconds()
+    if remaining_seconds <= 0:
         return "breached"
-    if time_since_creation > 3600:  # 1 hour
+    if remaining_seconds <= _CASE_DUE_SOON_MINUTES * 60:
         return "warning"
     return "ok"
+
+
+def _parse_case_snooze_datetime(value: object) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return _coerce_utc_datetime(value)
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return _coerce_utc_datetime(parsed)
+
+
+def _resolve_case_snooze_state(
+    *,
+    handover_meta: object,
+    last_inbound_at: Optional[datetime],
+    now_utc: datetime,
+) -> dict[str, object | None]:
+    if not isinstance(handover_meta, dict):
+        return {
+            "active": False,
+            "snoozed_until": None,
+            "snoozed_reason": None,
+            "snoozed_by": None,
+        }
+
+    snoozed_until = _parse_case_snooze_datetime(handover_meta.get("snoozed_until"))
+    snoozed_at = _parse_case_snooze_datetime(handover_meta.get("snoozed_at"))
+    if not snoozed_until or snoozed_until <= now_utc:
+        return {
+            "active": False,
+            "snoozed_until": None,
+            "snoozed_reason": None,
+            "snoozed_by": None,
+        }
+    if last_inbound_at and snoozed_at and last_inbound_at > snoozed_at:
+        return {
+            "active": False,
+            "snoozed_until": None,
+            "snoozed_reason": None,
+            "snoozed_by": None,
+        }
+
+    return {
+        "active": True,
+        "snoozed_until": snoozed_until.isoformat(),
+        "snoozed_reason": _normalize_optional_text(handover_meta.get("snooze_reason")),
+        "snoozed_by": _normalize_optional_text(handover_meta.get("snoozed_by_name")),
+    }
+
+
+def _build_case_queue_signals(
+    *,
+    created_at: datetime,
+    status: str,
+    needs_reply: bool,
+    has_delivery_error: bool,
+    has_pending_outbox: bool,
+    human_lock_active: bool,
+    human_lock_reason: Optional[str] = None,
+    last_inbound_at: Optional[datetime] = None,
+    last_outbound_at: Optional[datetime] = None,
+    first_response_at: Optional[datetime] = None,
+    handover_meta: object = None,
+    now_utc: Optional[datetime] = None,
+) -> dict[str, object | None]:
+    effective_now = now_utc or datetime.now(timezone.utc)
+    deadline_at = _resolve_case_reply_deadline(created_at)
+    target_response_at = deadline_at.isoformat()
+    sla_status = _calculate_sla_status(deadline_at=deadline_at, now_utc=effective_now) if needs_reply else "ok"
+    sla_action_state = "waiting_client"
+    sla_overdue_minutes: Optional[int] = None
+    priority_tier = "low"
+    attention_reason = None
+    waiting_for_customer = (
+        not needs_reply
+        and status != "resolved"
+        and (
+            human_lock_active
+            or (last_outbound_at is not None and (last_inbound_at is None or last_outbound_at >= last_inbound_at))
+            or first_response_at is not None
+        )
+    )
+    snooze_state = _resolve_case_snooze_state(
+        handover_meta=handover_meta,
+        last_inbound_at=last_inbound_at,
+        now_utc=effective_now,
+    )
+
+    if has_delivery_error:
+        priority_tier = "urgent"
+        attention_reason = "Ошибка доставки: проверьте отправку"
+        sla_action_state = "delivery_issue"
+    elif has_pending_outbox:
+        priority_tier = "high"
+        attention_reason = "Есть ожидающие отправки сообщения"
+        sla_action_state = "pending_outbox"
+    elif bool(snooze_state["active"]):
+        priority_tier = "low"
+        attention_reason = "Диалог отложен менеджером"
+        sla_action_state = "snoozed"
+    elif needs_reply and sla_status == "breached":
+        sla_overdue_minutes = max(
+            1,
+            int((effective_now - deadline_at).total_seconds() // 60),
+        )
+        priority_tier = "urgent"
+        attention_reason = "Клиент ожидает ответ"
+        sla_action_state = "overdue"
+    elif needs_reply:
+        priority_tier = "high" if sla_status == "warning" else "normal"
+        attention_reason = "Клиент ожидает ответ"
+        sla_action_state = "reply_due"
+    elif waiting_for_customer:
+        priority_tier = "normal"
+        attention_reason = "Ожидаем ответ клиента"
+        sla_action_state = "waiting_client"
+    elif status == "resolved":
+        sla_action_state = "resolved"
+
+    return {
+        "sla_status": sla_status,
+        "sla_action_state": sla_action_state,
+        "sla_overdue_minutes": sla_overdue_minutes,
+        "priority_tier": priority_tier,
+        "attention_reason": attention_reason,
+        "target_response_at": target_response_at,
+        "snoozed_until": snooze_state["snoozed_until"],
+        "snoozed_reason": snooze_state["snoozed_reason"],
+        "snoozed_by": snooze_state["snoozed_by"],
+    }
+
+
+def _build_case_business_status(
+    *,
+    status: str,
+    assigned_to_id: UUID | str | None,
+    assigned_to_name: Optional[str],
+    queue_signals: Optional[dict[str, object | None]] = None,
+) -> dict[str, str]:
+    action_state = str((queue_signals or {}).get("sla_action_state") or "").lower()
+    has_owner = bool(assigned_to_id or assigned_to_name)
+
+    if status == "resolved":
+        return {"business_status_code": "resolved", "business_status_label": "Закрыта"}
+    if status == "bot_handling":
+        return {"business_status_code": "bot_handling", "business_status_label": "Бот ведет"}
+    if action_state == "snoozed":
+        return {"business_status_code": "snoozed", "business_status_label": "Отложена"}
+    if not has_owner:
+        return {"business_status_code": "unassigned", "business_status_label": "Без владельца"}
+    if action_state in {"reply_due", "overdue"}:
+        return {"business_status_code": "needs_reply", "business_status_label": "Нужен ответ"}
+    if action_state == "waiting_client":
+        return {"business_status_code": "waiting_client", "business_status_label": "Ждем клиента"}
+    if status == "active":
+        return {"business_status_code": "in_progress", "business_status_label": "В работе"}
+    return {"business_status_code": "open", "business_status_label": "Открыта"}
+
+
+def _serialize_case_booking_followup(audit_row: Optional[AppointmentAudit]) -> dict[str, Any]:
+    if not audit_row:
+        return {
+            "done": False,
+            "result": None,
+        }
+    payload = audit_row.payload if isinstance(audit_row.payload, dict) else {}
+    return {
+        "done": True,
+        "result": payload.get("result") or "contacted",
+    }
+
+
+def _get_case_booking_attention_reason(status: str, *, followup_done: bool) -> Optional[str]:
+    normalized = (status or "").upper()
+    if normalized == "PENDING_CONFIRMATION":
+        return "Нужно подтвердить визит"
+    if normalized == "RESCHEDULE_REQUESTED":
+        return "Клиент просит перенос"
+    if normalized == "HOLD":
+        return "Нужно решение менеджера"
+    if normalized == "NO_SHOW" and not followup_done:
+        return "Связаться после неявки"
+    return None
+
+
+def _format_case_booking_slot_label(
+    *,
+    start_at: Optional[datetime],
+    specialist_name: Optional[str],
+    service_type: Optional[str],
+) -> str:
+    parts: list[str] = []
+    if start_at:
+        parts.append(start_at.strftime("%d.%m %H:%M"))
+    if specialist_name:
+        parts.append(specialist_name)
+    if service_type:
+        parts.append(service_type)
+    return " · ".join(parts)
+
+
+def _build_case_booking_operator_summary(
+    *,
+    status: str,
+    slot_label: str,
+    attention_reason: Optional[str],
+    no_show_followup_done: bool,
+    no_show_followup_result: Optional[str],
+) -> str:
+    normalized = (status or "").upper()
+    if normalized == "PENDING_CONFIRMATION":
+        return f"По заявке создан визит{f' {slot_label}' if slot_label else ''} — нужно подтвердить запись."
+    if normalized == "RESCHEDULE_REQUESTED":
+        return f"Клиент просит перенос записи{f' {slot_label}' if slot_label else ''}."
+    if normalized == "HOLD":
+        return f"Запись{f' {slot_label}' if slot_label else ''} удерживается до решения менеджера."
+    if normalized in {"DRAFT", "CONFIRMED", "CHECKED_IN"}:
+        return f"По заявке есть запись{f' {slot_label}' if slot_label else ''}."
+    if normalized == "NO_SHOW" and no_show_followup_done:
+        if no_show_followup_result == "rebooked":
+            return "После неявки клиента уже перезаписали."
+        return "После неявки с клиентом уже связались."
+    if normalized == "NO_SHOW":
+        return f"Клиент не пришел на визит{f' {slot_label}' if slot_label else ''} — {attention_reason or 'нужен follow-up'}."
+    if normalized == "COMPLETED":
+        return f"Визит по заявке завершен{f': {slot_label}' if slot_label else ''}."
+    if normalized == "CANCELLED":
+        return f"Запись по заявке отменена{f': {slot_label}' if slot_label else ''}."
+    return f"По заявке есть запись{f' {slot_label}' if slot_label else ''}."
+
+
+def _select_primary_case_booking(
+    query,
+    *,
+    now_utc: datetime,
+) -> Optional[Appointment]:
+    upcoming = (
+        query.filter(Appointment.start_at >= now_utc)
+        .order_by(Appointment.start_at.asc(), Appointment.created_at.desc())
+        .first()
+    )
+    if upcoming is not None:
+        return upcoming
+    return query.order_by(Appointment.start_at.desc(), Appointment.created_at.desc()).first()
+
+
+def _build_case_booking_summary(
+    db: Session,
+    *,
+    client_id: UUID,
+    handover: Handover,
+    now_utc: Optional[datetime] = None,
+) -> Optional[ConsoleCaseBookingSummary]:
+    effective_now = now_utc or datetime.now(timezone.utc)
+    explicit_query = db.query(Appointment).filter(
+        Appointment.client_id == client_id,
+        Appointment.case_id == handover.id,
+    )
+    booking = _select_primary_case_booking(explicit_query, now_utc=effective_now)
+    if booking is None and handover.conversation_id:
+        fallback_query = db.query(Appointment).filter(
+            Appointment.client_id == client_id,
+            Appointment.conversation_id == handover.conversation_id,
+        )
+        booking = _select_primary_case_booking(fallback_query, now_utc=effective_now)
+    if booking is None:
+        return None
+    if not isinstance(booking, Appointment):
+        return None
+
+    service_type = (
+        db.query(AppointmentServiceModel.service_name)
+        .filter(AppointmentServiceModel.appointment_id == booking.id)
+        .scalar()
+    )
+    no_show_followup_audit = (
+        db.query(AppointmentAudit)
+        .filter(
+            AppointmentAudit.appointment_id == booking.id,
+            AppointmentAudit.action == "no_show_followup",
+        )
+        .order_by(AppointmentAudit.created_at.desc())
+        .first()
+    )
+    followup_state = _serialize_case_booking_followup(no_show_followup_audit)
+    attention_reason = _get_case_booking_attention_reason(
+        booking.status,
+        followup_done=bool(followup_state["done"]),
+    )
+    slot_label = _format_case_booking_slot_label(
+        start_at=booking.start_at,
+        specialist_name=getattr(getattr(booking, "specialist", None), "name", None),
+        service_type=service_type,
+    )
+    operator_summary = _build_case_booking_operator_summary(
+        status=booking.status,
+        slot_label=slot_label,
+        attention_reason=attention_reason,
+        no_show_followup_done=bool(followup_state["done"]),
+        no_show_followup_result=followup_state["result"],
+    )
+    return ConsoleCaseBookingSummary(
+        booking_id=booking.id,
+        status=booking.status,
+        start_at=booking.start_at.isoformat() if booking.start_at else None,
+        specialist_name=getattr(getattr(booking, "specialist", None), "name", None),
+        service_type=service_type,
+        needs_action=attention_reason is not None,
+        attention_reason=attention_reason,
+        no_show_followup_done=bool(followup_state["done"]),
+        no_show_followup_result=followup_state["result"],
+        operator_summary=operator_summary,
+    )
+
+
+def _build_case_active_snooze_expr(
+    *,
+    last_inbound_col,
+    now_utc: datetime,
+):
+    snoozed_until_expr = cast(func.nullif(Handover.meta["snoozed_until"].astext, ""), DateTime(timezone=True))
+    snoozed_at_expr = cast(func.nullif(Handover.meta["snoozed_at"].astext, ""), DateTime(timezone=True))
+    return and_(
+        Handover.status.notin_(["resolved", "bot_handling"]),
+        snoozed_until_expr.is_not(None),
+        snoozed_until_expr > now_utc,
+        or_(
+            snoozed_at_expr.is_(None),
+            last_inbound_col.is_(None),
+            last_inbound_col <= snoozed_at_expr,
+        ),
+    )
+
+
+def _build_case_queue_view_expr(
+    *,
+    queue_view: str,
+    last_inbound_col,
+    last_outbound_col,
+    pending_count_col,
+    failed_count_col,
+    lock_until_col,
+    now_utc: datetime,
+):
+    has_owner_expr = or_(
+        Handover.assigned_to.is_not(None),
+        func.coalesce(Handover.assigned_to_name, "") != "",
+    )
+    delivery_expr = or_(
+        func.coalesce(failed_count_col, 0) > 0,
+        func.coalesce(pending_count_col, 0) > 0,
+    )
+    active_snooze_expr = _build_case_active_snooze_expr(
+        last_inbound_col=last_inbound_col,
+        now_utc=now_utc,
+    )
+    needs_reply_expr = and_(
+        Handover.status != "resolved",
+        Handover.status != "bot_handling",
+        ~delivery_expr,
+        ~active_snooze_expr,
+        last_inbound_col.is_not(None),
+        or_(last_outbound_col.is_(None), last_inbound_col > last_outbound_col),
+    )
+    waiting_client_expr = and_(
+        Handover.status != "resolved",
+        Handover.status != "bot_handling",
+        ~delivery_expr,
+        ~active_snooze_expr,
+        ~needs_reply_expr,
+        has_owner_expr,
+        or_(
+            lock_until_col.is_not(None),
+            and_(
+                last_outbound_col.is_not(None),
+                or_(last_inbound_col.is_(None), last_outbound_col >= last_inbound_col),
+            ),
+            Handover.first_response_at.is_not(None),
+        ),
+    )
+    unassigned_expr = and_(
+        Handover.status != "resolved",
+        Handover.status != "bot_handling",
+        ~has_owner_expr,
+    )
+
+    if queue_view == "needs_reply":
+        return needs_reply_expr
+    if queue_view == "waiting_client":
+        return waiting_client_expr
+    if queue_view == "snoozed":
+        return active_snooze_expr
+    if queue_view == "delivery":
+        return delivery_expr
+    if queue_view == "unassigned":
+        return unassigned_expr
+    raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid queue_view")
+
+
+def _build_case_action_case(
+    *,
+    db: Optional[Session] = None,
+    client_id: Optional[UUID] = None,
+    handover: Handover,
+    branch_id: UUID | None,
+    now_utc: Optional[datetime] = None,
+) -> ConsoleCase:
+    effective_now = now_utc or datetime.now(timezone.utc)
+    snooze_state = _resolve_case_snooze_state(
+        handover_meta=handover.meta,
+        last_inbound_at=None,
+        now_utc=effective_now,
+    )
+    queue_signals = {
+        "sla_action_state": "snoozed" if snooze_state["snoozed_until"] else None,
+    }
+    business_status = _build_case_business_status(
+        status=handover.status,
+        assigned_to_id=handover.assigned_to,
+        assigned_to_name=handover.assigned_to_name,
+        queue_signals=queue_signals,
+    )
+    booking_summary = None
+    if db is not None and client_id is not None:
+        booking_summary = _build_case_booking_summary(
+            db,
+            client_id=client_id,
+            handover=handover,
+            now_utc=effective_now,
+        )
+    return ConsoleCase(
+        id=handover.id,
+        conversation_id=handover.conversation_id,
+        status=handover.status,
+        business_status_code=business_status["business_status_code"],
+        business_status_label=business_status["business_status_label"],
+        trigger_type=handover.trigger_type,
+        trigger_value=getattr(handover, "trigger_value", None),
+        context_summary=getattr(handover, "context_summary", None),
+        user_message=getattr(handover, "user_message", None),
+        created_at=handover.created_at.isoformat(),
+        assigned_to_id=str(handover.assigned_to) if handover.assigned_to else None,
+        assigned_to_name=handover.assigned_to_name,
+        branch_id=branch_id,
+        channel=getattr(handover, "channel", None),
+        **_format_case_metrics(handover),
+        snoozed_until=snooze_state["snoozed_until"],
+        snoozed_reason=snooze_state["snoozed_reason"],
+        snoozed_by=snooze_state["snoozed_by"],
+        booking_summary=booking_summary,
+    )
+
+
+def _set_case_snooze_meta(
+    handover: Handover,
+    *,
+    snoozed_until: datetime,
+    now_utc: datetime,
+    reason: Optional[str],
+    agent_id: UUID,
+    agent_name: str,
+) -> None:
+    raw_meta = getattr(handover, "meta", None)
+    meta = dict(raw_meta) if isinstance(raw_meta, dict) else {}
+    meta["snoozed_until"] = snoozed_until.isoformat()
+    meta["snoozed_at"] = now_utc.isoformat()
+    meta["snooze_reason"] = reason
+    meta["snoozed_by_id"] = str(agent_id)
+    meta["snoozed_by_name"] = agent_name
+    handover.meta = meta
+
+
+def _clear_case_snooze_meta(handover: Handover) -> None:
+    raw_meta = getattr(handover, "meta", None)
+    if not isinstance(raw_meta, dict):
+        return
+    meta = dict(raw_meta)
+    changed = False
+    for key in _CASE_SNOOZE_META_KEYS:
+        if key in meta:
+            meta.pop(key, None)
+            changed = True
+    if changed:
+        handover.meta = meta
+
+
+def _resolve_case_action_context(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    case_id: UUID,
+    lock: bool = True,
+) -> tuple[Handover, Conversation]:
+    case_query = db.query(Handover).filter(
+        Handover.id == case_id,
+        Handover.client_id == context.client.id,
+    )
+    if lock:
+        case_query = case_query.with_for_update()
+    handover = case_query.first()
+    if not handover:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Case not found")
+
+    conversation_query = db.query(Conversation).filter(Conversation.id == handover.conversation_id)
+    if lock:
+        conversation_query = conversation_query.with_for_update()
+    conversation = conversation_query.first()
+    if not conversation:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+
+    _require_branch_access(context, conversation.branch_id, message="Access to this case denied")
+    return handover, conversation
+
+
+def _require_case_operator_access(
+    *,
+    context: ConsoleAuthContext,
+    handover: Handover,
+) -> None:
+    if context.role in ("platform_admin", "owner", "admin"):
+        return
+
+    actor_id = str(context.agent.id)
+    if handover.assigned_to and str(handover.assigned_to) != actor_id:
+        raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+
+    if not handover.assigned_to and handover.assigned_to_name and handover.assigned_to_name != context.agent.name:
+        raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+
+
+def _build_case_action_response(
+    *,
+    db: Optional[Session] = None,
+    client_id: Optional[UUID] = None,
+    handover: Handover,
+    branch_id: UUID | None,
+    sync: Optional[ConsoleCaseActionSync] = None,
+    routing: Optional[ConsoleCaseRoutingDecision] = None,
+) -> ConsoleCaseActionResponse:
+    return ConsoleCaseActionResponse(
+        success=True,
+        case=_build_case_action_case(
+            db=db,
+            client_id=client_id,
+            handover=handover,
+            branch_id=branch_id,
+        ),
+        sync=sync,
+        routing=routing,
+    )
+
+
+def _build_macro_execute_response(
+    *,
+    db: Optional[Session] = None,
+    client_id: Optional[UUID] = None,
+    macro: ConsoleMacroModel,
+    handover: Handover,
+    branch_id: UUID | None,
+    sync: Optional[ConsoleCaseActionSync] = None,
+) -> ConsoleMacroExecuteResponse:
+    case_response = _build_case_action_response(
+        db=db,
+        client_id=client_id,
+        handover=handover,
+        branch_id=branch_id,
+        sync=sync,
+    )
+    return ConsoleMacroExecuteResponse(
+        success=case_response.success,
+        macro=_serialize_macro(macro),
+        case=case_response.case,
+        sync=case_response.sync,
+    )
+
+
+def _finalize_case_connected_sync(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    conversation: Conversation,
+    handover: Handover,
+    branch_id: UUID | None,
+    manager_name: str,
+    reason: Optional[str] = None,
+) -> ConsoleCaseActionSync:
+    telegram_status = _sync_telegram_after_take(
+        db,
+        conversation=conversation,
+        handover=handover,
+        manager_name=manager_name,
+    )
+    client_notify = _notify_client_status(
+        db=db,
+        conversation=conversation,
+        handover=handover,
+        status="connected",
+        manager_name=manager_name,
+    )
+    payload = {
+        "telegram_status": telegram_status.status,
+        "client_notify_status": client_notify.status,
+    }
+    if reason:
+        payload["reason"] = reason
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="manager_connected",
+        entity_type="handover",
+        entity_id=handover.id,
+        payload=payload,
+        branch_id=branch_id,
+    )
+    db.commit()
+    return ConsoleCaseActionSync(
+        telegram=telegram_status,
+        client_notify=client_notify,
+    )
+
+
+def _finalize_case_disconnected_sync(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    conversation: Conversation,
+    handover: Handover,
+    branch_id: UUID | None,
+    manager_name: str,
+    action: Literal["resolve", "return"],
+    reason: Optional[str] = None,
+) -> ConsoleCaseActionSync:
+    telegram_status = _sync_telegram_after_close(
+        db,
+        conversation=conversation,
+        handover=handover,
+        manager_name=manager_name,
+        action=action,
+    )
+    client_notify = _notify_client_status(
+        db=db,
+        conversation=conversation,
+        handover=handover,
+        status="disconnected",
+        manager_name=manager_name,
+    )
+    payload = {
+        "telegram_status": telegram_status.status,
+        "client_notify_status": client_notify.status,
+    }
+    if reason:
+        payload["reason"] = reason
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="manager_disconnected",
+        entity_type="handover",
+        entity_id=handover.id,
+        payload=payload,
+        branch_id=branch_id,
+    )
+    db.commit()
+    return ConsoleCaseActionSync(
+        telegram=telegram_status,
+        client_notify=client_notify,
+    )
+
+
+def _finalize_case_reopened_sync(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    handover: Handover,
+    branch_id: UUID | None,
+    reason: Optional[str] = None,
+) -> ConsoleCaseActionSync:
+    telegram_status = _build_sync_status("skipped", "reopen_internal_only")
+    client_notify = _build_sync_status("skipped", "reopen_internal_only")
+    payload = {
+        "telegram_status": telegram_status.status,
+        "client_notify_status": client_notify.status,
+    }
+    if reason:
+        payload["reason"] = reason
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="case_reopen_sync",
+        entity_type="handover",
+        entity_id=handover.id,
+        payload=payload,
+        branch_id=branch_id,
+    )
+    db.commit()
+    return ConsoleCaseActionSync(
+        telegram=telegram_status,
+        client_notify=client_notify,
+    )
+
+
+def _execute_macro_case_action(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    macro: ConsoleMacroModel,
+    action_config: dict[str, Any],
+    handover: Handover,
+    conversation: Conversation,
+) -> ConsoleMacroExecuteResponse:
+    branch_id = conversation.branch_id
+    manager_name = context.agent.name or "Менеджер"
+    actor_id = str(context.agent.id)
+    action_type = action_config["type"]
+
+    if action_type == "take_case":
+        if handover.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+
+        if handover.status == "active":
+            current_assignee = handover.assigned_to_name
+            if handover.assigned_to and str(handover.assigned_to) != actor_id:
+                raise ConsoleAPIError(
+                    409,
+                    "CASE_ALREADY_TAKEN",
+                    "Case already taken",
+                    details={"current_assignee": current_assignee},
+                )
+            if current_assignee and current_assignee != context.agent.name:
+                raise ConsoleAPIError(
+                    409,
+                    "CASE_ALREADY_TAKEN",
+                    "Case already taken",
+                    details={"current_assignee": current_assignee},
+                )
+            return _build_macro_execute_response(
+                db=db,
+                client_id=context.client.id,
+                macro=macro,
+                handover=handover,
+                branch_id=branch_id,
+                sync=ConsoleCaseActionSync(
+                    telegram=_build_sync_status("skipped", "already_taken"),
+                    client_notify=_build_sync_status("skipped", "already_taken"),
+                ),
+            )
+
+        previous_status = handover.status
+        result = state_manager_take(db, conversation, handover, actor_id, manager_name)
+        if not result.ok:
+            raise ConsoleAPIError(409, "CASE_ALREADY_TAKEN", result.error or "Case already taken")
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_taken",
+            entity_type="handover",
+            entity_id=handover.id,
+            payload={"previous_status": previous_status},
+            branch_id=branch_id,
+        )
+        db.commit()
+        db.refresh(handover)
+        sync = _finalize_case_connected_sync(
+            db=db,
+            context=context,
+            conversation=conversation,
+            handover=handover,
+            branch_id=branch_id,
+            manager_name=manager_name,
+            reason="macro_take_case",
+        )
+        return _build_macro_execute_response(
+            db=db,
+            client_id=context.client.id,
+            macro=macro,
+            handover=handover,
+            branch_id=branch_id,
+            sync=sync,
+        )
+
+    if action_type == "resolve_case":
+        if handover.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+
+        _require_case_operator_access(context=context, handover=handover)
+        _clear_case_snooze_meta(handover)
+        result = state_manager_resolve(
+            db,
+            conversation,
+            handover,
+            actor_id,
+            manager_name,
+            preserve_context=True,
+        )
+        if not result.ok:
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", result.error or "Case already resolved")
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_resolved",
+            entity_type="handover",
+            entity_id=handover.id,
+            branch_id=branch_id,
+        )
+        remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+        released_lock = release_human_lock(
+            db,
+            client_id=context.client.id,
+            remote_jid=remote_jid,
+            conversation_id=conversation.id,
+            now=datetime.now(timezone.utc),
+        )
+        if released_lock:
+            record_audit_event(
+                db,
+                actor=context.agent,
+                event_type="human_lock_release_auto",
+                entity_type="conversation",
+                entity_id=conversation.id,
+                payload={"reason": "case_resolved"},
+                branch_id=branch_id,
+            )
+        db.commit()
+        db.refresh(handover)
+        sync = _finalize_case_disconnected_sync(
+            db=db,
+            context=context,
+            conversation=conversation,
+            handover=handover,
+            branch_id=branch_id,
+            manager_name=manager_name,
+            action="resolve",
+            reason="macro_resolve_case",
+        )
+        return _build_macro_execute_response(
+            db=db,
+            client_id=context.client.id,
+            macro=macro,
+            handover=handover,
+            branch_id=branch_id,
+            sync=sync,
+        )
+
+    if action_type == "return_to_bot":
+        if handover.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+
+        _require_case_operator_access(context=context, handover=handover)
+        _clear_case_snooze_meta(handover)
+        result = state_manager_return(
+            db,
+            conversation,
+            handover,
+            actor_id,
+            manager_name,
+        )
+        if not result.ok:
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", result.error or "Case already resolved")
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_returned",
+            entity_type="handover",
+            entity_id=handover.id,
+            branch_id=branch_id,
+        )
+        remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+        released_lock = release_human_lock(
+            db,
+            client_id=context.client.id,
+            remote_jid=remote_jid,
+            conversation_id=conversation.id,
+            now=datetime.now(timezone.utc),
+        )
+        if released_lock:
+            record_audit_event(
+                db,
+                actor=context.agent,
+                event_type="human_lock_release_auto",
+                entity_type="conversation",
+                entity_id=conversation.id,
+                payload={"reason": "case_returned"},
+                branch_id=branch_id,
+            )
+        db.commit()
+        db.refresh(handover)
+        sync = _finalize_case_disconnected_sync(
+            db=db,
+            context=context,
+            conversation=conversation,
+            handover=handover,
+            branch_id=branch_id,
+            manager_name=manager_name,
+            action="return",
+            reason="macro_return_to_bot",
+        )
+        return _build_macro_execute_response(
+            db=db,
+            client_id=context.client.id,
+            macro=macro,
+            handover=handover,
+            branch_id=branch_id,
+            sync=sync,
+        )
+
+    if action_type == "reopen_case":
+        if handover.status != "resolved":
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", "Case must be resolved to reopen")
+
+        _clear_case_snooze_meta(handover)
+        result = state_manager_reopen(
+            db,
+            conversation,
+            handover,
+            manager_id=actor_id,
+            manager_name=manager_name,
+        )
+        if not result.ok:
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", result.error or "Case must be resolved to reopen")
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_reopened",
+            entity_type="handover",
+            entity_id=handover.id,
+            payload={"assigned_to_id": actor_id, "assigned_to_name": manager_name},
+            branch_id=branch_id,
+        )
+        db.commit()
+        db.refresh(handover)
+        sync = _finalize_case_reopened_sync(
+            db=db,
+            context=context,
+            handover=handover,
+            branch_id=branch_id,
+            reason="macro_reopen_case",
+        )
+        return _build_macro_execute_response(
+            db=db,
+            client_id=context.client.id,
+            macro=macro,
+            handover=handover,
+            branch_id=branch_id,
+            sync=sync,
+        )
+
+    if action_type == "snooze_case":
+        if handover.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+        if handover.status != "active":
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", "Case must be active to snooze")
+
+        _require_case_operator_access(context=context, handover=handover)
+        now_utc = datetime.now(timezone.utc)
+        minutes = int(action_config.get("minutes") or 30)
+        reason = action_config.get("reason") or _CASE_SNOOZE_DEFAULT_REASON
+        snoozed_until = now_utc + timedelta(minutes=minutes)
+        _set_case_snooze_meta(
+            handover,
+            snoozed_until=snoozed_until,
+            now_utc=now_utc,
+            reason=reason,
+            agent_id=context.agent.id,
+            agent_name=manager_name,
+        )
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_snoozed",
+            entity_type="handover",
+            entity_id=handover.id,
+            payload={
+                "minutes": minutes,
+                "snoozed_until": snoozed_until.isoformat(),
+                "reason": reason,
+            },
+            branch_id=branch_id,
+        )
+        db.commit()
+        db.refresh(handover)
+        return _build_macro_execute_response(
+            db=db,
+            client_id=context.client.id,
+            macro=macro,
+            handover=handover,
+            branch_id=branch_id,
+        )
+
+    raise ConsoleAPIError(409, "MACRO_ACTION_INVALID", "Macro action is not supported")
+
+
+def _normalize_case_bulk_ids(case_ids: list[UUID]) -> list[UUID]:
+    if not case_ids:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "case_ids must contain at least one case")
+
+    deduped: list[UUID] = []
+    seen: set[UUID] = set()
+    for case_id in case_ids:
+        if case_id in seen:
+            continue
+        seen.add(case_id)
+        deduped.append(case_id)
+
+    if len(deduped) > _CASE_BULK_MAX_ITEMS:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"case_ids must contain at most {_CASE_BULK_MAX_ITEMS} cases",
+        )
+    return deduped
+
+
+def _build_case_bulk_result(
+    *,
+    case_id: UUID,
+    status: Literal["processed", "skipped", "failed"],
+    code: str,
+    message: Optional[str] = None,
+    handover: Optional[Handover] = None,
+    branch_id: UUID | None = None,
+    routing: Optional[ConsoleCaseRoutingDecision] = None,
+) -> ConsoleCaseBulkActionResult:
+    case_snapshot = None
+    if handover is not None:
+        case_snapshot = _build_case_action_case(handover=handover, branch_id=branch_id)
+    return ConsoleCaseBulkActionResult(
+        case_id=case_id,
+        status=status,
+        code=code,
+        message=message,
+        case=case_snapshot,
+        routing=routing,
+    )
 
 
 def _format_telegram_timestamp(value: Optional[int]) -> Optional[str]:
@@ -891,239 +2224,123 @@ def _serialize_branch(branch: Branch) -> ConsoleBranch:
     )
 
 
-_BRANCH_CHANGE_MANAGED_FIELDS = (
-    "slug",
-    "name",
-    "timezone",
-    "instance_id",
-    "phone",
-    "telegram_chat_id",
-    "knowledge_tag",
-    "working_hours",
-    "booking_settings",
-    "is_active",
-)
-_BRANCH_CHANGE_MUTABLE_STATUSES = {"draft", "validated", "publish_failed"}
+def _require_branch_activate_go_live(current_branch: Branch) -> None:
+    _require_branch_go_live_gate(current_branch, operation="branch_activate")
 
 
-def _snapshot_branch_for_change(branch: Branch) -> dict:
-    return {
-        "slug": branch.slug,
-        "name": branch.name,
-        "timezone": branch.timezone,
-        "instance_id": branch.instance_id,
-        "phone": branch.phone,
-        "telegram_chat_id": branch.telegram_chat_id,
-        "knowledge_tag": branch.knowledge_tag,
-        "working_hours": _jsonable_payload(branch.working_hours if isinstance(branch.working_hours, dict) else {}),
-        "booking_settings": _jsonable_payload(branch.booking_settings if isinstance(branch.booking_settings, dict) else {}),
-        "is_active": bool(branch.is_active),
-    }
+def _require_branch_activate_scorecard(current_db: Session, current_branch: Branch) -> None:
+    _require_branch_scorecard_ready(current_db, current_branch, operation="branch_activate")
 
 
-def _build_branch_change_diff(base_snapshot: dict, patch_payload: dict) -> dict:
-    diff: dict[str, dict[str, object]] = {}
-    for field in _BRANCH_CHANGE_MANAGED_FIELDS:
-        if field not in patch_payload:
-            continue
-        before = base_snapshot.get(field)
-        after = patch_payload.get(field)
-        if before == after:
-            continue
-        diff[field] = {
-            "before": before,
-            "after": after,
-        }
-    return diff
+_BRANCH_CHANGE_NORMALIZATION_KWARGS: dict[str, Any] = {
+    "validation_error_type": ConsoleAPIError,
+    "ensure_unique_branch_field": _ensure_unique_branch_field,
+    "normalize_slug": _normalize_slug,
+    "normalize_required_text": _normalize_required_text,
+    "normalize_timezone_name": _normalize_timezone_name,
+    "normalize_optional_text": _normalize_optional_text,
+    "normalize_branch_phone": _normalize_branch_phone,
+    "normalize_telegram_chat_id": _normalize_telegram_chat_id,
+    "normalize_knowledge_tag": _normalize_knowledge_tag,
+    "require_branch_go_live_gate": _require_branch_activate_go_live,
+    "require_branch_scorecard_ready": _require_branch_activate_scorecard,
+}
 
-
-def _serialize_branch_change_record(change: ConsoleBranchChange) -> ConsoleBranchChangeRecord:
-    return ConsoleBranchChangeRecord(
-        id=change.id,
-        branch_id=change.branch_id,
-        status=change.status,
-        reason=change.reason,
-        draft_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
-        diff_payload=change.diff_payload if isinstance(change.diff_payload, dict) else {},
-        validation_payload=change.validation_payload if isinstance(change.validation_payload, dict) else None,
-        base_snapshot=change.base_snapshot if isinstance(change.base_snapshot, dict) else {},
-        published_snapshot=change.published_snapshot if isinstance(change.published_snapshot, dict) else None,
-        rollback_snapshot=change.rollback_snapshot if isinstance(change.rollback_snapshot, dict) else None,
-        publish_error=change.publish_error,
-        rollback_error=change.rollback_error,
-        created_at=change.created_at.isoformat() if change.created_at else "",
-        updated_at=change.updated_at.isoformat() if change.updated_at else None,
-        validated_at=change.validated_at.isoformat() if change.validated_at else None,
-        published_at=change.published_at.isoformat() if change.published_at else None,
-        rolled_back_at=change.rolled_back_at.isoformat() if change.rolled_back_at else None,
-    )
-
-
-def _normalize_branch_change_patch(*, db: Session, branch: Branch, patch_payload: dict) -> tuple[dict, list[str]]:
-    errors: list[str] = []
-    normalized: dict[str, object] = {}
-
-    if not isinstance(patch_payload, dict):
-        return {}, ["patch must be an object"]
-
-    if not any(field in patch_payload for field in _BRANCH_CHANGE_MANAGED_FIELDS):
-        return {}, ["patch has no supported fields"]
-
-    if "slug" in patch_payload:
-        raw_slug = patch_payload.get("slug")
-        if raw_slug is None:
-            errors.append("slug cannot be null")
-        elif not isinstance(raw_slug, str):
-            errors.append("slug must be string")
-        else:
-            try:
-                slug = _normalize_slug(raw_slug, "branch_slug")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-            else:
-                _ensure_unique_branch_field(
-                    db,
-                    client_id=branch.client_id,
-                    field_name="slug",
-                    value=slug,
-                    exclude_branch_id=branch.id,
-                )
-                normalized["slug"] = slug
-
-    if "name" in patch_payload:
-        raw_name = patch_payload.get("name")
-        if raw_name is None:
-            errors.append("name cannot be null")
-        elif not isinstance(raw_name, str):
-            errors.append("name must be string")
-        else:
-            try:
-                normalized["name"] = _normalize_required_text(raw_name, "name")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-
-    if "timezone" in patch_payload:
-        raw_timezone = patch_payload.get("timezone")
-        if raw_timezone is not None and not isinstance(raw_timezone, str):
-            errors.append("timezone must be string")
-        else:
-            try:
-                normalized["timezone"] = _normalize_timezone_name(raw_timezone, "timezone")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-
-    if "instance_id" in patch_payload:
-        raw_instance_id = patch_payload.get("instance_id")
-        if raw_instance_id is not None and not isinstance(raw_instance_id, str):
-            errors.append("instance_id must be string")
-        else:
-            instance_id = _normalize_optional_text(raw_instance_id)
-            _ensure_unique_branch_field(
-                db,
-                client_id=branch.client_id,
-                field_name="instance_id",
-                value=instance_id,
-                exclude_branch_id=branch.id,
-            )
-            normalized["instance_id"] = instance_id
-
-    if "phone" in patch_payload:
-        raw_phone = patch_payload.get("phone")
-        if raw_phone is not None and not isinstance(raw_phone, str):
-            errors.append("phone must be string")
-        else:
-            try:
-                phone = _normalize_branch_phone(raw_phone, "phone")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-            else:
-                _ensure_unique_branch_field(
-                    db,
-                    client_id=branch.client_id,
-                    field_name="phone",
-                    value=phone,
-                    exclude_branch_id=branch.id,
-                )
-                normalized["phone"] = phone
-
-    if "telegram_chat_id" in patch_payload:
-        raw_chat_id = patch_payload.get("telegram_chat_id")
-        if raw_chat_id is not None and not isinstance(raw_chat_id, str):
-            errors.append("telegram_chat_id must be string")
-        else:
-            try:
-                normalized["telegram_chat_id"] = _normalize_telegram_chat_id(raw_chat_id, "telegram_chat_id")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-
-    if "knowledge_tag" in patch_payload:
-        raw_knowledge_tag = patch_payload.get("knowledge_tag")
-        if raw_knowledge_tag is not None and not isinstance(raw_knowledge_tag, str):
-            errors.append("knowledge_tag must be string")
-        else:
-            try:
-                normalized["knowledge_tag"] = _normalize_knowledge_tag(raw_knowledge_tag, "knowledge_tag")
-            except ConsoleAPIError as exc:
-                errors.append(exc.message)
-
-    if "working_hours" in patch_payload:
-        value = patch_payload.get("working_hours")
-        if value is None:
-            normalized["working_hours"] = {}
-        elif isinstance(value, dict):
-            normalized["working_hours"] = value
-        else:
-            errors.append("working_hours must be an object")
-
-    if "booking_settings" in patch_payload:
-        value = patch_payload.get("booking_settings")
-        if value is None:
-            normalized["booking_settings"] = {}
-        elif isinstance(value, dict):
-            normalized["booking_settings"] = value
-        else:
-            errors.append("booking_settings must be an object")
-
-    if "is_active" in patch_payload:
-        value = patch_payload.get("is_active")
-        if value is None:
-            errors.append("is_active cannot be null")
-        elif isinstance(value, bool):
-            normalized["is_active"] = value
-        else:
-            errors.append("is_active must be boolean")
-
-    final_instance_id = (
-        normalized.get("instance_id")
-        if "instance_id" in normalized
-        else branch.instance_id
-    )
-    final_is_active = (
-        normalized.get("is_active")
-        if "is_active" in normalized
-        else bool(branch.is_active)
-    )
-    if final_is_active and not final_instance_id:
-        errors.append("instance_id required to activate branch")
-    if final_is_active and not branch.is_active:
-        try:
-            _require_branch_go_live_gate(branch, operation="branch_activate")
-            _require_branch_scorecard_ready(db, branch, operation="branch_activate")
-        except ConsoleAPIError as exc:
-            errors.append(exc.message)
-
-    return normalized, errors
-
-
-def _build_branch_update_request(
+def _normalize_branch_change_patch(
     *,
-    normalized_patch: dict,
-    confirmation_id: Optional[UUID] = None,
-) -> ConsoleBranchUpdateRequest:
-    payload = dict(normalized_patch)
-    if confirmation_id:
-        payload["confirmation_id"] = confirmation_id
-    return ConsoleBranchUpdateRequest.model_validate(payload)
+    db: Session,
+    branch: Branch,
+    patch_payload: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    # Keep the legacy router-level signature stable while delegating to the service helper.
+    return _normalize_branch_change_patch_payload(
+        db=db,
+        branch=branch,
+        patch_payload=patch_payload,
+        **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+    )
+
+
+def _serialize_macro_action(action_config: Any) -> Optional[ConsoleMacroActionSchema]:
+    if not isinstance(action_config, dict):
+        return None
+
+    action_type = action_config.get("type")
+    if action_type not in {
+        "take_case",
+        "resolve_case",
+        "return_to_bot",
+        "reopen_case",
+        "snooze_case",
+    }:
+        return None
+
+    try:
+        return ConsoleMacroActionSchema(
+            type=action_type,
+            minutes=action_config.get("minutes"),
+            reason=action_config.get("reason"),
+        )
+    except ValidationError:
+        return None
+
+
+def _normalize_macro_action(
+    action: Optional[ConsoleMacroActionSchema],
+) -> Optional[dict[str, Any]]:
+    if action is None:
+        return None
+
+    action_type = _normalize_required_text(action.type, "action.type")
+    if action_type == "snooze_case":
+        minutes = _normalize_pause_minutes(action.minutes, default=30, allow_zero=False)
+        reason = _normalize_optional_text(action.reason) or _CASE_SNOOZE_DEFAULT_REASON
+        return {
+            "type": action_type,
+            "minutes": minutes,
+            "reason": reason,
+        }
+
+    if action.minutes is not None:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"action.minutes is not supported for {action_type}",
+        )
+    if action.reason is not None:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"action.reason is not supported for {action_type}",
+        )
+
+    return {"type": action_type}
+
+
+def _resolve_inbox_macro_for_context(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    branch_id: UUID,
+    macro_id: UUID,
+) -> ConsoleMacroModel:
+    macro = (
+        db.query(ConsoleMacroModel)
+        .filter(
+            ConsoleMacroModel.id == macro_id,
+            ConsoleMacroModel.client_id == context.client.id,
+            ConsoleMacroModel.branch_id == branch_id,
+        )
+        .first()
+    )
+    if not macro:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Macro not found")
+
+    is_privileged = context.role in ("platform_admin", "owner", "admin")
+    if macro.agent_id and macro.agent_id != context.agent.id and not is_privileged:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Cannot access another agent's macro")
+
+    return macro
 
 
 def _serialize_macro(macro: ConsoleMacroModel) -> ConsoleMacroSchema:
@@ -1132,6 +2349,7 @@ def _serialize_macro(macro: ConsoleMacroModel) -> ConsoleMacroSchema:
         scope=macro.scope,
         label=macro.label,
         body=macro.body,
+        action=_serialize_macro_action(getattr(macro, "action_config", None)),
         is_active=macro.is_active,
         created_at=macro.created_at.isoformat() if macro.created_at else None,
         updated_at=macro.updated_at.isoformat() if macro.updated_at else None,
@@ -1160,61 +2378,6 @@ def _serialize_onboarding_status(
     )
 
 
-def _resolve_readiness_hard_gate_blockers(readiness_kernel) -> list[str]:
-    if readiness_kernel is None:
-        return []
-    candidates = list(getattr(readiness_kernel, "shadow_hard_gate_blockers", []) or [])
-    selected = [
-        code
-        for code in candidates
-        if code.startswith("go_no_go:") or code in _ONBOARDING_READINESS_HARD_GATE_CODES
-    ]
-    return _dedupe_list(selected)
-
-
-def _is_readiness_hard_gate_enforced_for_branch(branch: Branch) -> bool:
-    if _ONBOARDING_READINESS_HARD_GATE_ENABLED:
-        return True
-    branch_id = getattr(branch, "id", None)
-    if branch_id is None:
-        return False
-    normalized_branch_id = str(branch_id).strip().lower()
-    return normalized_branch_id in _ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS
-
-
-def _serialize_onboarding_readiness_kernel(readiness_kernel, *, hard_gate_enforced: bool):
-    if readiness_kernel is None:
-        return None
-    hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
-    return ConsoleOnboardingReadinessKernel(
-        status=readiness_kernel.status,
-        blocker_codes=list(readiness_kernel.blocker_codes),
-        next_action_codes=list(readiness_kernel.next_action_codes),
-        auto_questions=[
-            ConsoleOnboardingReadinessQuestion(
-                code=item.code,
-                question=item.question,
-                blocking_go_live=item.blocking_go_live,
-            )
-            for item in readiness_kernel.auto_questions
-        ],
-        dimensions=[
-            ConsoleOnboardingReadinessDimension(
-                id=item.id,
-                status=item.status,
-                blocker_codes=list(item.blocker_codes),
-                next_action_codes=list(item.next_action_codes),
-            )
-            for item in readiness_kernel.dimensions
-        ],
-        shadow_hard_gate=ConsoleOnboardingReadinessHardGate(
-            enforced=hard_gate_enforced,
-            status="fail" if hard_gate_blockers else "pass",
-            blocker_codes=hard_gate_blockers,
-        ),
-    )
-
-
 def _serialize_onboarding_scorecard(
     branch: Branch,
     scorecard,
@@ -1223,7 +2386,11 @@ def _serialize_onboarding_scorecard(
     sla_control_loop = getattr(scorecard, "sla_control_loop", None)
     operational_pipeline = getattr(scorecard, "operational_pipeline", None)
     readiness_kernel = getattr(scorecard, "readiness_kernel", None)
-    hard_gate_enforced = _is_readiness_hard_gate_enforced_for_branch(branch)
+    hard_gate_enforced = _is_readiness_hard_gate_enforced_for_branch(
+        branch,
+        hard_gate_enabled=_ONBOARDING_READINESS_HARD_GATE_ENABLED,
+        canary_branch_ids=_ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS,
+    )
     document_ingestion_payload = None
     if document_ingestion is not None:
         document_ingestion_payload = ConsoleOnboardingDocumentIngestion(
@@ -1291,6 +2458,7 @@ def _serialize_onboarding_scorecard(
         readiness_kernel=_serialize_onboarding_readiness_kernel(
             readiness_kernel,
             hard_gate_enforced=hard_gate_enforced,
+            hard_gate_codes=_ONBOARDING_READINESS_HARD_GATE_CODES,
         ),
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
@@ -1330,8 +2498,36 @@ def _build_telegram_trail(
     )
 
 
-def _build_sync_status(status: str, detail: Optional[str] = None) -> ConsoleSyncStatus:
-    return ConsoleSyncStatus(status=status, detail=detail)
+def _resolve_sync_operator_message(
+    *,
+    status: str,
+    detail: Optional[str],
+    target: Optional[Literal["telegram", "client_notify"]],
+) -> Optional[str]:
+    if status != "failed" or not target:
+        return None
+
+    if target == "telegram":
+        if detail == "telegram_edit_failed":
+            return "Не удалось обновить отметку заявки в Telegram."
+        return "Не удалось синхронизировать состояние заявки с Telegram."
+
+    if detail == "chatflow_failed":
+        return "Не удалось отправить системное уведомление клиенту."
+    return "Не удалось отправить системное уведомление клиенту."
+
+
+def _build_sync_status(
+    status: str,
+    detail: Optional[str] = None,
+    *,
+    target: Optional[Literal["telegram", "client_notify"]] = None,
+) -> ConsoleSyncStatus:
+    return ConsoleSyncStatus(
+        status=status,
+        detail=detail,
+        operator_message=_resolve_sync_operator_message(status=status, detail=detail, target=target),
+    )
 
 
 def _normalize_phone_digits(value: Optional[str]) -> str:
@@ -1920,7 +3116,7 @@ def _sync_telegram_after_take(
     message_id = handover.telegram_message_id
 
     if not bot_token or not chat_id or not message_id:
-        return _build_sync_status("skipped", "telegram_context_missing")
+        return _build_sync_status("skipped", "telegram_context_missing", target="telegram")
 
     telegram = TelegramService(bot_token)
     result = telegram._make_request(
@@ -1934,7 +3130,7 @@ def _sync_telegram_after_take(
         },
     )
     if not result.get("ok"):
-        return _build_sync_status("failed", "telegram_edit_failed")
+        return _build_sync_status("failed", "telegram_edit_failed", target="telegram")
 
     if conversation.telegram_topic_id:
         telegram.send_message(
@@ -1943,7 +3139,7 @@ def _sync_telegram_after_take(
             message_thread_id=conversation.telegram_topic_id,
         )
 
-    return _build_sync_status("ok")
+    return _build_sync_status("ok", target="telegram")
 
 
 def _sync_telegram_after_close(
@@ -1964,7 +3160,7 @@ def _sync_telegram_after_close(
     message_id = handover.telegram_message_id
 
     if not bot_token or not chat_id or not message_id:
-        return _build_sync_status("skipped", "telegram_context_missing")
+        return _build_sync_status("skipped", "telegram_context_missing", target="telegram")
 
     telegram = TelegramService(bot_token)
     result = telegram._make_request(
@@ -1972,7 +3168,7 @@ def _sync_telegram_after_close(
         {"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
     )
     if not result.get("ok"):
-        return _build_sync_status("failed", "telegram_edit_failed")
+        return _build_sync_status("failed", "telegram_edit_failed", target="telegram")
 
     telegram.unpin_message(str(chat_id), message_id)
 
@@ -1983,7 +3179,7 @@ def _sync_telegram_after_close(
             message_thread_id=conversation.telegram_topic_id,
         )
 
-    return _build_sync_status("ok")
+    return _build_sync_status("ok", target="telegram")
 
 
 def _notify_client_status(
@@ -2002,10 +3198,10 @@ def _notify_client_status(
         manager_name=manager_name,
     )
     if ok:
-        return _build_sync_status("ok")
+        return _build_sync_status("ok", target="client_notify")
     if detail == "remote_jid_missing":
-        return _build_sync_status("skipped", detail)
-    return _build_sync_status("failed", detail or "notify_failed")
+        return _build_sync_status("skipped", detail, target="client_notify")
+    return _build_sync_status("failed", detail or "notify_failed", target="client_notify")
 
 
 def _require_roles(
@@ -2075,118 +3271,45 @@ def _resolve_telegram_action_target(
 
 
 def _reject_unknown_query_params(request: Request, allowed: set[str]) -> None:
-    unknown = sorted(set(request.query_params.keys()) - allowed)
-    if unknown:
-        raise ConsoleAPIError(
-            400,
-            "INVALID_PARAM",
-            f"Unknown query parameter(s): {', '.join(unknown)}",
-        )
+    _reject_unknown_query_params_util(
+        request,
+        allowed,
+        error_factory=lambda message: ConsoleAPIError(400, "INVALID_PARAM", message),
+    )
 
 
 def _validate_limit(limit: int) -> None:
-    if limit < 1 or limit > 100:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "limit must be between 1 and 100")
-
-
-def _request_with_query_params(request: Request, params: dict[str, object | None]) -> Request:
-    scope = dict(request.scope)
-    normalized: dict[str, str] = {}
-    for key, value in params.items():
-        if value is None:
-            continue
-        normalized[key] = str(value)
-    scope["query_string"] = urlencode(normalized).encode("utf-8")
-    return Request(scope, receive=request.receive)
+    _validate_limit_util(
+        limit,
+        min_value=1,
+        max_value=100,
+        error_factory=lambda message: ConsoleAPIError(400, "INVALID_PARAM", message),
+    )
 
 
 def _parse_uuid_param(name: str, value: Optional[str]) -> Optional[UUID]:
-    if value is None:
-        return None
-    if value == "":
-        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
-    try:
-        return UUID(value)
-    except ValueError as exc:
-        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}") from exc
+    return _parse_uuid_param_util(
+        name,
+        value,
+        error_factory=lambda message: ConsoleAPIError(400, "INVALID_PARAM", message),
+    )
 
 
 def _parse_bool_param(name: str, value: Optional[str], default: bool = False) -> bool:
-    if value is None:
-        return default
-    lowered = value.lower()
-    if lowered == "true":
-        return True
-    if lowered == "false":
-        return False
-    raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
-
-
-def _parse_env_bool(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    normalized = raw.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return default
-
-
-def _parse_env_csv_set(name: str, *, default: set[str]) -> set[str]:
-    raw = os.getenv(name)
-    if raw is None:
-        return set(default)
-    values = [item.strip() for item in raw.split(",")]
-    return {value for value in values if value}
-
-
-def _parse_env_int(
-    name: str,
-    *,
-    default: int,
-    min_value: int,
-    max_value: int,
-) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        value = int(raw.strip())
-    except (TypeError, ValueError):
-        return default
-    if value < min_value:
-        return min_value
-    if value > max_value:
-        return max_value
-    return value
-
-
-def _dedupe_list(values: list[str]) -> list[str]:
-    unique: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        unique.append(value)
-    return unique
+    return _parse_bool_param_util(
+        name,
+        value,
+        default=default,
+        error_factory=lambda message: ConsoleAPIError(400, "INVALID_PARAM", message),
+    )
 
 
 _TENANT_LIFECYCLE_MODES = {"active", "archived", "all"}
-_CLIENT_STATUS_ACTIVE = "active"
 _CLIENT_STATUS_ARCHIVED = "deleted"
 _CLIENT_LIFECYCLE_REASON_MAX_LEN = 500
 _ACCESS_REASON_MAX_LEN = 500
-_PRIVILEGED_ACCESS_ROLES = {"platform_admin", "owner", "admin"}
-_DEPRECATED_CONSOLE_ASSIGNMENT_ROLES = {"support", "specialist"}
 _CLIENT_ARCHIVE_SAMPLE_LIMIT = 20
 _BRANCH_BOOTSTRAP_ACCOUNTS_MAX = 20
-_BRANCH_GO_LIVE_STATES = {"pending", "approved", "rejected"}
-_BRANCH_GO_LIVE_DEFAULT_STATE = "pending"
-_GO_LIVE_WAIVER_MIN_HOURS = 1
-_GO_LIVE_WAIVER_MAX_HOURS = 24 * 30
 _ONBOARDING_READINESS_HARD_GATE_DEFAULT_CODES = {
     "delivery:backlog_critical",
     "delivery:failed_24h_critical",
@@ -2258,35 +3381,6 @@ _INTEGRATION_ALERT_ISSUES = {
 }
 _INTEGRATION_DRIFT_STATE: dict[str, str] = {}
 _INTEGRATION_DRIFT_LOCK = Lock()
-_FLEET_LIFECYCLE_STATES = {
-    "lead",
-    "contracting",
-    "onboarding",
-    "go_live_ready",
-    "active",
-    "paused",
-    "archived",
-}
-_FLEET_PAYMENT_STATES = {"pending", "confirmed", "rejected", "unknown"}
-_FLEET_SERVICE_STATES = {"ok", "degraded", "attention"}
-_FLEET_COMMERCIAL_STATES = {
-    "payment_confirmed",
-    "payment_pending",
-    "payment_rejected",
-    "contract_missing",
-}
-_FLEET_NEXT_ACTION_STATES = {
-    "qualify_and_collect_contract",
-    "collect_signed_contract_and_payment",
-    "complete_onboarding_steps",
-    "confirm_payment_and_approve_go_live",
-    "approve_go_live",
-    "resolve_payment_or_service_blocker",
-    "archived_no_action",
-    "run_integration_recovery",
-    "resolve_attention_items",
-    "monitor_sla_and_quality",
-}
 _FLEET_LIFECYCLE_ORDER = [
     "lead",
     "contracting",
@@ -4323,75 +5417,6 @@ def _normalize_access_reason(
     return value or None
 
 
-def _normalize_branch_go_live_state(value: Optional[str]) -> str:
-    normalized = (value or "").strip().lower()
-    if normalized in _BRANCH_GO_LIVE_STATES:
-        return normalized
-    return _BRANCH_GO_LIVE_DEFAULT_STATE
-
-
-def _normalize_go_live_waiver_ttl_hours(value: int) -> int:
-    if value < _GO_LIVE_WAIVER_MIN_HOURS or value > _GO_LIVE_WAIVER_MAX_HOURS:
-        raise ConsoleAPIError(
-            400,
-            "INVALID_PARAM",
-            f"ttl_hours must be between {_GO_LIVE_WAIVER_MIN_HOURS} and {_GO_LIVE_WAIVER_MAX_HOURS}",
-        )
-    return value
-
-
-def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value
-
-
-def _is_branch_go_live_waiver_active(
-    branch: Branch,
-    *,
-    now: Optional[datetime] = None,
-) -> bool:
-    waiver_until = _coerce_utc(getattr(branch, "go_live_waiver_until", None))
-    if waiver_until is None:
-        return False
-    current = now or datetime.now(timezone.utc)
-    return waiver_until > current
-
-
-def _is_branch_go_live_allowed(
-    branch: Branch,
-    *,
-    now: Optional[datetime] = None,
-) -> bool:
-    go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
-    if go_live_state == "approved":
-        return True
-    return _is_branch_go_live_waiver_active(branch, now=now)
-
-
-def _require_branch_go_live_gate(branch: Branch, *, operation: str) -> None:
-    now = datetime.now(timezone.utc)
-    go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
-    waiver_active = _is_branch_go_live_waiver_active(branch, now=now)
-    if go_live_state == "approved" or waiver_active:
-        return
-    waiver_until = _coerce_utc(getattr(branch, "go_live_waiver_until", None))
-    raise ConsoleAPIError(
-        409,
-        "GO_LIVE_GATE_REQUIRED",
-        "Go-live approval required before branch activation",
-        {
-            "operation": operation,
-            "go_live_state": go_live_state,
-            "go_live_reason": getattr(branch, "go_live_reason", None),
-            "go_live_waiver_active": waiver_active,
-            "go_live_waiver_until": waiver_until.isoformat() if waiver_until else None,
-        },
-    )
-
-
 def _require_branch_scorecard_ready(
     db: Session,
     branch: Branch,
@@ -4399,18 +5424,28 @@ def _require_branch_scorecard_ready(
     operation: str,
 ) -> None:
     scorecard = build_onboarding_scorecard(db, branch)
-    hard_gate_enforced = _is_readiness_hard_gate_enforced_for_branch(branch)
+    hard_gate_enforced = _is_readiness_hard_gate_enforced_for_branch(
+        branch,
+        hard_gate_enabled=_ONBOARDING_READINESS_HARD_GATE_ENABLED,
+        canary_branch_ids=_ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS,
+    )
     readiness_kernel = getattr(scorecard, "readiness_kernel", None)
     hard_gate_blockers: list[str] = []
     if readiness_kernel is not None:
-        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
+        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(
+            readiness_kernel,
+            hard_gate_codes=_ONBOARDING_READINESS_HARD_GATE_CODES,
+        )
     if hard_gate_enforced and readiness_kernel is None:
         readiness_kernel = build_onboarding_readiness_kernel(
             db,
             branch,
             scorecard=scorecard,
         )
-        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
+        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(
+            readiness_kernel,
+            hard_gate_codes=_ONBOARDING_READINESS_HARD_GATE_CODES,
+        )
     readiness_details = None
     if readiness_kernel is not None:
         hard_gate_status = "fail" if hard_gate_blockers else "pass"
@@ -5072,6 +6107,538 @@ def _serialize_membership(
     )
 
 
+def _serialize_routing_profile(
+    profile: ConsoleRoutingProfileModel,
+    *,
+    agent_name: Optional[str] = None,
+) -> ConsoleRoutingProfile:
+    scope: Literal["client", "branch"] = "branch" if profile.branch_id else "client"
+    return ConsoleRoutingProfile(
+        id=profile.id,
+        agent_id=profile.agent_id,
+        agent_name=agent_name,
+        client_id=profile.client_id,
+        branch_id=profile.branch_id,
+        scope=scope,
+        routing_status=profile.routing_status,
+        max_open_case_count=profile.max_open_case_count,
+        updated_by_agent_id=profile.updated_by_agent_id,
+        created_at=profile.created_at.isoformat() if profile.created_at else None,
+        updated_at=profile.updated_at.isoformat() if profile.updated_at else None,
+    )
+
+
+def _routing_profile_reason_message(option: ConsoleCaseAssigneeOption) -> str:
+    reason = (option.assignment_block_reason_code or "").strip().lower()
+    if reason == "paused":
+        return f"{option.agent_name} сейчас на паузе для новых заявок."
+    if reason == "follow_up_only":
+        return f"{option.agent_name} принимает только явные follow-up continuity кейсы."
+    if reason == "at_capacity":
+        capacity = option.max_open_case_count
+        if capacity is not None:
+            return f"{option.agent_name} достиг лимита открытых заявок ({option.open_case_count}/{capacity})."
+        return f"{option.agent_name} достиг лимита открытых заявок."
+    return f"{option.agent_name} сейчас недоступен для назначения."
+
+
+def _apply_routing_profiles_to_assignee_options(
+    db: Session,
+    *,
+    client_id: UUID,
+    branch_id: UUID | None,
+    options_by_agent_id: dict[UUID, ConsoleCaseAssigneeOption],
+) -> None:
+    profile_map = _resolve_routing_profile_map_service(
+        db,
+        client_id=client_id,
+        agent_ids=set(options_by_agent_id.keys()),
+        branch_id=branch_id,
+    )
+    for agent_id, option in options_by_agent_id.items():
+        profile = profile_map.get(agent_id)
+        if profile is None:
+            option.routing_status = _ROUTING_STATUS_AVAILABLE
+            option.routing_profile_source = "default"
+            option.max_open_case_count = None
+            option.at_capacity = False
+            option.assignment_eligible = True
+            option.assignment_block_reason_code = None
+            continue
+        option.routing_status = profile.routing_status
+        option.routing_profile_source = profile.source
+        option.max_open_case_count = profile.max_open_case_count
+        option.at_capacity = False
+        option.assignment_eligible = True
+        option.assignment_block_reason_code = None
+
+
+def _list_case_assignee_options(
+    db: Session,
+    *,
+    client_id: UUID,
+    branch_id: UUID | None,
+    current_assignee_id: Optional[str],
+) -> list[ConsoleCaseAssigneeOption]:
+    client = db.query(Client).filter(Client.id == client_id).first()
+    company_id = client.company_id if client else None
+
+    options_by_agent_id: dict[UUID, ConsoleCaseAssigneeOption] = {}
+    membership_query = (
+        db.query(AgentMembership, Agent)
+        .join(Agent, Agent.id == AgentMembership.agent_id)
+        .filter(
+            Agent.is_active.is_(True),
+            AgentMembership.is_active.is_(True),
+            AgentMembership.role.in_(tuple(_CASE_ASSIGNABLE_ROLES)),
+        )
+    )
+
+    scope_filters = [and_(AgentMembership.scope == "client", AgentMembership.client_id == client_id)]
+    if branch_id:
+        scope_filters.append(and_(AgentMembership.scope == "branch", AgentMembership.branch_id == branch_id))
+    if company_id:
+        scope_filters.append(and_(AgentMembership.scope == "company", AgentMembership.company_id == company_id))
+
+    memberships = membership_query.filter(or_(*scope_filters)).order_by(AgentMembership.created_at.desc()).all()
+    for membership, agent in memberships:
+        if agent.role == "platform_admin":
+            continue
+        options_by_agent_id[agent.id] = ConsoleCaseAssigneeOption(
+            agent_id=agent.id,
+            agent_name=agent.name or "Менеджер",
+            role=membership.role,
+            branch_id=membership.branch_id or agent.branch_id,
+            is_current=str(agent.id) == (current_assignee_id or ""),
+        )
+
+    legacy_query = db.query(Agent).filter(
+        Agent.client_id == client_id,
+        Agent.is_active.is_(True),
+        Agent.role.in_(tuple(_CASE_ASSIGNABLE_ROLES)),
+    )
+    if branch_id:
+        legacy_query = legacy_query.filter(or_(Agent.branch_id == branch_id, Agent.branch_id.is_(None)))
+    legacy_agents = legacy_query.order_by(Agent.name.asc().nullslast()).all()
+    for agent in legacy_agents:
+        if agent.id in options_by_agent_id:
+            continue
+        options_by_agent_id[agent.id] = ConsoleCaseAssigneeOption(
+            agent_id=agent.id,
+            agent_name=agent.name or "Менеджер",
+            role=agent.role,
+            branch_id=agent.branch_id,
+            is_current=str(agent.id) == (current_assignee_id or ""),
+        )
+
+    load_rows_query = (
+        db.query(
+            Handover.assigned_to.label("assigned_to"),
+            Handover.assigned_to_name.label("assigned_to_name"),
+            func.count(Handover.id).label("open_case_count"),
+        )
+        .join(Conversation, Conversation.id == Handover.conversation_id)
+        .filter(
+            Handover.client_id == client_id,
+            Handover.status.in_(("pending", "active")),
+        )
+    )
+    if branch_id:
+        load_rows_query = load_rows_query.filter(Conversation.branch_id == branch_id)
+
+    load_rows = load_rows_query.group_by(Handover.assigned_to, Handover.assigned_to_name).all()
+    load_map = _map_case_assignee_loads(
+        options_by_agent_id,
+        [
+            (
+                row.assigned_to,
+                row.assigned_to_name,
+                int(row.open_case_count or 0),
+            )
+            for row in load_rows
+        ],
+    )
+    for agent_id, option in options_by_agent_id.items():
+        option.open_case_count = load_map.get(agent_id, 0)
+    _apply_routing_profiles_to_assignee_options(
+        db,
+        client_id=client_id,
+        branch_id=branch_id,
+        options_by_agent_id=options_by_agent_id,
+    )
+
+    return sorted(
+        options_by_agent_id.values(),
+        key=lambda item: (not item.is_current, item.agent_name.lower(), str(item.agent_id)),
+    )
+
+
+def _map_case_assignee_loads(
+    options_by_agent_id: dict[UUID, ConsoleCaseAssigneeOption],
+    rows: list[tuple[Optional[str], Optional[str], int]],
+) -> dict[UUID, int]:
+    load_map: dict[UUID, int] = {agent_id: 0 for agent_id in options_by_agent_id.keys()}
+    name_to_agent_ids: dict[str, set[UUID]] = {}
+
+    for agent_id, option in options_by_agent_id.items():
+        normalized_name = option.agent_name.strip().lower()
+        if normalized_name:
+            name_to_agent_ids.setdefault(normalized_name, set()).add(agent_id)
+        load_map.setdefault(agent_id, 0)
+
+    for assigned_to, assigned_to_name, open_case_count in rows:
+        if open_case_count <= 0:
+            continue
+
+        resolved_agent_id: UUID | None = None
+        if assigned_to:
+            try:
+                candidate_agent_id = UUID(str(assigned_to))
+            except ValueError:
+                candidate_agent_id = None
+            if candidate_agent_id in load_map:
+                resolved_agent_id = candidate_agent_id
+
+        if resolved_agent_id is None and assigned_to_name:
+            normalized_name = assigned_to_name.strip().lower()
+            candidate_agent_ids = name_to_agent_ids.get(normalized_name) or set()
+            if len(candidate_agent_ids) == 1:
+                resolved_agent_id = next(iter(candidate_agent_ids))
+
+        if resolved_agent_id is not None:
+            load_map[resolved_agent_id] = load_map.get(resolved_agent_id, 0) + open_case_count
+
+    return load_map
+
+
+def _normalize_case_routing_policy(policy: Optional[str]) -> str:
+    try:
+        return _normalize_case_routing_policy_service(
+            policy,
+            default=_CASE_ROUTING_POLICY_DEFAULT,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported routing policy") from exc
+
+
+def _build_case_routing_decision(
+    *,
+    assignee_options: list[ConsoleCaseAssigneeOption],
+    current_assignee_id: Optional[str],
+    policy: str,
+    load_overrides: Optional[dict[UUID, int]] = None,
+    booking_context: Optional[CaseRoutingBookingContext] = None,
+    signal_context: Optional[CaseRoutingSignalContext] = None,
+) -> tuple[Optional[ConsoleCaseRoutingDecision], Optional[ConsoleCaseAssigneeOption]]:
+    return _build_case_routing_decision_service(
+        assignee_options=assignee_options,
+        current_assignee_id=current_assignee_id,
+        policy=policy,
+        load_overrides=load_overrides,
+        booking_context=booking_context,
+        signal_context=signal_context,
+    )
+
+
+def _adjust_case_routing_loads(
+    load_overrides: dict[UUID, int],
+    *,
+    previous_assignee_id: Optional[str],
+    next_assignee_id: str,
+) -> None:
+    _adjust_case_routing_loads_service(
+        load_overrides,
+        previous_assignee_id=previous_assignee_id,
+        next_assignee_id=next_assignee_id,
+    )
+
+
+def _build_case_routing_signal_context(
+    *,
+    queue_signals: dict[str, object | None],
+) -> CaseRoutingSignalContext:
+    return CaseRoutingSignalContext(
+        sla_status=str(queue_signals.get("sla_status") or "ok"),
+        sla_action_state=(
+            str(queue_signals.get("sla_action_state"))
+            if queue_signals.get("sla_action_state") is not None
+            else None
+        ),
+        sla_overdue_minutes=(
+            int(queue_signals["sla_overdue_minutes"])
+            if queue_signals.get("sla_overdue_minutes") is not None
+            else None
+        ),
+    )
+
+
+def _load_single_case_routing_signal_context(
+    db: Session,
+    *,
+    client_id: UUID,
+    handover: Handover,
+    conversation: Conversation,
+    now_utc: Optional[datetime] = None,
+) -> CaseRoutingSignalContext:
+    case_health = _fetch_case_health(db, conversation)
+    human_lock_snapshot = _build_case_human_lock_snapshot(
+        db,
+        client_id=client_id,
+        conversation=conversation,
+    )
+    queue_signals = _build_case_queue_signals(
+        created_at=handover.created_at,
+        status=handover.status,
+        needs_reply=bool(case_health.get("needs_reply")),
+        has_delivery_error=bool(case_health.get("has_delivery_error")),
+        has_pending_outbox=bool(case_health.get("has_pending_outbox")),
+        human_lock_active=bool(human_lock_snapshot.get("human_lock_active")),
+        human_lock_reason=human_lock_snapshot.get("human_lock_reason"),
+        last_inbound_at=case_health.get("last_inbound_at"),
+        last_outbound_at=case_health.get("last_outbound_at"),
+        first_response_at=handover.first_response_at,
+        handover_meta=handover.meta,
+        now_utc=now_utc,
+    )
+    return _build_case_routing_signal_context(queue_signals=queue_signals)
+
+
+def _load_case_routing_signal_contexts(
+    db: Session,
+    *,
+    handovers: list[Handover],
+    conversations_by_id: dict[UUID, Conversation],
+    now_utc: Optional[datetime] = None,
+) -> dict[UUID, CaseRoutingSignalContext]:
+    conversation_ids = [
+        handover.conversation_id
+        for handover in handovers
+        if handover.conversation_id in conversations_by_id
+    ]
+    if not conversation_ids:
+        return {}
+
+    inbound_rows = (
+        db.query(
+            Message.conversation_id,
+            func.max(Message.created_at).label("last_inbound_at"),
+        )
+        .filter(
+            Message.conversation_id.in_(conversation_ids),
+            Message.role == "user",
+        )
+        .group_by(Message.conversation_id)
+        .all()
+    )
+    outbound_rows = (
+        db.query(
+            Message.conversation_id,
+            func.max(Message.created_at).label("last_outbound_at"),
+        )
+        .filter(
+            Message.conversation_id.in_(conversation_ids),
+            Message.role.in_(["assistant", "manager", "system"]),
+        )
+        .group_by(Message.conversation_id)
+        .all()
+    )
+    outbox_rows = (
+        db.query(
+            OutboxMessage.conversation_id.label("conversation_id"),
+            func.sum(
+                case(
+                    (OutboxMessage.status.in_(["PENDING", "PROCESSING"]), 1),
+                    else_=0,
+                )
+            ).label("pending_count"),
+            func.sum(
+                case(
+                    (OutboxMessage.status == "FAILED", 1),
+                    else_=0,
+                )
+            ).label("failed_count"),
+        )
+        .filter(OutboxMessage.conversation_id.in_(conversation_ids))
+        .group_by(OutboxMessage.conversation_id)
+        .all()
+    )
+    inbound_by_conversation = {
+        row.conversation_id: row.last_inbound_at
+        for row in inbound_rows
+    }
+    outbound_by_conversation = {
+        row.conversation_id: row.last_outbound_at
+        for row in outbound_rows
+    }
+    outbox_by_conversation = {
+        row.conversation_id: (
+            int(row.pending_count or 0),
+            int(row.failed_count or 0),
+        )
+        for row in outbox_rows
+    }
+    effective_now = now_utc or datetime.now(timezone.utc)
+    contexts: dict[UUID, CaseRoutingSignalContext] = {}
+    for handover in handovers:
+        conversation = conversations_by_id.get(handover.conversation_id)
+        if conversation is None:
+            continue
+        last_inbound_at = inbound_by_conversation.get(conversation.id)
+        last_outbound_at = outbound_by_conversation.get(conversation.id)
+        pending_count, failed_count = outbox_by_conversation.get(conversation.id, (0, 0))
+        queue_signals = _build_case_queue_signals(
+            created_at=handover.created_at,
+            status=handover.status,
+            needs_reply=bool(
+                last_inbound_at and (not last_outbound_at or last_inbound_at > last_outbound_at)
+            ),
+            has_delivery_error=bool(failed_count > 0),
+            has_pending_outbox=bool(pending_count > 0),
+            human_lock_active=False,
+            last_inbound_at=last_inbound_at,
+            last_outbound_at=last_outbound_at,
+            first_response_at=handover.first_response_at,
+            handover_meta=handover.meta,
+            now_utc=effective_now,
+        )
+        contexts[handover.id] = _build_case_routing_signal_context(
+            queue_signals=queue_signals,
+        )
+    return contexts
+
+
+def _load_case_booking_routing_contexts(
+    db: Session,
+    *,
+    case_ids: list[UUID],
+    now_utc: Optional[datetime] = None,
+) -> dict[UUID, CaseRoutingBookingContext]:
+    if not case_ids:
+        return {}
+
+    bookings = (
+        db.query(Appointment)
+        .filter(
+            Appointment.case_id.in_(case_ids),
+            Appointment.status == "NO_SHOW",
+        )
+        .all()
+    )
+    if not bookings:
+        return {}
+
+    booking_ids = [booking.id for booking in bookings]
+    followup_rows = (
+        db.query(AppointmentAudit.appointment_id)
+        .filter(
+            AppointmentAudit.appointment_id.in_(booking_ids),
+            AppointmentAudit.action == "no_show_followup",
+        )
+        .distinct()
+        .all()
+    )
+    followup_done_ids = {row.appointment_id for row in followup_rows}
+    effective_now = now_utc or datetime.now(timezone.utc)
+    selected_by_case: dict[UUID, tuple[tuple[object, ...], CaseRoutingBookingContext]] = {}
+
+    for booking in bookings:
+        if booking.case_id is None or booking.id in followup_done_ids:
+            continue
+        due_at = _coerce_utc_datetime(booking.follow_up_due_at) if booking.follow_up_due_at else None
+        overdue = bool(due_at and due_at < effective_now)
+        context = CaseRoutingBookingContext(
+            appointment_id=booking.id,
+            follow_up_owner_id=booking.follow_up_owner_id,
+            follow_up_due_at=due_at,
+            follow_up_overdue=overdue,
+        )
+        priority = (
+            0 if overdue else 1,
+            0 if due_at is not None else 1,
+            due_at or datetime.max.replace(tzinfo=timezone.utc),
+            -int(_coerce_utc_datetime(booking.updated_at).timestamp()) if booking.updated_at else 0,
+            str(booking.id),
+        )
+        current = selected_by_case.get(booking.case_id)
+        if current is None or priority < current[0]:
+            selected_by_case[booking.case_id] = (priority, context)
+
+    return {
+        case_id: context
+        for case_id, (_priority, context) in selected_by_case.items()
+    }
+
+
+def _execute_case_reassign(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    case: Handover,
+    conversation: Conversation,
+    target_option: ConsoleCaseAssigneeOption,
+    routing: Optional[ConsoleCaseRoutingDecision] = None,
+) -> ConsoleCaseActionResponse:
+    branch_id = conversation.branch_id
+    target_id = str(target_option.agent_id)
+    previous_assignee_id = str(case.assigned_to) if case.assigned_to else None
+    previous_assignee_name = case.assigned_to_name
+    if previous_assignee_id == target_id:
+        if routing is not None:
+            record_audit_event(
+                db,
+                actor=context.agent,
+                event_type="case_routed_policy_kept",
+                entity_type="handover",
+                entity_id=case.id,
+                payload={"routing": routing.model_dump(mode="json")},
+                branch_id=branch_id,
+            )
+        return _build_case_action_response(
+            db=db,
+            client_id=context.client.id,
+            handover=case,
+            branch_id=branch_id,
+            routing=routing,
+        )
+
+    result = state_manager_reassign(
+        db,
+        conversation,
+        case,
+        manager_id=target_id,
+        manager_name=target_option.agent_name,
+    )
+    if not result.ok:
+        raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", result.error or "Case must be active to reassign")
+
+    event_type = "case_routed_policy" if routing else "case_reassigned"
+    payload = {
+        "previous_assignee_id": previous_assignee_id,
+        "previous_assignee_name": previous_assignee_name,
+        "assigned_to_id": target_id,
+        "assigned_to_name": target_option.agent_name,
+    }
+    if routing is not None:
+        payload["routing"] = routing.model_dump(mode="json")
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type=event_type,
+        entity_type="handover",
+        entity_id=case.id,
+        payload=payload,
+        branch_id=branch_id,
+    )
+    db.flush()
+    return _build_case_action_response(
+        db=db,
+        client_id=context.client.id,
+        handover=case,
+        branch_id=branch_id,
+        routing=routing,
+    )
+
+
 def _resolve_membership_target(
     db: Session,
     *,
@@ -5176,162 +6743,6 @@ def _assert_agent_matches_membership_target(
             raise ConsoleAPIError(400, "INVALID_PARAM", "Agent belongs to another company")
 
 
-def _ensure_role_not_deprecated_for_assignment(role: Optional[str]) -> None:
-    normalized_role = (role or "").strip().lower()
-    if normalized_role in _DEPRECATED_CONSOLE_ASSIGNMENT_ROLES:
-        raise ConsoleAPIError(
-            400,
-            "INVALID_PARAM",
-            f"{normalized_role} role is deprecated for assignment; use owner/admin/manager/viewer",
-        )
-
-
-def _ensure_membership_role_is_assignable(role: Optional[str]) -> None:
-    _ensure_role_not_deprecated_for_assignment(role)
-    if role == "platform_admin":
-        raise ConsoleAPIError(
-            400,
-            "INVALID_PARAM",
-            "platform_admin role cannot be assigned via membership",
-        )
-
-
-def _ensure_membership_agent_is_mutable(agent: Agent) -> None:
-    if agent.role == "platform_admin":
-        raise ConsoleAPIError(
-            409,
-            "INVALID_STATE",
-            "platform_admin membership is managed automatically",
-        )
-
-
-def _is_privileged_access_role(role: Optional[str]) -> bool:
-    return (role or "").strip().lower() in _PRIVILEGED_ACCESS_ROLES
-
-
-def _has_other_privileged_access_for_client(
-    db: Session,
-    *,
-    client: Client,
-    excluded_agent_ids: Optional[set[UUID]] = None,
-    excluded_membership_ids: Optional[set[UUID]] = None,
-) -> bool:
-    excluded_agent_ids = excluded_agent_ids or set()
-    excluded_membership_ids = excluded_membership_ids or set()
-
-    platform_admin_query = db.query(Agent.id).filter(
-        Agent.is_active.is_(True),
-        Agent.role == "platform_admin",
-    )
-    if excluded_agent_ids:
-        platform_admin_query = platform_admin_query.filter(~Agent.id.in_(excluded_agent_ids))
-    if platform_admin_query.first():
-        return True
-
-    branch_ids = [row[0] for row in db.query(Branch.id).filter(Branch.client_id == client.id).all()]
-    scope_filters = [and_(AgentMembership.scope == "client", AgentMembership.client_id == client.id)]
-    if branch_ids:
-        scope_filters.append(and_(AgentMembership.scope == "branch", AgentMembership.branch_id.in_(branch_ids)))
-    if client.company_id:
-        scope_filters.append(and_(AgentMembership.scope == "company", AgentMembership.company_id == client.company_id))
-
-    membership_query = (
-        db.query(AgentMembership.id)
-        .join(Agent, Agent.id == AgentMembership.agent_id)
-        .filter(
-            Agent.is_active.is_(True),
-            AgentMembership.is_active.is_(True),
-            AgentMembership.role.in_(tuple(_PRIVILEGED_ACCESS_ROLES)),
-            or_(*scope_filters),
-        )
-    )
-    if excluded_agent_ids:
-        membership_query = membership_query.filter(~AgentMembership.agent_id.in_(excluded_agent_ids))
-    if excluded_membership_ids:
-        membership_query = membership_query.filter(~AgentMembership.id.in_(excluded_membership_ids))
-    if membership_query.first():
-        return True
-
-    legacy_agent_query = db.query(Agent).filter(
-        Agent.is_active.is_(True),
-        Agent.client_id == client.id,
-        Agent.role.in_(tuple(_PRIVILEGED_ACCESS_ROLES)),
-    )
-    if excluded_agent_ids:
-        legacy_agent_query = legacy_agent_query.filter(~Agent.id.in_(excluded_agent_ids))
-    legacy_candidates = legacy_agent_query.all()
-    if not legacy_candidates:
-        return False
-
-    candidate_ids = [agent.id for agent in legacy_candidates]
-    membership_agent_ids = set()
-    if candidate_ids:
-        membership_agent_ids = {
-            row[0]
-            for row in db.query(AgentMembership.agent_id)
-            .filter(AgentMembership.agent_id.in_(candidate_ids))
-            .distinct()
-            .all()
-        }
-    return any(agent.id not in membership_agent_ids for agent in legacy_candidates)
-
-
-def _ensure_membership_change_keeps_privileged_access(
-    db: Session,
-    *,
-    context: ConsoleAuthContext,
-    membership: AgentMembership,
-    agent: Agent,
-    next_role: str,
-    next_is_active: bool,
-) -> None:
-    current_privileged = membership.is_active and _is_privileged_access_role(membership.role)
-    next_privileged = next_is_active and _is_privileged_access_role(next_role)
-    if not current_privileged or next_privileged:
-        return
-    if membership.agent_id == context.agent.id:
-        raise ConsoleAPIError(409, "INVALID_STATE", "Cannot disable or downgrade your own privileged membership")
-
-    client = db.query(Client).filter(Client.id == agent.client_id).first()
-    if not client:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
-    if not _has_other_privileged_access_for_client(
-        db,
-        client=client,
-        excluded_membership_ids={membership.id},
-    ):
-        raise ConsoleAPIError(
-            409,
-            "INVALID_STATE",
-            "Cannot remove last active privileged membership for this client",
-        )
-
-
-def _ensure_agent_lifecycle_is_mutable(
-    db: Session,
-    *,
-    context: ConsoleAuthContext,
-    agent: Agent,
-    enabling: bool,
-) -> None:
-    if agent.role == "platform_admin":
-        raise ConsoleAPIError(409, "INVALID_STATE", "platform_admin account is protected")
-    if not enabling and agent.id == context.agent.id:
-        raise ConsoleAPIError(409, "INVALID_STATE", "Cannot disable your own account")
-    if enabling or not _is_privileged_access_role(agent.role):
-        return
-
-    client = db.query(Client).filter(Client.id == agent.client_id).first()
-    if not client:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
-    if not _has_other_privileged_access_for_client(
-        db,
-        client=client,
-        excluded_agent_ids={agent.id},
-    ):
-        raise ConsoleAPIError(409, "INVALID_STATE", "Cannot disable the last active privileged account for this client")
-
-
 def _create_agent_with_membership(
     db: Session,
     *,
@@ -5413,146 +6824,6 @@ def _apply_membership_target_filters(
     else:
         query = query.filter(AgentMembership.branch_id.is_(None))
     return query
-
-
-def _parse_fleet_lifecycle_param(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    normalized = value.strip().lower()
-    if normalized == "all":
-        return None
-    if normalized not in _FLEET_LIFECYCLE_STATES:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid fleet_lifecycle")
-    return normalized
-
-
-def _parse_fleet_payment_param(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    normalized = value.strip().lower()
-    if normalized == "all":
-        return None
-    if normalized not in _FLEET_PAYMENT_STATES:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid payment_status")
-    return normalized
-
-
-def _parse_fleet_service_param(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    normalized = value.strip().lower()
-    if normalized == "all":
-        return None
-    if normalized not in _FLEET_SERVICE_STATES:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid service_state")
-    return normalized
-
-
-def _is_client_active_status(status: Optional[str]) -> bool:
-    return (status or "").strip().lower() == _CLIENT_STATUS_ACTIVE
-
-
-def _normalize_fleet_payment_status(value: Optional[str]) -> str:
-    normalized = (value or "").strip().lower()
-    if normalized in {"pending", "confirmed", "rejected"}:
-        return normalized
-    return "unknown"
-
-
-def _resolve_fleet_commercial_state(payment_status: str) -> str:
-    if payment_status == "confirmed":
-        return "payment_confirmed"
-    if payment_status == "pending":
-        return "payment_pending"
-    if payment_status == "rejected":
-        return "payment_rejected"
-    return "contract_missing"
-
-
-def _resolve_fleet_service_state(
-    *,
-    client_active: bool,
-    active_branches: int,
-    degraded_branches: int,
-    go_live_ready_branches: int,
-) -> str:
-    if not client_active:
-        return "attention"
-    if active_branches <= 0:
-        return "attention"
-    if degraded_branches > 0:
-        return "degraded"
-    if go_live_ready_branches < active_branches:
-        return "attention"
-    return "ok"
-
-
-def _resolve_fleet_lifecycle_override(client: Client, company: Optional[Company]) -> Optional[str]:
-    candidates: list[Optional[str]] = []
-    if company and isinstance(company.billing_info, dict):
-        candidates.append(company.billing_info.get("lifecycle_state"))
-        candidates.append(company.billing_info.get("service_lifecycle_state"))
-    if isinstance(client.config, dict):
-        candidates.append(client.config.get("lifecycle_state"))
-        candidates.append(client.config.get("service_lifecycle_state"))
-    for raw in candidates:
-        normalized = (raw or "").strip().lower() if isinstance(raw, str) else ""
-        if normalized in _FLEET_LIFECYCLE_STATES:
-            return normalized
-    return None
-
-
-def _resolve_fleet_lifecycle_state(
-    *,
-    client: Client,
-    company: Optional[Company],
-    payment_status: str,
-    active_branches: int,
-    go_live_ready_branches: int,
-) -> str:
-    override = _resolve_fleet_lifecycle_override(client, company)
-    if override:
-        return override
-    if not _is_client_active_status(client.status):
-        return "archived"
-    if payment_status == "rejected":
-        return "paused"
-    if active_branches <= 0:
-        if payment_status == "confirmed":
-            return "onboarding"
-        return "contracting"
-    if go_live_ready_branches < active_branches:
-        return "onboarding"
-    if payment_status != "confirmed":
-        return "go_live_ready"
-    return "active"
-
-
-def _resolve_fleet_next_action(
-    *,
-    lifecycle_state: str,
-    service_state: str,
-    payment_status: str,
-) -> str:
-    if lifecycle_state == "lead":
-        return "qualify_and_collect_contract"
-    if lifecycle_state == "contracting":
-        return "collect_signed_contract_and_payment"
-    if lifecycle_state == "onboarding":
-        return "complete_onboarding_steps"
-    if lifecycle_state == "go_live_ready":
-        if payment_status != "confirmed":
-            return "confirm_payment_and_approve_go_live"
-        return "approve_go_live"
-    if lifecycle_state == "paused":
-        return "resolve_payment_or_service_blocker"
-    if lifecycle_state == "archived":
-        return "archived_no_action"
-    if service_state == "degraded":
-        return "run_integration_recovery"
-    if service_state == "attention":
-        return "resolve_attention_items"
-    return "monitor_sla_and_quality"
 
 
 def _build_reference_branch_decisions(
@@ -5734,8 +7005,9 @@ def _build_fleet_client_details_map(
             go_live_ready_branches=stats["go_live_ready_branches"],
         )
         lifecycle_state = _resolve_fleet_lifecycle_state(
-            client=client,
-            company=company,
+            client_status=client.status,
+            client_config=client.config,
+            company_billing_info=company.billing_info if company else None,
             payment_status=payment_status,
             active_branches=stats["active_branches"],
             go_live_ready_branches=stats["go_live_ready_branches"],
@@ -8240,7 +9512,7 @@ def _parse_sort_param(name: str, value: Optional[str], default: str = "last_acti
     if value is None or str(value).strip() == "":
         return default
     normalized = str(value).strip().lower()
-    if normalized not in {"last_activity", "created_at", "sla"}:
+    if normalized not in {"last_activity", "created_at", "sla", "resolved_at"}:
         raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
     return normalized
 
@@ -8256,14 +9528,42 @@ def _parse_case_status_param(name: str, value: Optional[str]) -> Optional[list[s
     raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
 
 
+def _parse_case_queue_view_param(name: str, value: Optional[str]) -> Optional[str]:
+    if value is None or str(value).strip() == "":
+        return None
+    normalized = str(value).strip().lower()
+    if normalized not in {"needs_reply", "waiting_client", "snoozed", "delivery", "unassigned"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
+    return normalized
+
+
+def _parse_case_owner_filters(
+    *,
+    assigned_to_me: bool,
+    assignee_id: Optional[str],
+    unassigned: bool,
+) -> tuple[Optional[UUID], bool]:
+    parsed_assignee_id = _parse_uuid_param("assignee_id", assignee_id) if assignee_id else None
+    if assigned_to_me and parsed_assignee_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "assigned_to_me cannot be combined with assignee_id")
+    if assigned_to_me and unassigned:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "assigned_to_me cannot be combined with unassigned")
+    if parsed_assignee_id and unassigned:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "assignee_id cannot be combined with unassigned")
+    return parsed_assignee_id, unassigned
+
+
 def _resolve_case_sort_cursor(
     *,
     sort_by: str,
     last_activity_at: Optional[datetime],
     created_at: datetime,
+    resolved_at: Optional[datetime] = None,
 ) -> datetime:
     if sort_by == "last_activity":
         return last_activity_at or created_at
+    if sort_by == "resolved_at":
+        return resolved_at or created_at
     return created_at
 
 
@@ -8585,52 +9885,6 @@ def _build_admin_recent_ops_jobs(
     return [_build_ops_job_record(row) for row in rows], total_24h, failed_24h
 
 
-def _build_control_tower_issue_counts(
-    counter: dict[str, int],
-    *,
-    limit: int = 10,
-) -> list[ConsoleAdminControlTowerIssueCount]:
-    if not counter:
-        return []
-    ranked = sorted(counter.items(), key=lambda item: (-item[1], item[0]))
-    return [
-        ConsoleAdminControlTowerIssueCount(code=code, count=count)
-        for code, count in ranked[: max(limit, 0)]
-    ]
-
-
-def _control_tower_incident_priority(severity: str) -> Literal["p0", "p1", "p2"]:
-    if severity == "critical":
-        return "p0"
-    if severity == "warn":
-        return "p1"
-    return "p2"
-
-
-def _control_tower_provider_action_label(action: str) -> str:
-    labels = {
-        "integration_reconcile": "Запустить integration reconcile",
-        "provider_start_rebind": "Начать provider rebind",
-        "provider_complete_rebind": "Завершить provider rebind",
-        "provider_renewal_confirmed": "Подтвердить продление провайдера",
-        "provider_webhook_updated": "Обновить webhook/instance",
-        "provider_send_reminder": "Отправить напоминание провайдеру",
-    }
-    return labels.get(action, "Запустить provider action")
-
-
-def _dedupe_non_empty(values: list[str]) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = (value or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        deduped.append(normalized)
-        seen.add(normalized)
-    return deduped
-
-
 def _build_admin_control_tower_action_center(
     db: Session,
     *,
@@ -8659,7 +9913,6 @@ def _build_admin_control_tower_action_center(
             top_reasons=[],
             items=[],
         )
-
     incident_limit = max(limit, 50)
     board_limit = max(limit, 50)
     client_ids = [client.id for client in active_clients]
@@ -8687,353 +9940,15 @@ def _build_admin_control_tower_action_center(
         limit=board_limit,
         now=now,
     )
-
-    reason_counter: dict[str, int] = {}
-    collected: list[ConsoleAdminControlTowerActionItem] = []
-
-    for incident in incidents.items:
-        priority = _control_tower_incident_priority(incident.severity)
-        reasons = _dedupe_non_empty([incident.reason_code])
-        for reason in reasons:
-            reason_counter[reason] = reason_counter.get(reason, 0) + 1
-        for action in incident.actions:
-            collected.append(
-                ConsoleAdminControlTowerActionItem(
-                    id=f"incident:{incident.id}:{action.id}",
-                    priority=priority,
-                    source="incident",
-                    kind="ops_job" if action.job_type else "navigate",
-                    title=action.title,
-                    description=action.description,
-                    reasons=reasons,
-                    href=action.href,
-                    incident_id=incident.id,
-                    client_id=incident.client_id,
-                    client_slug=incident.client_slug,
-                    branch_id=incident.branch_id,
-                    job_type=action.job_type,
-                    mode=action.mode,
-                    params=action.params if isinstance(action.params, dict) else None,
-                    requires_confirmation=bool(action.requires_confirmation),
-                    evidence_links=_dedupe_non_empty(
-                        ["/admin/incidents", action.href or "", "/admin/control-tower/overview"]
-                    ),
-                )
-            )
-
-    for queue_item in drift_board.provider_ops_queue:
-        reasons = _dedupe_non_empty(list(queue_item.reasons or []))
-        for reason in reasons:
-            reason_counter[reason] = reason_counter.get(reason, 0) + 1
-        collected.append(
-            ConsoleAdminControlTowerActionItem(
-                id=f"provider:{queue_item.branch_id}:{queue_item.recommended_action}",
-                priority=queue_item.priority,
-                source="provider_ops",
-                kind="provider_action",
-                title=_control_tower_provider_action_label(queue_item.recommended_action),
-                description=(
-                    f"{queue_item.client_slug}/{queue_item.branch_name}: "
-                    f"priority={queue_item.priority}, reasons={', '.join(reasons) or 'n/a'}"
-                ),
-                reasons=reasons,
-                href="/integrations",
-                client_id=queue_item.client_id,
-                client_slug=queue_item.client_slug,
-                branch_id=queue_item.branch_id,
-                branch_slug=queue_item.branch_slug,
-                branch_name=queue_item.branch_name,
-                provider_action=queue_item.recommended_action,
-                params={
-                    "branch_id": str(queue_item.branch_id),
-                    "action": queue_item.recommended_action,
-                    "mode": "execute",
-                    "requires_confirmation": bool(queue_item.requires_confirmation),
-                },
-                requires_confirmation=bool(queue_item.requires_confirmation),
-                evidence_links=[
-                    "/admin/control-tower/drift-board",
-                    f"/admin/integrations/{queue_item.branch_id}/reconcile",
-                ],
-            )
-        )
-
-    for readiness_item in readiness_board.items:
-        reasons = _dedupe_non_empty(
-            list(readiness_item.hard_gate_blockers or []) + list(readiness_item.missing or [])
-        )
-        if not reasons:
-            reasons = ["readiness_blocked"]
-        for reason in reasons:
-            reason_counter[reason] = reason_counter.get(reason, 0) + 1
-        collected.append(
-            ConsoleAdminControlTowerActionItem(
-                id=f"readiness:{readiness_item.branch_id}",
-                priority="p0" if readiness_item.hard_gate_status == "fail" else "p1",
-                source="readiness",
-                kind="navigate",
-                title=f"Закрыть go-live blockers: {readiness_item.client_slug}/{readiness_item.branch_name}",
-                description=(
-                    "Проверьте hard-gate и недостающие onboarding шаги перед продвижением филиала."
-                ),
-                reasons=reasons,
-                href="/tenants",
-                client_id=readiness_item.client_id,
-                client_slug=readiness_item.client_slug,
-                branch_id=readiness_item.branch_id,
-                branch_slug=readiness_item.branch_slug,
-                branch_name=readiness_item.branch_name,
-                evidence_links=["/admin/control-tower/readiness-board", "/tenants"],
-            )
-        )
-
-    scoped_items: list[ConsoleAdminControlTowerActionItem] = []
-    for item in collected:
-        if item.client_id and item.client_id not in client_ids:
-            continue
-        if not include_p2_mode and item.priority == "p2":
-            continue
-        scoped_items.append(item)
-
-    priority_rank = {"p0": 0, "p1": 1, "p2": 2}
-    source_rank = {"incident": 0, "provider_ops": 1, "readiness": 2}
-    scoped_items.sort(
-        key=lambda item: (
-            priority_rank.get(item.priority, 99),
-            source_rank.get(item.source, 99),
-            item.client_slug or "",
-            item.branch_name or "",
-            item.title,
-        )
-    )
-
-    summary = ConsoleAdminControlTowerActionCenterSummary(
-        total_actions=len(scoped_items),
-        p0_actions=sum(1 for item in scoped_items if item.priority == "p0"),
-        p1_actions=sum(1 for item in scoped_items if item.priority == "p1"),
-        p2_actions=sum(1 for item in scoped_items if item.priority == "p2"),
-        incident_actions=sum(1 for item in scoped_items if item.source == "incident"),
-        provider_ops_actions=sum(1 for item in scoped_items if item.source == "provider_ops"),
-        readiness_actions=sum(1 for item in scoped_items if item.source == "readiness"),
-    )
-
-    return ConsoleAdminControlTowerActionCenterResponse(
-        generated_at=now.isoformat(),
+    return _build_admin_control_tower_action_center_response(
+        incidents=incidents,
+        drift_board=drift_board,
+        readiness_board=readiness_board,
+        client_ids=client_ids,
         stale_after_minutes=stale_after_minutes,
+        include_p2_mode=include_p2_mode,
         limit=limit,
-        include_p2=include_p2_mode,
-        summary=summary,
-        top_reasons=_build_control_tower_issue_counts(reason_counter, limit=10),
-        items=scoped_items[:limit],
-    )
-
-
-def _merge_control_tower_issue_counts(
-    *groups: list[ConsoleAdminControlTowerIssueCount],
-) -> dict[str, int]:
-    merged: dict[str, int] = {}
-    for group in groups:
-        for item in group:
-            code = (item.code or "").strip()
-            if not code:
-                continue
-            merged[code] = merged.get(code, 0) + int(item.count or 0)
-    return merged
-
-
-def _build_migration_wave(
-    *,
-    wave: Literal["canary", "cohort", "fleet"],
-    candidate_clients_total: int,
-    candidate_branches_total: int,
-    hard_blockers_total: int,
-    soft_blockers_total: int,
-    blocked_branches_total: int,
-    soft_blocker_budget: int,
-    top_blockers: list[ConsoleAdminControlTowerIssueCount],
-) -> ConsoleAdminControlTowerMigrationWave:
-    gate: Literal["go", "hold"] = "go"
-    reasons: list[str] = []
-    rollback_triggers: list[str] = []
-
-    if candidate_branches_total <= 0:
-        gate = "hold"
-        reasons.append("no_ready_candidates")
-        rollback_triggers.append("no_ready_candidates")
-
-    if hard_blockers_total > 0:
-        gate = "hold"
-        reasons.append("hard_blockers_present")
-        rollback_triggers.extend(
-            [
-                "incident_p0_open",
-                "readiness_hard_gate_failed",
-                "provider_ops_p0_queue",
-            ]
-        )
-
-    if soft_blockers_total > soft_blocker_budget:
-        gate = "hold"
-        reasons.append("soft_blocker_budget_exceeded")
-        rollback_triggers.append("soft_blocker_burn_rate")
-
-    if wave == "fleet" and blocked_branches_total > 0:
-        gate = "hold"
-        reasons.append("blocked_branches_remaining")
-        rollback_triggers.append("blocked_branches_remaining")
-
-    if gate == "go":
-        reason_text = "wave_ready_for_promotion"
-    else:
-        reason_text = "+".join(_dedupe_non_empty(reasons)) or "wave_hold"
-
-    blockers_total = hard_blockers_total + max(0, soft_blockers_total - soft_blocker_budget)
-    return ConsoleAdminControlTowerMigrationWave(
-        wave=wave,
-        gate=gate,
-        reason=reason_text,
-        candidate_clients_total=max(candidate_clients_total, 0),
-        candidate_branches_total=max(candidate_branches_total, 0),
-        blockers_total=max(blockers_total, 0),
-        rollback_triggers=_dedupe_non_empty(rollback_triggers),
-        top_blockers=top_blockers,
-    )
-
-
-def _resolve_migration_wave_for_priority(
-    priority: Literal["p0", "p1", "p2"],
-) -> Literal["canary", "cohort", "fleet"]:
-    if priority == "p0":
-        return "canary"
-    if priority == "p1":
-        return "cohort"
-    return "fleet"
-
-
-def _build_migration_signals(
-    *,
-    ready_branches: int,
-    blocked_branches: int,
-    hard_blockers_total: int,
-    soft_blockers_total: int,
-) -> list[ConsoleAdminControlTowerMigrationSignal]:
-    if soft_blockers_total <= 0:
-        soft_status: Literal["pass", "warn", "fail"] = "pass"
-    elif soft_blockers_total <= 3:
-        soft_status = "warn"
-    else:
-        soft_status = "fail"
-    return [
-        ConsoleAdminControlTowerMigrationSignal(
-            code="ready_branches",
-            status="pass" if ready_branches > 0 else "fail",
-            value=max(ready_branches, 0),
-            threshold=1,
-            note="at least one ready branch is required for promotion",
-        ),
-        ConsoleAdminControlTowerMigrationSignal(
-            code="hard_blockers",
-            status="pass" if hard_blockers_total == 0 else "fail",
-            value=max(hard_blockers_total, 0),
-            threshold=0,
-            note="p0 incidents + hard-gate failures + p0 action queue",
-        ),
-        ConsoleAdminControlTowerMigrationSignal(
-            code="soft_blockers",
-            status=soft_status,
-            value=max(soft_blockers_total, 0),
-            threshold=3,
-            note="p1 drift queue + p1 action queue",
-        ),
-        ConsoleAdminControlTowerMigrationSignal(
-            code="blocked_branches",
-            status="pass" if blocked_branches == 0 else "fail",
-            value=max(blocked_branches, 0),
-            threshold=0,
-            note="fleet promotion requires zero blocked branches",
-        ),
-    ]
-
-
-def _build_migration_promotion_actions(
-    *,
-    action_center: ConsoleAdminControlTowerActionCenterResponse,
-    waves: list[ConsoleAdminControlTowerMigrationWave],
-    limit: int,
-) -> list[ConsoleAdminControlTowerPromotionAction]:
-    wave_by_id = {wave.wave: wave for wave in waves}
-    collected: list[ConsoleAdminControlTowerPromotionAction] = []
-    for item in action_center.items:
-        wave_id = _resolve_migration_wave_for_priority(item.priority)
-        wave_gate = wave_by_id.get(wave_id).gate if wave_id in wave_by_id else "hold"
-        collected.append(
-            ConsoleAdminControlTowerPromotionAction(
-                id=item.id,
-                wave=wave_id,
-                gate=wave_gate,
-                priority=item.priority,
-                source=item.source,
-                kind=item.kind,
-                title=item.title,
-                description=item.description,
-                reasons=list(item.reasons or []),
-                href=item.href,
-                job_type=item.job_type,
-                mode=item.mode,
-                params=item.params if isinstance(item.params, dict) else None,
-                evidence_links=list(item.evidence_links or []),
-            )
-        )
-        if len(collected) >= limit:
-            break
-    return collected
-
-
-def _build_admin_control_tower_migration_wave_detail(
-    *,
-    migration_program: ConsoleAdminControlTowerMigrationProgramResponse,
-    wave: Literal["canary", "cohort", "fleet"],
-    limit: int,
-) -> ConsoleAdminControlTowerMigrationWaveDetailResponse:
-    selected_wave: Optional[ConsoleAdminControlTowerMigrationWave] = None
-    for candidate in migration_program.waves:
-        if candidate.wave == wave:
-            selected_wave = candidate
-            break
-    if selected_wave is None:
-        selected_wave = ConsoleAdminControlTowerMigrationWave(
-            wave=wave,
-            gate="hold",
-            reason="wave_not_available",
-            candidate_clients_total=0,
-            candidate_branches_total=0,
-            blockers_total=0,
-            rollback_triggers=["wave_not_available"],
-            top_blockers=[],
-        )
-
-    selected_actions = [
-        item
-        for item in migration_program.promotion_actions
-        if item.wave == wave
-    ][:limit]
-    decision: Literal["promote", "hold"] = "promote" if selected_wave.gate == "go" else "hold"
-    reason = selected_wave.reason if selected_wave.reason else ("wave_ready_for_promotion" if decision == "promote" else "wave_hold")
-    return ConsoleAdminControlTowerMigrationWaveDetailResponse(
-        generated_at=migration_program.generated_at,
-        stale_after_minutes=migration_program.stale_after_minutes,
-        limit=limit,
-        include_p2=migration_program.include_p2,
-        wave=wave,
-        decision=decision,
-        reason=reason,
-        summary=migration_program.summary,
-        wave_state=selected_wave,
-        signals=list(migration_program.signals or []),
-        promotion_actions_total=sum(
-            1 for item in migration_program.promotion_actions if item.wave == wave
-        ),
-        promotion_actions=selected_actions,
+        now=now,
     )
 
 
@@ -9117,92 +10032,15 @@ def _build_admin_control_tower_migration_program(
         limit=board_limit,
         now=now,
     )
-
-    merged_top_blockers = _build_control_tower_issue_counts(
-        _merge_control_tower_issue_counts(
-            readiness_board.top_blockers,
-            drift_board.top_issues,
-            action_center.top_reasons,
-        ),
-        limit=5,
-    )
-
-    active_clients_total = len(active_clients)
-    total_branches = readiness_board.summary.total_branches
-    ready_branches = readiness_board.summary.ready_branches
-    blocked_branches = readiness_board.summary.blocked_branches
-    p0_actions = action_center.summary.p0_actions
-    p1_actions = action_center.summary.p1_actions
-    p2_actions = action_center.summary.p2_actions
-    hard_blockers_total = (
-        readiness_board.summary.hard_gate_failed_branches
-        + drift_board.summary.queue_p0
-        + p0_actions
-    )
-    soft_blockers_total = drift_board.summary.queue_p1 + p1_actions
-
-    canary_wave = _build_migration_wave(
-        wave="canary",
-        candidate_clients_total=1 if ready_branches > 0 else 0,
-        candidate_branches_total=min(ready_branches, 3),
-        hard_blockers_total=hard_blockers_total,
-        soft_blockers_total=soft_blockers_total,
-        blocked_branches_total=blocked_branches,
-        soft_blocker_budget=2,
-        top_blockers=merged_top_blockers,
-    )
-    cohort_wave = _build_migration_wave(
-        wave="cohort",
-        candidate_clients_total=min(active_clients_total, 5) if ready_branches > 0 else 0,
-        candidate_branches_total=min(ready_branches, 25),
-        hard_blockers_total=hard_blockers_total,
-        soft_blockers_total=soft_blockers_total,
-        blocked_branches_total=blocked_branches,
-        soft_blocker_budget=5,
-        top_blockers=merged_top_blockers,
-    )
-    fleet_wave = _build_migration_wave(
-        wave="fleet",
-        candidate_clients_total=active_clients_total if ready_branches > 0 else 0,
-        candidate_branches_total=ready_branches,
-        hard_blockers_total=hard_blockers_total,
-        soft_blockers_total=soft_blockers_total + (p2_actions if include_p2_mode else 0),
-        blocked_branches_total=blocked_branches,
-        soft_blocker_budget=0,
-        top_blockers=merged_top_blockers,
-    )
-    waves = [canary_wave, cohort_wave, fleet_wave]
-    signals = _build_migration_signals(
-        ready_branches=ready_branches,
-        blocked_branches=blocked_branches,
-        hard_blockers_total=hard_blockers_total,
-        soft_blockers_total=soft_blockers_total,
-    )
-    promotion_actions = _build_migration_promotion_actions(
+    return _build_admin_control_tower_migration_program_response(
+        active_clients_total=len(active_clients),
+        readiness_board=readiness_board,
+        drift_board=drift_board,
         action_center=action_center,
-        waves=waves,
-        limit=limit,
-    )
-
-    return ConsoleAdminControlTowerMigrationProgramResponse(
-        generated_at=now.isoformat(),
         stale_after_minutes=stale_after_minutes,
+        include_p2_mode=include_p2_mode,
         limit=limit,
-        include_p2=include_p2_mode,
-        summary=ConsoleAdminControlTowerMigrationProgramSummary(
-            active_clients_total=active_clients_total,
-            total_branches=total_branches,
-            ready_branches=ready_branches,
-            blocked_branches=blocked_branches,
-            p0_actions=p0_actions,
-            p1_actions=p1_actions,
-            p2_actions=p2_actions,
-            waves_go=sum(1 for wave in waves if wave.gate == "go"),
-            waves_hold=sum(1 for wave in waves if wave.gate == "hold"),
-        ),
-        waves=waves,
-        signals=signals,
-        promotion_actions=promotion_actions,
+        now=now,
     )
 
 
@@ -9215,163 +10053,18 @@ def _build_admin_control_tower_readiness_board(
     limit: int,
     now: datetime,
 ) -> ConsoleAdminControlTowerReadinessBoardResponse:
-    if not active_clients:
-        return ConsoleAdminControlTowerReadinessBoardResponse(
-            generated_at=now.isoformat(),
-            limit=limit,
-            include_ready=include_ready_mode,
-            summary=ConsoleAdminControlTowerReadinessSummary(
-                total_branches=0,
-                ready_branches=0,
-                blocked_branches=0,
-                hard_gate_failed_branches=0,
-                go_live_draft_branches=0,
-                go_live_approved_branches=0,
-                go_live_rejected_branches=0,
-                degraded_branches=0,
-            ),
-            top_blockers=[],
-            items=[],
-        )
-
-    client_ids = [client.id for client in active_clients]
-    client_slug_map = {client.id: client.name for client in active_clients}
-    client_company_map = {
-        client.id: client.company_id
-        for client in active_clients
-        if getattr(client, "company_id", None)
-    }
-    branches = (
-        db.query(Branch)
-        .filter(
-            Branch.client_id.in_(client_ids),
-            Branch.is_active.is_(True),
-        )
-        .order_by(Branch.created_at.desc(), Branch.id.desc())
-        .all()
-    )
-
-    summary = ConsoleAdminControlTowerReadinessSummary(
-        total_branches=0,
-        ready_branches=0,
-        blocked_branches=0,
-        hard_gate_failed_branches=0,
-        go_live_draft_branches=0,
-        go_live_approved_branches=0,
-        go_live_rejected_branches=0,
-        degraded_branches=0,
-    )
-    issue_counter: dict[str, int] = {}
-    items: list[ConsoleAdminControlTowerReadinessItem] = []
-    allowed_steps = {
-        "branch_draft",
-        "integrations",
-        "team",
-        "telegram",
-        "knowledge",
-        "booking",
-        "go_no_go",
-    }
-
-    for branch in branches:
-        client_slug = client_slug_map.get(branch.client_id)
-        if not client_slug:
-            continue
-        summary.total_branches += 1
-
-        onboarding_status = build_onboarding_status(db, branch)
-        scorecard = build_onboarding_scorecard(db, branch)
-        missing = list(getattr(scorecard, "missing", []) or [])
-        readiness_kernel = getattr(scorecard, "readiness_kernel", None)
-        readiness_status = (
-            getattr(readiness_kernel, "status", None)
-            if readiness_kernel is not None
-            else None
-        )
-        if readiness_status not in {"pass", "warn", "fail"}:
-            readiness_status = "pass" if getattr(scorecard, "ready", False) else "fail"
-        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
-        hard_gate_status = "fail" if hard_gate_blockers else "pass"
-
-        if getattr(scorecard, "ready", False):
-            summary.ready_branches += 1
-        blocked = (not getattr(scorecard, "ready", False)) or bool(hard_gate_blockers)
-        if blocked:
-            summary.blocked_branches += 1
-        if hard_gate_status == "fail":
-            summary.hard_gate_failed_branches += 1
-
-        go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
-        if go_live_state == "approved":
-            summary.go_live_approved_branches += 1
-        elif go_live_state == "rejected":
-            summary.go_live_rejected_branches += 1
-        else:
-            summary.go_live_draft_branches += 1
-
-        integration_state = (_normalize_optional_text(getattr(branch, "integration_state", None)) or "ok").lower()
-        if integration_state not in {"ok", "degraded"}:
-            integration_state = "ok"
-        if integration_state == "degraded":
-            summary.degraded_branches += 1
-
-        if not include_ready_mode and not blocked:
-            continue
-
-        current_step = (
-            getattr(getattr(onboarding_status, "current_step", None), "value", None)
-            or "branch_draft"
-        )
-        if current_step not in allowed_steps:
-            current_step = "branch_draft"
-
-        company_id = client_company_map.get(branch.client_id)
-        company_name = companies_by_id.get(company_id).name if company_id and company_id in companies_by_id else None
-        item = ConsoleAdminControlTowerReadinessItem(
-            company_id=company_id,
-            company_name=company_name,
-            client_id=branch.client_id,
-            client_slug=client_slug,
-            branch_id=branch.id,
-            branch_slug=branch.slug,
-            branch_name=branch.name,
-            current_step=current_step,
-            scorecard_status="pass" if getattr(scorecard, "ready", False) else "fail",
-            readiness_status=readiness_status,
-            hard_gate_status=hard_gate_status,
-            ready=bool(getattr(scorecard, "ready", False)),
-            go_live_state=go_live_state,
-            integration_state=integration_state,
-            missing=missing,
-            hard_gate_blockers=hard_gate_blockers,
-        )
-        items.append(item)
-
-        for code in missing + hard_gate_blockers:
-            normalized = (code or "").strip()
-            if not normalized:
-                continue
-            issue_counter[normalized] = issue_counter.get(normalized, 0) + 1
-
-    readiness_rank = {"fail": 2, "warn": 1, "pass": 0}
-    items.sort(
-        key=lambda item: (
-            -int(not item.ready),
-            -int(item.hard_gate_status == "fail"),
-            -readiness_rank.get(item.readiness_status, 0),
-            -len(item.hard_gate_blockers),
-            -len(item.missing),
-            item.client_slug,
-            item.branch_name,
-        )
-    )
-    return ConsoleAdminControlTowerReadinessBoardResponse(
-        generated_at=now.isoformat(),
+    return _build_admin_control_tower_readiness_board_response(
+        db=db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
+        include_ready_mode=include_ready_mode,
         limit=limit,
-        include_ready=include_ready_mode,
-        summary=summary,
-        top_blockers=_build_control_tower_issue_counts(issue_counter, limit=10),
-        items=items[:limit],
+        now=now,
+        build_onboarding_status=build_onboarding_status,
+        build_onboarding_scorecard=build_onboarding_scorecard,
+        resolve_readiness_hard_gate_blockers=_resolve_readiness_hard_gate_blockers,
+        normalize_branch_go_live_state=_normalize_branch_go_live_state,
+        hard_gate_codes=_ONBOARDING_READINESS_HARD_GATE_CODES,
     )
 
 
@@ -9385,198 +10078,21 @@ def _build_admin_control_tower_drift_board(
     limit: int,
     now: datetime,
 ) -> ConsoleAdminControlTowerDriftBoardResponse:
-    if not active_clients:
-        return ConsoleAdminControlTowerDriftBoardResponse(
-            generated_at=now.isoformat(),
-            stale_after_minutes=stale_after_minutes,
-            limit=limit,
-            only_problematic=only_problematic_mode,
-            summary=ConsoleAdminControlTowerDriftSummary(
-                total_branches=0,
-                ok_branches=0,
-                warn_branches=0,
-                error_branches=0,
-                degraded_branches=0,
-                queue_p0=0,
-                queue_p1=0,
-                queue_p2=0,
-            ),
-            top_issues=[],
-            items=[],
-            provider_ops_queue=[],
-        )
-
-    client_ids = [client.id for client in active_clients]
-    client_slug_map = {client.id: client.name for client in active_clients}
-    client_company_map = {
-        client.id: client.company_id
-        for client in active_clients
-        if getattr(client, "company_id", None)
-    }
-    client_domain_map: dict[UUID, str] = {}
-    for client in active_clients:
-        config = getattr(client, "config", None)
-        if not isinstance(config, dict):
-            continue
-        domain_key = _normalize_optional_domain_slug_token(
-            config.get("domain_slug") or config.get("domain")
-        )
-        if domain_key:
-            client_domain_map[client.id] = domain_key
-
-    branches = (
-        db.query(Branch)
-        .filter(
-            Branch.client_id.in_(client_ids),
-            Branch.is_active.is_(True),
-        )
-        .order_by(Branch.created_at.desc(), Branch.id.desc())
-        .all()
-    )
-    if not branches:
-        return ConsoleAdminControlTowerDriftBoardResponse(
-            generated_at=now.isoformat(),
-            stale_after_minutes=stale_after_minutes,
-            limit=limit,
-            only_problematic=only_problematic_mode,
-            summary=ConsoleAdminControlTowerDriftSummary(
-                total_branches=0,
-                ok_branches=0,
-                warn_branches=0,
-                error_branches=0,
-                degraded_branches=0,
-                queue_p0=0,
-                queue_p1=0,
-                queue_p2=0,
-            ),
-            top_issues=[],
-            items=[],
-            provider_ops_queue=[],
-        )
-
-    branch_by_id = {branch.id: branch for branch in branches}
-    branch_client_ids = sorted({branch.client_id for branch in branches})
-    token_rows = (
-        db.query(
-            ClientSettings.client_id,
-            ClientSettings.telegram_bot_token,
-        )
-        .filter(ClientSettings.client_id.in_(branch_client_ids))
-        .all()
-    )
-    telegram_token_map: dict[UUID, bool] = {}
-    for row_client_id, token in token_rows:
-        telegram_token_map[row_client_id] = bool(_normalize_optional_text(token))
-
-    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
-        db,
-        client_ids=branch_client_ids,
-    )
-    provider_binding_by_branch = _build_provider_binding_lifecycle_map(
-        db,
-        client_ids=branch_client_ids,
-        branches=branches,
-        now=now,
-    )
-
-    all_status_items: list[ConsoleBranchIntegrationStatus] = []
-    for branch in branches:
-        client_slug = client_slug_map.get(branch.client_id)
-        if not client_slug:
-            continue
-        observed = inbound_observations.get(branch.id)
-        last_inbound_at: Optional[datetime] = observed[0] if observed else None
-        last_inbound_instance_id: Optional[str] = observed[1] if observed else None
-        all_status_items.append(
-            _build_branch_integration_status(
-                client_id=branch.client_id,
-                client_slug=client_slug,
-                branch=branch,
-                has_telegram_bot_token=telegram_token_map.get(branch.client_id, False),
-                stale_after_minutes=stale_after_minutes,
-                last_inbound_at=last_inbound_at,
-                last_inbound_instance_id=last_inbound_instance_id,
-                now=now,
-                provider_binding=provider_binding_by_branch.get(branch.id),
-            )
-        )
-
-    provider_ops_queue = _build_provider_ops_queue(
-        all_status_items,
-        generated_at=now,
-    )
-    queue_counter = {"p0": 0, "p1": 0, "p2": 0}
-    for queue_item in provider_ops_queue:
-        queue_counter[queue_item.priority] = queue_counter.get(queue_item.priority, 0) + 1
-
-    summary = ConsoleAdminControlTowerDriftSummary(
-        total_branches=len(all_status_items),
-        ok_branches=sum(1 for item in all_status_items if item.status == "ok"),
-        warn_branches=sum(1 for item in all_status_items if item.status == "warn"),
-        error_branches=sum(1 for item in all_status_items if item.status == "error"),
-        degraded_branches=sum(1 for item in all_status_items if item.integration_state == "degraded"),
-        queue_p0=queue_counter.get("p0", 0),
-        queue_p1=queue_counter.get("p1", 0),
-        queue_p2=queue_counter.get("p2", 0),
-    )
-
-    scoped_items: list[ConsoleBranchIntegrationStatus] = []
-    for status_item in all_status_items:
-        decision = _resolve_provider_ops_decision(status_item)
-        if only_problematic_mode and status_item.status == "ok" and not decision:
-            continue
-        scoped_items.append(status_item)
-
-    severity_rank = {"error": 2, "warn": 1, "ok": 0}
-    scoped_items.sort(
-        key=lambda item: (
-            -severity_rank.get(item.status, 0),
-            -int(item.integration_state == "degraded"),
-            -len(item.drift_issues),
-            item.client_slug,
-            item.branch_name,
-        )
-    )
-
-    issue_counter: dict[str, int] = {}
-    for status_item in scoped_items:
-        for issue in status_item.drift_issues:
-            normalized = (issue or "").strip()
-            if not normalized:
-                continue
-            issue_counter[normalized] = issue_counter.get(normalized, 0) + 1
-        if status_item.integration_state == "degraded":
-            issue_counter["integration_degraded"] = issue_counter.get("integration_degraded", 0) + 1
-
-    lifecycle_items: list[ConsoleProviderLifecycleItem] = []
-    for status_item in scoped_items[:limit]:
-        branch = branch_by_id.get(status_item.branch_id)
-        if not branch:
-            continue
-        company_id = client_company_map.get(status_item.client_id)
-        company_name = companies_by_id.get(company_id).name if company_id and company_id in companies_by_id else None
-        lifecycle_items.append(
-            _build_provider_lifecycle_item(
-                db=db,
-                status=status_item,
-                branch=branch,
-                company_id=company_id,
-                company_name=company_name,
-                domain_key=client_domain_map.get(status_item.client_id),
-                generated_at=now,
-                now=now,
-            )
-        )
-
-    return ConsoleAdminControlTowerDriftBoardResponse(
-        generated_at=now.isoformat(),
+    return _build_admin_control_tower_drift_board_response(
+        db=db,
+        active_clients=active_clients,
+        companies_by_id=companies_by_id,
         stale_after_minutes=stale_after_minutes,
+        only_problematic_mode=only_problematic_mode,
         limit=limit,
-        only_problematic=only_problematic_mode,
-        summary=summary,
-        top_issues=_build_control_tower_issue_counts(issue_counter, limit=10),
-        items=lifecycle_items,
-        provider_ops_queue=provider_ops_queue[:limit],
+        now=now,
+        normalize_optional_domain_slug_token=_normalize_optional_domain_slug_token,
+        load_latest_branch_inbound_observations_for_clients=_load_latest_branch_inbound_observations_for_clients,
+        build_provider_binding_lifecycle_map=_build_provider_binding_lifecycle_map,
+        build_branch_integration_status=_build_branch_integration_status,
+        build_provider_ops_queue=_build_provider_ops_queue,
+        resolve_provider_ops_decision=_resolve_provider_ops_decision,
+        build_provider_lifecycle_item=_build_provider_lifecycle_item,
     )
 
 
@@ -10687,6 +11203,418 @@ async def get_me(request: Request, db: Session = Depends(get_db)) -> ConsoleMeRe
     return _build_me_response(context)
 
 
+def _require_queue_state_permission(context: ConsoleAuthContext, surface: str) -> None:
+    if surface == "cases":
+        require_console_permission(context, "inbox", "read")
+        return
+    if surface == "calendar":
+        require_console_permission(context, "calendar", "read")
+        return
+    raise ConsoleAPIError(400, "INVALID_PARAM", "surface is invalid")
+
+
+def _can_manage_team_saved_views(context: ConsoleAuthContext) -> bool:
+    return has_console_permission(context.role, "team", "write")
+
+
+def _require_team_saved_view_manage_permission(context: ConsoleAuthContext) -> None:
+    require_console_permission(
+        context,
+        "team",
+        "write",
+        message="Only owner/admin can manage team queue presets",
+    )
+
+
+def _saved_view_current_branch_id(context: ConsoleAuthContext) -> Optional[UUID]:
+    return (
+        getattr(context, "selected_branch_id", None)
+        or getattr(context, "effective_branch_id", None)
+        or getattr(getattr(context, "agent", None), "branch_id", None)
+    )
+
+
+def _normalize_saved_view_target_branch_id(
+    context: ConsoleAuthContext,
+    *,
+    target_branch_id: Optional[UUID],
+) -> Optional[UUID]:
+    if target_branch_id is None:
+        return None
+    allowed_branch_ids = {branch_id for branch_id in getattr(context, "allowed_branch_ids", set()) if branch_id}
+    if allowed_branch_ids and target_branch_id not in allowed_branch_ids:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
+    return target_branch_id
+
+
+def _normalize_saved_view_target_role(
+    *,
+    surface: str,
+    target_role: Optional[str],
+) -> Optional[str]:
+    cleaned = _normalize_optional_text(target_role)
+    if cleaned is None:
+        return None
+    if surface == "cases":
+        allowed = has_console_permission(cleaned, "inbox", "read")
+    elif surface == "calendar":
+        allowed = has_console_permission(cleaned, "calendar", "read")
+    else:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "surface is invalid")
+    if not allowed:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "target_role is invalid")
+    return cleaned
+
+
+def _resolve_saved_view_targeting(
+    context: ConsoleAuthContext,
+    *,
+    surface: str,
+    scope: str,
+    target_branch_id: Optional[UUID],
+    target_role: Optional[str],
+) -> tuple[str, Optional[UUID], Optional[str]]:
+    normalized_scope = _normalize_saved_view_scope(scope)
+    if normalized_scope == "personal":
+        if target_branch_id is not None or target_role is not None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Personal saved views do not support team targeting")
+        return normalized_scope, None, None
+    _require_team_saved_view_manage_permission(context)
+    return (
+        normalized_scope,
+        _normalize_saved_view_target_branch_id(context, target_branch_id=target_branch_id),
+        _normalize_saved_view_target_role(surface=surface, target_role=target_role),
+    )
+
+
+def _assert_saved_view_access(
+    context: ConsoleAuthContext,
+    *,
+    record,
+    mutate: bool,
+) -> None:
+    scope = _normalize_saved_view_scope(getattr(record, "scope", "personal"))
+    if scope == "personal":
+        if getattr(record, "agent_id", None) != context.agent.id:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+        return
+    if mutate:
+        _require_team_saved_view_manage_permission(context)
+        _normalize_saved_view_target_branch_id(
+            context,
+            target_branch_id=getattr(record, "target_branch_id", None),
+        )
+        return
+    if not _saved_view_applies_to_context(
+        record,
+        role=context.role,
+        current_branch_id=_saved_view_current_branch_id(context),
+    ):
+        raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+
+
+def _build_current_queue_state_response(
+    *,
+    surface: str,
+    scope,
+    record,
+) -> ConsoleQueueStateCurrentResponse:
+    if record is None:
+        return ConsoleQueueStateCurrentResponse(
+            found=False,
+            surface=surface,
+            selected_branch_id=scope.selected_branch_id,
+            case_id=scope.case_id,
+            conversation_id=scope.conversation_id,
+            version=1,
+            query_state={},
+            updated_at=None,
+        )
+    return ConsoleQueueStateCurrentResponse(
+        found=True,
+        surface=surface,
+        selected_branch_id=record.selected_branch_id,
+        case_id=record.case_id,
+        conversation_id=record.conversation_id,
+        version=record.version,
+        query_state=dict(record.query_state or {}),
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
+def _serialize_saved_view(record) -> ConsoleSavedView:
+    return ConsoleSavedView(
+        id=record.id,
+        surface=record.surface,
+        scope=getattr(record, "scope", "personal"),
+        name=record.name,
+        version=record.version,
+        query_state=dict(record.query_state or {}),
+        is_default=bool(record.is_default),
+        is_applicable=bool(getattr(record, "is_applicable", True)),
+        created_by_agent_id=getattr(record, "created_by_agent_id", None),
+        target_branch_id=getattr(record, "target_branch_id", None),
+        target_role=getattr(record, "target_role", None),
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
+@router.get(
+    "/queue-state/current",
+    response_model=ConsoleQueueStateCurrentResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_current_queue_state(
+    request: Request,
+    surface: str = Query(...),
+    case_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleQueueStateCurrentResponse:
+    context = get_console_context(request, db)
+    _reject_unknown_query_params(request, {"surface", "case_id", "conversation_id"})
+    _require_queue_state_permission(context, surface)
+    scope = _build_queue_state_scope(
+        context,
+        surface=surface,
+        case_id=_parse_uuid_param("case_id", case_id),
+        conversation_id=_parse_uuid_param("conversation_id", conversation_id),
+    )
+    record = _get_current_queue_state_record(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        surface=scope.surface,
+        scope_key=scope.scope_key,
+    )
+    return _build_current_queue_state_response(surface=scope.surface, scope=scope, record=record)
+
+
+@router.put(
+    "/queue-state/current",
+    response_model=ConsoleQueueStateCurrentResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def put_current_queue_state(
+    body: ConsoleQueueStateCurrentRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleQueueStateCurrentResponse:
+    context = get_console_context(request, db)
+    _require_queue_state_permission(context, body.surface)
+    scope = _build_queue_state_scope(
+        context,
+        surface=body.surface,
+        case_id=body.case_id,
+        conversation_id=body.conversation_id,
+    )
+    query_state = _normalize_queue_state_payload(
+        context,
+        surface=body.surface,
+        query_state=body.query_state,
+    )
+    record = _upsert_current_queue_state_record(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        scope=scope,
+        version=body.version,
+        query_state=query_state,
+    )
+    return _build_current_queue_state_response(surface=scope.surface, scope=scope, record=record)
+
+
+@router.get(
+    "/queue-state/views",
+    response_model=ConsoleSavedViewListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_queue_state_views(
+    request: Request,
+    surface: str = Query(...),
+    db: Session = Depends(get_db),
+) -> ConsoleSavedViewListResponse:
+    context = get_console_context(request, db)
+    _reject_unknown_query_params(request, {"surface"})
+    _require_queue_state_permission(context, surface)
+    scope = _build_queue_state_scope(context, surface=surface)
+    current_branch_id = _saved_view_current_branch_id(context)
+    items = _list_saved_views(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        surface=scope.surface,
+        role=context.role,
+        current_branch_id=current_branch_id,
+        include_all_team_presets=_can_manage_team_saved_views(context),
+    )
+    for item in items:
+        item.is_applicable = _saved_view_applies_to_context(
+            item,
+            role=context.role,
+            current_branch_id=current_branch_id,
+        )
+    return ConsoleSavedViewListResponse(items=[_serialize_saved_view(item) for item in items])
+
+
+@router.get(
+    "/queue-state/views/{view_id}",
+    response_model=ConsoleSavedView,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_queue_state_view(
+    view_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleSavedView:
+    context = get_console_context(request, db)
+    record = _get_saved_view_for_client(
+        db,
+        client_id=context.client.id,
+        view_id=view_id,
+    )
+    if record is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+    _assert_saved_view_access(context, record=record, mutate=False)
+    _require_queue_state_permission(context, record.surface)
+    record.is_applicable = _saved_view_applies_to_context(
+        record,
+        role=context.role,
+        current_branch_id=_saved_view_current_branch_id(context),
+    )
+    return _serialize_saved_view(record)
+
+
+@router.post(
+    "/queue-state/views",
+    response_model=ConsoleSavedView,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def create_queue_state_view(
+    body: ConsoleSavedViewCreateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleSavedView:
+    context = get_console_context(request, db)
+    _require_queue_state_permission(context, body.surface)
+    scope, target_branch_id, target_role = _resolve_saved_view_targeting(
+        context,
+        surface=body.surface,
+        scope=body.scope,
+        target_branch_id=body.target_branch_id,
+        target_role=body.target_role,
+    )
+    query_state = _normalize_queue_state_payload(
+        context,
+        surface=body.surface,
+        query_state=body.query_state,
+    )
+    record = _create_saved_view(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id if scope == "personal" else None,
+        created_by_agent_id=context.agent.id,
+        surface=body.surface,
+        scope=scope,
+        name=body.name,
+        version=body.version,
+        query_state=query_state,
+        is_default=body.is_default,
+        target_branch_id=target_branch_id,
+        target_role=target_role,
+    )
+    record.is_applicable = _saved_view_applies_to_context(
+        record,
+        role=context.role,
+        current_branch_id=_saved_view_current_branch_id(context),
+    )
+    return _serialize_saved_view(record)
+
+
+@router.patch(
+    "/queue-state/views/{view_id}",
+    response_model=ConsoleSavedView,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def update_queue_state_view(
+    view_id: UUID,
+    body: ConsoleSavedViewUpdateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleSavedView:
+    context = get_console_context(request, db)
+    record = _get_saved_view_for_client(
+        db,
+        client_id=context.client.id,
+        view_id=view_id,
+    )
+    if record is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+    _assert_saved_view_access(context, record=record, mutate=True)
+    _require_queue_state_permission(context, record.surface)
+    body_fields = body.model_dump(exclude_unset=True)
+    query_state = (
+        _normalize_queue_state_payload(
+            context,
+            surface=record.surface,
+            query_state=body.query_state,
+        )
+        if body.query_state is not None
+        else None
+    )
+    update_kwargs = {
+        "name": body.name,
+        "version": body.version,
+        "query_state": query_state,
+        "is_default": body.is_default,
+    }
+    if "target_branch_id" in body_fields:
+        update_kwargs["target_branch_id"] = _normalize_saved_view_target_branch_id(
+            context,
+            target_branch_id=body.target_branch_id,
+        )
+    if "target_role" in body_fields:
+        update_kwargs["target_role"] = _normalize_saved_view_target_role(
+            surface=record.surface,
+            target_role=body.target_role,
+        )
+    updated = _update_saved_view(
+        db,
+        record=record,
+        **update_kwargs,
+    )
+    updated.is_applicable = _saved_view_applies_to_context(
+        updated,
+        role=context.role,
+        current_branch_id=_saved_view_current_branch_id(context),
+    )
+    return _serialize_saved_view(updated)
+
+
+@router.delete(
+    "/queue-state/views/{view_id}",
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def delete_queue_state_view(
+    view_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    context = get_console_context(request, db)
+    record = _get_saved_view_for_client(
+        db,
+        client_id=context.client.id,
+        view_id=view_id,
+    )
+    if record is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+    _assert_saved_view_access(context, record=record, mutate=True)
+    _require_queue_state_permission(context, record.surface)
+    _delete_saved_view(db, record=record)
+    return JSONResponse({"success": True})
+
+
 @router.get(
     "/agents",
     response_model=ConsoleAgentListResponse,
@@ -10815,9 +11743,12 @@ async def link_agent_telegram(
 async def list_cases(
     request: Request,
     status: Optional[str] = None,
+    queue_view: Optional[str] = None,
     q: Optional[str] = None,
     branch_id: Optional[str] = None,
     assigned_to_me: bool = False,
+    assignee_id: Optional[str] = None,
+    unassigned: bool = False,
     phone: Optional[str] = None,
     has_delivery_error: bool = False,
     has_pending_outbox: bool = False,
@@ -10826,6 +11757,8 @@ async def list_cases(
     sort_by: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    resolved_from: Optional[str] = None,
+    resolved_to: Optional[str] = None,
     cursor: Optional[str] = None,
     limit: int = 20,
     db: Session = Depends(get_db),
@@ -10836,9 +11769,12 @@ async def list_cases(
         request,
         {
             "status",
+            "queue_view",
             "q",
             "branch_id",
             "assigned_to_me",
+            "assignee_id",
+            "unassigned",
             "phone",
             "has_delivery_error",
             "has_pending_outbox",
@@ -10847,6 +11783,8 @@ async def list_cases(
             "sort_by",
             "date_from",
             "date_to",
+            "resolved_from",
+            "resolved_to",
             "cursor",
             "limit",
         },
@@ -10856,6 +11794,11 @@ async def list_cases(
         "assigned_to_me",
         request.query_params.get("assigned_to_me"),
         default=assigned_to_me,
+    )
+    unassigned = _parse_bool_param(
+        "unassigned",
+        request.query_params.get("unassigned"),
+        default=unassigned,
     )
     has_delivery_error = _parse_bool_param(
         "has_delivery_error",
@@ -10874,6 +11817,12 @@ async def list_cases(
     )
     last_activity_since_dt = _parse_datetime_param("last_activity_since", last_activity_since)
     sort_by_value = _parse_sort_param("sort_by", request.query_params.get("sort_by"))
+    queue_view_value = _parse_case_queue_view_param("queue_view", request.query_params.get("queue_view") or queue_view)
+    assignee_filter_id, unassigned_filter = _parse_case_owner_filters(
+        assigned_to_me=assigned_to_me,
+        assignee_id=request.query_params.get("assignee_id") or assignee_id,
+        unassigned=unassigned,
+    )
 
     # Base query with common filters used by both count and item fetch.
     base_query = (
@@ -10919,6 +11868,22 @@ async def list_cases(
         end_of_day = datetime.combine(to_date, time.max).replace(tzinfo=timezone.utc)
         base_query = base_query.filter(Handover.created_at <= end_of_day)
 
+    if resolved_from is not None:
+        resolved_from_date = _parse_date_param("resolved_from", resolved_from)
+        resolved_from_dt = datetime.combine(resolved_from_date, time.min).replace(tzinfo=timezone.utc)
+        base_query = base_query.filter(
+            Handover.resolved_at.isnot(None),
+            Handover.resolved_at >= resolved_from_dt,
+        )
+
+    if resolved_to is not None:
+        resolved_to_date = _parse_date_param("resolved_to", resolved_to)
+        resolved_to_dt = datetime.combine(resolved_to_date, time.max).replace(tzinfo=timezone.utc)
+        base_query = base_query.filter(
+            Handover.resolved_at.isnot(None),
+            Handover.resolved_at <= resolved_to_dt,
+        )
+
     # Assigned to me
     if assigned_to_me:
         base_query = base_query.filter(
@@ -10929,6 +11894,30 @@ async def list_cases(
                     Handover.assigned_to_name == context.agent.name,
                 ),
             )
+        )
+    elif assignee_filter_id:
+        assignee_options = _list_case_assignee_options(
+            db,
+            client_id=context.client.id,
+            branch_id=_parse_uuid_param("branch_id", branch_id) if branch_id else None,
+            current_assignee_id=None,
+        )
+        assignee_option = next((item for item in assignee_options if item.agent_id == assignee_filter_id), None)
+        if not assignee_option:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid assignee_id")
+        base_query = base_query.filter(
+            or_(
+                Handover.assigned_to == str(assignee_filter_id),
+                and_(
+                    Handover.assigned_to.is_(None),
+                    Handover.assigned_to_name == assignee_option.agent_name,
+                ),
+            )
+        )
+    elif unassigned_filter:
+        base_query = base_query.filter(
+            Handover.assigned_to.is_(None),
+            func.coalesce(Handover.assigned_to_name, "") == "",
         )
 
     # Search filters
@@ -10952,52 +11941,6 @@ async def list_cases(
                 func.regexp_replace(User.phone, r"\D", "", "g").ilike(f"%{digits}%")
             )
 
-    count_query = base_query
-    if has_delivery_error:
-        count_query = count_query.filter(
-            db.query(OutboxMessage.id)
-            .filter(
-                OutboxMessage.client_id == context.client.id,
-                OutboxMessage.conversation_id == Conversation.id,
-                OutboxMessage.status == "FAILED",
-            )
-            .exists()
-        )
-    if has_pending_outbox:
-        count_query = count_query.filter(
-            db.query(OutboxMessage.id)
-            .filter(
-                OutboxMessage.client_id == context.client.id,
-                OutboxMessage.conversation_id == Conversation.id,
-                OutboxMessage.status.in_(["PENDING", "PROCESSING"]),
-            )
-            .exists()
-        )
-    if has_human_lock:
-        now_utc = datetime.now(timezone.utc)
-        count_query = count_query.filter(
-            db.query(ConversationHumanLock.id)
-            .filter(
-                ConversationHumanLock.client_id == context.client.id,
-                ConversationHumanLock.conversation_id == Conversation.id,
-                ConversationHumanLock.lock_scope == HUMAN_LOCK_SCOPE_CONVERSATION,
-                ConversationHumanLock.active.is_(True),
-                ConversationHumanLock.lock_until > now_utc,
-            )
-            .exists()
-        )
-    if last_activity_since_dt:
-        count_query = count_query.filter(
-            db.query(Message.id)
-            .filter(
-                Message.client_id == context.client.id,
-                Message.conversation_id == Conversation.id,
-                Message.created_at >= last_activity_since_dt,
-            )
-            .exists()
-        )
-    # Full count for queue visibility (before cursor pagination).
-    total_count = count_query.order_by(None).count()
     now_utc = datetime.now(timezone.utc)
 
     latest_message_subq = (
@@ -11108,21 +12051,38 @@ async def list_cases(
     )
 
     if has_delivery_error:
-        query = query.filter(outbox_subq.c.failed_count > 0)
+        query = query.filter(func.coalesce(outbox_subq.c.failed_count, 0) > 0)
 
     if has_pending_outbox:
-        query = query.filter(outbox_subq.c.pending_count > 0)
+        query = query.filter(func.coalesce(outbox_subq.c.pending_count, 0) > 0)
 
     if last_activity_since_dt:
         query = query.filter(latest_message_subq.c.created_at >= last_activity_since_dt)
     if has_human_lock:
         query = query.filter(human_lock_subq.c.lock_until.is_not(None))
+    if queue_view_value:
+        query = query.filter(
+            _build_case_queue_view_expr(
+                queue_view=queue_view_value,
+                last_inbound_col=last_inbound_subq.c.last_inbound_at,
+                last_outbound_col=last_outbound_subq.c.last_outbound_at,
+                pending_count_col=outbox_subq.c.pending_count,
+                failed_count_col=outbox_subq.c.failed_count,
+                lock_until_col=human_lock_subq.c.lock_until,
+                now_utc=now_utc,
+            )
+        )
+
+    # Full count for queue visibility (before cursor pagination).
+    total_count = query.order_by(None).count()
 
     # Sorting & Pagination (Cursor based on selected sort)
     sort_expr = Handover.created_at
     sort_desc = True
     if sort_by_value == "last_activity":
         sort_expr = func.coalesce(latest_message_subq.c.created_at, Handover.created_at)
+    elif sort_by_value == "resolved_at":
+        sort_expr = func.coalesce(Handover.resolved_at, Handover.created_at)
     elif sort_by_value == "sla":
         sort_expr = Handover.created_at
         sort_desc = False
@@ -11180,6 +12140,7 @@ async def list_cases(
             sort_by=sort_by_value,
             last_activity_at=last_activity_at,
             created_at=last_handover.created_at,
+            resolved_at=last_handover.resolved_at,
         )
         next_cursor = cursor_value.isoformat()
     else:
@@ -11191,16 +12152,24 @@ async def list_cases(
                 id=handover.id,
                 conversation_id=handover.conversation_id,
                 status=handover.status,
+                business_status_code=business_status["business_status_code"],
+                business_status_label=business_status["business_status_label"],
                 trigger_type=handover.trigger_type,
                 trigger_value=handover.trigger_value,
                 context_summary=handover.context_summary,
                 user_message=handover.user_message,
+                assigned_to_id=str(handover.assigned_to) if handover.assigned_to else None,
                 assigned_to_name=handover.assigned_to_name,
                 branch_id=conversation.branch_id,
                 channel=handover.channel,
                 created_at=handover.created_at.isoformat(),
                 **_format_case_metrics(handover),
-                sla_status=_calculate_sla_status(handover.created_at),
+                sla_status=queue_signals["sla_status"],
+                sla_action_state=queue_signals["sla_action_state"],
+                sla_overdue_minutes=queue_signals["sla_overdue_minutes"],
+                priority_tier=queue_signals["priority_tier"],
+                attention_reason=queue_signals["attention_reason"],
+                target_response_at=queue_signals["target_response_at"],
                 customer_name=user.name if user else None,
                 customer_phone=user.phone if user else None,
                 customer_remote_jid=user.remote_jid if user else None,
@@ -11213,12 +12182,10 @@ async def list_cases(
                     conversation_channel=conversation.channel,
                 ),
                 last_message_preview=last_message_preview,
-                needs_reply=bool(
-                    last_inbound_at and (not last_outbound_at or last_inbound_at > last_outbound_at)
-                ),
-                has_delivery_error=bool(failed_count and failed_count > 0),
-                has_pending_outbox=bool(pending_count and pending_count > 0),
-                human_lock_active=bool(lock_until),
+                needs_reply=needs_reply,
+                has_delivery_error=has_delivery_error,
+                has_pending_outbox=has_pending_outbox,
+                human_lock_active=human_lock_active,
                 human_lock_until=lock_until.isoformat() if lock_until else None,
                 human_lock_remaining_seconds=(
                     max(0, int((lock_until - now_utc).total_seconds())) if lock_until else None
@@ -11226,6 +12193,9 @@ async def list_cases(
                 human_lock_source=lock_source,
                 human_lock_reason=lock_reason,
                 human_lock_by=lock_by_name,
+                snoozed_until=queue_signals["snoozed_until"],
+                snoozed_reason=queue_signals["snoozed_reason"],
+                snoozed_by=queue_signals["snoozed_by"],
             )
             for (
                 handover,
@@ -11244,11 +12214,827 @@ async def list_cases(
                 lock_reason,
                 lock_by_name,
             ) in items
+            for needs_reply in [bool(
+                last_inbound_at and (not last_outbound_at or last_inbound_at > last_outbound_at)
+            )]
+            for has_delivery_error in [bool(failed_count and failed_count > 0)]
+            for has_pending_outbox in [bool(pending_count and pending_count > 0)]
+            for human_lock_active in [bool(lock_until)]
+            for queue_signals in [
+                _build_case_queue_signals(
+                    created_at=handover.created_at,
+                    status=handover.status,
+                    needs_reply=needs_reply,
+                    has_delivery_error=has_delivery_error,
+                    has_pending_outbox=has_pending_outbox,
+                    human_lock_active=human_lock_active,
+                    human_lock_reason=lock_reason,
+                    last_inbound_at=last_inbound_at,
+                    last_outbound_at=last_outbound_at,
+                    first_response_at=handover.first_response_at,
+                    handover_meta=handover.meta,
+                )
+            ]
+            for business_status in [
+                _build_case_business_status(
+                    status=handover.status,
+                    assigned_to_id=handover.assigned_to,
+                    assigned_to_name=handover.assigned_to_name,
+                    queue_signals=queue_signals,
+                )
+            ]
         ],
         cursor=next_cursor,
         has_more=has_more,
         total=total_count,
     )
+
+
+@router.post(
+    "/cases/bulk",
+    response_model=ConsoleCaseBulkActionResponse,
+)
+async def bulk_case_action(
+    body: ConsoleCaseBulkActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseBulkActionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+    action = body.action
+    case_ids = _normalize_case_bulk_ids(body.case_ids)
+    idempotency_key = _get_idempotency_key(request)
+
+    target_agent_id: Optional[UUID] = None
+    routing_policy: Optional[str] = None
+    snooze_minutes: Optional[int] = None
+    snooze_reason: Optional[str] = None
+
+    if action == "reassign":
+        if body.agent_id is None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "agent_id is required for reassign")
+        target_agent_id = body.agent_id
+    elif action == "route":
+        routing_policy = _normalize_case_routing_policy(body.policy)
+    elif action == "snooze":
+        snooze_minutes = _normalize_pause_minutes(body.minutes, default=30, allow_zero=False)
+        snooze_reason = _normalize_optional_text(body.reason) or _CASE_SNOOZE_DEFAULT_REASON
+
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.bulk",
+        payload={
+            "action": action,
+            "case_ids": [str(case_id) for case_id in case_ids],
+            "agent_id": str(target_agent_id) if target_agent_id else None,
+            "policy": routing_policy,
+            "minutes": snooze_minutes,
+            "reason": snooze_reason,
+        },
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        handovers = (
+            db.query(Handover)
+            .filter(
+                Handover.client_id == context.client.id,
+                Handover.id.in_(case_ids),
+            )
+            .with_for_update()
+            .all()
+        )
+        handovers_by_id = {handover.id: handover for handover in handovers}
+        conversation_ids = [handover.conversation_id for handover in handovers]
+        conversations = (
+            db.query(Conversation)
+            .filter(Conversation.id.in_(conversation_ids))
+            .with_for_update()
+            .all()
+        ) if conversation_ids else []
+        conversations_by_id = {conversation.id: conversation for conversation in conversations}
+        routing_signal_contexts: dict[UUID, CaseRoutingSignalContext] = {}
+        booking_routing_contexts: dict[UUID, CaseRoutingBookingContext] = {}
+        if action == "route":
+            routing_signal_contexts = _load_case_routing_signal_contexts(
+                db,
+                handovers=handovers,
+                conversations_by_id=conversations_by_id,
+            )
+            booking_routing_contexts = _load_case_booking_routing_contexts(
+                db,
+                case_ids=case_ids,
+            )
+
+        assignee_cache: dict[UUID | None, list[ConsoleCaseAssigneeOption]] = {}
+        policy_load_cache: dict[UUID | None, dict[UUID, int]] = {}
+        results: list[ConsoleCaseBulkActionResult] = []
+        processed_count = 0
+        skipped_count = 0
+        failed_count = 0
+        actor_name = context.agent.name or "Менеджер"
+
+        for case_id in case_ids:
+            handover = handovers_by_id.get(case_id)
+            if handover is None:
+                skipped_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="skipped",
+                        code="NOT_FOUND",
+                        message="Case not found",
+                    )
+                )
+                continue
+
+            conversation = conversations_by_id.get(handover.conversation_id)
+            if conversation is None:
+                failed_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="failed",
+                        code="NOT_FOUND",
+                        message="Conversation not found",
+                    )
+                )
+                continue
+
+            branch_id = conversation.branch_id
+            try:
+                _require_branch_access(context, branch_id, message="Access to this case denied")
+                _require_case_operator_access(context=context, handover=handover)
+
+                if action in {"reassign", "route"}:
+                    if handover.status == "resolved":
+                        skipped_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="skipped",
+                                code="CASE_ALREADY_RESOLVED",
+                                message="Case already resolved",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+                    if handover.status != "active":
+                        skipped_count += 1
+                        results.append(
+                            _build_case_bulk_result(
+                                case_id=case_id,
+                                status="skipped",
+                                code="CASE_NOT_ACTIVE",
+                                message="Case must be active to route" if action == "route" else "Case must be active to reassign",
+                                handover=handover,
+                                branch_id=branch_id,
+                            )
+                        )
+                        continue
+
+                    if branch_id not in assignee_cache:
+                        assignee_cache[branch_id] = _list_case_assignee_options(
+                            db,
+                            client_id=context.client.id,
+                            branch_id=branch_id,
+                            current_assignee_id=None,
+                        )
+                    current_assignee_id = str(handover.assigned_to) if handover.assigned_to else None
+                    routing: Optional[ConsoleCaseRoutingDecision] = None
+                    if action == "route":
+                        if branch_id not in policy_load_cache:
+                            policy_load_cache[branch_id] = {
+                                option.agent_id: int(option.open_case_count or 0)
+                                for option in assignee_cache[branch_id]
+                            }
+                        routing, target_option = _build_case_routing_decision(
+                            assignee_options=assignee_cache[branch_id],
+                            current_assignee_id=current_assignee_id,
+                            policy=routing_policy or _CASE_ROUTING_POLICY_DEFAULT,
+                            load_overrides=policy_load_cache[branch_id],
+                            booking_context=booking_routing_contexts.get(case_id),
+                            signal_context=routing_signal_contexts.get(case_id),
+                        )
+                        if target_option is None or routing is None:
+                            skipped_count += 1
+                            results.append(
+                                _build_case_bulk_result(
+                                    case_id=case_id,
+                                    status="skipped",
+                                    code="NOT_FOUND",
+                                    message="Assignee not available for this case",
+                                    handover=handover,
+                                    branch_id=branch_id,
+                                )
+                            )
+                            continue
+                        if not routing.will_reassign:
+                            skipped_count += 1
+                            results.append(
+                                _build_case_bulk_result(
+                                    case_id=case_id,
+                                    status="skipped",
+                                    code="ALREADY_POLICY_ASSIGNED",
+                                    message=routing.reason_summary,
+                                    handover=handover,
+                                    branch_id=branch_id,
+                                    routing=routing,
+                                )
+                            )
+                            continue
+                    else:
+                        _annotate_case_assignee_options_service(
+                            assignee_cache[branch_id],
+                            current_assignee_id=current_assignee_id,
+                            booking_context=None,
+                        )
+                        target_option = next(
+                            (
+                                option
+                                for option in assignee_cache[branch_id]
+                                if option.agent_id == target_agent_id
+                            ),
+                            None,
+                        )
+                        if target_option is None:
+                            skipped_count += 1
+                            results.append(
+                                _build_case_bulk_result(
+                                    case_id=case_id,
+                                    status="skipped",
+                                    code="NOT_FOUND",
+                                    message="Assignee not available for this case",
+                                    handover=handover,
+                                    branch_id=branch_id,
+                                )
+                            )
+                            continue
+                        if not target_option.assignment_eligible:
+                            skipped_count += 1
+                            results.append(
+                                _build_case_bulk_result(
+                                    case_id=case_id,
+                                    status="skipped",
+                                    code="ASSIGNEE_UNAVAILABLE",
+                                    message=_routing_profile_reason_message(target_option),
+                                    handover=handover,
+                                    branch_id=branch_id,
+                                )
+                            )
+                            continue
+                        if current_assignee_id == str(target_agent_id):
+                            skipped_count += 1
+                            results.append(
+                                _build_case_bulk_result(
+                                    case_id=case_id,
+                                    status="skipped",
+                                    code="ALREADY_ASSIGNED",
+                                    message="Case already assigned to target manager",
+                                    handover=handover,
+                                    branch_id=branch_id,
+                                )
+                            )
+                            continue
+
+                    response = _execute_case_reassign(
+                        db=db,
+                        context=context,
+                        case=handover,
+                        conversation=conversation,
+                        target_option=target_option,
+                        routing=routing,
+                    )
+                    if action == "route" and routing is not None and branch_id in policy_load_cache:
+                        _adjust_case_routing_loads(
+                            policy_load_cache[branch_id],
+                            previous_assignee_id=current_assignee_id,
+                            next_assignee_id=str(target_option.agent_id),
+                        )
+                    processed_count += 1
+                    results.append(
+                        _build_case_bulk_result(
+                            case_id=case_id,
+                            status="processed",
+                            code="ROUTED" if action == "route" else "REASSIGNED",
+                            message=(
+                                routing.reason_summary
+                                if action == "route" and routing is not None
+                                else f"Assigned to {target_option.agent_name}"
+                            ),
+                            handover=handover,
+                            branch_id=branch_id,
+                            routing=response.routing,
+                        )
+                    )
+                    continue
+
+                if handover.status == "resolved":
+                    skipped_count += 1
+                    results.append(
+                        _build_case_bulk_result(
+                            case_id=case_id,
+                            status="skipped",
+                            code="CASE_ALREADY_RESOLVED",
+                            message="Case already resolved",
+                            handover=handover,
+                            branch_id=branch_id,
+                        )
+                    )
+                    continue
+                if handover.status != "active":
+                    skipped_count += 1
+                    results.append(
+                        _build_case_bulk_result(
+                            case_id=case_id,
+                            status="skipped",
+                            code="CASE_NOT_ACTIVE",
+                            message="Case must be active to snooze",
+                            handover=handover,
+                            branch_id=branch_id,
+                        )
+                    )
+                    continue
+
+                now_utc = datetime.now(timezone.utc)
+                _set_case_snooze_meta(
+                    handover,
+                    snoozed_until=now_utc + timedelta(minutes=snooze_minutes or 30),
+                    now_utc=now_utc,
+                    reason=snooze_reason,
+                    agent_id=context.agent.id,
+                    agent_name=actor_name,
+                )
+                record_audit_event(
+                    db,
+                    actor=context.agent,
+                    event_type="case_bulk_snoozed",
+                    entity_type="handover",
+                    entity_id=handover.id,
+                    payload={
+                        "action": action,
+                        "minutes": snooze_minutes,
+                        "reason": snooze_reason,
+                    },
+                    branch_id=branch_id,
+                )
+                processed_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="processed",
+                        code="SNOOZED",
+                        message="Case snoozed",
+                        handover=handover,
+                        branch_id=branch_id,
+                    )
+                )
+            except ConsoleAPIError as exc:
+                skipped_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="skipped",
+                        code=exc.code,
+                        message=exc.message,
+                        handover=handover,
+                        branch_id=branch_id,
+                    )
+                )
+            except Exception as exc:
+                failed_count += 1
+                results.append(
+                    _build_case_bulk_result(
+                        case_id=case_id,
+                        status="failed",
+                        code="SERVER_ERROR",
+                        message=str(exc),
+                        handover=handover,
+                        branch_id=branch_id,
+                    )
+                )
+
+        db.commit()
+        response = ConsoleCaseBulkActionResponse(
+            success=failed_count == 0,
+            action=action,
+            requested_count=len(case_ids),
+            processed_count=processed_count,
+            skipped_count=skipped_count,
+            failed_count=failed_count,
+            items=results,
+        )
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        db.rollback()
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
+
+
+@router.get(
+    "/cases/assignees",
+    response_model=ConsoleCaseAssigneeListResponse,
+)
+async def list_queue_case_assignees(
+    request: Request,
+    branch_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseAssigneeListResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "read")
+
+    requested_branch_id = _parse_uuid_param("branch_id", branch_id) if branch_id else None
+    if requested_branch_id:
+        _require_branch_access(context, requested_branch_id, message="Access to this branch denied")
+
+    if requested_branch_id is None and context.branch_restricted:
+        allowed_branch_ids = [branch.id for branch in context.branches if branch.id]
+        if len(allowed_branch_ids) == 1:
+            requested_branch_id = allowed_branch_ids[0]
+
+    items = _list_case_assignee_options(
+        db,
+        client_id=context.client.id,
+        branch_id=requested_branch_id,
+        current_assignee_id=None,
+    )
+    _annotate_case_assignee_options_service(
+        items,
+        current_assignee_id=None,
+        booking_context=None,
+    )
+    return ConsoleCaseAssigneeListResponse(items=items)
+
+
+@router.get(
+    "/cases/{case_id}/assignees",
+    response_model=ConsoleCaseAssigneeListResponse,
+)
+async def list_case_assignees(
+    case_id: UUID,
+    request: Request,
+    policy: Optional[ConsoleCaseRoutingPolicyType] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleCaseAssigneeListResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+
+    case, conversation = _resolve_case_action_context(
+        db,
+        context=context,
+        case_id=case_id,
+        lock=False,
+    )
+    items = _list_case_assignee_options(
+        db,
+        client_id=context.client.id,
+        branch_id=conversation.branch_id,
+        current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+    )
+    routing_policy = _normalize_case_routing_policy(policy)
+    signal_context = _load_single_case_routing_signal_context(
+        db,
+        client_id=context.client.id,
+        handover=case,
+        conversation=conversation,
+    )
+    booking_context = _load_case_booking_routing_contexts(
+        db,
+        case_ids=[case.id],
+    ).get(case.id)
+    _annotate_case_assignee_options_service(
+        items,
+        current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+        booking_context=booking_context,
+    )
+    routing, _recommended_option = _build_case_routing_decision(
+        assignee_options=items,
+        current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+        policy=routing_policy,
+        booking_context=booking_context,
+        signal_context=signal_context,
+    )
+    return ConsoleCaseAssigneeListResponse(items=items, routing=routing)
+
+
+@router.post(
+    "/cases/{case_id}/reassign",
+    response_model=ConsoleCaseActionResponse,
+)
+async def reassign_case(
+    case_id: UUID,
+    body: ConsoleCaseReassignRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseActionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+    mode = (body.mode or "manual").strip().lower()
+    policy = _normalize_case_routing_policy(body.policy) if mode == "policy" else None
+    idempotency_key = _get_idempotency_key(request)
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.reassign",
+        payload={
+            "case_id": str(case_id),
+            "mode": mode,
+            "agent_id": str(body.agent_id) if body.agent_id else None,
+            "policy": policy,
+        },
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        case, conversation = _resolve_case_action_context(
+            db,
+            context=context,
+            case_id=case_id,
+            lock=True,
+        )
+        branch_id = conversation.branch_id
+
+        if case.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+        if case.status != "active":
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", "Case must be active to reassign")
+
+        _require_case_operator_access(context=context, handover=case)
+
+        assignee_options = _list_case_assignee_options(
+            db,
+            client_id=context.client.id,
+            branch_id=branch_id,
+            current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+        )
+        booking_context = _load_case_booking_routing_contexts(
+            db,
+            case_ids=[case.id],
+        ).get(case.id)
+        _annotate_case_assignee_options_service(
+            assignee_options,
+            current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+            booking_context=booking_context,
+        )
+        routing: Optional[ConsoleCaseRoutingDecision] = None
+        if mode == "policy":
+            signal_context = _load_single_case_routing_signal_context(
+                db,
+                client_id=context.client.id,
+                handover=case,
+                conversation=conversation,
+            )
+            routing, target_option = _build_case_routing_decision(
+                assignee_options=assignee_options,
+                current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+                policy=policy or _CASE_ROUTING_POLICY_DEFAULT,
+                booking_context=booking_context,
+                signal_context=signal_context,
+            )
+            if target_option is None:
+                raise ConsoleAPIError(404, "NOT_FOUND", "Assignee not found")
+        else:
+            if body.agent_id is None:
+                raise ConsoleAPIError(400, "INVALID_PARAM", "agent_id is required for manual reassign")
+            target_option = next(
+                (option for option in assignee_options if option.agent_id == body.agent_id),
+                None,
+            )
+            if target_option is None:
+                raise ConsoleAPIError(404, "NOT_FOUND", "Assignee not found")
+            if not target_option.assignment_eligible:
+                raise ConsoleAPIError(
+                    409,
+                    "ASSIGNEE_UNAVAILABLE",
+                    _routing_profile_reason_message(target_option),
+                )
+
+        response = _execute_case_reassign(
+            db=db,
+            context=context,
+            case=case,
+            conversation=conversation,
+            target_option=target_option,
+            routing=routing,
+        )
+        db.commit()
+        db.refresh(case)
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
+
+
+@router.post(
+    "/cases/{case_id}/snooze",
+    response_model=ConsoleCaseActionResponse,
+)
+async def snooze_case(
+    case_id: UUID,
+    body: ConsoleCaseSnoozeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseActionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+    idempotency_key = _get_idempotency_key(request)
+    minutes = _normalize_pause_minutes(body.minutes, default=30, allow_zero=False)
+    reason = _normalize_optional_text(body.reason) or _CASE_SNOOZE_DEFAULT_REASON
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.snooze",
+        payload={"case_id": str(case_id), "minutes": minutes, "reason": reason},
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        case, conversation = _resolve_case_action_context(
+            db,
+            context=context,
+            case_id=case_id,
+            lock=True,
+        )
+        branch_id = conversation.branch_id
+
+        if case.status == "resolved":
+            raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+        if case.status != "active":
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", "Case must be active to snooze")
+
+        _require_case_operator_access(context=context, handover=case)
+
+        now_utc = datetime.now(timezone.utc)
+        snoozed_until = now_utc + timedelta(minutes=minutes)
+        _set_case_snooze_meta(
+            case,
+            snoozed_until=snoozed_until,
+            now_utc=now_utc,
+            reason=reason,
+            agent_id=context.agent.id,
+            agent_name=context.agent.name or "Менеджер",
+        )
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_snoozed",
+            entity_type="handover",
+            entity_id=case.id,
+            payload={
+                "minutes": minutes,
+                "snoozed_until": snoozed_until.isoformat(),
+                "reason": reason,
+            },
+            branch_id=branch_id,
+        )
+        db.commit()
+        db.refresh(case)
+
+        response = _build_case_action_response(
+            db=db,
+            client_id=context.client.id,
+            handover=case,
+            branch_id=branch_id,
+        )
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
+
+
+@router.post(
+    "/cases/{case_id}/reopen",
+    response_model=ConsoleCaseActionResponse,
+)
+async def reopen_case(
+    case_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleCaseActionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+    idempotency_key = _get_idempotency_key(request)
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.reopen",
+        payload={"case_id": str(case_id)},
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        case, conversation = _resolve_case_action_context(
+            db,
+            context=context,
+            case_id=case_id,
+            lock=True,
+        )
+        branch_id = conversation.branch_id
+        manager_name = context.agent.name or "Менеджер"
+
+        if case.status != "resolved":
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", "Case must be resolved to reopen")
+
+        _clear_case_snooze_meta(case)
+        result = state_manager_reopen(
+            db,
+            conversation,
+            case,
+            manager_id=str(context.agent.id),
+            manager_name=manager_name,
+        )
+        if not result.ok:
+            raise ConsoleAPIError(409, "CASE_NOT_ACTIVE", result.error or "Case must be resolved to reopen")
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="case_reopened",
+            entity_type="handover",
+            entity_id=case.id,
+            payload={"assigned_to_id": str(context.agent.id), "assigned_to_name": manager_name},
+            branch_id=branch_id,
+        )
+
+        db.commit()
+        db.refresh(case)
+        sync = _finalize_case_reopened_sync(
+            db=db,
+            context=context,
+            handover=case,
+            branch_id=branch_id,
+            reason="case_reopened",
+        )
+        response = _build_case_action_response(
+            db=db,
+            client_id=context.client.id,
+            handover=case,
+            branch_id=branch_id,
+            sync=sync,
+        )
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
 
 
 @router.post(
@@ -11321,15 +13107,11 @@ async def take_case(
 
         response = ConsoleCaseActionResponse(
             success=True,
-            case=ConsoleCase(
-                id=case.id,
-                conversation_id=case.conversation_id,
-                status=case.status,
-                trigger_type=case.trigger_type,
-                created_at=case.created_at.isoformat(),
-                assigned_to_name=case.assigned_to_name,
+            case=_build_case_action_case(
+                db=db,
+                client_id=context.client.id,
+                handover=case,
                 branch_id=branch_id,
-                **_format_case_metrics(case),
             ),
             sync=ConsoleCaseActionSync(
                 telegram=_build_sync_status("skipped", "already_taken"),
@@ -11365,49 +13147,20 @@ async def take_case(
     try:
         db.commit()
         db.refresh(case)
-        telegram_status = _sync_telegram_after_take(
-            db,
-            conversation=conversation,
-            handover=case,
-            manager_name=manager_name,
-        )
-        client_notify = _notify_client_status(
+        sync = _finalize_case_connected_sync(
             db=db,
+            context=context,
             conversation=conversation,
             handover=case,
-            status="connected",
+            branch_id=branch_id,
             manager_name=manager_name,
         )
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="manager_connected",
-            entity_type="handover",
-            entity_id=case.id,
-            payload={
-                "telegram_status": telegram_status.status,
-                "client_notify_status": client_notify.status,
-            },
+        response = _build_case_action_response(
+            db=db,
+            client_id=context.client.id,
+            handover=case,
             branch_id=branch_id,
-        )
-        db.commit()
-
-        response = ConsoleCaseActionResponse(
-            success=True,
-            case=ConsoleCase(
-                id=case.id,
-                conversation_id=case.conversation_id,
-                status=case.status,
-                trigger_type=case.trigger_type,
-                created_at=case.created_at.isoformat(),
-                assigned_to_name=case.assigned_to_name,
-                branch_id=branch_id,
-                **_format_case_metrics(case),
-            ),
-            sync=ConsoleCaseActionSync(
-                telegram=telegram_status,
-                client_notify=client_notify,
-            ),
+            sync=sync,
         )
         if idempotency and idempotency.record:
             finalize_idempotency(
@@ -11483,6 +13236,7 @@ async def resolve_case(
                 release_idempotency(db, record=idempotency.record)
             raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
 
+    _clear_case_snooze_meta(case)
     result = state_manager_resolve(
         db,
         conversation,
@@ -11525,49 +13279,21 @@ async def resolve_case(
 
     try:
         db.commit()
-        telegram_status = _sync_telegram_after_close(
-            db,
+        sync = _finalize_case_disconnected_sync(
+            db=db,
+            context=context,
             conversation=conversation,
             handover=case,
+            branch_id=branch_id,
             manager_name=manager_name,
             action="resolve",
         )
-        client_notify = _notify_client_status(
+        response = _build_case_action_response(
             db=db,
-            conversation=conversation,
+            client_id=context.client.id,
             handover=case,
-            status="disconnected",
-            manager_name=manager_name,
-        )
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="manager_disconnected",
-            entity_type="handover",
-            entity_id=case.id,
-            payload={
-                "telegram_status": telegram_status.status,
-                "client_notify_status": client_notify.status,
-            },
             branch_id=branch_id,
-        )
-        db.commit()
-
-        response = ConsoleCaseActionResponse(
-            success=True,
-            case=ConsoleCase(
-                id=case.id,
-                conversation_id=case.conversation_id,
-                status=case.status,
-                trigger_type=case.trigger_type,
-                created_at=case.created_at.isoformat(),
-                branch_id=branch_id,
-                **_format_case_metrics(case),
-            ),
-            sync=ConsoleCaseActionSync(
-                telegram=telegram_status,
-                client_notify=client_notify,
-            ),
+            sync=sync,
         )
         if idempotency and idempotency.record:
             finalize_idempotency(
@@ -11643,6 +13369,7 @@ async def return_case(
                 release_idempotency(db, record=idempotency.record)
             raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
 
+    _clear_case_snooze_meta(case)
     result = state_manager_return(
         db,
         conversation,
@@ -11684,49 +13411,21 @@ async def return_case(
 
     try:
         db.commit()
-        telegram_status = _sync_telegram_after_close(
-            db,
+        sync = _finalize_case_disconnected_sync(
+            db=db,
+            context=context,
             conversation=conversation,
             handover=case,
+            branch_id=branch_id,
             manager_name=manager_name,
             action="return",
         )
-        client_notify = _notify_client_status(
+        response = _build_case_action_response(
             db=db,
-            conversation=conversation,
+            client_id=context.client.id,
             handover=case,
-            status="disconnected",
-            manager_name=manager_name,
-        )
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="manager_disconnected",
-            entity_type="handover",
-            entity_id=case.id,
-            payload={
-                "telegram_status": telegram_status.status,
-                "client_notify_status": client_notify.status,
-            },
             branch_id=branch_id,
-        )
-        db.commit()
-
-        response = ConsoleCaseActionResponse(
-            success=True,
-            case=ConsoleCase(
-                id=case.id,
-                conversation_id=case.conversation_id,
-                status=case.status,
-                trigger_type=case.trigger_type,
-                created_at=case.created_at.isoformat(),
-                branch_id=branch_id,
-                **_format_case_metrics(case),
-            ),
-            sync=ConsoleCaseActionSync(
-                telegram=telegram_status,
-                client_notify=client_notify,
-            ),
+            sync=sync,
         )
         if idempotency and idempotency.record:
             finalize_idempotency(
@@ -11803,6 +13502,161 @@ async def get_case_messages(
 
 
 @router.get(
+    "/cases/{case_id}/stream",
+    responses={
+        200: {"content": {"text/event-stream": {}}},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def stream_case_updates(
+    case_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """SSE stream for a single case with polling fallback on the frontend."""
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "read")
+    _reject_unknown_query_params(request, set())
+
+    case = (
+        db.query(Handover)
+        .filter(
+            Handover.id == case_id,
+            Handover.client_id == context.client.id,
+        )
+        .first()
+    )
+    if not case:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Case not found")
+
+    conversation = db.query(Conversation).filter(Conversation.id == case.conversation_id).first()
+    if not conversation:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+    _require_branch_access(context, conversation.branch_id, message="Access to this case denied")
+
+    poll_interval_seconds = 3.0
+    heartbeat_seconds = 15.0
+    conversation_id = conversation.id
+
+    latest_message = (
+        db.query(Message.id, Message.created_at)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+    last_case_updated_at = case.updated_at or case.created_at
+    last_message_created_at = latest_message.created_at if latest_message else None
+    last_message_id = str(latest_message.id) if latest_message else None
+
+    def _sse_event(event_name: str, payload: dict[str, Any]) -> str:
+        return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    async def event_generator():
+        nonlocal last_case_updated_at, last_message_created_at, last_message_id
+        last_emitted_at = datetime.now(timezone.utc)
+
+        yield _sse_event(
+            "ready",
+            {
+                "reason_code": "stream_ready",
+                "case_id": str(case_id),
+                "conversation_id": str(conversation_id),
+            },
+        )
+
+        while True:
+            if await request.is_disconnected():
+                return
+
+            await asyncio.sleep(poll_interval_seconds)
+
+            refreshed_case = (
+                db.query(Handover)
+                .filter(
+                    Handover.id == case_id,
+                    Handover.client_id == context.client.id,
+                )
+                .first()
+            )
+            if not refreshed_case:
+                yield _sse_event(
+                    "closed",
+                    {
+                        "reason_code": "case_not_found",
+                        "case_id": str(case_id),
+                    },
+                )
+                return
+
+            refreshed_message = (
+                db.query(Message.id, Message.created_at)
+                .filter(Message.conversation_id == conversation_id)
+                .order_by(Message.created_at.desc())
+                .first()
+            )
+
+            refreshed_case_updated_at = refreshed_case.updated_at or refreshed_case.created_at
+            refreshed_message_created_at = refreshed_message.created_at if refreshed_message else None
+            refreshed_message_id = str(refreshed_message.id) if refreshed_message else None
+
+            changed_reasons: list[str] = []
+            if refreshed_case_updated_at and (
+                not last_case_updated_at or refreshed_case_updated_at > last_case_updated_at
+            ):
+                changed_reasons.append("case_updated")
+                last_case_updated_at = refreshed_case_updated_at
+
+            if refreshed_message_created_at and (
+                not last_message_created_at or refreshed_message_created_at > last_message_created_at
+            ):
+                changed_reasons.append("message_appended")
+                last_message_created_at = refreshed_message_created_at
+                last_message_id = refreshed_message_id
+
+            if changed_reasons:
+                yield _sse_event(
+                    "case.refresh",
+                    {
+                        "reason_code": "case_refresh",
+                        "reasons": changed_reasons,
+                        "case_id": str(case_id),
+                        "conversation_id": str(conversation_id),
+                        "case_updated_at": (
+                            last_case_updated_at.isoformat() if last_case_updated_at else None
+                        ),
+                        "latest_message_at": (
+                            last_message_created_at.isoformat() if last_message_created_at else None
+                        ),
+                        "latest_message_id": last_message_id,
+                    },
+                )
+                last_emitted_at = datetime.now(timezone.utc)
+                continue
+
+            now = datetime.now(timezone.utc)
+            if (now - last_emitted_at).total_seconds() >= heartbeat_seconds:
+                yield _sse_event(
+                    "heartbeat",
+                    {
+                        "reason_code": "heartbeat",
+                        "case_id": str(case_id),
+                        "server_time": now.isoformat(),
+                    },
+                )
+                last_emitted_at = now
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get(
     "/inbox/macros",
     response_model=ConsoleMacroListResponse,
     responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
@@ -11856,6 +13710,7 @@ async def create_inbox_macro(
 
     branch = _resolve_branch_from_context(context)
     now = datetime.now(timezone.utc)
+    action_config = _normalize_macro_action(body.action)
     macro = ConsoleMacroModel(
         id=uuid4(),
         client_id=context.client.id,
@@ -11864,6 +13719,7 @@ async def create_inbox_macro(
         scope=scope,
         label=_normalize_required_text(body.label, "label"),
         body=_normalize_required_text(body.body, "body"),
+        action_config=action_config,
         is_active=body.is_active if body.is_active is not None else True,
         created_at=now,
         updated_at=now,
@@ -11893,27 +13749,20 @@ async def update_inbox_macro(
     require_console_permission(context, "inbox", "write")
 
     branch = _resolve_branch_from_context(context)
-    macro = (
-        db.query(ConsoleMacroModel)
-        .filter(
-            ConsoleMacroModel.id == macro_id,
-            ConsoleMacroModel.client_id == context.client.id,
-            ConsoleMacroModel.branch_id == branch.id,
-        )
-        .first()
+    macro = _resolve_inbox_macro_for_context(
+        db,
+        context=context,
+        branch_id=branch.id,
+        macro_id=macro_id,
     )
-    if not macro:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Macro not found")
-
-    is_privileged = context.role in ("platform_admin", "owner", "admin")
-    if macro.agent_id and macro.agent_id != context.agent.id and not is_privileged:
-        raise ConsoleAPIError(403, "ACCESS_DENIED", "Cannot edit another agent's macro")
 
     fields_set = body.model_fields_set
     if "label" in fields_set:
         macro.label = _normalize_required_text(body.label, "label")
     if "body" in fields_set:
         macro.body = _normalize_required_text(body.body, "body")
+    if "action" in fields_set:
+        macro.action_config = _normalize_macro_action(body.action)
     if "is_active" in fields_set:
         macro.is_active = bool(body.is_active)
 
@@ -11922,6 +13771,107 @@ async def update_inbox_macro(
         db.commit()
 
     return _serialize_macro(macro)
+
+
+@router.post(
+    "/inbox/macros/{macro_id}/execute",
+    response_model=ConsoleMacroExecuteResponse,
+    responses={
+        401: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+        409: {"model": ConsoleErrorResponse},
+    },
+)
+async def execute_inbox_macro(
+    macro_id: UUID,
+    body: ConsoleMacroExecuteRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleMacroExecuteResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+
+    branch = _resolve_branch_from_context(context)
+    idempotency_key = _get_idempotency_key(request)
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.inbox_macro.execute",
+        payload={"macro_id": str(macro_id), "case_id": str(body.case_id)},
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        macro = _resolve_inbox_macro_for_context(
+            db,
+            context=context,
+            branch_id=branch.id,
+            macro_id=macro_id,
+        )
+        if not macro.is_active:
+            raise ConsoleAPIError(409, "MACRO_INACTIVE", "Macro is inactive")
+
+        action_config = _normalize_macro_action(
+            _serialize_macro_action(getattr(macro, "action_config", None))
+        )
+        if action_config is None:
+            raise ConsoleAPIError(409, "MACRO_ACTION_MISSING", "Macro has no executable action")
+
+        handover, conversation = _resolve_case_action_context(
+            db,
+            context=context,
+            case_id=body.case_id,
+            lock=True,
+        )
+        if conversation.branch_id != macro.branch_id:
+            raise ConsoleAPIError(
+                409,
+                "MACRO_BRANCH_MISMATCH",
+                "Macro branch does not match case branch",
+            )
+
+        response = _execute_macro_case_action(
+            db=db,
+            context=context,
+            macro=macro,
+            action_config=action_config,
+            handover=handover,
+            conversation=conversation,
+        )
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="macro_executed",
+            entity_type="console_macro",
+            entity_id=macro.id,
+            payload={
+                "case_id": str(handover.id),
+                "action_type": action_config["type"],
+                "scope": macro.scope,
+            },
+            branch_id=conversation.branch_id,
+        )
+        db.commit()
+
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
 
 
 @router.get(
@@ -12008,22 +13958,57 @@ async def get_case(
     if branch_id is not None and branch_id not in allowed_branch_ids:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this case denied")
     
-    sla_status = _calculate_sla_status(case.created_at)
+    needs_reply = bool(case_health.get("needs_reply"))
+    has_delivery_error = bool(case_health.get("has_delivery_error"))
+    has_pending_outbox = bool(case_health.get("has_pending_outbox"))
+    human_lock_active = bool(human_lock_snapshot.get("human_lock_active"))
+    queue_signals = _build_case_queue_signals(
+        created_at=case.created_at,
+        status=case.status,
+        needs_reply=needs_reply,
+        has_delivery_error=has_delivery_error,
+        has_pending_outbox=has_pending_outbox,
+        human_lock_active=human_lock_active,
+        human_lock_reason=human_lock_snapshot.get("human_lock_reason"),
+        last_inbound_at=case_health.get("last_inbound_at"),
+        last_outbound_at=case_health.get("last_outbound_at"),
+        first_response_at=case.first_response_at,
+        handover_meta=handover_meta,
+    )
+    business_status = _build_case_business_status(
+        status=case.status,
+        assigned_to_id=case.assigned_to,
+        assigned_to_name=case.assigned_to_name,
+        queue_signals=queue_signals,
+    )
+    booking_summary = _build_case_booking_summary(
+        db,
+        client_id=context.client.id,
+        handover=case,
+    )
     
     return ConsoleCase(
         id=case.id,
         conversation_id=case.conversation_id,
         status=case.status,
+        business_status_code=business_status["business_status_code"],
+        business_status_label=business_status["business_status_label"],
         trigger_type=case.trigger_type,
         trigger_value=case.trigger_value,
         context_summary=case.context_summary,
         user_message=case.user_message,
+        assigned_to_id=str(case.assigned_to) if case.assigned_to else None,
         assigned_to_name=case.assigned_to_name,
         branch_id=branch_id,
         channel=case.channel,
         created_at=case.created_at.isoformat(),
         **_format_case_metrics(case),
-        sla_status=sla_status,
+        sla_status=queue_signals["sla_status"],
+        sla_action_state=queue_signals["sla_action_state"],
+        sla_overdue_minutes=queue_signals["sla_overdue_minutes"],
+        priority_tier=queue_signals["priority_tier"],
+        attention_reason=queue_signals["attention_reason"],
+        target_response_at=queue_signals["target_response_at"],
         customer_name=customer_name,
         customer_phone=customer_phone,
         customer_remote_jid=customer_remote_jid,
@@ -12036,11 +14021,15 @@ async def get_case(
         last_activity_at=case_health.get("last_activity_at").isoformat() if case_health.get("last_activity_at") else None,
         last_activity_channel=case_health.get("last_activity_channel"),
         last_message_preview=case_health.get("last_message_preview"),
-        needs_reply=case_health.get("needs_reply"),
-        has_delivery_error=case_health.get("has_delivery_error"),
-        has_pending_outbox=case_health.get("has_pending_outbox"),
+        needs_reply=needs_reply,
+        has_delivery_error=has_delivery_error,
+        has_pending_outbox=has_pending_outbox,
+        snoozed_until=queue_signals["snoozed_until"],
+        snoozed_reason=queue_signals["snoozed_reason"],
+        snoozed_by=queue_signals["snoozed_by"],
         **human_lock_snapshot,
         telegram_trail=telegram_trail,
+        booking_summary=booking_summary,
     )
 
 
@@ -12142,6 +14131,7 @@ async def send_manager_message(
             case.first_response_at = datetime.now(timezone.utc)
         if not case.assigned_to_name and context.agent.name:
             case.assigned_to_name = context.agent.name
+        _clear_case_snooze_meta(case)
 
         # Audit
         record_audit_event(
@@ -16192,6 +18182,35 @@ def _resolve_kpi_status(
     return "fact"
 
 
+def _resolve_threshold_kpi_status(
+    value: Optional[float],
+    *,
+    max_fact: float,
+) -> str:
+    if value is None:
+        return "need"
+    if value <= max_fact:
+        return "fact"
+    return "need"
+
+
+def _derive_stale_view_rate(
+    *,
+    inbound_total: Optional[int],
+    no_response_alert_total: Optional[int],
+) -> Optional[float]:
+    if inbound_total is None or inbound_total <= 0:
+        return None
+    if no_response_alert_total is None:
+        return None
+    ratio = no_response_alert_total / float(inbound_total)
+    if ratio < 0:
+        ratio = 0.0
+    if ratio > 1:
+        ratio = 1.0
+    return round(ratio, 4)
+
+
 @router.get(
     "/metrics/daily",
     response_model=ConsoleMetricsDailyResponse,
@@ -16428,6 +18447,18 @@ async def get_metrics_daily(
         missing_total=booking_missing_conversation_total,
     )
     first_response_status = _resolve_kpi_status(first_response_p50_seconds)
+    queue_lag_seconds = first_response_p50_seconds
+    queue_lag_status = _resolve_threshold_kpi_status(queue_lag_seconds, max_fact=180.0)
+    stale_view_rate = _derive_stale_view_rate(
+        inbound_total=inbound_conversations_total,
+        no_response_alert_total=no_response_alert_total,
+    )
+    stale_view_status = _resolve_threshold_kpi_status(stale_view_rate, max_fact=0.05)
+    case_action_apply_latency_seconds = manager_median_response_seconds
+    case_action_apply_latency_status = _resolve_threshold_kpi_status(
+        case_action_apply_latency_seconds,
+        max_fact=300.0,
+    )
     after_hours_status = _resolve_kpi_status(
         after_hours_coverage_rate,
         missing_total=after_hours_missing_total,
@@ -16469,6 +18500,12 @@ async def get_metrics_daily(
         first_response_p90_seconds=first_response_p90_seconds,
         first_response_missing_total=first_response_missing_total,
         first_response_status=first_response_status,
+        queue_lag_seconds=queue_lag_seconds,
+        queue_lag_status=queue_lag_status,
+        stale_view_rate=stale_view_rate,
+        stale_view_status=stale_view_status,
+        case_action_apply_latency_seconds=case_action_apply_latency_seconds,
+        case_action_apply_latency_status=case_action_apply_latency_status,
         after_hours_total=after_hours_total,
         after_hours_covered=after_hours_covered,
         after_hours_missing_total=after_hours_missing_total,
@@ -21146,19 +23183,10 @@ def _get_branch_change_for_context(
     context: ConsoleAuthContext,
     change_id: UUID,
 ) -> ConsoleBranchChange:
-    query = db.query(ConsoleBranchChange).filter(
-        ConsoleBranchChange.id == change_id,
-        ConsoleBranchChange.client_id == context.client.id,
-    )
-    allowed_branch_ids = _resolve_branch_scope(context)
-    if allowed_branch_ids is not None:
-        if not allowed_branch_ids:
-            raise ConsoleAPIError(404, "NOT_FOUND", "Branch change not found")
-        query = query.filter(ConsoleBranchChange.branch_id.in_(allowed_branch_ids))
-    change = query.first()
-    if not change:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Branch change not found")
-    return change
+    change = _get_branch_change_for_context_row(db=db, change_id=change_id, client_id=context.client.id, allowed_branch_ids=_resolve_branch_scope(context))
+    if change:
+        return change
+    raise ConsoleAPIError(404, "NOT_FOUND", "Branch change not found")
 
 
 @router.get(
@@ -21184,39 +23212,25 @@ async def list_branch_changes(
     _reject_unknown_query_params(request, {"branch_id", "status", "cursor", "limit"})
     _validate_limit(limit)
 
-    query = db.query(ConsoleBranchChange).filter(ConsoleBranchChange.client_id == context.client.id)
-    if branch_id:
-        query = query.filter(ConsoleBranchChange.branch_id == branch_id)
-
-    allowed_branch_ids = _resolve_branch_scope(context)
-    if allowed_branch_ids is not None:
-        if not allowed_branch_ids:
-            return ConsoleBranchChangeListResponse(items=[], cursor=None, has_more=False)
-        query = query.filter(ConsoleBranchChange.branch_id.in_(allowed_branch_ids))
-
-    if status:
-        normalized_status = status.strip().lower()
-        allowed_statuses = {"draft", "validated", "publish_failed", "published", "rolled_back"}
-        if normalized_status not in allowed_statuses:
-            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
-        query = query.filter(ConsoleBranchChange.status == normalized_status)
-
-    cursor_date = _parse_cursor_param(cursor)
-    if cursor_date is not None:
-        query = query.filter(ConsoleBranchChange.created_at < cursor_date)
-
-    rows = (
-        query.order_by(ConsoleBranchChange.created_at.desc(), ConsoleBranchChange.id.desc())
-        .limit(limit + 1)
-        .all()
+    query = _query_branch_changes_for_context(
+        db=db,
+        client_id=context.client.id,
+        branch_id=branch_id,
+        allowed_branch_ids=_resolve_branch_scope(context),
     )
-    has_more = len(rows) > limit
-    items_rows = rows[:limit]
-    next_cursor = items_rows[-1].created_at.isoformat() if has_more and items_rows else None
-    return ConsoleBranchChangeListResponse(
-        items=[_serialize_branch_change_record(row) for row in items_rows],
-        cursor=next_cursor,
-        has_more=has_more,
+    if query is None:
+        return ConsoleBranchChangeListResponse(items=[], cursor=None, has_more=False)
+
+    try:
+        normalized_status = _normalize_branch_change_status_filter(status)
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", str(exc)) from exc
+    cursor_date = _parse_cursor_param(cursor)
+    return _build_branch_change_list_response(
+        query=query,
+        status=normalized_status,
+        cursor_date=cursor_date,
+        limit=limit,
     )
 
 
@@ -21239,9 +23253,10 @@ async def get_branch_change(
     )
     change = _get_branch_change_for_context(db, context=context, change_id=change_id)
     branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(branch) if branch else None,
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -21270,14 +23285,12 @@ async def draft_branch_change(
 
     reason = _normalize_access_reason(body.reason, required=True)
     patch_payload = body.patch.model_dump(exclude_unset=True)
-    try:
-        normalized_patch, errors = _normalize_branch_change_patch(db=db, branch=branch, patch_payload=patch_payload)
-    except ConsoleAPIError as exc:
-        normalized_patch, errors = {}, [exc.message]
-    base_snapshot = _snapshot_branch_for_change(branch)
-    diff_payload = _build_branch_change_diff(base_snapshot, normalized_patch)
-    if not diff_payload:
-        errors.append("No effective branch changes detected")
+    normalized_patch, errors, diff_payload, base_snapshot = _prepare_branch_change_payload_for_context(
+        db=db,
+        branch=branch,
+        patch_payload=patch_payload,
+        **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+    )
 
     now = datetime.now(timezone.utc)
     change = ConsoleBranchChange(
@@ -21315,9 +23328,10 @@ async def draft_branch_change(
     db.commit()
     db.refresh(change)
 
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(branch),
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -21342,43 +23356,35 @@ async def validate_branch_change(
     if change.status not in _BRANCH_CHANGE_MUTABLE_STATUSES:
         raise ConsoleAPIError(409, "INVALID_STATE", "Branch change is not mutable")
 
-    branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
-    if not branch:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
-    _require_client_access(context, branch.client_id)
+    branch = _get_branch_for_change_context_row(
+        db=db,
+        change=change,
+        require_client_access=lambda client_id: _require_client_access(context, client_id),
+    )
 
-    errors: list[str] = []
-    try:
-        normalized_patch, errors = _normalize_branch_change_patch(
-            db=db,
-            branch=branch,
-            patch_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
-        )
-    except ConsoleAPIError as exc:
-        normalized_patch, errors = {}, [exc.message]
-
-    base_snapshot = _snapshot_branch_for_change(branch)
-    diff_payload = _build_branch_change_diff(base_snapshot, normalized_patch)
-    if not diff_payload:
-        errors.append("No effective branch changes detected")
+    normalized_patch, errors, diff_payload, base_snapshot = _prepare_branch_change_payload_for_context(
+        db=db,
+        branch=branch,
+        patch_payload=_get_branch_change_draft_payload(change),
+        **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+    )
 
     now = datetime.now(timezone.utc)
-    change.draft_payload = _jsonable_payload(normalized_patch)
-    change.diff_payload = _jsonable_payload(diff_payload)
-    change.base_snapshot = _jsonable_payload(base_snapshot)
-    change.base_branch_updated_at = branch.updated_at
-    change.validation_payload = {
-        "ok": len(errors) == 0,
-        "errors": errors,
-    }
-    change.status = "validated" if not errors else "draft"
-    change.validated_at = now if not errors else None
-    change.updated_at = now
+    _apply_branch_change_validation_result(
+        change=change,
+        branch=branch,
+        normalized_patch=normalized_patch,
+        diff_payload=diff_payload,
+        base_snapshot=base_snapshot,
+        errors=errors,
+        now=now,
+    )
     db.commit()
     db.refresh(change)
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(branch),
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -21404,10 +23410,11 @@ async def publish_branch_change(
     if change.status not in {"validated", "publish_failed"}:
         raise ConsoleAPIError(409, "INVALID_STATE", "Branch change must be validated before publish")
 
-    branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
-    if not branch:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
-    _require_client_access(context, branch.client_id)
+    branch = _get_branch_for_change_context_row(
+        db=db,
+        change=change,
+        require_client_access=lambda client_id: _require_client_access(context, client_id),
+    )
 
     if change.base_branch_updated_at and branch.updated_at and change.base_branch_updated_at != branch.updated_at:
         raise ConsoleAPIError(
@@ -21416,26 +23423,20 @@ async def publish_branch_change(
             "Branch changed since draft creation; revalidate before publish",
         )
 
-    errors: list[str] = []
-    try:
-        normalized_patch, errors = _normalize_branch_change_patch(
-            db=db,
-            branch=branch,
-            patch_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
-        )
-    except ConsoleAPIError as exc:
-        normalized_patch, errors = {}, [exc.message]
-    diff_payload = _build_branch_change_diff(_snapshot_branch_for_change(branch), normalized_patch)
-    if not diff_payload:
-        errors.append("No effective branch changes detected")
+    normalized_patch, errors, diff_payload, _base_snapshot = _prepare_branch_change_payload_for_context(
+        db=db,
+        branch=branch,
+        patch_payload=_get_branch_change_draft_payload(change),
+        **_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+    )
 
     now = datetime.now(timezone.utc)
     if errors:
-        message = "; ".join(errors)
-        change.status = "publish_failed"
-        change.publish_error = message
-        change.validation_payload = {"ok": False, "errors": errors}
-        change.updated_at = now
+        message = _apply_branch_change_publish_failed_state(
+            change=change,
+            errors=errors,
+            now=now,
+        )
         db.commit()
         raise ConsoleAPIError(409, "CHANGE_VALIDATION_FAILED", message, {"errors": errors})
 
@@ -21451,19 +23452,22 @@ async def publish_branch_change(
             db=db,
         )
     except ConsoleAPIError as exc:
-        change.status = "publish_failed"
-        change.publish_error = exc.message
-        change.updated_at = now
+        _apply_branch_change_publish_runtime_error_state(
+            change=change,
+            error_message=exc.message,
+            now=now,
+        )
         db.commit()
         raise
 
-    refreshed_branch = db.query(Branch).filter(Branch.id == branch.id).first()
-    change.status = "published"
-    change.publish_error = None
-    change.published_snapshot = _jsonable_payload(_snapshot_branch_for_change(refreshed_branch)) if refreshed_branch else None
-    change.published_at = now
-    change.published_by = context.agent.id
-    change.updated_at = now
+    refreshed_branch = _get_branch_by_id_for_change_context(db=db, branch_id=branch.id)
+    published_snapshot = _snapshot_branch_for_change(refreshed_branch) if refreshed_branch else None
+    _apply_branch_change_published_state(
+        change=change,
+        published_snapshot=published_snapshot,
+        actor_id=context.agent.id,
+        now=now,
+    )
     record_audit_event(
         db,
         actor=context.agent,
@@ -21479,9 +23483,10 @@ async def publish_branch_change(
     )
     db.commit()
     db.refresh(change)
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(refreshed_branch) if refreshed_branch else None,
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=refreshed_branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -21507,44 +23512,51 @@ async def rollback_branch_change(
     if change.status != "published":
         raise ConsoleAPIError(409, "INVALID_STATE", "Only published change can be rolled back")
 
-    branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
-    if not branch:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
-    _require_client_access(context, branch.client_id)
+    branch = _get_branch_for_change_context_row(
+        db=db,
+        change=change,
+        require_client_access=lambda client_id: _require_client_access(context, client_id),
+    )
     rollback_reason = _normalize_access_reason(body.reason, required=True)
 
     base_snapshot = change.base_snapshot if isinstance(change.base_snapshot, dict) else {}
     current_snapshot = _snapshot_branch_for_change(branch)
-    rollback_patch = {
-        field: base_snapshot.get(field)
-        for field in _BRANCH_CHANGE_MANAGED_FIELDS
-        if field in base_snapshot and current_snapshot.get(field) != base_snapshot.get(field)
-    }
+    rollback_patch = _build_branch_change_rollback_patch(
+        base_snapshot=base_snapshot,
+        current_snapshot=current_snapshot,
+    )
 
     now = datetime.now(timezone.utc)
     if not rollback_patch:
-        change.status = "rolled_back"
-        change.rollback_error = None
-        change.rollback_snapshot = _jsonable_payload(current_snapshot)
-        change.rolled_back_at = now
-        change.rolled_back_by = context.agent.id
-        change.updated_at = now
+        _apply_branch_change_rolled_back_state(
+            change=change,
+            rollback_snapshot=current_snapshot,
+            actor_id=context.agent.id,
+            now=now,
+        )
         db.commit()
         db.refresh(change)
-        return ConsoleBranchChangeResponse(
-            change=_serialize_branch_change_record(change),
-            branch=_serialize_branch(branch),
+        return _build_branch_change_response_for_context(
+            change=change,
+            branch=branch,
+            serialize_branch=_serialize_branch,
         )
 
-    errors: list[str] = []
-    try:
-        normalized_patch, errors = _normalize_branch_change_patch(db=db, branch=branch, patch_payload=rollback_patch)
-    except ConsoleAPIError as exc:
-        normalized_patch, errors = {}, [exc.message]
+    normalized_patch, errors = _prepare_branch_change_rollback_payload_for_context(
+        db=db,
+        branch=branch,
+        rollback_patch=rollback_patch,
+        validation_error_type=ConsoleAPIError,
+        normalize_branch_change_patch=_normalize_branch_change_patch_payload,
+        normalize_kwargs=_BRANCH_CHANGE_NORMALIZATION_KWARGS,
+    )
     if errors:
         message = "; ".join(errors)
-        change.rollback_error = message
-        change.updated_at = now
+        _apply_branch_change_rollback_failed_state(
+            change=change,
+            error_message=message,
+            now=now,
+        )
         db.commit()
         raise ConsoleAPIError(409, "CHANGE_VALIDATION_FAILED", message, {"errors": errors})
 
@@ -21560,18 +23572,22 @@ async def rollback_branch_change(
             db=db,
         )
     except ConsoleAPIError as exc:
-        change.rollback_error = exc.message
-        change.updated_at = now
+        _apply_branch_change_rollback_failed_state(
+            change=change,
+            error_message=exc.message,
+            now=now,
+        )
         db.commit()
         raise
 
-    refreshed_branch = db.query(Branch).filter(Branch.id == branch.id).first()
-    change.status = "rolled_back"
-    change.rollback_error = None
-    change.rollback_snapshot = _jsonable_payload(_snapshot_branch_for_change(refreshed_branch)) if refreshed_branch else None
-    change.rolled_back_at = now
-    change.rolled_back_by = context.agent.id
-    change.updated_at = now
+    refreshed_branch = _get_branch_by_id_for_change_context(db=db, branch_id=branch.id)
+    rollback_snapshot = _snapshot_branch_for_change(refreshed_branch) if refreshed_branch else {}
+    _apply_branch_change_rolled_back_state(
+        change=change,
+        rollback_snapshot=rollback_snapshot,
+        actor_id=context.agent.id,
+        now=now,
+    )
     record_audit_event(
         db,
         actor=context.agent,
@@ -21587,9 +23603,10 @@ async def rollback_branch_change(
     )
     db.commit()
     db.refresh(change)
-    return ConsoleBranchChangeResponse(
-        change=_serialize_branch_change_record(change),
-        branch=_serialize_branch(refreshed_branch) if refreshed_branch else None,
+    return _build_branch_change_response_for_context(
+        change=change,
+        branch=refreshed_branch,
+        serialize_branch=_serialize_branch,
     )
 
 
@@ -22271,6 +24288,208 @@ async def update_membership(
     )
     db.commit()
     return _serialize_membership(membership, agent=agent)
+
+
+@router.get(
+    "/admin/routing-profiles",
+    response_model=ConsoleRoutingProfileListResponse,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def list_routing_profiles(
+    request: Request,
+    client_id: str,
+    agent_id: Optional[str] = Query(default=None),
+    branch_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> ConsoleRoutingProfileListResponse:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "team",
+        "read",
+        message="Only team supervisors can view routing profiles",
+    )
+
+    parsed_client_id = _parse_uuid_param("client_id", client_id)
+    if parsed_client_id is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "client_id is required")
+    _require_client_access(context, parsed_client_id)
+
+    parsed_agent_id = _parse_uuid_param("agent_id", agent_id)
+    parsed_branch_id = _parse_uuid_param("branch_id", branch_id)
+    if parsed_branch_id is not None:
+        branch = db.query(Branch).filter(Branch.id == parsed_branch_id).first()
+        if not branch:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        if branch.client_id != parsed_client_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
+
+    records = _list_routing_profiles_service(
+        db,
+        client_id=parsed_client_id,
+        agent_id=parsed_agent_id,
+        branch_id=parsed_branch_id,
+    )
+    if not records:
+        return ConsoleRoutingProfileListResponse(items=[])
+
+    agent_names = {
+        agent.id: agent.name
+        for agent in db.query(Agent).filter(
+            Agent.id.in_({record.agent_id for record in records}),
+        ).all()
+    }
+    return ConsoleRoutingProfileListResponse(
+        items=[
+            _serialize_routing_profile(
+                record,
+                agent_name=agent_names.get(record.agent_id),
+            )
+            for record in records
+        ]
+    )
+
+
+@router.put(
+    "/admin/routing-profiles",
+    response_model=ConsoleRoutingProfile,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def upsert_routing_profile(
+    request: Request,
+    body: ConsoleRoutingProfileUpsertRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleRoutingProfile:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "team",
+        "write",
+        message="Only owner/admin can manage routing profiles",
+    )
+    _require_client_access(context, body.client_id)
+
+    agent = db.query(Agent).filter(Agent.id == body.agent_id).first()
+    if not agent:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
+    if agent.client_id != body.client_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "agent_id does not belong to client_id")
+    if agent.role not in _CASE_ASSIGNABLE_ROLES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Agent role is not eligible for case routing")
+
+    branch_id = body.branch_id
+    if branch_id is not None:
+        branch = db.query(Branch).filter(Branch.id == branch_id).first()
+        if not branch:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        if branch.client_id != body.client_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
+
+    record = _upsert_routing_profile_service(
+        db,
+        client_id=body.client_id,
+        agent_id=body.agent_id,
+        branch_id=branch_id,
+        routing_status=body.routing_status,
+        max_open_case_count=body.max_open_case_count,
+        updated_by_agent_id=context.agent.id,
+    )
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="routing_profile_upserted",
+        entity_type="console_routing_profile",
+        entity_id=record.id,
+        payload={
+            "reason": _normalize_optional_text(body.reason),
+            "agent_id": str(record.agent_id),
+            "client_id": str(record.client_id),
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "routing_status": record.routing_status,
+            "max_open_case_count": record.max_open_case_count,
+        },
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+    )
+    db.commit()
+    return _serialize_routing_profile(record, agent_name=agent.name)
+
+
+@router.delete(
+    "/admin/routing-profiles/{agent_id}",
+    response_model=ConsoleRoutingProfileDeleteResponse,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def delete_routing_profile(
+    agent_id: UUID,
+    request: Request,
+    client_id: str,
+    branch_id: Optional[str] = Query(default=None),
+    reason: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> ConsoleRoutingProfileDeleteResponse:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "team",
+        "write",
+        message="Only owner/admin can manage routing profiles",
+    )
+
+    parsed_client_id = _parse_uuid_param("client_id", client_id)
+    if parsed_client_id is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "client_id is required")
+    _require_client_access(context, parsed_client_id)
+
+    parsed_branch_id = _parse_uuid_param("branch_id", branch_id)
+    if parsed_branch_id is not None:
+        branch = db.query(Branch).filter(Branch.id == parsed_branch_id).first()
+        if not branch:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        if branch.client_id != parsed_client_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
+
+    record = _delete_routing_profile_service(
+        db,
+        client_id=parsed_client_id,
+        agent_id=agent_id,
+        branch_id=parsed_branch_id,
+    )
+    if record is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Routing profile not found")
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="routing_profile_deleted",
+        entity_type="console_routing_profile",
+        entity_id=record.id,
+        payload={
+            "reason": _normalize_optional_text(reason),
+            "agent_id": str(record.agent_id),
+            "client_id": str(record.client_id),
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+        },
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+    )
+    db.commit()
+    return ConsoleRoutingProfileDeleteResponse(success=True)
 
 
 @router.post(

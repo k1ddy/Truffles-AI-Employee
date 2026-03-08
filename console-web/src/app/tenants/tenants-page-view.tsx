@@ -2,7 +2,6 @@
 
 import type { ComponentProps } from "react";
 import type { Session } from "next-auth";
-import Link from "next/link";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
 import TenantsActionQueuePanel, { type TenantsActionQueueItem } from "@/components/TenantsActionQueuePanel";
@@ -64,6 +63,7 @@ type TenantsPageViewProps<TActionItem extends TenantsActionQueueItem> = {
     lifecycleModalProps: ComponentProps<typeof TenantsClientLifecycleModal>;
     showOnboarding: boolean;
     onOpenWorkspaceFromOnboarding: () => void;
+    onOpenOpsFromOnboarding: () => void;
 };
 
 export default function TenantsPageView<TActionItem extends TenantsActionQueueItem>({
@@ -86,6 +86,7 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
     lifecycleModalProps,
     showOnboarding,
     onOpenWorkspaceFromOnboarding,
+    onOpenOpsFromOnboarding,
 }: TenantsPageViewProps<TActionItem>) {
     if (!session) {
         return (
@@ -143,6 +144,9 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
                         Архив
                     </button>
                 </div>
+                <div className="rounded-lg border border-emerald-300/60 bg-emerald-50 p-3 text-xs text-emerald-900" data-testid="tenants-intent-map">
+                    Роль вкладки: <span className="font-semibold">факт и приоритизация</span>. Выбираем задачу здесь, выполняем действие в Workspace, затем сверяем результат в Ops.
+                </div>
             </div>
 
             <div className="grid gap-6">
@@ -184,11 +188,15 @@ export default function TenantsPageView<TActionItem extends TenantsActionQueueIt
                         >
                             Открыть Workspace
                         </button>
+                        <button
+                            className="btn-ghost ml-2"
+                            onClick={onOpenOpsFromOnboarding}
+                            data-testid="tenants-onboarding-open-ops"
+                        >
+                            Открыть Ops
+                        </button>
                         <div className="mt-2 text-blue-900/80" data-testid="tenants-onboarding-loop-hint">
-                            После действий в Workspace подтвердите результат в Ops и вернитесь сюда для следующего шага.
-                            <Link href="/ops" className="ml-2 font-semibold underline underline-offset-2" data-testid="tenants-onboarding-open-ops">
-                                Перейти в Ops
-                            </Link>
+                            Последовательность: откройте Workspace, выполните действие по филиалу, затем проверьте результат в Ops через подсказку в Workspace.
                         </div>
                     </div>
                     <ProvisioningWizard session={session} accessSection="tenants" />

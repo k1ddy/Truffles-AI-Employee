@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import CaseList from "@/components/CaseList";
 import CaseConversation from "@/components/CaseConversation";
+import CaseBookingsPanel from "@/components/CaseBookingsPanel";
 import CaseDetailsPanel from "@/components/CaseDetailsPanel";
 import { InboxMacroChips } from "@/components/InboxMacros";
 import AccessDenied from "@/components/AccessDenied";
@@ -13,32 +14,40 @@ import { useCaseData } from "@/hooks/useCaseData";
 import { authApi, canAccessConsole, outreachApi } from "@/lib/api-client";
 import {
     buildInboxWorkspaceScope,
+    readInboxSidePanelMode,
     readInboxSelectedCase,
+    type InboxSidePanelMode,
+    writeInboxSidePanelMode,
     writeInboxSelectedCase,
 } from "@/lib/inbox-workspace";
 import toast from "react-hot-toast";
 
 interface InboxViewProps {
     initialCaseId?: string | null;
+    initialSidePanel?: InboxSidePanelMode | null;
 }
 
-export default function InboxView({ initialCaseId }: InboxViewProps) {
+type SidePanelMode = "details" | "bookings" | null;
+
+export default function InboxView({ initialCaseId, initialSidePanel = null }: InboxViewProps) {
     const router = useRouter();
     const pathname = usePathname();
     const { data: session } = useSession();
     const queryClient = useQueryClient();
     const [selectedCaseId, setSelectedCaseId] = useState(initialCaseId ?? "");
     const [draft, setDraft] = useState("");
-    const [detailsOpen, setDetailsOpen] = useState(false);
+    const [sidePanelMode, setSidePanelMode] = useState<SidePanelMode>(null);
     const [visibleCaseIds, setVisibleCaseIds] = useState<string[]>([]);
     const [selectionHydrated, setSelectionHydrated] = useState(Boolean(initialCaseId));
     const restoredScopeRef = useRef<string | null>(null);
+    const restoredPanelScopeRef = useRef<string | null>(null);
     const [standaloneOutreachOpen, setStandaloneOutreachOpen] = useState(false);
     const [standaloneOutreachDestination, setStandaloneOutreachDestination] = useState("");
     const [standaloneOutreachContent, setStandaloneOutreachContent] = useState("");
     const [standaloneOutreachBranchId, setStandaloneOutreachBranchId] = useState("");
     const [standalonePauseEnabled, setStandalonePauseEnabled] = useState(true);
     const [standalonePauseMinutes, setStandalonePauseMinutes] = useState(30);
+    const [isDesktopViewport, setIsDesktopViewport] = useState(false);
 
     const { data: meData } = useQuery({
         queryKey: ["console-me"],
@@ -52,6 +61,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const role = meData?.agent?.role ?? "manager";
     const canReadInbox = canAccessConsole(role, "inbox", "read");
     const canWriteInbox = canAccessConsole(role, "inbox", "write");
+    const canReadCalendar = canAccessConsole(role, "calendar", "read");
+    const canWriteCalendar = canAccessConsole(role, "calendar", "write");
     const canReadOutreach = canAccessConsole(role, "outreach", "read");
     const canWriteOutreach = canAccessConsole(role, "outreach", "write");
     const branches = useMemo(
@@ -80,6 +91,27 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     }, [workspaceScope]);
 
     useEffect(() => {
+        if (workspaceScope && restoredPanelScopeRef.current !== workspaceScope) {
+            restoredPanelScopeRef.current = null;
+        }
+    }, [workspaceScope]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") {
+            return;
+        }
+        const media = window.matchMedia("(min-width: 1280px)");
+        const syncViewport = () => setIsDesktopViewport(media.matches);
+        syncViewport();
+        if (typeof media.addEventListener === "function") {
+            media.addEventListener("change", syncViewport);
+            return () => media.removeEventListener("change", syncViewport);
+        }
+        media.addListener(syncViewport);
+        return () => media.removeListener(syncViewport);
+    }, []);
+
+    useEffect(() => {
         if (initialCaseId) {
             setSelectedCaseId(initialCaseId);
             if (workspaceScope) {
@@ -88,6 +120,15 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
             setSelectionHydrated(true);
         }
     }, [initialCaseId, workspaceScope]);
+
+    useEffect(() => {
+        if (initialSidePanel) {
+            setSidePanelMode(initialSidePanel);
+            if (workspaceScope) {
+                restoredPanelScopeRef.current = workspaceScope;
+            }
+        }
+    }, [initialSidePanel, workspaceScope]);
 
     useEffect(() => {
         if (!workspaceScope || initialCaseId || restoredScopeRef.current === workspaceScope) {
@@ -103,6 +144,14 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     }, [workspaceScope, initialCaseId, router]);
 
     useEffect(() => {
+        if (!workspaceScope || initialSidePanel || restoredPanelScopeRef.current === workspaceScope) {
+            return;
+        }
+        setSidePanelMode(readInboxSidePanelMode(workspaceScope));
+        restoredPanelScopeRef.current = workspaceScope;
+    }, [workspaceScope, initialSidePanel]);
+
+    useEffect(() => {
         if (!workspaceScope || !selectionHydrated) {
             return;
         }
@@ -110,8 +159,14 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     }, [workspaceScope, selectionHydrated, selectedCaseId]);
 
     useEffect(() => {
+        if (!workspaceScope) {
+            return;
+        }
+        writeInboxSidePanelMode(workspaceScope, sidePanelMode);
+    }, [workspaceScope, sidePanelMode]);
+
+    useEffect(() => {
         setDraft("");
-        setDetailsOpen(false);
     }, [selectedCaseId]);
 
     useEffect(() => {
@@ -165,15 +220,18 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const macroBranchId = caseDetail?.branch_id ?? selectedBranchId;
     const canManageMacros = canWriteInbox;
     const canToggleDetails = Boolean(selectedCaseId && caseDetail && !caseLoading && !caseError);
-    const showDetailsColumn = detailsOpen && !!selectedCaseId;
+    const canToggleBookings = Boolean(selectedCaseId && caseDetail && !caseLoading && !caseError && canReadCalendar);
+    const detailsOpen = sidePanelMode === "details";
+    const bookingsOpen = sidePanelMode === "bookings";
+    const showDetailsColumn = Boolean(sidePanelMode) && !!selectedCaseId;
     const hasSelection = Boolean(selectedCaseId);
     const gridClass = showDetailsColumn
         ? hasSelection
-            ? "xl:grid-cols-[220px_minmax(0,1fr)_320px]"
-            : "xl:grid-cols-[280px_minmax(0,1fr)_320px]"
+            ? "xl:grid-cols-[400px_minmax(0,1fr)_320px] 2xl:grid-cols-[440px_minmax(0,1fr)_340px]"
+            : "xl:grid-cols-[420px_minmax(0,1fr)_320px] 2xl:grid-cols-[460px_minmax(0,1fr)_340px]"
         : hasSelection
-            ? "xl:grid-cols-[220px_minmax(0,1fr)]"
-            : "xl:grid-cols-[280px_minmax(0,1fr)]";
+            ? "xl:grid-cols-[420px_minmax(0,1fr)] 2xl:grid-cols-[460px_minmax(0,1fr)]"
+            : "xl:grid-cols-[460px_minmax(0,1fr)] 2xl:grid-cols-[500px_minmax(0,1fr)]";
 
     const handleSelectCase = (caseId: string) => {
         setSelectedCaseId(caseId);
@@ -210,7 +268,14 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
         if (!canToggleDetails) {
             return;
         }
-        setDetailsOpen((prev) => !prev);
+        setSidePanelMode((prev) => prev === "details" ? null : "details");
+    };
+
+    const handleToggleBookings = () => {
+        if (!canToggleBookings) {
+            return;
+        }
+        setSidePanelMode((prev) => prev === "bookings" ? null : "bookings");
     };
 
     const standaloneOutreachMutation = useMutation({
@@ -289,9 +354,10 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const composerBefore = (
         <InboxMacroChips
             onSelect={handleMacroSelect}
-            disabled={!selectedCaseId || !canSend}
+            disabled={!selectedCaseId || !canWriteInbox}
             canManage={canManageMacros}
             branchId={macroBranchId}
+            caseId={selectedCaseId || null}
         />
     );
 
@@ -433,7 +499,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
             <div
                 className={`grid flex-1 min-h-0 grid-cols-1 gap-4 ${gridClass}`}
             >
-                <section className="card-surface flex h-full min-h-0 flex-col p-4 xl:overflow-hidden" data-testid="inbox-list">
+                <section className="card-surface flex h-full min-h-0 flex-col p-4 lg:p-5 xl:overflow-hidden" data-testid="inbox-list">
                     <CaseList
                         variant="compact"
                         selectedCaseId={selectedCaseId}
@@ -442,6 +508,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                         showBranchFilter={showBranchFilter}
                         workspaceScope={workspaceScope}
                         onCaseIdsChange={setVisibleCaseIds}
+                        canBulkManage={canWriteInbox}
+                        viewerRole={role}
                     />
                 </section>
 
@@ -469,7 +537,10 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                         onDraftChange={setDraft}
                                         composerBefore={composerBefore}
                                         detailsOpen={detailsOpen}
+                                        bookingsOpen={bookingsOpen}
                                         onToggleDetails={handleToggleDetails}
+                                        onToggleBookings={handleToggleBookings}
+                                        canReadCalendar={canReadCalendar}
                                         onNextCase={handleNextCase}
                                         canGoNextCase={Boolean(nextCaseId && nextCaseId !== selectedCaseId)}
                                         chatFrame="plain"
@@ -496,20 +567,35 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                 {!caseLoading && !caseError && caseDetail && (
                                     <>
                                         <div className="sticky top-0 z-10 flex items-center justify-between rounded-2xl border border-border/60 bg-background/90 px-4 py-3 backdrop-blur">
-                                            <p className="text-sm font-semibold">Детали заявки</p>
+                                            <p className="text-sm font-semibold">
+                                                {bookingsOpen ? "Записи по заявке" : "Детали заявки"}
+                                            </p>
                                             <button
                                                 type="button"
-                                                onClick={() => setDetailsOpen(false)}
+                                                onClick={() => setSidePanelMode(null)}
                                                 className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
                                             >
-                                                Скрыть детали
+                                                {bookingsOpen ? "Скрыть записи" : "Скрыть детали"}
                                             </button>
                                         </div>
-                                        <CaseDetailsPanel
-                                            caseDetail={caseDetail}
-                                            messages={messages}
-                                            canViewDiagnostics={canViewDiagnostics}
-                                        />
+                                        {bookingsOpen ? (
+                                            <CaseBookingsPanel
+                                                caseId={selectedCaseId}
+                                                conversationId={caseDetail.conversation_id}
+                                                canWriteCalendar={canWriteCalendar}
+                                                fullCalendarHref={
+                                                    caseDetail.conversation_id
+                                                        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(selectedCaseId)}&return_panel=bookings`
+                                                        : `/calendar?case_id=${encodeURIComponent(selectedCaseId)}&return_panel=bookings`
+                                                }
+                                            />
+                                        ) : (
+                                            <CaseDetailsPanel
+                                                caseDetail={caseDetail}
+                                                messages={messages}
+                                                canViewDiagnostics={canViewDiagnostics}
+                                            />
+                                        )}
                                     </>
                                 )}
                                 {!caseLoading && !caseError && !caseDetail && (
@@ -523,29 +609,42 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                 )}
             </div>
 
-            {detailsOpen && canToggleDetails && caseDetail && (
+            {sidePanelMode && caseDetail && !isDesktopViewport && (
                 <div className="fixed inset-0 z-40 xl:hidden">
                     <div
                         className="absolute inset-0 bg-foreground/20"
-                        onClick={() => setDetailsOpen(false)}
+                        onClick={() => setSidePanelMode(null)}
                         aria-hidden="true"
                     />
                     <div className="absolute inset-y-0 right-0 flex h-full w-full max-w-[420px] flex-col gap-3 overflow-y-auto bg-background p-4 shadow-xl">
                         <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold">Детали заявки</p>
+                            <p className="text-sm font-semibold">{bookingsOpen ? "Записи по заявке" : "Детали заявки"}</p>
                             <button
                                 type="button"
-                                onClick={() => setDetailsOpen(false)}
+                                onClick={() => setSidePanelMode(null)}
                                 className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
                             >
-                                Скрыть детали
+                                {bookingsOpen ? "Скрыть записи" : "Скрыть детали"}
                             </button>
                         </div>
-                        <CaseDetailsPanel
-                            caseDetail={caseDetail}
-                            messages={messages}
-                            canViewDiagnostics={canViewDiagnostics}
-                        />
+                        {bookingsOpen ? (
+                            <CaseBookingsPanel
+                                caseId={selectedCaseId}
+                                conversationId={caseDetail.conversation_id}
+                                canWriteCalendar={canWriteCalendar}
+                                fullCalendarHref={
+                                    caseDetail.conversation_id
+                                        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(selectedCaseId)}&return_panel=bookings`
+                                        : `/calendar?case_id=${encodeURIComponent(selectedCaseId)}&return_panel=bookings`
+                                }
+                            />
+                        ) : (
+                            <CaseDetailsPanel
+                                caseDetail={caseDetail}
+                                messages={messages}
+                                canViewDiagnostics={canViewDiagnostics}
+                            />
+                        )}
                     </div>
                 </div>
             )}

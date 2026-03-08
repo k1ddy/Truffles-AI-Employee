@@ -75,6 +75,7 @@
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/diagnose.py` | Диагностика диалогов/trace/outbox + `dialog-report` (one-command) | QA/OPS/Brain |
 | `ops/console_platform_admin_kpi_snapshot.py` | Weekly KPI snapshot для Platform Admin (runtime + LOC + UX/e2e signals) | Brain/OPS/QA |
+| `ops/platform_admin_remediation_assist.py` | Deterministic remediation-assist plan/brief generator from Platform Admin KPI snapshot | Brain/OPS/QA |
 | `ops/console_owner_admin_kpi_snapshot.py` | KPI snapshot для Owner/Admin (`T+0/T+24`, impact baseline/replay, fail-fast guard) | Brain/OPS/QA |
 | `ops/owner_admin_control_loop.py` | Orchestration wrapper Owner/Admin control-loop (`t0/t24`: snapshot + gate + brief + log) | Brain/OPS/QA |
 | `ops/shadow_replay.py` | Shadow replay report (decision_meta/trace comparison) | QA/OPS/Brain |
@@ -143,6 +144,7 @@
 | `console-web/src/app/tenants/use-tenants-action-queue.ts` | Hook для action-queue orchestration и archive predicate в `/tenants` | Frontend |
 | `console-web/src/app/tenants/use-tenants-operational-model.ts` | Hook для вычисления Tenants operational KPI/drilldown/alert/report модели | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
+| `console-web/e2e/support/keycloak-auth.ts` | Shared Keycloak auth helper for Playwright `login/smoke/inspect_case` live lanes | Frontend/QA |
 | `console-web/e2e/tenants-a11y.spec.ts` | Live Playwright + Axe evidence для Tenants (desktop/mobile) | Frontend/QA |
 | `console-web/eslint.config.js` | ESLint flat config для console-web | Frontend |
 | `console-web/.env.e2e.example` | Шаблон env для console‑e2e | Frontend/QA |
@@ -156,11 +158,148 @@
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
 | `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` | Booking confirm verification runbook | QA/OPS/Brain |
+| `docs/runbooks/INBOX_CALENDAR_WAVE4_RELEASE.md` | Wave4 release runbook for Inbox/Calendar (`canary -> go/no-go -> rollback`) | Brain/Architect/OPS |
+| `docs/runbooks/INBOX_SEMANTIC_WAVE22_VALIDATION.md` | Wave22 semantic validation runbook for Inbox manager/admin/history/booking matrix | Brain/Architect/QA |
+| `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md` | Closeout Task Package for Inbox/Calendar wave4 release discipline (`flag rollback + live lane evidence + runbook`) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-console-e2e-live-auth-hardening-a1.md` | Follow-up Task Package for live no-mocks auth/case inspection hardening after wave4 closeout | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-console-e2e-auth-helper-unification-a1.md` | Follow-up Task Package for shared auth helper unification in `login/smoke/inspect_case` Playwright specs | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-console-e2e-auth-helper-rollout-a1.md` | Follow-up Task Package for rollout of shared auth helper into the remaining Playwright specs | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md` | Wave5 Task Package for action-driven SLA contract in Inbox (`backend contract -> frontend surfaces`) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-a1.md` | Wave6 Task Package for bounded single-case Inbox actions (`reassign/snooze/reopen`) before bulk scope | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave6-partb-a1.md` | Wave6 Part B Task Package for backend-first bulk/supervisor Inbox actions (`bulk reassign/snooze` -> queue selection UI) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-a1.md` | Wave7 Task Package for backend action-macro contract in Inbox (`structured macro action + execute endpoint`) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave7-partb-a1.md` | Wave7 Part B Task Package for macro UI builder/apply flow in Inbox workspace | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-a1.md` | Wave8 Task Package for unified inbox+bookings workspace shell (`Part A`) with embedded case-linked bookings panel | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave8-partb-a1.md` | Wave8 Part B Task Package for context/panel preservation between inbox workspace and full calendar route | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-a1.md` | Wave9 Part A Task Package for supervisor/admin queue governance in Inbox (`role-aware views + visible fields`, no new route) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave9-partb-a1.md` | Wave9 Part B Task Package for server-backed owner/unassigned governance in Inbox (`assignee filter + queue assignee endpoint`, no new route) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-a1.md` | Wave10 Part A Task Package for factual assignee workload signals in Inbox reassignment surfaces (`load counts in reassign selects`, no fake availability) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave10-partb-a1.md` | Wave10 Part B Task Package for one-click recommended routing in current reassignment surfaces (`recommendation CTA`, no hidden automation) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-closeout-review-a1.md` | Closeout-review Task Package for final ТЗ coverage classification and merge-go/no-go decision after Waves 1-10 | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave11-a1.md` | Wave11 Task Package for post-merge live hardening: reopen-safe sync semantics + inbox left-rail usability reconstruction | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-a1.md` | Wave12 Task Package for server-owned policy-based routing automation on existing reassignment surfaces (`least_open_cases`, single-case + bulk) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave12-live-validation-a1.md` | Post-merge live-validation Task Package for proving Wave12 policy-routing mutation path on real backend without mocks | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave13-a1.md` | Wave13 Task Package for server-owned business status contract and badge-noise reduction in inbox queue/header surfaces | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave14-a1.md` | Wave14 Task Package for server-owned inbox queue-view semantics instead of local predicates over partial pages | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-a1.md` | Wave15 Task Package for operator-safe action feedback: remove raw sync reason leakage and separate business outcome from secondary sync warnings | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave15-live-validation-a1.md` | Post-merge live-validation Task Package for proving Wave15 feedback semantics on real backend without mocks | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave16-a1.md` | Wave16 Task Package for full redesign of overloaded inbox action surfaces and left queue rail | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-a1.md` | Wave17 Task Package for separating inbox filter contract into queue mode, owner scope, advanced refinements, and presentation prefs | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave17-closeout-a1.md` | Wave17 closeout review Task Package for deciding merge-go and whether any saved-views follow-up is actually required | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave18-a1.md` | Wave18 Task Package for fixing inbox filter-state correctness via explicit contract, precedence rules, and deterministic validation | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave19-a1.md` | Wave19 Task Package for semantic decomposition of the full bot->case->manager->booking->history operator chain | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave20-a1.md` | Wave20 Task Package for inbox panel IA reconstruction with explicit open/closed/all modes and history/archive access | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave21-a1.md` | Wave21 Task Package for cross-surface semantic integration between bot-origin cases and calendar bookings | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-a1.md` | Wave22 Task Package for forbidden-state matrix, deterministic acceptance, and live closeout of the new inbox semantic model | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-live-proof-a1.md` | Wave22 live-proof closure Task Package for explicit safe-case validation and blocker classification | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave23-a1.md` | Wave23 Task Package for post-closeout defect clustering and the queue-state-first maturity sequence for Inbox/Calendar | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md` | Wave24 Task Package for server-owned `Queue State Canon` across Inbox/Calendar before saved views, presets, and shareable URLs | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave25-a1.md` | Wave25 Task Package for personal saved views on top of the shared inbox/calendar queue-state canon | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave26-a1.md` | Wave26 Task Package for managed team presets on the shared inbox/calendar saved-view object with branch/role-targeted defaults | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md` | Wave27 Task Package for shareable inbox/calendar queue URLs via explicit params plus optional `view_id` on the same queue-state/saved-view canon | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave28-a1.md` | Wave28 Task Package for supervisor-grade booking governance (`follow-up owner`, `due`, `history`) on top of the calendar queue-state/share-URL canon | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave29-a1.md` | Wave29 Task Package for explainable richer routing v1 (`follow_up_sla_balance`) on top of explicit booking governance and queue-state canon | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave30-a1.md` | Wave30 Task Package for server-owned assignee routing profiles (`available/paused/follow_up_only` + optional capacity) before any skill/presence-aware routing | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave31-a1.md` | Wave31 planning Task Package to decide whether any routing v2/capability-input layer is justified after Wave30 or whether the product should stop at routing profiles | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |
+| `scripts/check_console_audit_governance.py` | Deterministic fail-closed checker for `CANON_VS_IMPLEMENTED` + `UX_BACKLOG` consistency (duplicate IDs/gap tags) | QA/OPS/Brain |
+| `truffles-api/app/services/console_router_utils.py` | Shared pure helpers for Console router env/query normalization (`parse_env_*`, query rebuild, list dedupe) | Backend |
+| `truffles-api/app/services/console_control_tower_utils.py` | Shared pure helper layer for Control Tower action/migration contracts (priority/reasons/wave/detail builders) | Backend |
+| `truffles-api/app/services/console_control_tower_program.py` | Shared orchestration/program composition layer for Control Tower action-center and migration-program responses | Backend |
+| `truffles-api/app/services/console_branch_changes.py` | Shared branch-change snapshot/diff/record/update-request helper layer extracted from Console router | Backend |
+| `truffles-api/app/services/console_fleet_state.py` | Shared fleet lifecycle/payment/service state resolver layer extracted from Console router | Backend |
+| `truffles-api/app/services/console_membership_state.py` | Shared membership/role assignment lifecycle guard layer extracted from Console router | Backend |
 | `docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md` | Weekly control-loop runbook для Platform Admin (snapshot -> backlog -> checks) | Brain/Architect |
 | `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md` | Post-merge control-loop runbook для Owner/Admin (`T+0/T+24`) | Brain/Architect |
+| `truffles-api/tests/test_check_console_audit_governance.py` | Deterministic tests for console audit governance checker | QA/Backend |
+| `truffles-api/tests/test_console_router_utils.py` | Deterministic tests for extracted Console router helper module | QA/Backend |
+| `truffles-api/tests/test_console_control_tower_utils.py` | Deterministic tests for extracted Control Tower helper module | QA/Backend |
+| `truffles-api/tests/test_console_control_tower_program.py` | Deterministic tests for extracted Control Tower orchestration/program module | QA/Backend |
+| `truffles-api/tests/test_console_fleet_state.py` | Deterministic tests for extracted fleet state resolver module | QA/Backend |
+| `truffles-api/tests/test_console_membership_state.py` | Deterministic tests for extracted membership/role state guard module | QA/Backend |
+| `console-web/src/components/provisioning-wizard-utils.ts` | Extracted pure helper functions for `ProvisioningWizard` (JSON parse, status labels/classes, capability normalization) | Frontend |
+| `console-web/src/components/provisioning-wizard-domain.ts` | Extracted provisioning domain lexicon (`WIZARD_STEPS`, field guides, formatters, fallback presets) for `ProvisioningWizard` | Frontend |
+| `console-web/src/components/provisioning-wizard-derived.ts` | Extracted derived-state builders for `ProvisioningWizard` (step status/timeline/readiness items) | Frontend |
+| `console-web/src/components/provisioning-wizard-shell-panels.tsx` | Extracted controlled shell panels for `ProvisioningWizard` (error summary, mode switch, execution hub) | Frontend |
+| `console-web/src/components/provisioning-wizard-json-payloads.ts` | Extracted JSON payload builders/loaders for `ProvisioningWizard` (`billing_info`, `working_hours`, `booking_settings`) | Frontend |
+| `console-web/src/components/provisioning-wizard-state.ts` | Extracted state lifecycle/bootstrap/hydration helpers for `ProvisioningWizard` | Frontend |
+| `console-web/src/components/provisioning-wizard-branch-actions.ts` | Extracted branch action payload builders for `ProvisioningWizard` (`create/update/save instance/telegram/knowledge/booking`) | Frontend |
+| `console-web/src/components/provisioning-wizard-account-actions.ts` | Extracted account action payload builders for `ProvisioningWizard` (`create company/client/agent`) | Frontend |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-operations-governance-closeout-a705.md` | Artifact report: UVC audit governance closeout (`UVC-UX-OPERATIONS-GOVERNANCE-CLOSEOUT-A705`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-03-uvc-tech-debt-decomposition-wave1-a705.md` | Artifact report: wave1 structural decomposition for `UX-11`/`UX-12` + merge-red fix | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave2-a705.md` | Artifact report: wave2 structural decomposition for `UX-11`/`UX-12` (control-tower + provisioning domain extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave3-a705.md` | Artifact report: wave3 structural decomposition for `UX-11`/`UX-12` (control-tower orchestration + provisioning derived-state extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closeout-a705.md` | Artifact report: closeout decision for `UX-11`/`UX-12` after merged wave1/2/3 (`Open (Mitigated wave3)` + Wave4 contract) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave4-a705.md` | Artifact report: wave4 structural decomposition for `UX-11`/`UX-12` (onboarding readiness backend slice + provisioning readiness panel extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-close-a705.md` | Artifact report: final-close decision after wave4 merge (`Open (Mitigated wave4; residual accepted, wave5 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave5-a705.md` | Artifact report: wave5 structural decomposition for `UX-11`/`UX-12` (router param-validation extraction + wizard shell panel extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review-a705.md` | Artifact report: closure-review decision after wave5 merge (`Open (Mitigated wave5; wave6 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave6-a705.md` | Artifact report: wave6 structural decomposition for `UX-11`/`UX-12` (fleet-state backend extraction + provisioning JSON payload extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review2-a705.md` | Artifact report: closure-review2 decision after wave6 merge (`Open (Mitigated wave6; wave7 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave7-a705.md` | Artifact report: wave7 structural decomposition for `UX-11`/`UX-12` (membership-state backend extraction + wizard state lifecycle extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-final-review3-a705.md` | Artifact report: final-review3 merged-main decision after wave7 (`Open (Mitigated wave7; wave8 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave8-a705.md` | Artifact report: wave8 structural decomposition for `UX-11`/`UX-12` (go-live backend governance extraction + wizard JSON sync extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review4-a705.md` | Artifact report: closure-review4 merged-main decision after wave8 (`Open (Mitigated wave8; wave9 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave9-a705.md` | Artifact report: wave9 structural decomposition for `UX-11`/`UX-12` (branch-change backend extraction + provisioning branch-action extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review5-a705.md` | Artifact report: closure-review5 merged-main decision after wave9 (`Open (Mitigated wave9; wave10 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave10-a705.md` | Artifact report: wave10 structural decomposition for `UX-11`/`UX-12` (branch-change normalization extraction + provisioning account-action extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review6-a705.md` | Artifact report: closure-review6 merged-main decision after wave10 (`Open (Mitigated wave10; wave11 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave11-a705.md` | Artifact report: wave11 structural decomposition for `UX-11`/`UX-12` (branch-change context/rollback extraction + provisioning autopilot extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review7-a705.md` | Artifact report: closure-review7 merged-main decision after wave11 (`Open (Mitigated wave11; wave12 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave12-a705.md` | Artifact report: wave12 structural decomposition for `UX-11`/`UX-12` (branch-change prepare/validation extraction + provisioning autopilot run-state extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-closure-review8-a705.md` | Artifact report: closure-review8 merged-main decision after wave12 (`Open (Mitigated wave12; wave13 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-04-uvc-tech-debt-decomposition-wave13-a705.md` | Artifact report: wave13 structural decomposition for `UX-11`/`UX-12` (branch-change list response extraction + provisioning autopilot success-sync extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review9-a705.md` | Artifact report: closure-review9 merged-main decision after wave13 (`Open (Mitigated wave13; wave14 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave14-a705.md` | Artifact report: wave14 structural decomposition for `UX-11`/`UX-12` (branch-change validate/publish-failed state extraction + provisioning branch-mutation orchestration extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review10-a705.md` | Artifact report: closure-review10 merged-main decision after wave14 (`Open (Mitigated wave14; wave15 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave15-a705.md` | Artifact report: wave15 structural decomposition for `UX-11`/`UX-12` (branch-change publish/rollback runtime-state extraction + provisioning go-live payload validation extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review11-a705.md` | Artifact report: closure-review11 merged-main decision after wave15 (`Open (Mitigated wave15; wave16 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave16-a705.md` | Artifact report: wave16 structural decomposition for `UX-11`/`UX-12` (branch-change publish-success state extraction + provisioning go-live mutation submit-flow extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review12-a705.md` | Artifact report: closure-review12 merged-main decision after wave16 (`Open (Mitigated wave16; wave17 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave17-a705.md` | Artifact report: wave17 structural decomposition for `UX-11`/`UX-12` (branch-change rollback normalization extraction + provisioning go-live submit-orchestration extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review13-a705.md` | Artifact report: closure-review13 merged-main decision after wave17 (`Open (Mitigated wave17; wave18 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave18-a705.md` | Artifact report: wave18 structural decomposition for `UX-11`/`UX-12` (branch-change response assembly extraction + provisioning branch-mutation submit-flow extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review14-a705.md` | Artifact report: closure-review14 merged-main decision after wave18 (`Open (Mitigated wave18; wave19 required)`) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave19-a705.md` | Artifact report: wave19 structural decomposition for `UX-11`/`UX-12` (branch-change context resolver extraction + wizard reset-state extraction) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review15-a705.md` | Artifact report: closure-review15 binary DoD decision after wave19 (`Open (Mitigated wave19; wave20 required)` with failed-criteria map) | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-wave20-a705.md` | Artifact report: wave20 bounded backend extraction (control-tower drift/readiness board orchestration) closing criterion `C1` (`console.py` threshold) and locking closure-review16 | Brain/Architect |
+| `docs/CONSOLE_AUDIT/artifacts/2026-03-05-uvc-tech-debt-decomposition-closure-review16-a705.md` | Artifact report: closure-review16 merged-main binary DoD decision after wave20 (`UX-11/UX-12 = Fixed`, wave21 not opened) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave4-a705.md` | Follow-up Task Package for next decomposition wave after closeout residual confirmation | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-close-a705.md` | Final-close Task Package for post-wave4 deterministic status decision and residual contract | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave5-a705.md` | Next bounded wave Task Package for residual `UX-11/UX-12` decomposition after final-close merge | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review-a705.md` | Closure-review Task Package for post-wave5 merged-main decision and wave6 contract lock | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave6-a705.md` | Next bounded decomposition Task Package after closure-review for residual `UX-11/UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review2-a705.md` | Follow-up closure-review Task Package after wave6 merge to decide `Fixed` vs `Open` for `UX-11/UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave7-a705.md` | Next bounded decomposition Task Package after closure-review2 for residual `UX-11/UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-review3-a705.md` | Final review Task Package after wave7 to decide `Fixed` vs `Open + wave8` for `UX-11/UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave8-a705.md` | Next bounded decomposition Task Package after final-review3 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review4-a705.md` | Closure-review Task Package after wave8 merge to decide `Fixed` vs `Open + wave9` for `UX-11/UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave9-a705.md` | Next bounded decomposition Task Package after closure-review4 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review5-a705.md` | Closure-review Task Package after wave9 merge to decide `Fixed` vs `Open + wave10` for `UX-11/UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave10-a705.md` | Next bounded decomposition Task Package after closure-review5 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review6-a705.md` | Closure-review Task Package after wave10 merge to decide `Fixed` vs `Open + wave11` for `UX-11/UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave11-a705.md` | Next bounded decomposition Task Package after closure-review6 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review7-a705.md` | Closure-review Task Package after wave11 merge to decide `Fixed` vs `Open + wave12` for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave12-a705.md` | Next bounded decomposition Task Package after closure-review7 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review8-a705.md` | Closure-review Task Package after wave12 merge to decide `Fixed` vs `Open + wave13` for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave13-a705.md` | Next bounded decomposition Task Package after closure-review8 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-closure-review9-a705.md` | Closure-review Task Package after wave13 merge to decide `Fixed` vs `Open + wave14` for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave14-a705.md` | Next bounded decomposition Task Package after closure-review9 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review10-a705.md` | Closure-review Task Package after wave14 merge to decide `Fixed` vs `Open + wave15` for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave15-a705.md` | Next bounded decomposition Task Package after closure-review10 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review11-a705.md` | Closure-review Task Package after wave15 merge to decide `Fixed` vs `Open + wave16` for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave16-a705.md` | Next bounded decomposition Task Package after closure-review11 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review12-a705.md` | Closure-review Task Package after wave16 merge to decide `Fixed` vs `Open + wave17` for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave17-a705.md` | Next bounded decomposition Task Package after closure-review12 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review13-a705.md` | Closure-review Task Package after wave17 merge to decide `Fixed` vs `Open + wave18` for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave18-a705.md` | Next bounded decomposition Task Package after closure-review13 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review14-a705.md` | Closure-review Task Package after wave18 merge to decide `Fixed` vs `Open + wave19` for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave19-a705.md` | Next bounded decomposition Task Package after closure-review14 residual decision for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review15-a705.md` | Closure-review Task Package after wave19 merge to decide `Fixed` vs `Open + wave20` for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave20-a705.md` | Next bounded decomposition Task Package after closure-review15 failed criterion `C1` (`console.py` threshold) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review16-a705.md` | Closure-review Task Package after wave20 merge to decide `Fixed` vs `Open + wave21` for `UX-11`/`UX-12` | Brain/Architect |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
 | `SPECS/INBOX_HUMAN_LOCK.md` | ТЗ: manual messaging + human lock в «Заявках» | Архитектор/Backend/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
@@ -199,7 +338,12 @@
 - `docs/TASK_PACKAGES/TP-2026-03-04-e2c-canonical-replay-canary-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-04-e2b-lexicon-resolver-hardening-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-04-e2a-interrupt-arbitration-owner-a1.md`
-- `docs/TASK_PACKAGES/TP-2026-03-03-e1-llm-first-firebreak-action-router-a1.md`- `docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-03-e1-llm-first-firebreak-action-router-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave7-a705.md`
+- `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-review3-a705.md`
+- `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-dedup-intent-map-a705.md`
+- `docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-tech-debt-decomposition-a705.md`
+- `docs/TASK_PACKAGES/TP-2026-03-02-s2-s3-signal-compiler-and-gate-v2-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-s0-s1-signal-manifest-and-hardcode-gate-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-s4-cross-domain-contract-suite-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-02-multi-seed-drift-gate-a1.md`

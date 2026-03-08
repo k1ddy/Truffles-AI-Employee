@@ -18,9 +18,18 @@ function buildForwardHeaders(
     request: NextRequest,
     extraHeaders?: Record<string, string>
 ): Record<string, string> {
-    const companyId = request.headers.get('x-company-id');
-    const clientId = request.headers.get('x-client-id');
-    const branchId = request.headers.get('x-branch-id');
+    const companyId =
+        request.headers.get('x-company-id')
+        ?? request.nextUrl.searchParams.get('company_id')
+        ?? request.nextUrl.searchParams.get('x_company_id');
+    const clientId =
+        request.headers.get('x-client-id')
+        ?? request.nextUrl.searchParams.get('client_id')
+        ?? request.nextUrl.searchParams.get('x_client_id');
+    const branchId =
+        request.headers.get('x-branch-id')
+        ?? request.nextUrl.searchParams.get('branch_id')
+        ?? request.nextUrl.searchParams.get('x_branch_id');
 
     return {
         Authorization: `Bearer ${sessionToken}`,
@@ -98,7 +107,12 @@ async function forwardProxyRequest(
         let body: FormData | string | undefined;
 
         if (method === 'GET') {
-            headers['Content-Type'] = 'application/json';
+            const accept = request.headers.get('accept');
+            if (accept) {
+                headers['Accept'] = accept;
+            } else {
+                headers['Accept'] = 'application/json';
+            }
         } else {
             const contentType = request.headers.get('content-type') ?? '';
             const isMultipart = contentType.includes('multipart/form-data');
@@ -120,6 +134,17 @@ async function forwardProxyRequest(
             headers,
             ...(body !== undefined ? { body } : {}),
         });
+        const contentType = response.headers.get('content-type') ?? '';
+        if (contentType.includes('text/event-stream')) {
+            return new Response(response.body, {
+                status: response.status,
+                headers: {
+                    'Content-Type': 'text/event-stream',
+                    'Cache-Control': 'no-cache, no-transform',
+                    Connection: 'keep-alive',
+                },
+            });
+        }
         const data = await parseUpstreamPayload(response);
         if (
             response.ok

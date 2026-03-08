@@ -1,7 +1,7 @@
 import uuid
 
 from sqlalchemy import Boolean, Column, ForeignKey, Text
-from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 
 from app.database import Base
 
@@ -16,6 +16,7 @@ class ConsoleMacro(Base):
     scope = Column(Text, nullable=False)
     label = Column(Text, nullable=False)
     body = Column(Text, nullable=False)
+    action_config = Column(JSONB, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False)

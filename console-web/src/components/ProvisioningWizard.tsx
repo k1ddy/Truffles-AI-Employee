@@ -19,6 +19,95 @@ import {
 } from "@/lib/api-client";
 import { writeConsoleContextScopeToStorage } from "@/lib/console-context-storage";
 import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
+import {
+    AUTOPILOT_FIELD_GUIDE,
+    AUTOPILOT_SERVICE_OPTIONS,
+    CAPABILITY_FIELD_LABELS,
+    FALLBACK_DOMAIN_TEMPLATE_PRESETS,
+    MANUAL_STEP_FIELD_GUIDE,
+    WORKING_DAYS,
+    WIZARD_STEPS,
+    type DomainTemplatePreset,
+    type WizardStepId,
+    formatMissingRequirement,
+    formatOperationalBlocker,
+    formatPipelineAction,
+    formatSlaIncident,
+    formatSlaProviderStatus,
+} from "@/components/provisioning-wizard-domain";
+import {
+    formatEffectiveValue,
+    isNonEmptyRecord,
+    fromTriState,
+    hasPurchasedSignal,
+    intakePriorityClass,
+    intakePriorityLabel,
+    intakeStatusClass,
+    intakeStatusLabel,
+    mergeCapabilities,
+    normalizeCapabilities,
+    normalizeOnboardingContractPayload,
+    parseOptionalJson,
+    qualityStatusClass,
+    qualityStatusLabel,
+    toTriState,
+} from "@/components/provisioning-wizard-utils";
+import {
+    buildOnboardingTimeline,
+    buildReadinessItems,
+    buildStepStateById,
+    buildStepStatus,
+} from "@/components/provisioning-wizard-derived";
+import { ProvisioningWizardReadinessPanel } from "@/components/provisioning-wizard-readiness-panel";
+import {
+    ProvisioningWizardErrorSummary,
+    ProvisioningWizardExecutionHub,
+    ProvisioningWizardModePanel,
+} from "@/components/provisioning-wizard-shell-panels";
+import {
+    buildCreateAgentPayload,
+    buildCreateClientPayload,
+    buildCreateCompanyPayload,
+} from "@/components/provisioning-wizard-account-actions";
+import {
+    buildCreateBranchPayload,
+    handleBranchMutationError,
+    submitBranchMutation,
+    submitGoLiveDecisionMutation,
+    submitGoLiveWaiverMutation,
+    buildSaveBookingPayload,
+    buildSaveInstancePayload,
+    buildSaveKnowledgePayload,
+    buildSaveTelegramPayload,
+    syncBranchMutationSuccess,
+    buildUpdateBranchDraftPayload,
+} from "@/components/provisioning-wizard-branch-actions";
+import {
+    buildAutopilotRunState,
+    buildAutopilotRunValidationError,
+    buildRunAutopilotPayload,
+    deriveAutopilotState,
+    syncAutopilotMutationSuccess,
+    toggleAutopilotServiceSelection,
+} from "@/components/provisioning-wizard-autopilot";
+import {
+    buildBillingInfoJsonFromFields,
+    buildBookingSettingsJsonFromFields,
+    buildBranchFormFromBranchData,
+    buildWorkingHoursJsonFromFields,
+    createInitialAgentFormState,
+    createInitialAutopilotForm,
+    createInitialBranchBootstrapState,
+    createInitialBranchForm,
+    createProvisioningWizardResetState,
+    hydrateBillingFieldsFromJson,
+    hydrateBookingSettingsFieldsFromJson,
+    hydrateWorkingHoursFieldsFromJson,
+    loadBillingInfoFieldsFromJson,
+    loadBookingSettingsFieldsFromJson,
+    loadWorkingHoursFieldsFromJson,
+    resolveNextAgentBranchId,
+} from "@/components/provisioning-wizard-state";
 
 type SessionData = ReturnType<typeof useSession>["data"];
 type ProvisioningBranch = components["schemas"]["ConsoleBranch"];
@@ -37,7 +126,6 @@ type OnboardingAutopilotResponse = components["schemas"]["ConsoleOnboardingAutop
 type OnboardingPurchasedService = NonNullable<OnboardingAutopilotRequest["purchased_services"]>[number];
 type ReferencePackListResponse = components["schemas"]["ConsoleReferencePackListResponse"];
 type OnboardingStatus = components["schemas"]["ConsoleOnboardingStatusResponse"];
-type OnboardingStepStatus = components["schemas"]["ConsoleOnboardingStepStatus"];
 type OnboardingScorecard = components["schemas"]["ConsoleOnboardingScorecardResponse"];
 type OnboardingScorecardCheck = components["schemas"]["ConsoleOnboardingScorecardCheck"];
 type OnboardingDocumentIngestion = components["schemas"]["ConsoleOnboardingDocumentIngestion"];
@@ -88,726 +176,9 @@ type OnboardingScorecardEnterprise = OnboardingScorecard & {
 type AgentRole = ConsoleRole;
 type OnboardingMode = "autopilot" | "manual";
 
-type DomainTemplatePreset = {
-    id: string;
-    label: string;
-    summary: string;
-    payload: CapabilitiesPayload;
-};
-
 const DEFAULT_TIMEZONE = "Asia/Almaty";
 const PROVISIONING_ASSIGNABLE_AGENT_ROLES: AgentRole[] = ["owner", "admin", "manager", "viewer"];
 const DOMAIN_SLUG_RE = /^[a-z0-9_]+$/;
-const ISO_CURRENCY_RE = /^[A-Z]{3}$/;
-const WORKING_DAYS = [
-    { id: "mon", label: "Пн" },
-    { id: "tue", label: "Вт" },
-    { id: "wed", label: "Ср" },
-    { id: "thu", label: "Чт" },
-    { id: "fri", label: "Пт" },
-    { id: "sat", label: "Сб" },
-    { id: "sun", label: "Вс" },
-] as const;
-
-const WIZARD_STEPS = [
-    { id: "branch_draft", label: "Филиал", hint: "Черновик" },
-    { id: "integrations", label: "Интеграции", hint: "instance_id" },
-    { id: "team", label: "Команда", hint: "владелец/админ" },
-    { id: "telegram", label: "Telegram", hint: "chat_id" },
-    { id: "knowledge", label: "Знания", hint: "pack" },
-    { id: "booking", label: "Бронирование", hint: "calendar" },
-    { id: "go_no_go", label: "Go/No-Go", hint: "готовность" },
-] as const;
-
-const MISSING_LABELS: Record<string, string> = {
-    phone: "phone (WhatsApp branch)",
-    instance_id: "instance_id (WhatsApp)",
-    owner_admin: "Owner/Admin",
-    telegram_chat_id: "telegram_chat_id",
-    knowledge_tag: "knowledge_tag",
-    knowledge_published: "Knowledge publish",
-    working_hours: "working_hours",
-    booking_settings: "booking_settings",
-    specialists: "specialists",
-    capabilities: "capabilities",
-    onboarding_contract: "Onboarding contract",
-    payment_confirmed: "Payment confirmed",
-    webhook_secret: "Webhook secret",
-    reference_pack_domain: "Niche domain (domain_slug)",
-    reference_pack: "Reference pack",
-    reference_pack_integrity: "Reference pack integrity",
-    reference_pack_schema_version: "Reference pack schema_version (v2)",
-    reference_pack_metadata: "Reference pack metadata",
-    reference_pack_integrity_version: "Reference pack integrity version",
-    reference_pack_minimum_data_contract_version: "Reference pack min data contract version",
-    reference_pack_required_fields: "Reference pack required fields snapshot",
-    reference_pack_required_fields_checksum: "Reference pack required fields checksum",
-    branch_active: "Филиал активен",
-    "provider_binding.whatsapp": "Provider binding (WhatsApp)",
-    "provider_binding.whatsapp.provider": "Provider binding: provider",
-    "provider_binding.whatsapp.instance_id": "Provider binding: instance_id",
-    "provider_binding.whatsapp.instance_id_mismatch": "Provider binding: instance_id не совпадает с branch",
-    "provider_binding.whatsapp.webhook_status": "Provider binding: webhook_status=configured",
-    "provider_binding.whatsapp.owner": "Provider binding: owner",
-    "provider_binding.whatsapp.next_renewal_at": "Provider binding: next_renewal_at",
-    "provider_binding.whatsapp.paid_until": "Provider binding: paid_until",
-    "provider_binding.whatsapp.paid_until_expired": "Provider binding: paid_until истёк",
-    "provider_binding.whatsapp.rebind_required": "Provider binding: rebind required",
-    "provider_binding.whatsapp.alert_state": "Provider binding: capability check (alert_state)",
-    "provider_binding.whatsapp.capability_check_failed": "Provider binding: capability check failed (alert_state=critical)",
-    document_ingestion_invalid: "Document ingestion gate",
-    "client_pack.business.name": "Профиль бизнеса: название",
-    "client_pack.location.city": "Локация: город",
-    "client_pack.location.address.full": "Локация: адрес",
-    "client_pack.operations.hours.days": "График работы: дни",
-    "client_pack.operations.hours.open": "График работы: открытие",
-    "client_pack.operations.hours.close": "График работы: закрытие",
-    "client_pack.catalog.summary": "Каталог: кратко об услугах",
-    "client_pack.communication.languages": "Коммуникация: языки",
-    "client_pack.salon.name": "Профиль бизнеса: название",
-    "client_pack.salon.city": "Локация: город",
-    "client_pack.salon.address.full": "Локация: адрес",
-    "client_pack.salon.hours.days": "График работы: дни",
-    "client_pack.salon.hours.open": "График работы: открытие",
-    "client_pack.salon.hours.close": "График работы: закрытие",
-    "client_pack.salon.services_summary": "Каталог: кратко об услугах",
-    "client_pack.salon.communication.languages": "Коммуникация: языки",
-    "client_pack.services_catalog.services": "Каталог: услуги",
-    "client_pack.service_duration_estimates": "Каталог: длительности услуг",
-    "client_pack.booking.collect_fields": "Booking: обязательные поля",
-    "client_pack.booking.bot_can_confirm": "Booking: подтверждение",
-    "client_pack.guest_policy": "Политика гостей",
-    "client_pack.safety.medical_note": "Дисклеймер: противопоказания",
-    "client_pack.pricing.price_from_reason": "Дисклеймер: цена \"от\"",
-    "client_pack.quality.expectations_photo": "Дисклеймер: ожидания/референс",
-    "client_pack.price_list": "Прайс-лист",
-    "client_pack.policy.hard_law": "Политика: hard_law",
-    "client_pack.policy.payment_info": "Политика: оплата",
-    "client_pack.policy.reschedule": "Политика: перенос",
-    "client_pack.policy.cancel": "Политика: отмена",
-    "client_pack.policy.medical": "Политика: медицинские ограничения",
-    "client_pack.policy.legal": "Политика: юридические ограничения",
-    "client_pack.policy.complaint": "Политика: жалобы",
-    "client_pack.policy.discounts": "Политика: скидки",
-    "client_pack.policy.guard_topics.refund": "Политика: refund keywords",
-};
-
-const CAPABILITY_FIELD_LABELS: Record<string, string> = {
-    "channels.whatsapp": "WhatsApp",
-    "channels.telegram": "Telegram",
-    "channels.instagram": "Instagram",
-    "providers.availability_provider": "availability_provider",
-    "providers.crm_provider": "crm_provider",
-    "providers.calendar_provider": "calendar_provider",
-    "features.booking_mode": "booking_mode",
-    "features.knowledge_upload": "knowledge_upload",
-    "features.analytics": "analytics",
-    "features.auto_learn": "auto_learn",
-};
-
-const SLA_INCIDENT_LABELS: Record<string, string> = {
-    handover_sla_breached: "Просроченные handover в очереди",
-    handover_sla_warning: "Handover близко к SLA-нарушению",
-    provider_binding_missing: "Не заполнен provider binding",
-    provider_webhook_not_configured: "Webhook provider не сконфигурирован",
-    provider_rebind_required: "Требуется rebind provider",
-    provider_billing_expired: "Подписка provider истекла",
-    provider_renewal_due: "Скоро продление provider",
-    provider_capability_alert_critical: "Provider capability check: critical",
-    provider_capability_alert_warn: "Provider capability check: warn",
-};
-
-const PIPELINE_ACTION_LABELS: Record<string, string> = {
-    complete_contract_and_payment: "Закрыть договор и оплату",
-    fix_channel_bindings: "Починить channel bindings",
-    publish_knowledge_pack: "Опубликовать knowledge pack",
-    configure_booking_runtime: "Настроить booking runtime",
-    resolve_go_live_blockers: "Снять go-live блокеры",
-    resolve_breached_handovers: "Разобрать просроченные handover",
-    review_pending_handovers: "Проверить pending handover",
-    fix_provider_binding: "Исправить provider binding",
-    renew_provider_subscription_urgent: "Срочно продлить provider",
-    renew_provider_subscription: "Продлить provider",
-    run_provider_capability_check: "Проверить provider capability",
-    monitor_sla_loop: "Мониторить SLA контрольный цикл",
-    monitor_go_live_readiness: "Мониторить go-live readiness",
-};
-
-const SLA_PROVIDER_STATUS_LABELS: Record<string, string> = {
-    configured: "configured",
-    missing: "missing",
-    webhook_not_configured: "webhook_not_configured",
-    rebind_required: "rebind_required",
-    billing_expired: "billing_expired",
-    renewal_due: "renewal_due",
-    not_required: "not_required",
-    unknown: "unknown",
-};
-
-const AUTOPILOT_SERVICE_OPTIONS: Array<{
-    id: OnboardingPurchasedService;
-    label: string;
-}> = [
-    { id: "whatsapp", label: "WhatsApp" },
-    { id: "telegram", label: "Telegram" },
-    { id: "instagram", label: "Instagram" },
-    { id: "booking_collect", label: "Booking: collect" },
-    { id: "booking_confirm", label: "Booking: confirm" },
-    { id: "knowledge_upload", label: "Knowledge upload" },
-    { id: "analytics", label: "Analytics" },
-    { id: "auto_learn", label: "Auto learn" },
-    { id: "provider_google_calendar", label: "Google Calendar" },
-    { id: "provider_local_calendar", label: "Local Calendar" },
-    { id: "provider_manual", label: "Manual provider" },
-    { id: "provider_amocrm", label: "amoCRM" },
-    { id: "provider_bitrix", label: "Bitrix" },
-];
-
-const FALLBACK_DOMAIN_TEMPLATE_PRESETS: DomainTemplatePreset[] = [
-    {
-        id: "beauty",
-        label: "Beauty / Salon",
-        summary: "WhatsApp+Telegram, запись, knowledge upload",
-        payload: {
-            domain_slug: "beauty",
-            channels: { whatsapp: true, telegram: true, instagram: null },
-            providers: { availability_provider: "google_calendar", crm_provider: "amocrm", calendar_provider: "google_calendar" },
-            features: { booking_mode: "confirm_slots", knowledge_upload: true, analytics: true, auto_learn: false },
-        },
-    },
-    {
-        id: "clinic",
-        label: "Clinic",
-        summary: "WhatsApp, запись через календарь, строгий ручной контроль",
-        payload: {
-            domain_slug: "clinic",
-            channels: { whatsapp: true, telegram: false, instagram: null },
-            providers: { availability_provider: "google_calendar", crm_provider: "custom", calendar_provider: "google_calendar" },
-            features: { booking_mode: "confirm_slots", knowledge_upload: true, analytics: true, auto_learn: false },
-        },
-    },
-    {
-        id: "legal",
-        label: "Legal",
-        summary: "Консультационный режим без слот-подтверждения",
-        payload: {
-            domain_slug: "legal",
-            channels: { whatsapp: true, telegram: true, instagram: false },
-            providers: { availability_provider: "manual", crm_provider: "none", calendar_provider: "local" },
-            features: { booking_mode: "collect_preferences", knowledge_upload: true, analytics: true, auto_learn: false },
-        },
-    },
-    {
-        id: "ecom",
-        label: "E-commerce",
-        summary: "Мультиканал и аналитика, без confirm-slots по умолчанию",
-        payload: {
-            domain_slug: "ecom",
-            channels: { whatsapp: true, telegram: true, instagram: true },
-            providers: { availability_provider: "none", crm_provider: "bitrix", calendar_provider: "none" },
-            features: { booking_mode: "collect_preferences", knowledge_upload: true, analytics: true, auto_learn: true },
-        },
-    },
-];
-
-type WizardStepId = (typeof WIZARD_STEPS)[number]["id"];
-
-type FieldGuideItem = {
-    field: string;
-    required: boolean;
-    purpose: string;
-    relation: string;
-    output: string;
-};
-
-const AUTOPILOT_FIELD_GUIDE: FieldGuideItem[] = [
-    {
-        field: "phone",
-        required: true,
-        purpose: "Номер филиала для inbound/outbound",
-        relation: "branches.phone (уникально в client)",
-        output: "Branch routing и anti-loop контур",
-    },
-    {
-        field: "instance_id",
-        required: true,
-        purpose: "Идентификатор WA instance",
-        relation: "branches.instance_id (уникально в client)",
-        output: "WA канал + генерация webhook_secret",
-    },
-    {
-        field: "client_data_text",
-        required: true,
-        purpose: "Свободный текст данных клиента",
-        relation: "intake -> normalize -> validate",
-        output: "draft payload + missing_fields/questions",
-    },
-    {
-        field: "purchased_services",
-        required: true,
-        purpose: "Подключенные услуги по договору",
-        relation: "onboarding_contract.purchased -> capabilities",
-        output: "Go/No-Go capability_mismatch контроль",
-    },
-    {
-        field: "company_id | company_name",
-        required: true,
-        purpose: "Привязка/создание компании",
-        relation: "companies -> clients",
-        output: "Company контекст",
-    },
-    {
-        field: "client_id | client_slug",
-        required: true,
-        purpose: "Привязка/создание клиента",
-        relation: "clients -> branches",
-        output: "Client контекст",
-    },
-    {
-        field: "branch_name",
-        required: true,
-        purpose: "Имя филиала при создании",
-        relation: "branches.name",
-        output: "Создание нового branch",
-    },
-    {
-        field: "payment_status",
-        required: false,
-        purpose: "Коммерческий статус запуска",
-        relation: "onboarding_contract.payment_status",
-        output: "Go/No-Go gate payment_confirmed",
-    },
-];
-
-const MANUAL_STEP_FIELD_GUIDE: Record<WizardStepId, FieldGuideItem[]> = {
-    branch_draft: [
-        {
-            field: "name",
-            required: true,
-            purpose: "Читаемое имя филиала",
-            relation: "branches.name",
-            output: "Branch draft запись",
-        },
-        {
-            field: "slug",
-            required: true,
-            purpose: "Технический идентификатор филиала",
-            relation: "branches.slug (уникален в client)",
-            output: "Branch lookup в UI/API",
-        },
-        {
-            field: "timezone",
-            required: false,
-            purpose: "Часовой пояс филиала",
-            relation: "branches.timezone",
-            output: "Корректное время в слотах",
-        },
-        {
-            field: "phone",
-            required: true,
-            purpose: "Телефон WA филиала",
-            relation: "branches.phone (уникален в client)",
-            output: "Требуется для WA go-live",
-        },
-    ],
-    integrations: [
-        {
-            field: "instance_id",
-            required: true,
-            purpose: "Привязка WA инстанса",
-            relation: "branches.instance_id",
-            output: "Активируем branch + webhook",
-        },
-        {
-            field: "phone",
-            required: true,
-            purpose: "Явная связка с instance",
-            relation: "branches.phone + branches.instance_id",
-            output: "Устойчивый branch routing",
-        },
-    ],
-    team: [
-        {
-            field: "role + name",
-            required: true,
-            purpose: "Console доступ сотрудников",
-            relation: "agents + agent_memberships",
-            output: "Owner/Admin/Manager доступ",
-        },
-        {
-            field: "oidc_subject",
-            required: false,
-            purpose: "Привязка Keycloak user",
-            relation: "agent_identities(channel=oidc)",
-            output: "SSO авторизация",
-        },
-    ],
-    telegram: [
-        {
-            field: "telegram_chat_id",
-            required: true,
-            purpose: "Эскалации менеджеру",
-            relation: "branches.telegram_chat_id",
-            output: "HANDOFF delivery в Telegram",
-        },
-    ],
-    knowledge: [
-        {
-            field: "knowledge_tag",
-            required: true,
-            purpose: "Связка branch с knowledge pack",
-            relation: "branches.knowledge_tag",
-            output: "Publish/Sync готовность",
-        },
-    ],
-    booking: [
-        {
-            field: "working_hours",
-            required: true,
-            purpose: "График филиала",
-            relation: "branches.working_hours",
-            output: "Booking slot availability",
-        },
-        {
-            field: "booking_settings",
-            required: true,
-            purpose: "Правила записи",
-            relation: "branches.booking_settings",
-            output: "Детерминированный booking flow",
-        },
-    ],
-    go_no_go: [
-        {
-            field: "capabilities + onboarding_contract",
-            required: true,
-            purpose: "Сверка купленного и включенного",
-            relation: "client_capabilities + onboarding_contract",
-            output: "capability mismatch detection",
-        },
-        {
-            field: "payment + webhook + reference pack",
-            required: true,
-            purpose: "Коммерческий и тех readiness",
-            relation: "payment_status + branches.webhook_secret + reference_packs",
-            output: "Go/No-Go final unlock",
-        },
-    ],
-};
-
-function stringifyOptionalJson(value: unknown): string {
-    if (!value || typeof value !== "object") {
-        return "";
-    }
-    const keys = Object.keys(value as Record<string, unknown>);
-    if (keys.length === 0) {
-        return "";
-    }
-    return JSON.stringify(value, null, 2);
-}
-
-function parseOptionalJson(value: string, label: string): { value?: Record<string, unknown>; error?: string } {
-    const trimmed = value.trim();
-    if (!trimmed) {
-        return {};
-    }
-    try {
-        return { value: JSON.parse(trimmed) as Record<string, unknown> };
-    } catch {
-        return { error: `${label}: некорректный JSON` };
-    }
-}
-
-function formatMissingRequirement(code: string): string {
-    if (code.startsWith("capability_mismatch:")) {
-        const key = code.slice("capability_mismatch:".length);
-        return `Несоответствие договору: ${CAPABILITY_FIELD_LABELS[key] ?? key}`;
-    }
-    return MISSING_LABELS[code] ?? code;
-}
-
-function formatSlaIncident(code: string): string {
-    return SLA_INCIDENT_LABELS[code] ?? code;
-}
-
-function formatPipelineAction(code: string): string {
-    return PIPELINE_ACTION_LABELS[code] ?? code;
-}
-
-function formatSlaProviderStatus(status?: string): string {
-    if (!status) {
-        return "unknown";
-    }
-    return SLA_PROVIDER_STATUS_LABELS[status] ?? status;
-}
-
-function formatOperationalBlocker(code: string): string {
-    if (
-        code.startsWith("capability_mismatch:")
-        || code.startsWith("provider_binding.whatsapp")
-        || code.startsWith("client_pack.")
-        || code.startsWith("reference_pack")
-        || Object.prototype.hasOwnProperty.call(MISSING_LABELS, code)
-    ) {
-        return formatMissingRequirement(code);
-    }
-    return formatSlaIncident(code);
-}
-
-function onboardingStepStatusLabel(status: "complete" | "available" | "locked" | "skipped"): string {
-    if (status === "complete") {
-        return "выполнен";
-    }
-    if (status === "available") {
-        return "доступен";
-    }
-    if (status === "locked") {
-        return "заблокирован";
-    }
-    return "пропущен";
-}
-
-function onboardingStepStatusClass(status: "complete" | "available" | "locked" | "skipped"): string {
-    if (status === "complete") {
-        return "border-green-200 bg-green-50 text-green-800";
-    }
-    if (status === "available") {
-        return "border-blue-200 bg-blue-50 text-blue-800";
-    }
-    if (status === "locked") {
-        return "border-border/60 bg-muted/40 text-muted-foreground";
-    }
-    return "border-amber-200 bg-amber-50 text-amber-800";
-}
-
-function intakePriorityLabel(value?: string): string {
-    if (value === "critical") {
-        return "critical";
-    }
-    if (value === "high") {
-        return "high";
-    }
-    if (value === "medium") {
-        return "medium";
-    }
-    return "low";
-}
-
-function intakePriorityClass(value?: string): string {
-    if (value === "critical") {
-        return "border-destructive/30 bg-destructive/10 text-destructive";
-    }
-    if (value === "high") {
-        return "border-amber-300/60 bg-amber-50 text-amber-800";
-    }
-    if (value === "medium") {
-        return "border-blue-300/60 bg-blue-50 text-blue-800";
-    }
-    return "border-border/60 bg-muted/40 text-muted-foreground";
-}
-
-function intakeStatusLabel(value?: string): string {
-    if (value === "confirmed") {
-        return "confirmed";
-    }
-    if (value === "assumed") {
-        return "assumed";
-    }
-    return "unknown";
-}
-
-function intakeStatusClass(value?: string): string {
-    if (value === "confirmed") {
-        return "border-green-200 bg-green-50 text-green-800";
-    }
-    if (value === "assumed") {
-        return "border-blue-300/60 bg-blue-50 text-blue-800";
-    }
-    return "border-border/60 bg-muted/40 text-muted-foreground";
-}
-
-function qualityStatusLabel(value?: string): string {
-    if (value === "pass") {
-        return "pass";
-    }
-    if (value === "warn") {
-        return "warn";
-    }
-    if (value === "skip") {
-        return "skip";
-    }
-    return "fail";
-}
-
-function qualityStatusClass(value?: string): string {
-    if (value === "pass") {
-        return "border-green-200 bg-green-50 text-green-800";
-    }
-    if (value === "warn") {
-        return "border-amber-300/60 bg-amber-50 text-amber-800";
-    }
-    if (value === "skip") {
-        return "border-blue-300/60 bg-blue-50 text-blue-800";
-    }
-    return "border-destructive/30 bg-destructive/10 text-destructive";
-}
-
-function normalizeCapabilities(payload?: RawCapabilitiesPayload | null): CapabilitiesPayload {
-    return {
-        domain_slug: payload?.domain_slug ?? null,
-        channels: {
-            whatsapp: payload?.channels?.whatsapp ?? null,
-            telegram: payload?.channels?.telegram ?? null,
-            instagram: payload?.channels?.instagram ?? null,
-        },
-        providers: {
-            availability_provider: payload?.providers?.availability_provider ?? null,
-            crm_provider: payload?.providers?.crm_provider ?? null,
-            calendar_provider: payload?.providers?.calendar_provider ?? null,
-        },
-        features: {
-            booking_mode: payload?.features?.booking_mode ?? null,
-            knowledge_upload: payload?.features?.knowledge_upload ?? null,
-            analytics: payload?.features?.analytics ?? null,
-            auto_learn: payload?.features?.auto_learn ?? null,
-        },
-    };
-}
-
-function normalizeOnboardingContractPayload(
-    payload?: OnboardingContractPayload | null,
-): OnboardingContractPayload {
-    return {
-        domain_slug: payload?.domain_slug ?? null,
-        purchased: normalizeCapabilities(payload?.purchased ?? null),
-        provider_binding: {
-            whatsapp: {
-                provider: payload?.provider_binding?.whatsapp?.provider ?? null,
-                instance_id: payload?.provider_binding?.whatsapp?.instance_id ?? null,
-                webhook_status: payload?.provider_binding?.whatsapp?.webhook_status ?? null,
-                paid_until: payload?.provider_binding?.whatsapp?.paid_until ?? null,
-                owner: payload?.provider_binding?.whatsapp?.owner ?? null,
-                next_renewal_at: payload?.provider_binding?.whatsapp?.next_renewal_at ?? null,
-                last_rebind_at: payload?.provider_binding?.whatsapp?.last_rebind_at ?? null,
-                rebind_required: payload?.provider_binding?.whatsapp?.rebind_required ?? null,
-                alert_state: payload?.provider_binding?.whatsapp?.alert_state ?? null,
-                notes: payload?.provider_binding?.whatsapp?.notes ?? null,
-            },
-        },
-    };
-}
-
-function mergeCapabilities(base?: RawCapabilitiesPayload | null, override?: RawCapabilitiesPayload | null): CapabilitiesPayload {
-    const merged = normalizeCapabilities(base);
-    const overridePayload = normalizeCapabilities(override);
-
-    if (overridePayload.domain_slug) {
-        merged.domain_slug = overridePayload.domain_slug;
-    }
-
-    (["whatsapp", "telegram", "instagram"] as const).forEach((key) => {
-        const value = overridePayload.channels?.[key];
-        if (value !== null && value !== undefined) {
-            merged.channels[key] = value;
-        }
-    });
-
-    const availabilityProvider = overridePayload.providers?.availability_provider;
-    if (availabilityProvider !== null && availabilityProvider !== undefined) {
-        merged.providers.availability_provider = availabilityProvider;
-    }
-
-    const crmProvider = overridePayload.providers?.crm_provider;
-    if (crmProvider !== null && crmProvider !== undefined) {
-        merged.providers.crm_provider = crmProvider;
-    }
-
-    const calendarProvider = overridePayload.providers?.calendar_provider;
-    if (calendarProvider !== null && calendarProvider !== undefined) {
-        merged.providers.calendar_provider = calendarProvider;
-    }
-
-    const bookingMode = overridePayload.features?.booking_mode;
-    if (bookingMode !== null && bookingMode !== undefined) {
-        merged.features.booking_mode = bookingMode;
-    }
-
-    const knowledgeUpload = overridePayload.features?.knowledge_upload;
-    if (knowledgeUpload !== null && knowledgeUpload !== undefined) {
-        merged.features.knowledge_upload = knowledgeUpload;
-    }
-
-    const analytics = overridePayload.features?.analytics;
-    if (analytics !== null && analytics !== undefined) {
-        merged.features.analytics = analytics;
-    }
-
-    const autoLearn = overridePayload.features?.auto_learn;
-    if (autoLearn !== null && autoLearn !== undefined) {
-        merged.features.auto_learn = autoLearn;
-    }
-
-    return merged;
-}
-
-function toTriState(value: boolean | null | undefined): string {
-    if (value === true) {
-        return "true";
-    }
-    if (value === false) {
-        return "false";
-    }
-    return "inherit";
-}
-
-function fromTriState(value: string): boolean | null {
-    if (value === "true") {
-        return true;
-    }
-    if (value === "false") {
-        return false;
-    }
-    return null;
-}
-
-function formatEffectiveValue(value: string | number | boolean | null | undefined): string {
-    if (value === true) {
-        return "Включено";
-    }
-    if (value === false) {
-        return "Выключено";
-    }
-    if (value === null || value === undefined || value === "") {
-        return "—";
-    }
-    return String(value);
-}
-
-function isNonEmptyRecord(value: unknown): value is Record<string, unknown> {
-    if (!value || typeof value !== "object") {
-        return false;
-    }
-    return Object.keys(value as Record<string, unknown>).length > 0;
-}
-
-function hasCapabilityValue(value: boolean | string | null | undefined): boolean {
-    return value !== null && value !== undefined && value !== "";
-}
-
-function hasPurchasedSignal(payload: CapabilitiesPayload): boolean {
-    return [
-        payload.domain_slug,
-        payload.channels.whatsapp,
-        payload.channels.telegram,
-        payload.channels.instagram,
-        payload.providers.availability_provider,
-        payload.providers.crm_provider,
-        payload.providers.calendar_provider,
-        payload.features.booking_mode,
-        payload.features.knowledge_upload,
-        payload.features.analytics,
-        payload.features.auto_learn,
-    ].some((value) => hasCapabilityValue(value));
-}
 
 type ProvisioningWizardProps = {
     session: SessionData;
@@ -824,10 +195,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         clearErrors,
     } = useInlineErrorSummary();
 
-    const reportValidationError = (message: string, code = "VALIDATION_ERROR") => {
+    const reportValidationError = useCallback((message: string, code = "VALIDATION_ERROR") => {
         toast.error(message);
         reportInlineError({ code, message });
-    };
+    }, [reportInlineError]);
     const reportProvisioningError = useCallback(
         (error: unknown, operation: string, endpoint: string) =>
             reportError(error, {
@@ -861,41 +232,15 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const [clientSlug, setClientSlug] = useState("");
     const [clientId, setClientId] = useState("");
     const [branchData, setBranchData] = useState<ProvisioningBranch | null>(null);
-    const [branchForm, setBranchForm] = useState({
-        name: "",
-        slug: "",
-        timezone: DEFAULT_TIMEZONE,
-        phone: "",
-        instanceId: "",
-        telegramChatId: "",
-        knowledgeTag: "",
-        workingHours: "",
-        bookingSettings: "",
-    });
-    const [branchBootstrap, setBranchBootstrap] = useState({
-        enabled: true,
-        createOwner: true,
-        createAdmin: true,
-        createManager: true,
-        ownerName: "",
-        ownerOidcSubject: "",
-        adminName: "",
-        adminOidcSubject: "",
-        managerName: "",
-        managerOidcSubject: "",
-    });
+    const [branchForm, setBranchForm] = useState(() => createInitialBranchForm(DEFAULT_TIMEZONE));
+    const [branchBootstrap, setBranchBootstrap] = useState(createInitialBranchBootstrapState);
     const [workingHoursDays, setWorkingHoursDays] = useState<string[]>([]);
     const [workingHoursStart, setWorkingHoursStart] = useState("");
     const [workingHoursEnd, setWorkingHoursEnd] = useState("");
     const [bookingDefaultDuration, setBookingDefaultDuration] = useState("");
     const [bookingBufferMin, setBookingBufferMin] = useState("");
     const [activateOnSave, setActivateOnSave] = useState(true);
-    const [agentForm, setAgentForm] = useState({
-        name: "",
-        role: "owner" as AgentRole,
-        oidcSubject: "",
-        branchId: "",
-    });
+    const [agentForm, setAgentForm] = useState(() => createInitialAgentFormState<AgentRole>("owner"));
     const [createdAgents, setCreatedAgents] = useState<ProvisioningAgent[]>([]);
     const [capabilitiesDraft, setCapabilitiesDraft] = useState<CapabilitiesPayload>(() => normalizeCapabilities());
     const [capabilitiesTouched, setCapabilitiesTouched] = useState(false);
@@ -914,27 +259,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const [specialistsConfirmed, setSpecialistsConfirmed] = useState(false);
     const [integrationWebhookSecret, setIntegrationWebhookSecret] = useState("");
     const [integrationWebhookUrl, setIntegrationWebhookUrl] = useState("");
-    const [autopilotForm, setAutopilotForm] = useState({
-        companyName: "",
-        clientSlug: "",
-        branchName: "",
-        branchSlug: "",
-        timezone: DEFAULT_TIMEZONE,
-        phone: "",
-        instanceId: "",
-        domainSlug: "beauty",
-        paymentStatus: "pending" as "pending" | "confirmed" | "rejected",
-        providerBindingProvider: "chatflow",
-        providerBindingWebhookStatus: "pending" as "configured" | "pending" | "rebind_required",
-        providerBindingPaidUntil: "",
-        providerBindingOwner: "",
-        providerBindingNextRenewalAt: "",
-        providerBindingLastRebindAt: "",
-        providerBindingRebindRequired: false,
-        providerBindingAlertState: "warn" as "ok" | "warn" | "critical",
-        providerBindingNotes: "",
-        clientDataText: "",
-    });
+    const [autopilotForm, setAutopilotForm] = useState(() => createInitialAutopilotForm(DEFAULT_TIMEZONE));
     const [autopilotServices, setAutopilotServices] = useState<OnboardingPurchasedService[]>(["whatsapp"]);
     const [autopilotResult, setAutopilotResult] = useState<OnboardingAutopilotResponse | null>(null);
     const [goLiveDecisionReason, setGoLiveDecisionReason] = useState("");
@@ -958,94 +283,53 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setWorkingHoursEnd("");
         setBookingDefaultDuration("");
         setBookingBufferMin("");
-        setBranchForm({
-            name: branchData.name ?? "",
-            slug: branchData.slug ?? "",
-            timezone: branchData.timezone ?? DEFAULT_TIMEZONE,
-            phone: branchData.phone ?? "",
-            instanceId: branchData.instance_id ?? "",
-            telegramChatId: branchData.telegram_chat_id ?? "",
-            knowledgeTag: branchData.knowledge_tag ?? "",
-            workingHours: stringifyOptionalJson(branchData.working_hours),
-            bookingSettings: stringifyOptionalJson(branchData.booking_settings),
-        });
+        setBranchForm(buildBranchFormFromBranchData(branchData, DEFAULT_TIMEZONE));
         setAgentForm((prev) => ({
             ...prev,
-            branchId: prev.branchId || branchData.id || "",
+            branchId: resolveNextAgentBranchId(prev.branchId, branchData.id),
         }));
     }, [branchData]);
 
     useEffect(() => {
-        if (!billingInfo.trim()) {
+        const hydrated = hydrateBillingFieldsFromJson({
+            billingInfo,
+            billingContract,
+            billingCurrency,
+        });
+        if (!hydrated) {
             return;
         }
-        if (billingContract || billingCurrency) {
-            return;
-        }
-        const parsed = parseOptionalJson(billingInfo, "billing_info");
-        if (!parsed.value) {
-            return;
-        }
-        const contract = parsed.value.contract;
-        const currency = parsed.value.currency;
-        if (typeof contract === "string") {
-            setBillingContract(contract);
-        }
-        if (typeof currency === "string") {
-            setBillingCurrency(currency);
-        }
+        setBillingContract(hydrated.contract);
+        setBillingCurrency(hydrated.currency);
     }, [billingInfo, billingContract, billingCurrency]);
 
     useEffect(() => {
-        if (!branchForm.workingHours.trim()) {
+        const hydrated = hydrateWorkingHoursFieldsFromJson({
+            workingHoursJson: branchForm.workingHours,
+            currentDaysCount: workingHoursDays.length,
+            currentStart: workingHoursStart,
+            currentEnd: workingHoursEnd,
+            orderedDays: WORKING_DAYS.map((day) => day.id),
+        });
+        if (!hydrated) {
             return;
         }
-        if (workingHoursDays.length || workingHoursStart || workingHoursEnd) {
-            return;
-        }
-        const parsed = parseOptionalJson(branchForm.workingHours, "working_hours");
-        if (!parsed.value) {
-            return;
-        }
-        const availableDays = new Set<string>(WORKING_DAYS.map((day) => day.id));
-        const dayKeys = Object.keys(parsed.value).filter((day) => availableDays.has(day));
-        if (dayKeys.length) {
-            setWorkingHoursDays(dayKeys);
-        }
-        const firstDay = dayKeys[0];
-        if (firstDay) {
-            const slots = parsed.value[firstDay];
-            if (Array.isArray(slots) && slots[0] && typeof slots[0] === "object") {
-                const slot = slots[0] as { start?: unknown; end?: unknown };
-                if (typeof slot.start === "string") {
-                    setWorkingHoursStart(slot.start);
-                }
-                if (typeof slot.end === "string") {
-                    setWorkingHoursEnd(slot.end);
-                }
-            }
-        }
+        setWorkingHoursDays(hydrated.days);
+        setWorkingHoursStart(hydrated.start);
+        setWorkingHoursEnd(hydrated.end);
     }, [branchForm.workingHours, workingHoursDays.length, workingHoursStart, workingHoursEnd]);
 
     useEffect(() => {
-        if (!branchForm.bookingSettings.trim()) {
+        const hydrated = hydrateBookingSettingsFieldsFromJson({
+            bookingSettingsJson: branchForm.bookingSettings,
+            currentDefaultDuration: bookingDefaultDuration,
+            currentBufferMin: bookingBufferMin,
+        });
+        if (!hydrated) {
             return;
         }
-        if (bookingDefaultDuration || bookingBufferMin) {
-            return;
-        }
-        const parsed = parseOptionalJson(branchForm.bookingSettings, "booking_settings");
-        if (!parsed.value) {
-            return;
-        }
-        const defaultDuration = parsed.value.default_duration_min;
-        const bufferMin = parsed.value.buffer_min;
-        if (typeof defaultDuration === "number" || typeof defaultDuration === "string") {
-            setBookingDefaultDuration(String(defaultDuration));
-        }
-        if (typeof bufferMin === "number" || typeof bufferMin === "string") {
-            setBookingBufferMin(String(bufferMin));
-        }
+        setBookingDefaultDuration(hydrated.defaultDuration);
+        setBookingBufferMin(hydrated.bufferMin);
     }, [branchForm.bookingSettings, bookingDefaultDuration, bookingBufferMin]);
 
     useEffect(() => {
@@ -1055,163 +339,79 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setReferencePackTitle("");
     }, [branchData?.id]);
 
-    const buildBillingInfoPayload = (): { value?: Record<string, unknown>; error?: string } => {
-        const payload: Record<string, unknown> = {};
-        const contract = billingContract.trim();
-        const currency = billingCurrency.trim().toUpperCase();
-        if (contract && contract.length < 2) {
-            return { error: "billing_info.contract: минимум 2 символа" };
-        }
-        if (currency && !ISO_CURRENCY_RE.test(currency)) {
-            return { error: "billing_info.currency: используйте ISO-код (например KZT)" };
-        }
-        if (contract) {
-            payload.contract = contract;
-        }
-        if (currency) {
-            payload.currency = currency;
-        }
-        return { value: Object.keys(payload).length ? payload : undefined };
-    };
-
     const applyBillingToJson = () => {
-        const built = buildBillingInfoPayload();
-        if (built.error) {
-            reportValidationError(built.error);
+        const result = buildBillingInfoJsonFromFields({
+            contract: billingContract,
+            currency: billingCurrency,
+        });
+        if (result.error) {
+            reportValidationError(result.error);
             return;
         }
-        setBillingInfo(built.value ? JSON.stringify(built.value, null, 2) : "");
+        setBillingInfo(result.json);
     };
 
     const loadBillingFromJson = () => {
-        const parsed = parseOptionalJson(billingInfo, "billing_info");
-        if (parsed.error) {
-            reportValidationError(parsed.error);
+        const result = loadBillingInfoFieldsFromJson({
+            billingInfo,
+        });
+        if (result.error) {
+            reportValidationError(result.error);
             return;
         }
-        const payload = (parsed.value ?? {}) as Record<string, unknown>;
-        const contract = payload.contract;
-        const currency = payload.currency;
-        setBillingContract(typeof contract === "string" ? contract : "");
-        setBillingCurrency(typeof currency === "string" ? currency.toUpperCase() : "");
-    };
-
-    const buildWorkingHoursPayload = (): { value?: Record<string, unknown>; error?: string } => {
-        const selectedDays = workingHoursDays;
-        const start = workingHoursStart.trim();
-        const end = workingHoursEnd.trim();
-        if (!selectedDays.length && !start && !end) {
-            return {};
-        }
-        if (!selectedDays.length) {
-            return { error: "Укажите рабочие дни" };
-        }
-        if (!start || !end) {
-            return { error: "Укажите время открытия и закрытия" };
-        }
-        if (start >= end) {
-            return { error: "working_hours: время закрытия должно быть позже открытия" };
-        }
-        const payload: Record<string, unknown> = {};
-        selectedDays.forEach((day) => {
-            payload[day] = [{ start, end }];
-        });
-        return { value: payload };
+        setBillingContract(result.contract);
+        setBillingCurrency(result.currency);
     };
 
     const applyWorkingHoursToJson = () => {
-        const built = buildWorkingHoursPayload();
-        if (built.error) {
-            reportValidationError(built.error);
+        const result = buildWorkingHoursJsonFromFields({
+            selectedDays: workingHoursDays,
+            start: workingHoursStart,
+            end: workingHoursEnd,
+        });
+        if (result.error) {
+            reportValidationError(result.error);
             return;
         }
-        const nextValue = built.value ? JSON.stringify(built.value, null, 2) : "";
-        setBranchForm((prev) => ({ ...prev, workingHours: nextValue }));
+        setBranchForm((prev) => ({ ...prev, workingHours: result.json }));
     };
 
     const loadWorkingHoursFromJson = () => {
-        const parsed = parseOptionalJson(branchForm.workingHours, "working_hours");
-        if (parsed.error) {
-            reportValidationError(parsed.error);
+        const result = loadWorkingHoursFieldsFromJson({
+            workingHoursJson: branchForm.workingHours,
+            orderedDays: WORKING_DAYS.map((day) => day.id),
+        });
+        if (result.error) {
+            reportValidationError(result.error);
             return;
         }
-        const payload = (parsed.value ?? {}) as Record<string, unknown>;
-        const orderedDays = WORKING_DAYS.map((day) => day.id);
-        const dayKeys = orderedDays.filter((day) => Array.isArray(payload[day]));
-        setWorkingHoursDays(dayKeys);
-        setWorkingHoursStart("");
-        setWorkingHoursEnd("");
-        const firstDay = dayKeys[0];
-        if (!firstDay) {
-            return;
-        }
-        const slots = payload[firstDay];
-        if (Array.isArray(slots) && slots[0] && typeof slots[0] === "object") {
-            const slot = slots[0] as { start?: unknown; end?: unknown };
-            if (typeof slot.start === "string") {
-                setWorkingHoursStart(slot.start);
-            }
-            if (typeof slot.end === "string") {
-                setWorkingHoursEnd(slot.end);
-            }
-        }
-    };
-
-    const buildBookingSettingsPayload = (): { value?: Record<string, unknown>; error?: string } => {
-        const defaultDurationRaw = bookingDefaultDuration.trim();
-        const bufferMinRaw = bookingBufferMin.trim();
-        if (!defaultDurationRaw && !bufferMinRaw) {
-            return {};
-        }
-        const payload: Record<string, unknown> = {};
-        if (defaultDurationRaw) {
-            const parsed = Number(defaultDurationRaw);
-            if (!Number.isInteger(parsed)) {
-                return { error: "default_duration_min: укажите целое число" };
-            }
-            if (parsed < 5 || parsed > 480) {
-                return { error: "default_duration_min: допустимо от 5 до 480" };
-            }
-            payload.default_duration_min = parsed;
-        }
-        if (bufferMinRaw) {
-            const parsed = Number(bufferMinRaw);
-            if (!Number.isInteger(parsed)) {
-                return { error: "buffer_min: укажите целое число" };
-            }
-            if (parsed < 0 || parsed > 240) {
-                return { error: "buffer_min: допустимо от 0 до 240" };
-            }
-            payload.buffer_min = parsed;
-        }
-        return { value: payload };
+        setWorkingHoursDays(result.days);
+        setWorkingHoursStart(result.start);
+        setWorkingHoursEnd(result.end);
     };
 
     const applyBookingSettingsToJson = () => {
-        const built = buildBookingSettingsPayload();
-        if (built.error) {
-            reportValidationError(built.error);
+        const result = buildBookingSettingsJsonFromFields({
+            defaultDuration: bookingDefaultDuration,
+            bufferMin: bookingBufferMin,
+        });
+        if (result.error) {
+            reportValidationError(result.error);
             return;
         }
-        const nextValue = built.value ? JSON.stringify(built.value, null, 2) : "";
-        setBranchForm((prev) => ({ ...prev, bookingSettings: nextValue }));
+        setBranchForm((prev) => ({ ...prev, bookingSettings: result.json }));
     };
 
     const loadBookingSettingsFromJson = () => {
-        const parsed = parseOptionalJson(branchForm.bookingSettings, "booking_settings");
-        if (parsed.error) {
-            reportValidationError(parsed.error);
+        const result = loadBookingSettingsFieldsFromJson({
+            bookingSettingsJson: branchForm.bookingSettings,
+        });
+        if (result.error) {
+            reportValidationError(result.error);
             return;
         }
-        const payload = (parsed.value ?? {}) as Record<string, unknown>;
-        const defaultDuration = payload.default_duration_min;
-        const bufferMin = payload.buffer_min;
-        setBookingDefaultDuration((typeof defaultDuration === "number" || typeof defaultDuration === "string")
-            ? String(defaultDuration)
-            : "");
-        setBookingBufferMin((typeof bufferMin === "number" || typeof bufferMin === "string")
-            ? String(bufferMin)
-            : "");
+        setBookingDefaultDuration(result.defaultDuration);
+        setBookingBufferMin(result.bufferMin);
     };
 
     const validatePurchasedPayload = (payload: CapabilitiesPayload): string | null => {
@@ -1506,6 +706,33 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setAutoStepSync(false);
     }, [autoStepSync, onboardingStatus]);
 
+    const applyBranchMutationSuccess = useCallback(
+        (nextBranch: ProvisioningBranch, message: string) => {
+            syncBranchMutationSuccess({
+                data: nextBranch,
+                toastMessage: message,
+                setBranchData,
+                refetchOnboarding,
+                refetchOnboardingScorecard,
+                notifySuccess: (toastMessage) => toast.success(toastMessage),
+            });
+        },
+        [refetchOnboarding, refetchOnboardingScorecard],
+    );
+
+    const handleBranchMutationFailure = useCallback(
+        (error: unknown, action: string, endpoint: string) => {
+            handleBranchMutationError({
+                error,
+                action,
+                endpoint,
+                reportValidationError,
+                reportProvisioningError,
+            });
+        },
+        [reportProvisioningError, reportValidationError],
+    );
+
     const createCompanyMutation = useMutation({
         mutationFn: async (payload: components["schemas"]["ConsoleCompanyCreateRequest"]) => {
             const response = await adminApi.createCompany(payload);
@@ -1572,17 +799,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return response.data;
         },
         onSuccess: (data) => {
-            setBranchData(data as ProvisioningBranch);
-            refetchOnboarding();
-            refetchOnboardingScorecard();
-            toast.success("Филиал обновлён");
+            applyBranchMutationSuccess(data as ProvisioningBranch, "Филиал обновлён");
         },
         onError: (error) => {
-            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                reportValidationError("Сначала создайте филиал");
-                return;
-            }
-            reportProvisioningError(error, "обновление филиала", "PATCH /api/proxy/admin/branches/:id");
+            handleBranchMutationFailure(error, "обновление филиала", "PATCH /api/proxy/admin/branches/:id");
         },
     });
 
@@ -1595,17 +815,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return response.data;
         },
         onSuccess: (data) => {
-            setBranchData(data as ProvisioningBranch);
-            refetchOnboarding();
-            refetchOnboardingScorecard();
-            toast.success("Go-live одобрен");
+            applyBranchMutationSuccess(data as ProvisioningBranch, "Go-live одобрен");
         },
         onError: (error) => {
-            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                reportValidationError("Сначала создайте филиал");
-                return;
-            }
-            reportProvisioningError(error, "подтверждение go-live", "POST /api/proxy/admin/branches/:id/go-live/approve");
+            handleBranchMutationFailure(error, "подтверждение go-live", "POST /api/proxy/admin/branches/:id/go-live/approve");
         },
     });
 
@@ -1618,17 +831,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return response.data;
         },
         onSuccess: (data) => {
-            setBranchData(data as ProvisioningBranch);
-            refetchOnboarding();
-            refetchOnboardingScorecard();
-            toast.success("Go-live отклонен");
+            applyBranchMutationSuccess(data as ProvisioningBranch, "Go-live отклонен");
         },
         onError: (error) => {
-            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                reportValidationError("Сначала создайте филиал");
-                return;
-            }
-            reportProvisioningError(error, "отклонение go-live", "POST /api/proxy/admin/branches/:id/go-live/reject");
+            handleBranchMutationFailure(error, "отклонение go-live", "POST /api/proxy/admin/branches/:id/go-live/reject");
         },
     });
 
@@ -1641,17 +847,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return response.data;
         },
         onSuccess: (data) => {
-            setBranchData(data as ProvisioningBranch);
-            refetchOnboarding();
-            refetchOnboardingScorecard();
-            toast.success("Go-live waiver сохранен");
+            applyBranchMutationSuccess(data as ProvisioningBranch, "Go-live waiver сохранен");
         },
         onError: (error) => {
-            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                reportValidationError("Сначала создайте филиал");
-                return;
-            }
-            reportProvisioningError(error, "waiver go-live", "POST /api/proxy/admin/branches/:id/go-live/waive");
+            handleBranchMutationFailure(error, "waiver go-live", "POST /api/proxy/admin/branches/:id/go-live/waive");
         },
     });
 
@@ -1732,42 +931,31 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             return response.data as OnboardingAutopilotResponse;
         },
         onSuccess: (data) => {
-            setAutopilotResult(data);
-            if (data.company?.id) {
-                setCompanyId(data.company.id);
-            }
-            if (data.client?.id) {
-                setClientId(data.client.id);
-            }
-            if (data.client?.slug) {
-                setClientSlug(data.client.slug);
-            }
-            if (data.branch) {
-                setBranchData(data.branch as ProvisioningBranch);
-            }
-            if (data.capabilities?.payload) {
-                setCapabilitiesDraft(normalizeCapabilities(data.capabilities.payload));
-                setCapabilitiesTouched(false);
-            }
-            if (data.onboarding_contract?.payload) {
-                const normalizedContract = normalizeOnboardingContractPayload(data.onboarding_contract.payload);
-                const normalizedPurchased = normalizeCapabilities(normalizedContract.purchased);
-                setOnboardingContractDraft(normalizedContract);
-                setPurchasedCapabilitiesDraft(normalizedPurchased);
-                setOnboardingContractTouched(false);
-                setPurchasedJsonDraft(JSON.stringify(normalizedPurchased, null, 2));
-                setPurchasedJsonDirty(false);
-            }
-            if (data.payment_status) {
-                setPaymentStatusDraft(data.payment_status);
-            }
-            if (data.webhook_secret) {
-                setIntegrationWebhookSecret(data.webhook_secret);
-            }
-            if (data.webhook_url) {
-                setIntegrationWebhookUrl(data.webhook_url);
-            }
-            setAutoStepSync(true);
+            syncAutopilotMutationSuccess({
+                data,
+                setAutopilotResult,
+                setCompanyId,
+                setClientId,
+                setClientSlug,
+                setBranchData: (branch) => setBranchData(branch as ProvisioningBranch),
+                setCapabilitiesDraft,
+                setCapabilitiesTouched,
+                normalizeCapabilities: (value) => normalizeCapabilities(value as RawCapabilitiesPayload | null | undefined),
+                normalizeOnboardingContractPayload: (value) => (
+                    normalizeOnboardingContractPayload(value as OnboardingContractPayload | null | undefined)
+                ),
+                setOnboardingContractDraft: (value) => (
+                    setOnboardingContractDraft(value as OnboardingContractPayload)
+                ),
+                setPurchasedCapabilitiesDraft,
+                setOnboardingContractTouched,
+                setPurchasedJsonDraft,
+                setPurchasedJsonDirty,
+                setPaymentStatusDraft,
+                setIntegrationWebhookSecret,
+                setIntegrationWebhookUrl,
+                setAutoStepSync,
+            });
             queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
             queryClient.invalidateQueries({ queryKey: ["onboarding-scorecard"] });
             queryClient.invalidateQueries({ queryKey: ["admin-capabilities"] });
@@ -1836,60 +1024,19 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         },
     });
 
-    const stepStateById = useMemo(() => {
-        const map: Partial<Record<WizardStepId, OnboardingStepStatus>> = {};
-        if (onboardingStatus?.steps?.length) {
-            onboardingStatus.steps.forEach((step) => {
-                map[step.id as WizardStepId] = step;
-            });
-        }
-        return map;
-    }, [onboardingStatus]);
+    const stepStateById = useMemo(() => buildStepStateById(onboardingStatus), [onboardingStatus]);
 
-    const stepStatus = useMemo(() => {
-        if (onboardingStatus?.steps?.length) {
-            const status: Record<WizardStepId, boolean> = {
-                branch_draft: false,
-                integrations: false,
-                team: false,
-                telegram: false,
-                knowledge: false,
-                booking: false,
-                go_no_go: false,
-            };
-            onboardingStatus.steps.forEach((step) => {
-                status[step.id as WizardStepId] = step.status === "complete" || step.status === "skipped";
-            });
-            return status;
-        }
-        const hasWorkingHours = isNonEmptyRecord(branchData?.working_hours);
-        const hasBookingSettings = isNonEmptyRecord(branchData?.booking_settings);
-        return {
-            branch_draft: !!branchData?.id,
-            integrations: !!branchData?.instance_id && !!branchData?.phone,
-            team: createdAgents.length > 0,
-            telegram: !!branchData?.telegram_chat_id,
-            knowledge: !!branchData?.knowledge_tag,
-            booking: hasWorkingHours && hasBookingSettings,
-            go_no_go: !!capabilitiesSavedAt || !!onboardingContractSavedAt,
-        };
-    }, [onboardingStatus, branchData, createdAgents.length, capabilitiesSavedAt, onboardingContractSavedAt]);
-    const onboardingTimeline = useMemo(() => {
-        return WIZARD_STEPS.map((step, index) => {
-            const stepState = stepStateById[step.id];
-            const status = stepState?.status
-                ?? (stepStatus[step.id] ? "complete" : "locked");
-            return {
-                id: step.id,
-                index: index + 1,
-                label: step.label,
-                hint: step.hint,
-                status,
-                required: stepState?.required ?? true,
-                missing: stepState?.missing ?? [],
-            };
-        });
-    }, [stepStateById, stepStatus]);
+    const stepStatus = useMemo(() => buildStepStatus({
+        onboardingStatus,
+        branchData,
+        createdAgentsCount: createdAgents.length,
+        capabilitiesSavedAt,
+        onboardingContractSavedAt,
+    }), [onboardingStatus, branchData, createdAgents.length, capabilitiesSavedAt, onboardingContractSavedAt]);
+    const onboardingTimeline = useMemo(
+        () => buildOnboardingTimeline(stepStateById, stepStatus),
+        [stepStateById, stepStatus],
+    );
 
     const capabilitiesPreview = useMemo(() => {
         const clientPayload = capabilitiesData?.client_capabilities?.payload ?? null;
@@ -1917,76 +1064,20 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const onboardingSlaControlLoop: OnboardingSlaControlLoop | null = onboardingScorecardEnterprise?.sla_control_loop ?? null;
     const onboardingOperationalPipeline: OnboardingOperationalPipeline | null = onboardingScorecardEnterprise?.operational_pipeline ?? null;
 
-    const readinessItems = useMemo(() => {
-        return [
-            {
-                id: "wa_instance",
-                label: "WhatsApp instance_id",
-                required: capabilitiesPreview.channels?.whatsapp === true,
-                ok: !!branchData?.instance_id,
-            },
-            {
-                id: "wa_active",
-                label: "Филиал активен",
-                required: capabilitiesPreview.channels?.whatsapp === true,
-                ok: !!branchData?.is_active,
-            },
-            {
-                id: "tg_chat",
-                label: "Telegram chat_id",
-                required: capabilitiesPreview.channels?.telegram === true,
-                ok: !!branchData?.telegram_chat_id,
-            },
-            {
-                id: "knowledge_tag",
-                label: "Knowledge tag",
-                required: knowledgeUploadEnabled,
-                ok: !!branchData?.knowledge_tag,
-            },
-            {
-                id: "document_ingestion",
-                label: "Document ingestion gate",
-                required: knowledgeUploadEnabled,
-                ok: knowledgeUploadEnabled ? Boolean(documentIngestionGate?.valid) : true,
-            },
-            {
-                id: "booking_hours",
-                label: "Working hours",
-                required: bookingEnabled,
-                ok: hasWorkingHours,
-            },
-            {
-                id: "booking_settings",
-                label: "Booking settings",
-                required: bookingEnabled,
-                ok: hasBookingSettings,
-            },
-            {
-                id: "booking_specialists",
-                label: "Specialists подтверждены",
-                required: bookingEnabled,
-                ok: specialistsConfirmed,
-            },
-            {
-                id: "onboarding_contract",
-                label: "Onboarding contract",
-                required: true,
-                ok: hasOnboardingContractRecord,
-            },
-            {
-                id: "payment_confirmed",
-                label: "Payment confirmed",
-                required: true,
-                ok: paymentStatusEffective === "confirmed",
-            },
-            {
-                id: "reference_pack",
-                label: "Reference pack active",
-                required: true,
-                ok: referencePackDomainSlug.length > 0 && hasActiveReferencePack,
-            },
-        ];
-    }, [
+    const readinessItems = useMemo(() => buildReadinessItems({
+        branchData,
+        capabilitiesPreview,
+        bookingEnabled,
+        knowledgeUploadEnabled,
+        documentIngestionValid: Boolean(documentIngestionGate?.valid),
+        hasWorkingHours,
+        hasBookingSettings,
+        specialistsConfirmed,
+        hasOnboardingContractRecord,
+        paymentStatusEffective,
+        referencePackDomainSlug,
+        hasActiveReferencePack,
+    }), [
         branchData,
         capabilitiesPreview,
         bookingEnabled,
@@ -2102,457 +1193,239 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const branchGoLiveWaiverUntil = typeof branchGoLiveWaiverUntilRaw === "string" && branchGoLiveWaiverUntilRaw.length > 0
         ? branchGoLiveWaiverUntilRaw
         : null;
-    const autopilotPhone = autopilotForm.phone.trim();
-    const autopilotInstanceId = autopilotForm.instanceId.trim();
-    const autopilotCompanyRef = companyId.trim() || autopilotForm.companyName.trim();
-    const autopilotClientRef = clientId.trim() || autopilotForm.clientSlug.trim();
-    const autopilotNeedsBranchName = !branchData?.id;
-    const autopilotBranchName = autopilotForm.branchName.trim();
-    const autopilotClientDataText = autopilotForm.clientDataText.trim();
-    const autopilotProviderBindingProvider = autopilotForm.providerBindingProvider.trim();
-    const autopilotProviderBindingPaidUntil = autopilotForm.providerBindingPaidUntil.trim();
-    const autopilotProviderBindingOwner = autopilotForm.providerBindingOwner.trim();
-    const autopilotProviderBindingNextRenewalAt = autopilotForm.providerBindingNextRenewalAt.trim();
-    const autopilotProviderBindingLastRebindAt = autopilotForm.providerBindingLastRebindAt.trim();
-    const autopilotMissingInputs: string[] = [];
-    if (!autopilotPhone) {
-        autopilotMissingInputs.push("phone");
-    }
-    if (!autopilotInstanceId) {
-        autopilotMissingInputs.push("instance_id");
-    }
-    if (!autopilotCompanyRef) {
-        autopilotMissingInputs.push("company_id или company_name");
-    }
-    if (!autopilotClientRef) {
-        autopilotMissingInputs.push("client_id или client_slug");
-    }
-    if (autopilotNeedsBranchName && !autopilotBranchName) {
-        autopilotMissingInputs.push("branch_name (для нового branch)");
-    }
-    if (!autopilotServices.length) {
-        autopilotMissingInputs.push("минимум 1 подключённая услуга");
-    }
-    if (!autopilotClientDataText) {
-        autopilotMissingInputs.push("client_data_text");
-    }
-    if (autopilotServices.includes("whatsapp")) {
-        if (!autopilotProviderBindingProvider) {
-            autopilotMissingInputs.push("provider_binding.provider");
-        }
-        if (!autopilotForm.providerBindingWebhookStatus) {
-            autopilotMissingInputs.push("provider_binding.webhook_status");
-        }
-        if (!autopilotProviderBindingOwner) {
-            autopilotMissingInputs.push("provider_binding.owner");
-        }
-        if (!autopilotProviderBindingPaidUntil && !autopilotProviderBindingNextRenewalAt) {
-            autopilotMissingInputs.push("provider_binding.next_renewal_at | paid_until");
-        }
-    }
-    const autopilotBlockedByScorecard = Boolean(branchData?.id && scorecardFailed);
-    const canRunAutopilot = (
-        canEdit
-        && !runAutopilotMutation.isPending
-        && autopilotMissingInputs.length === 0
-        && !autopilotBlockedByScorecard
+    const autopilotDerived = useMemo(
+        () => deriveAutopilotState({
+            form: autopilotForm,
+            companyId,
+            clientId,
+            branchId: branchData?.id,
+            purchasedServices: autopilotServices,
+        }),
+        [autopilotForm, companyId, clientId, branchData?.id, autopilotServices],
     );
-
-    const handleToggleAutopilotService = (serviceId: OnboardingPurchasedService) => {
-        setAutopilotServices((prev) => (
-            prev.includes(serviceId)
-                ? prev.filter((item) => item !== serviceId)
-                : [...prev, serviceId]
-        ));
+    const goNoGoMissingLabels = goNoGoMissing.map((item) => formatMissingRequirement(item));
+    const autopilotRunState = useMemo(
+        () => buildAutopilotRunState({
+            canEdit,
+            isPending: runAutopilotMutation.isPending,
+            branchId: branchData?.id,
+            scorecardFailed,
+            missingInputs: autopilotDerived.missingInputs,
+        }),
+        [autopilotDerived.missingInputs, branchData?.id, canEdit, runAutopilotMutation.isPending, scorecardFailed],
+    );
+    const autopilotMissingInputs = autopilotRunState.missingInputs;
+    const autopilotBlockedByScorecard = autopilotRunState.blockedByScorecard;
+    const canRunAutopilot = autopilotRunState.canRun;
+    const clearGoLiveDecisionReason = () => {
+        setGoLiveDecisionReason("");
     };
 
     const handleApproveGoLive = () => {
-        const reason = goLiveDecisionReason.trim();
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        if (scorecardFailed) {
-            const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
-            reportValidationError(`Go-live заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
-            return;
-        }
-        if (!reason) {
-            reportValidationError("Укажите reason для approve");
-            return;
-        }
-        approveGoLiveMutation.mutate(
-            { reason },
-            {
-                onSuccess: () => {
-                    setGoLiveDecisionReason("");
-                },
-            },
-        );
+        submitGoLiveDecisionMutation({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            decisionLabel: "approve",
+            enforceScorecard: scorecardFailed,
+            scorecardMissingLabels: goNoGoMissingLabels,
+            reportValidationError,
+            mutate: approveGoLiveMutation.mutate,
+            clearReason: clearGoLiveDecisionReason,
+        });
     };
 
     const handleRejectGoLive = () => {
-        const reason = goLiveDecisionReason.trim();
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        if (!reason) {
-            reportValidationError("Укажите reason для reject");
-            return;
-        }
-        rejectGoLiveMutation.mutate(
-            { reason },
-            {
-                onSuccess: () => {
-                    setGoLiveDecisionReason("");
-                },
-            },
-        );
+        submitGoLiveDecisionMutation({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            decisionLabel: "reject",
+            enforceScorecard: false,
+            scorecardMissingLabels: [],
+            reportValidationError,
+            mutate: rejectGoLiveMutation.mutate,
+            clearReason: clearGoLiveDecisionReason,
+        });
     };
 
     const handleWaiveGoLive = () => {
-        const reason = goLiveDecisionReason.trim();
-        const ttlHours = Number.parseInt(goLiveWaiverHours, 10);
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        if (scorecardFailed) {
-            const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
-            reportValidationError(`Go-live заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
-            return;
-        }
-        if (!reason) {
-            reportValidationError("Укажите reason для waiver");
-            return;
-        }
-        if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
-            reportValidationError("ttl_hours должен быть положительным числом");
-            return;
-        }
-        waiveGoLiveMutation.mutate(
-            { reason, ttl_hours: ttlHours },
-            {
-                onSuccess: () => {
-                    setGoLiveDecisionReason("");
-                },
-            },
-        );
+        submitGoLiveWaiverMutation({
+            branchId: branchData?.id,
+            reason: goLiveDecisionReason,
+            ttlHoursInput: goLiveWaiverHours,
+            enforceScorecard: scorecardFailed,
+            scorecardMissingLabels: goNoGoMissingLabels,
+            reportValidationError,
+            mutate: waiveGoLiveMutation.mutate,
+            clearReason: clearGoLiveDecisionReason,
+        });
     };
 
     const handleRunAutopilot = () => {
-        if (autopilotMissingInputs.length > 0) {
-            reportValidationError(`Не хватает данных: ${autopilotMissingInputs.join(", ")}`);
+        const validationError = buildAutopilotRunValidationError({
+            missingInputs: autopilotMissingInputs,
+            blockedByScorecard: autopilotBlockedByScorecard,
+            scorecardMissingLabels: goNoGoMissingLabels,
+        });
+        if (validationError) {
+            reportValidationError(validationError);
             return;
         }
-        if (autopilotBlockedByScorecard) {
-            const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
-            reportValidationError(`Автопроцесс заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
-            return;
-        }
-        const payload: OnboardingAutopilotRequest = {
-            company_id: companyId.trim() || undefined,
-            company_name: autopilotForm.companyName.trim() || undefined,
-            client_id: clientId.trim() || undefined,
-            client_slug: autopilotForm.clientSlug.trim() || undefined,
-            branch_id: branchData?.id || undefined,
-            branch_slug: autopilotForm.branchSlug.trim() || undefined,
-            branch_name: autopilotForm.branchName.trim() || undefined,
-            timezone: autopilotForm.timezone.trim() || undefined,
-            phone: autopilotPhone,
-            instance_id: autopilotInstanceId,
-            payment_status: canManagePayment ? autopilotForm.paymentStatus : "pending",
-            domain_slug: autopilotForm.domainSlug.trim() || undefined,
-            purchased_services: autopilotServices.length ? autopilotServices : undefined,
-            provider_binding: autopilotServices.includes("whatsapp")
-                ? {
-                    whatsapp: {
-                        provider: autopilotProviderBindingProvider || null,
-                        instance_id: autopilotInstanceId,
-                        webhook_status: autopilotForm.providerBindingWebhookStatus || null,
-                        paid_until: autopilotProviderBindingPaidUntil || null,
-                        owner: autopilotProviderBindingOwner || null,
-                        next_renewal_at: autopilotProviderBindingNextRenewalAt || null,
-                        last_rebind_at: autopilotProviderBindingLastRebindAt || null,
-                        rebind_required: autopilotForm.providerBindingRebindRequired,
-                        alert_state: autopilotForm.providerBindingAlertState || null,
-                        notes: autopilotForm.providerBindingNotes.trim() || null,
-                    },
-                }
-                : undefined,
-            client_data_text: autopilotClientDataText || undefined,
-            activate_branch: false,
-            auto_create_reference_pack: true,
-            auto_publish_knowledge: false,
-        };
+        const payload: OnboardingAutopilotRequest = buildRunAutopilotPayload({
+            form: autopilotForm,
+            companyId,
+            clientId,
+            branchId: branchData?.id,
+            canManagePayment,
+            purchasedServices: autopilotServices,
+            derived: autopilotDerived,
+        });
         runAutopilotMutation.mutate(payload);
     };
 
     const handleCreateCompany = () => {
-        const name = companyName.trim();
-        if (!name) {
-            reportValidationError("Укажите название компании");
-            return;
-        }
-        const builtBilling = buildBillingInfoPayload();
-        if (builtBilling.error) {
-            reportValidationError(builtBilling.error);
-            return;
-        }
-        const billing = parseOptionalJson(billingInfo, "billing_info");
-        if (billing.error) {
-            reportValidationError(billing.error);
-            return;
-        }
-        let billingPayload = billing.value;
-        if (!billingPayload) {
-            billingPayload = builtBilling.value;
-            if (billingPayload) {
-                setBillingInfo(JSON.stringify(billingPayload, null, 2));
-            }
-        }
-        createCompanyMutation.mutate({
-            name,
-            billing_info: (billingPayload as Record<string, never> | undefined) ?? undefined,
+        const result = buildCreateCompanyPayload({
+            companyName,
+            billingInfoJson: billingInfo,
+            billingContract,
+            billingCurrency,
         });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для company");
+            return;
+        }
+        if (result.nextBillingInfoJson) {
+            setBillingInfo(result.nextBillingInfoJson);
+        }
+        createCompanyMutation.mutate(result.payload);
     };
 
     const handleCreateClient = () => {
-        const slug = clientSlug.trim();
-        if (!slug) {
-            reportValidationError("Укажите slug клиента");
-            return;
-        }
-        if (!companyId.trim()) {
-            reportValidationError("Укажите company_id компании");
-            return;
-        }
-        createClientMutation.mutate({
-            slug,
-            company_id: companyId.trim(),
-            status: null,
+        const result = buildCreateClientPayload({
+            clientSlug,
+            companyId,
         });
-    };
-
-    const buildBranchBootstrapAccounts = (): components["schemas"]["ConsoleBranchBootstrapAccountTemplate"][] => {
-        if (!branchBootstrap.enabled) {
-            return [];
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для client");
+            return;
         }
-        const branchLabel = branchForm.name.trim() || "Branch";
-        const accounts: components["schemas"]["ConsoleBranchBootstrapAccountTemplate"][] = [];
-        if (branchBootstrap.createOwner) {
-            accounts.push({
-                role: "owner",
-                name: branchBootstrap.ownerName.trim() || `${branchLabel} Owner`,
-                oidc_subject: branchBootstrap.ownerOidcSubject.trim() || undefined,
-                is_active: true,
-            });
-        }
-        if (branchBootstrap.createAdmin) {
-            accounts.push({
-                role: "admin",
-                name: branchBootstrap.adminName.trim() || `${branchLabel} Admin`,
-                oidc_subject: branchBootstrap.adminOidcSubject.trim() || undefined,
-                is_active: true,
-            });
-        }
-        if (branchBootstrap.createManager) {
-            accounts.push({
-                role: "manager",
-                name: branchBootstrap.managerName.trim() || `${branchLabel} Manager`,
-                oidc_subject: branchBootstrap.managerOidcSubject.trim() || undefined,
-                is_active: true,
-            });
-        }
-        return accounts;
+        createClientMutation.mutate(result.payload);
     };
 
     const handleCreateBranch = () => {
-        if (!clientId) {
-            reportValidationError("Укажите client_id");
-            return;
-        }
-        const name = branchForm.name.trim();
-        const slug = branchForm.slug.trim();
-        if (!name || !slug) {
-            reportValidationError("Заполните название и slug");
-            return;
-        }
-        const bootstrapAccounts = buildBranchBootstrapAccounts();
-        createBranchMutation.mutate({
-            client_id: clientId,
-            name,
-            slug,
-            timezone: branchForm.timezone.trim() || undefined,
-            phone: branchForm.phone.trim() || undefined,
-            is_active: false,
-            bootstrap_accounts: bootstrapAccounts,
+        submitBranchMutation({
+            result: buildCreateBranchPayload({
+                clientId,
+                branchName: branchForm.name,
+                branchSlug: branchForm.slug,
+                timezone: branchForm.timezone,
+                phone: branchForm.phone,
+                bootstrap: branchBootstrap,
+            }),
+            fallbackError: "Не удалось собрать payload для branch",
+            reportValidationError,
+            mutate: createBranchMutation.mutate,
         });
     };
 
     const handleUpdateBranchDraft = () => {
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        const name = branchForm.name.trim();
-        const slug = branchForm.slug.trim();
-        if (!name || !slug) {
-            reportValidationError("Заполните название и slug");
-            return;
-        }
-        patchBranchMutation.mutate({
-            name,
-            slug,
-            timezone: branchForm.timezone.trim() || undefined,
-            phone: branchForm.phone.trim() || undefined,
+        submitBranchMutation({
+            result: buildUpdateBranchDraftPayload({
+                branchId: branchData?.id,
+                branchName: branchForm.name,
+                branchSlug: branchForm.slug,
+                timezone: branchForm.timezone,
+                phone: branchForm.phone,
+            }),
+            fallbackError: "Не удалось собрать payload для branch draft",
+            reportValidationError,
+            mutate: patchBranchMutation.mutate,
         });
     };
 
     const handleSaveInstance = () => {
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        const instanceId = branchForm.instanceId.trim();
-        if (!instanceId) {
-            reportValidationError("Укажите instance_id");
-            return;
-        }
-        const phone = branchForm.phone.trim();
-        if (!phone) {
-            reportValidationError("Укажите phone филиала");
-            return;
-        }
-        patchBranchMutation.mutate(
-            {
-                phone,
-                instance_id: instanceId,
-                is_active: activateOnSave,
+        submitBranchMutation({
+            result: buildSaveInstancePayload({
+                branchId: branchData?.id,
+                instanceId: branchForm.instanceId,
+                phone: branchForm.phone,
+                activateOnSave,
+            }),
+            fallbackError: "Не удалось собрать payload для instance",
+            reportValidationError,
+            mutate: patchBranchMutation.mutate,
+            onSuccess: (data?: unknown) => {
+                const typed = data as ProvisioningBranch;
+                if (typed?.id && typed.instance_id) {
+                    getWebhookSecretMutation.mutate({ branchId: typed.id });
+                }
             },
-            {
-                onSuccess: (data) => {
-                    const typed = data as ProvisioningBranch;
-                    if (typed?.id && typed.instance_id) {
-                        getWebhookSecretMutation.mutate({ branchId: typed.id });
-                    }
-                },
-            },
-        );
+        });
     };
 
     const handleSaveTelegram = () => {
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        const chatId = branchForm.telegramChatId.trim();
-        if (!chatId) {
-            reportValidationError("Укажите telegram_chat_id");
-            return;
-        }
-        patchBranchMutation.mutate({
-            telegram_chat_id: chatId,
+        submitBranchMutation({
+            result: buildSaveTelegramPayload({
+                branchId: branchData?.id,
+                chatId: branchForm.telegramChatId,
+            }),
+            fallbackError: "Не удалось собрать payload для telegram",
+            reportValidationError,
+            mutate: patchBranchMutation.mutate,
         });
     };
 
     const handleSaveKnowledge = () => {
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        const tag = branchForm.knowledgeTag.trim();
-        if (!tag) {
-            reportValidationError("Укажите knowledge_tag");
-            return;
-        }
-        patchBranchMutation.mutate({
-            knowledge_tag: tag,
+        submitBranchMutation({
+            result: buildSaveKnowledgePayload({
+                branchId: branchData?.id,
+                knowledgeTag: branchForm.knowledgeTag,
+            }),
+            fallbackError: "Не удалось собрать payload для knowledge",
+            reportValidationError,
+            mutate: patchBranchMutation.mutate,
         });
     };
 
     const handleSaveBooking = () => {
-        if (!branchData?.id) {
-            reportValidationError("Сначала создайте филиал");
-            return;
-        }
-        const workingHours = parseOptionalJson(branchForm.workingHours, "working_hours");
-        if (workingHours.error) {
-            reportValidationError(workingHours.error);
-            return;
-        }
-        const bookingSettings = parseOptionalJson(branchForm.bookingSettings, "booking_settings");
-        if (bookingSettings.error) {
-            reportValidationError(bookingSettings.error);
-            return;
-        }
-        let workingPayload = workingHours.value;
-        let bookingPayload = bookingSettings.value;
-        let nextWorkingJson: string | null = null;
-        let nextBookingJson: string | null = null;
-        if (!workingPayload) {
-            const built = buildWorkingHoursPayload();
-            if (built.error) {
-                reportValidationError(built.error);
-                return;
-            }
-            workingPayload = built.value;
-            if (built.value) {
-                nextWorkingJson = JSON.stringify(built.value, null, 2);
-            }
-        }
-        if (!bookingPayload) {
-            const built = buildBookingSettingsPayload();
-            if (built.error) {
-                reportValidationError(built.error);
-                return;
-            }
-            bookingPayload = built.value;
-            if (built.value) {
-                nextBookingJson = JSON.stringify(built.value, null, 2);
-            }
-        }
-        if (!workingPayload && !bookingPayload) {
-            reportValidationError("Заполните working_hours или booking_settings");
-            return;
-        }
-        if (nextWorkingJson || nextBookingJson) {
+        const result = buildSaveBookingPayload({
+            branchId: branchData?.id,
+            workingHoursJson: branchForm.workingHours,
+            bookingSettingsJson: branchForm.bookingSettings,
+            workingHoursDays,
+            workingHoursStart,
+            workingHoursEnd,
+            bookingDefaultDuration,
+            bookingBufferMin,
+        });
+        if (result.nextWorkingHoursJson || result.nextBookingSettingsJson) {
             setBranchForm((prev) => ({
                 ...prev,
-                workingHours: nextWorkingJson ?? prev.workingHours,
-                bookingSettings: nextBookingJson ?? prev.bookingSettings,
+                workingHours: result.nextWorkingHoursJson ?? prev.workingHours,
+                bookingSettings: result.nextBookingSettingsJson ?? prev.bookingSettings,
             }));
         }
-        patchBranchMutation.mutate({
-            working_hours: (workingPayload as Record<string, never> | undefined) ?? undefined,
-            booking_settings: (bookingPayload as Record<string, never> | undefined) ?? undefined,
+        submitBranchMutation({
+            result,
+            fallbackError: "Не удалось собрать payload для booking",
+            reportValidationError,
+            mutate: patchBranchMutation.mutate,
         });
     };
 
     const handleCreateAgent = () => {
-        if (!clientId) {
-            reportValidationError("Укажите client_id");
+        const result = buildCreateAgentPayload({
+            clientId,
+            role: agentForm.role,
+            name: agentForm.name,
+            oidcSubject: agentForm.oidcSubject,
+            selectedBranchId: agentForm.branchId,
+            fallbackBranchId: branchData?.id,
+        });
+        if (result.error || !result.payload) {
+            reportValidationError(result.error ?? "Не удалось собрать payload для agent");
             return;
         }
-        const roleValue = agentForm.role;
-        const payload: components["schemas"]["ConsoleAgentCreateRequest"] = {
-            client_id: clientId,
-            role: roleValue,
-            name: agentForm.name.trim() || undefined,
-            oidc_subject: agentForm.oidcSubject.trim() || undefined,
-            is_active: true,
-            sso_temp_password: null,
-        };
-        if (roleValue === "manager") {
-            const branchId = agentForm.branchId || branchData?.id;
-            if (!branchId) {
-                reportValidationError("branch_id обязателен для manager");
-                return;
-            }
-            payload.branch_id = branchId;
-        }
-        createAgentMutation.mutate(payload);
+        createAgentMutation.mutate(result.payload);
     };
 
     const handleSaveCapabilities = () => {
@@ -2647,20 +1520,12 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     };
 
     const handleReset = () => {
+        const resetState = createProvisioningWizardResetState(DEFAULT_TIMEZONE);
         setOnboardingMode("autopilot");
         setStepIndex(0);
         setBranchData(null);
-        setBranchForm({
-            name: "",
-            slug: "",
-            timezone: DEFAULT_TIMEZONE,
-            phone: "",
-            instanceId: "",
-            telegramChatId: "",
-            knowledgeTag: "",
-            workingHours: "",
-            bookingSettings: "",
-        });
+        setBranchForm(resetState.branchForm);
+        setBranchBootstrap(resetState.branchBootstrap);
         setWorkingHoursDays([]);
         setWorkingHoursStart("");
         setWorkingHoursEnd("");
@@ -2680,33 +1545,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setPaymentStatusDraft("pending");
         setReferencePackTitle("");
         setSpecialistsConfirmed(false);
-        setAgentForm({
-            name: "",
-            role: "owner",
-            oidcSubject: "",
-            branchId: "",
-        });
-        setAutopilotForm({
-            companyName: "",
-            clientSlug: "",
-            branchName: "",
-            branchSlug: "",
-            timezone: DEFAULT_TIMEZONE,
-            phone: "",
-            instanceId: "",
-            domainSlug: "beauty",
-            paymentStatus: "pending",
-            providerBindingProvider: "chatflow",
-            providerBindingWebhookStatus: "pending",
-            providerBindingPaidUntil: "",
-            providerBindingOwner: "",
-            providerBindingNextRenewalAt: "",
-            providerBindingLastRebindAt: "",
-            providerBindingRebindRequired: false,
-            providerBindingAlertState: "warn",
-            providerBindingNotes: "",
-            clientDataText: "",
-        });
+        setAgentForm(createInitialAgentFormState<AgentRole>("owner"));
+        setAutopilotForm(resetState.autopilotForm);
         setAutopilotServices(["whatsapp"]);
         setAutopilotResult(null);
         setIntegrationWebhookSecret("");
@@ -2768,83 +1608,15 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 </div>
             )}
 
-            {inlineErrors.length > 0 && (
-                <section className="mt-6 rounded-xl border border-red-300/60 bg-red-50 p-4" data-testid="provisioning-error-summary">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                        <h3 className="text-sm font-semibold text-red-900">Ошибки последних операций</h3>
-                        <button type="button" className="btn-ghost" onClick={clearErrors}>
-                            Очистить
-                        </button>
-                    </div>
-                    <div className="mt-2 space-y-2">
-                        {inlineErrors.map((error) => (
-                            <div key={error.id} className="rounded-lg border border-red-200/80 bg-background/90 p-3 text-xs">
-                                <div className="font-mono text-red-900">{error.code}</div>
-                                <div className="mt-1 text-foreground">{error.message}</div>
-                                <div className="mt-1 text-muted-foreground">
-                                    {new Date(error.capturedAt).toLocaleString("ru-RU")}
-                                    {error.traceId ? ` · trace: ${error.traceId}` : ""}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </section>
-            )}
+            <ProvisioningWizardErrorSummary errors={inlineErrors} onClear={clearErrors} />
 
-            <div className="mt-6 rounded-xl border border-border/60 bg-card p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Режим онбординга</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                        type="button"
-                        className={`rounded-lg border px-3 py-2 text-sm ${
-                            onboardingMode === "autopilot"
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-border/60 bg-background"
-                        }`}
-                        onClick={() => setOnboardingMode("autopilot")}
-                    >
-                        Автопроцесс (Recommended)
-                    </button>
-                    <button
-                        type="button"
-                        className={`rounded-lg border px-3 py-2 text-sm ${
-                            onboardingMode === "manual"
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-border/60 bg-background"
-                        }`}
-                        onClick={() => setOnboardingMode("manual")}
-                    >
-                        Ручной по шагам
-                    </button>
-                </div>
-                <p className="mt-3 text-xs text-muted-foreground">
-                    Автопроцесс: минимальные входы и авто-связка сущностей. Ручной режим: детальная настройка шага за шагом.
-                </p>
-            </div>
+            <ProvisioningWizardModePanel mode={onboardingMode} onChange={setOnboardingMode} />
 
-            <div className="mt-4 rounded-xl border border-blue-300/60 bg-blue-50 p-4" data-testid="onboarding-execution-hub">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-900">
-                            Execution Hub
-                        </div>
-                        <div className="mt-1 text-sm text-blue-900">
-                            Рабочий поток выполнения: используйте Company Workspace для remediation/go-live.
-                        </div>
-                        <div className="mt-1 text-xs text-blue-900/80">
-                            scope: company={workspaceScope.companyId || "—"} · client={workspaceScope.clientId || "—"} · branch={workspaceScope.branchId || "—"}
-                        </div>
-                    </div>
-                    <button
-                        type="button"
-                        className="btn-primary"
-                        onClick={openExecutionHub}
-                        data-testid="onboarding-open-workspace"
-                    >
-                        Продолжить в Workspace
-                    </button>
-                </div>
-            </div>
+            <ProvisioningWizardExecutionHub
+                scope={workspaceScope}
+                scopeReady={workspaceScopeReady}
+                onOpen={openExecutionHub}
+            />
 
             {onboardingMode === "autopilot" && (
             <div className="mt-6 rounded-xl border border-border/60 bg-muted/10 p-4 space-y-4" data-testid="onboarding-autopilot">
@@ -2872,8 +1644,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                     {branchData?.id && (
                         <div className="mt-1 text-xs text-muted-foreground">
                             Server scorecard: {scorecardStatus ?? "—"}
-                            {scorecardFailed && goNoGoMissing.length > 0
-                                ? ` (${goNoGoMissing.map((item) => formatMissingRequirement(item)).join(", ")})`
+                            {scorecardFailed && goNoGoMissingLabels.length > 0
+                                ? ` (${goNoGoMissingLabels.join(", ")})`
                                 : ""}
                         </div>
                     )}
@@ -2921,11 +1693,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                     />
                     <input
                         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                        placeholder={autopilotNeedsBranchName ? "Branch name *" : "Branch name (optional)"}
+                        placeholder={autopilotDerived.needsBranchName ? "Branch name *" : "Branch name (optional)"}
                         value={autopilotForm.branchName}
                         onChange={(event) => setAutopilotForm((prev) => ({ ...prev, branchName: event.target.value }))}
                         disabled={!canEdit}
-                        required={autopilotNeedsBranchName}
+                        required={autopilotDerived.needsBranchName}
                     />
                     <input
                         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -3100,7 +1872,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 <input
                                     type="checkbox"
                                     checked={autopilotServices.includes(option.id)}
-                                    onChange={() => handleToggleAutopilotService(option.id)}
+                                    onChange={() => setAutopilotServices((prev) => toggleAutopilotServiceSelection(prev, option.id))}
                                     disabled={!canEdit}
                                 />
                                 {option.label}
@@ -3135,8 +1907,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 {autopilotBlockedByScorecard && (
                     <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                         Автопроцесс заблокирован: scorecard=fail.
-                        {goNoGoMissing.length > 0
-                            ? ` Missing: ${goNoGoMissing.map((item) => formatMissingRequirement(item)).join(", ")}`
+                        {goNoGoMissingLabels.length > 0
+                            ? ` Missing: ${goNoGoMissingLabels.join(", ")}`
                             : ""}
                     </div>
                 )}
@@ -4416,94 +3188,18 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                                     Проверки Go/No-Go
                                 </h4>
-                                <div className="rounded-lg border border-border/60 bg-background p-3 space-y-2" data-testid="onboarding-readiness-timeline">
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                                            Readiness Timeline
-                                        </div>
-                                        <div className="text-[11px] text-muted-foreground">
-                                            updated_at: {onboardingStatus?.updated_at ? new Date(onboardingStatus.updated_at).toLocaleString("ru-RU") : "—"}
-                                        </div>
-                                    </div>
-                                    <div className="space-y-2">
-                                        {onboardingTimeline.map((item) => (
-                                            <div
-                                                key={item.id}
-                                                className={`rounded-lg border px-3 py-2 text-xs ${onboardingStepStatusClass(item.status)}`}
-                                            >
-                                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                                    <div className="font-medium">
-                                                        {item.index}. {item.label}
-                                                    </div>
-                                                    <div>{onboardingStepStatusLabel(item.status)}</div>
-                                                </div>
-                                                <div className="mt-1 text-[11px]">
-                                                    hint: {item.hint} · required: {item.required ? "yes" : "no"}
-                                                </div>
-                                                {item.missing.length > 0 ? (
-                                                    <div className="mt-1 text-[11px]">
-                                                        missing: {item.missing.map((code) => formatMissingRequirement(code)).join(", ")}
-                                                    </div>
-                                                ) : null}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div className={`rounded-lg border px-3 py-3 text-xs ${
-                                    scorecardFailed
-                                        ? "border-destructive/30 bg-destructive/10 text-destructive"
-                                        : "border-green-200 bg-green-50 text-green-800"
-                                }`} data-testid="onboarding-scorecard">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <span className="font-semibold">Server Scorecard</span>
-                                        <span className="font-mono">{scorecardStatus ?? "—"}</span>
-                                    </div>
-                                    <div className="mt-1">
-                                        generated_at: {onboardingScorecard?.generated_at
-                                            ? new Date(onboardingScorecard.generated_at).toLocaleString("ru-RU")
-                                            : "—"}
-                                    </div>
-                                    {scorecardMissing.length > 0 && (
-                                        <div className="mt-2">
-                                            missing: {scorecardMissing.map((item) => formatMissingRequirement(item)).join(", ")}
-                                        </div>
-                                    )}
-                                    {scorecardFailedChecks.length > 0 && (
-                                        <div className="mt-2">
-                                            failed checks: {scorecardFailedChecks.map((item) => item.id).join(", ")}
-                                        </div>
-                                    )}
-                                    {documentIngestionGate && (
-                                        <div
-                                            className={`mt-2 rounded-md border px-2 py-2 ${
-                                                documentIngestionGate.status === "pass"
-                                                    ? "border-green-200 bg-green-50 text-green-800"
-                                                    : documentIngestionGate.status === "fail"
-                                                        ? "border-destructive/30 bg-destructive/10 text-destructive"
-                                                        : "border-border/60 bg-muted/40 text-muted-foreground"
-                                            }`}
-                                            data-testid="onboarding-document-ingestion"
-                                        >
-                                            <div className="font-semibold">
-                                                Document ingestion: {documentIngestionGate.status}
-                                            </div>
-                                            <div className="mt-1 text-[11px]">
-                                                source: <span className="font-mono">{documentIngestionGate.source}</span> · valid:{" "}
-                                                <span className="font-mono">{documentIngestionGate.valid ? "true" : "false"}</span>
-                                            </div>
-                                            {documentIngestionMissing.length > 0 && (
-                                                <div className="mt-1 text-[11px]">
-                                                    missing_fields: {documentIngestionMissing.map((item) => formatMissingRequirement(item)).join(", ")}
-                                                </div>
-                                            )}
-                                            {documentIngestionCriticalMissing.length > 0 && (
-                                                <div className="mt-1 text-[11px] font-semibold">
-                                                    critical_missing: {documentIngestionCriticalMissing.map((item) => formatMissingRequirement(item)).join(", ")}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
+                                <ProvisioningWizardReadinessPanel
+                                    onboardingUpdatedAt={onboardingStatus?.updated_at ?? null}
+                                    onboardingTimeline={onboardingTimeline}
+                                    scorecardFailed={scorecardFailed}
+                                    scorecardStatus={scorecardStatus}
+                                    scorecardGeneratedAt={onboardingScorecard?.generated_at ?? null}
+                                    scorecardMissing={scorecardMissing}
+                                    scorecardFailedChecks={scorecardFailedChecks}
+                                    documentIngestionGate={documentIngestionGate}
+                                    documentIngestionMissing={documentIngestionMissing}
+                                    documentIngestionCriticalMissing={documentIngestionCriticalMissing}
+                                />
                                 {onboardingSlaControlLoop && (
                                     <div className={`rounded-lg border px-3 py-3 text-xs ${qualityStatusClass(onboardingSlaControlLoop.status)}`} data-testid="onboarding-sla-control-loop">
                                         <div className="flex items-center justify-between gap-3">

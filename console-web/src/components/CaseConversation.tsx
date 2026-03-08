@@ -1,13 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import toast from "react-hot-toast";
-import { casesApi, outreachApi, type CaseActionResponse } from "@/lib/api-client";
+import {
+    casesApi,
+    DEFAULT_CASE_ROUTING_POLICY,
+    outreachApi,
+    type CaseActionResponse,
+    type CaseAssigneeOption,
+    type CaseRoutingPolicy,
+} from "@/lib/api-client";
 import type { Case, Message } from "@/types";
 import ChatInterface from "./ChatInterface";
-import { getSlaCountdown, getStatusLabel, getSlaLabel } from "@/utils/labels";
+import {
+    collectCaseActionFollowupMessages,
+    getCaseBookingSemanticSummary,
+    getCaseBusinessStatusBadge,
+    getCaseOriginSummary,
+    getCaseSlaIndicator,
+} from "@/utils/labels";
 
 interface CaseConversationProps {
     caseDetail: Case;
@@ -27,6 +41,9 @@ interface CaseConversationProps {
     composerBefore?: ReactNode;
     detailsOpen?: boolean;
     onToggleDetails?: () => void;
+    bookingsOpen?: boolean;
+    onToggleBookings?: () => void;
+    canReadCalendar?: boolean;
     onNextCase?: () => void;
     canGoNextCase?: boolean;
     chatFrame?: "card" | "plain";
@@ -48,34 +65,65 @@ async function returnCase(caseId: string): Promise<CaseActionResponse> {
     return response.data;
 }
 
-function collectSyncIssues(sync?: CaseActionResponse["sync"]) {
-    const issues: string[] = [];
-    if (sync?.telegram?.status === "failed") {
-        issues.push(`Telegram: ${sync.telegram.detail || "ошибка синхронизации"}`);
-    }
-    if (sync?.client_notify?.status === "failed") {
-        issues.push(`Клиент: ${sync.client_notify.detail || "уведомление не доставлено"}`);
-    }
-    return issues;
+async function reopenCase(caseId: string): Promise<CaseActionResponse> {
+    const response = await casesApi.reopen(caseId);
+    return response.data;
 }
 
-function SlaBadge({ status }: { status?: string }) {
-    const styles = {
-        ok: "bg-green-100 text-green-800",
-        warning: "bg-yellow-100 text-yellow-800",
-        breached: "bg-red-100 text-red-800",
-    };
-    const style = styles[status as keyof typeof styles] || styles.ok;
+function extractErrorCode(error: unknown): string | undefined {
+    return (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+}
+
+function extractErrorMessage(error: unknown): string | undefined {
+    return (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message;
+}
+
+function showActionFollowupWarnings(sync?: CaseActionResponse["sync"] | null) {
+    const messages = collectCaseActionFollowupMessages(sync);
+    if (messages.length === 0) {
+        return;
+    }
+    toast(messages.join(" "), { icon: "⚠️" });
+}
+
+function SemanticSummaryCard({
+    eyebrow,
+    title,
+    detail,
+    badge,
+    badgeClassName = "bg-muted text-muted-foreground",
+    testId,
+}: {
+    eyebrow: string;
+    title: string;
+    detail?: string | null;
+    badge?: string | null;
+    badgeClassName?: string;
+    testId: string;
+}) {
     return (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${style}`}>
-            SLA: {getSlaLabel(status)}
-        </span>
+        <div className="rounded-lg border border-border/60 bg-card p-3" data-testid={testId}>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                    {eyebrow}
+                </p>
+                {badge ? (
+                    <span className={`rounded px-2 py-0.5 text-[11px] font-semibold ${badgeClassName}`}>
+                        {badge}
+                    </span>
+                ) : null}
+            </div>
+            <p className="mt-2 text-sm font-semibold text-foreground">{title}</p>
+            {detail ? (
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{detail}</p>
+            ) : null}
+        </div>
     );
 }
 
 const HUMAN_LOCK_SOURCE_LABELS: Record<string, string> = {
     console_message: "Ответ менеджера",
-    console_outreach: "Outreach",
+    console_outreach: "Ручное сообщение",
     console_pause: "Ручная пауза",
     console_media: "Медиа",
 };
@@ -85,6 +133,26 @@ const HUMAN_LOCK_REASON_LABELS: Record<string, string> = {
     manual_pause: "Ручная пауза",
 };
 
+const ASSIGNEE_ROLE_LABELS: Record<string, string> = {
+    owner: "Owner",
+    admin: "Admin",
+    manager: "Manager",
+};
+
+const CASE_ROUTING_POLICY_LABELS: Record<CaseRoutingPolicy, string> = {
+    follow_up_sla_balance: "Follow-up + SLA баланс",
+    least_open_cases: "Меньше всего открытых",
+};
+
+const CASE_ROUTING_POLICY_HINTS: Record<CaseRoutingPolicy, string> = {
+    follow_up_sla_balance: "Сохраняет continuity по no-show follow-up и сильнее учитывает нагрузку, если у заявки уже есть SLA-риск.",
+    least_open_cases: "Распределяет только по текущему числу открытых заявок и сохраняет владельца при равной нагрузке.",
+};
+
+const CASE_SNOOZE_PRESETS = [30, 60, 120, 240];
+
+type ActionPanel = "reassign" | "snooze" | null;
+
 function formatHumanLockLabel(value?: string | null, lookup?: Record<string, string>) {
     if (!value) {
         return null;
@@ -93,6 +161,123 @@ function formatHumanLockLabel(value?: string | null, lookup?: Record<string, str
         return lookup[value];
     }
     return value;
+}
+
+function formatAssigneeLoadLabel(option: CaseAssigneeOption) {
+    return `${option.open_case_count ?? 0} в работе`;
+}
+
+function formatAssigneeRoleLabel(option: CaseAssigneeOption) {
+    const roleLabel = ASSIGNEE_ROLE_LABELS[option.role];
+    if (!roleLabel) {
+        return null;
+    }
+    return roleLabel.toLowerCase() === option.agent_name.toLowerCase() ? null : roleLabel;
+}
+
+function formatAssigneeMetaLabel(option: CaseAssigneeOption) {
+    const parts = [formatAssigneeRoleLabel(option), formatAssigneeLoadLabel(option)].filter(Boolean);
+    if (option.is_current) {
+        parts.push("текущий");
+    }
+    return parts.join(" · ");
+}
+
+function formatAssigneeAvailabilityLabel(option: CaseAssigneeOption) {
+    const parts: string[] = [];
+    if (option.routing_status === "paused") {
+        parts.push("пауза для новых заявок");
+    } else if (option.routing_status === "follow_up_only") {
+        parts.push("только follow-up continuity");
+    } else if (option.routing_profile_source === "branch") {
+        parts.push("branch override");
+    } else if (option.routing_profile_source === "client") {
+        parts.push("client profile");
+    }
+    if (option.max_open_case_count != null) {
+        parts.push(`лимит ${option.open_case_count ?? 0}/${option.max_open_case_count}`);
+    }
+    return parts.join(" · ");
+}
+
+function formatAssigneeUnavailableReason(option: CaseAssigneeOption) {
+    if (option.assignment_eligible) {
+        return null;
+    }
+    if (option.assignment_block_reason_code === "paused") {
+        return "Новые заявки временно отключены этим routing profile.";
+    }
+    if (option.assignment_block_reason_code === "follow_up_only") {
+        return "Можно назначать только на явный follow-up continuity кейс.";
+    }
+    if (option.assignment_block_reason_code === "at_capacity") {
+        if (option.max_open_case_count != null) {
+            return `Достигнут лимит ${option.open_case_count ?? 0}/${option.max_open_case_count}.`;
+        }
+        return "Достигнут лимит открытых заявок.";
+    }
+    return "Сейчас недоступен для назначения.";
+}
+
+function formatRoutingRecommendationCopy(
+    recommendation: { reason_summary?: string | null } | null | undefined,
+    recommendedAssignee: CaseAssigneeOption | null,
+    currentAssignee: CaseAssigneeOption | null,
+) {
+    if (recommendation?.reason_summary) {
+        return recommendation.reason_summary;
+    }
+    if (recommendedAssignee && currentAssignee) {
+        return `Сейчас у ${currentAssignee.agent_name} ${formatAssigneeLoadLabel(currentAssignee)}. Лучше передать ${recommendedAssignee.agent_name}, у него ${formatAssigneeLoadLabel(recommendedAssignee)}.`;
+    }
+    if (recommendedAssignee) {
+        return `Рекомендуем ${recommendedAssignee.agent_name}: ${formatAssigneeLoadLabel(recommendedAssignee)}.`;
+    }
+    return recommendation?.reason_summary || "Выберите ответственного по текущей нагрузке команды.";
+}
+
+function sortAssigneeOptionsByLoad(options: CaseAssigneeOption[]) {
+    return [...options].sort((left, right) => {
+        if (left.is_current !== right.is_current) {
+            return left.is_current ? -1 : 1;
+        }
+        if (left.assignment_eligible !== right.assignment_eligible) {
+            return left.assignment_eligible ? -1 : 1;
+        }
+        const leftLoad = left.open_case_count ?? 0;
+        const rightLoad = right.open_case_count ?? 0;
+        if (leftLoad !== rightLoad) {
+            return leftLoad - rightLoad;
+        }
+        return left.agent_name.localeCompare(right.agent_name, "ru");
+    });
+}
+
+function resolveRecommendedAssignee(
+    options: CaseAssigneeOption[],
+    currentAssigneeId?: string | null,
+) {
+    const currentOption = currentAssigneeId
+        ? options.find((item) => String(item.agent_id) === currentAssigneeId)
+        : null;
+    const candidateOptions = options.filter(
+        (item) => item.assignment_eligible && String(item.agent_id) !== (currentAssigneeId ?? ""),
+    );
+    if (candidateOptions.length === 0) {
+        return null;
+    }
+    const bestCandidate = [...candidateOptions].sort((left, right) => {
+        const leftLoad = left.open_case_count ?? 0;
+        const rightLoad = right.open_case_count ?? 0;
+        if (leftLoad !== rightLoad) {
+            return leftLoad - rightLoad;
+        }
+        return left.agent_name.localeCompare(right.agent_name, "ru");
+    })[0];
+    if (!currentOption) {
+        return bestCandidate;
+    }
+    return (bestCandidate.open_case_count ?? 0) < (currentOption.open_case_count ?? 0) ? bestCandidate : null;
 }
 
 export default function CaseConversation({
@@ -113,6 +298,9 @@ export default function CaseConversation({
     composerBefore,
     detailsOpen = false,
     onToggleDetails,
+    bookingsOpen = false,
+    onToggleBookings,
+    canReadCalendar = false,
     onNextCase,
     canGoNextCase = false,
     chatFrame = "card",
@@ -126,10 +314,7 @@ export default function CaseConversation({
         mutationFn: () => takeCase(caseId),
         onSuccess: (response) => {
             toast.success("Заявка назначена на вас!");
-            const issues = collectSyncIssues(response.sync);
-            if (issues.length > 0) {
-                toast.error(issues.join(" · "));
-            }
+            showActionFollowupWarnings(response.sync);
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
         },
@@ -147,10 +332,7 @@ export default function CaseConversation({
         mutationFn: () => resolveCase(caseId),
         onSuccess: (response) => {
             toast.success("Заявка закрыта!");
-            const issues = collectSyncIssues(response.sync);
-            if (issues.length > 0) {
-                toast.error(issues.join(" · "));
-            }
+            showActionFollowupWarnings(response.sync);
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
             handleResolved();
@@ -171,10 +353,7 @@ export default function CaseConversation({
         mutationFn: () => returnCase(caseId),
         onSuccess: (response) => {
             toast.success("Заявка передана боту");
-            const issues = collectSyncIssues(response.sync);
-            if (issues.length > 0) {
-                toast.error(issues.join(" · "));
-            }
+            showActionFollowupWarnings(response.sync);
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
             handleResolved();
@@ -191,7 +370,15 @@ export default function CaseConversation({
         },
     });
 
+    const isActive = caseDetail.status === "active";
+    const isPending = caseDetail.status === "pending";
+    const isResolved = caseDetail.status === "resolved";
     const defaultDestination = caseDetail.customer_phone || caseDetail.customer_remote_jid || "";
+    const [actionPanel, setActionPanel] = useState<ActionPanel>(null);
+    const [selectedRoutingPolicy, setSelectedRoutingPolicy] = useState<CaseRoutingPolicy>(DEFAULT_CASE_ROUTING_POLICY);
+    const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
+    const [snoozeMinutes, setSnoozeMinutes] = useState(60);
+    const [snoozeReason, setSnoozeReason] = useState("");
     const [outreachDestination, setOutreachDestination] = useState(defaultDestination);
     const [outreachContent, setOutreachContent] = useState("");
     const [pauseMinutes, setPauseMinutes] = useState(30);
@@ -199,9 +386,15 @@ export default function CaseConversation({
     const [replyPauseEnabled, setReplyPauseEnabled] = useState(true);
     const [replyPauseMinutes, setReplyPauseMinutes] = useState(30);
     const [outreachExpanded, setOutreachExpanded] = useState(false);
+    const [contextExpanded, setContextExpanded] = useState(layout !== "inbox");
     const outreachPanelRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
+        setActionPanel(null);
+        setSelectedRoutingPolicy(DEFAULT_CASE_ROUTING_POLICY);
+        setSelectedAssigneeId("");
+        setSnoozeMinutes(60);
+        setSnoozeReason("");
         setOutreachDestination(caseDetail.customer_phone || caseDetail.customer_remote_jid || "");
         setOutreachContent("");
         setPauseMinutes(30);
@@ -209,7 +402,137 @@ export default function CaseConversation({
         setReplyPauseEnabled(true);
         setReplyPauseMinutes(30);
         setOutreachExpanded(false);
-    }, [caseId, caseDetail.customer_phone, caseDetail.customer_remote_jid]);
+        setContextExpanded(layout !== "inbox");
+    }, [caseId, caseDetail.customer_phone, caseDetail.customer_remote_jid, layout]);
+
+    const assigneeOptionsQuery = useQuery({
+        queryKey: ["case-assignees", caseId, selectedRoutingPolicy],
+        queryFn: async () => {
+            const response = await casesApi.listAssignees(caseId, selectedRoutingPolicy);
+            return response.data;
+        },
+        enabled: canWrite && isActive && actionPanel === "reassign",
+        staleTime: 30_000,
+    });
+
+    useEffect(() => {
+        if (actionPanel !== "reassign") {
+            return;
+        }
+        const items = assigneeOptionsQuery.data?.items ?? [];
+        if (items.length === 0) {
+            return;
+        }
+        setSelectedAssigneeId((current) => {
+            if (current && items.some((item) => item.agent_id === current && item.assignment_eligible)) {
+                return current;
+            }
+            const routedTargetId = assigneeOptionsQuery.data?.routing?.recommended_agent_id;
+            const preferred = items.find(
+                (item) => item.assignment_eligible && String(item.agent_id) === String(routedTargetId),
+            )
+                ?? items.find((item) => item.assignment_eligible && !item.is_current)
+                ?? null;
+            return preferred ? String(preferred.agent_id) : "";
+        });
+    }, [actionPanel, assigneeOptionsQuery.data]);
+
+    const reassignMutation = useMutation({
+        mutationFn: async (mode: "manual" | "policy") => {
+            if (mode === "policy") {
+                const response = await casesApi.reassign(caseId, {
+                    mode: "policy",
+                    policy: selectedRoutingPolicy,
+                });
+                return { response: response.data, mode };
+            }
+            const agentId = selectedAssigneeId.trim();
+            if (!agentId) {
+                throw new Error("assignee_required");
+            }
+            const response = await casesApi.reassign(caseId, { agent_id: agentId, mode: "manual" });
+            return { response: response.data, mode };
+        },
+        onSuccess: ({ response, mode }) => {
+            setActionPanel(null);
+            if (mode === "policy") {
+                toast.success(`Заявка назначена по политике: ${response.case.assigned_to_name ?? "новый менеджер"}`);
+            } else {
+                toast.success(`Заявка передана: ${response.case.assigned_to_name ?? "новый менеджер"}`);
+            }
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
+            queryClient.invalidateQueries({ queryKey: ["case-assignees", caseId] });
+        },
+        onError: (error: unknown) => {
+            if (error instanceof Error && error.message === "assignee_required") {
+                toast.error("Выберите менеджера");
+                return;
+            }
+            const code = extractErrorCode(error);
+            if (code === "NOT_ASSIGNED") {
+                toast.error("Передавать заявку может только ответственный или администратор");
+                return;
+            }
+            if (code === "CASE_NOT_ACTIVE") {
+                toast.error("Передача доступна только для активной заявки");
+                return;
+            }
+            if (code === "ASSIGNEE_UNAVAILABLE") {
+                toast.error(extractErrorMessage(error) || "Выбранный менеджер сейчас недоступен для назначения");
+                return;
+            }
+            toast.error("Не удалось передать заявку");
+        },
+    });
+
+    const snoozeMutation = useMutation({
+        mutationFn: async () => {
+            const minutes = Math.min(Math.max(Number(snoozeMinutes) || 0, 1), 1440);
+            const response = await casesApi.snooze(caseId, {
+                minutes,
+                reason: snoozeReason.trim() || undefined,
+            });
+            return response.data;
+        },
+        onSuccess: (response) => {
+            setActionPanel(null);
+            const untilLabel = response.case.snoozed_until
+                ? new Date(response.case.snoozed_until).toLocaleTimeString("ru-RU", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                })
+                : null;
+            toast.success(untilLabel ? `Заявка отложена до ${untilLabel}` : "Заявка отложена");
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
+        },
+        onError: (error: unknown) => {
+            const code = extractErrorCode(error);
+            if (code === "NOT_ASSIGNED") {
+                toast.error("Отложить заявку может только ответственный или администратор");
+                return;
+            }
+            if (code === "CASE_NOT_ACTIVE") {
+                toast.error("Отложить можно только активную заявку");
+                return;
+            }
+            toast.error("Не удалось отложить заявку");
+        },
+    });
+
+    const reopenMutation = useMutation({
+        mutationFn: () => reopenCase(caseId),
+        onSuccess: (response) => {
+            toast.success(`Заявка возвращена в работу${response.case.assigned_to_name ? `: ${response.case.assigned_to_name}` : ""}`);
+            showActionFollowupWarnings(response.sync);
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
+        },
+        onError: () => {
+            toast.error("Не удалось вернуть заявку в работу");
+        },
+    });
 
     const humanLockQuery = useQuery({
         queryKey: ["human-lock", caseDetail.conversation_id],
@@ -236,13 +559,13 @@ export default function CaseConversation({
         onSuccess: (response) => {
             if (!response.success) {
                 const suffix = response.error_code ? ` (${response.error_code})` : "";
-                toast.error(`Не удалось отправить outreach${suffix}`);
+                toast.error(`Не удалось отправить ручное сообщение${suffix}`);
                 return;
             }
             if (response.delivery_status === "queued") {
-                toast.success("Outreach поставлен в очередь");
+                toast.success("Сообщение поставлено в очередь");
             } else {
-                toast.success("Outreach отправлен");
+                toast.success("Сообщение отправлено");
             }
             setOutreachContent("");
             queryClient.invalidateQueries({ queryKey: ["messages", caseId] });
@@ -257,10 +580,10 @@ export default function CaseConversation({
                 return;
             }
             if (code === "CONVERSATION_REQUIRED") {
-                toast.error("Outreach доступен только в рамках заявки");
+                toast.error("Ручное сообщение доступно только в рамках заявки");
                 return;
             }
-            toast.error("Не удалось отправить outreach");
+            toast.error("Не удалось отправить ручное сообщение");
         },
     });
 
@@ -299,9 +622,46 @@ export default function CaseConversation({
         },
     });
 
-    const isActive = caseDetail.status === "active";
-    const isPending = caseDetail.status === "pending";
+    const caseActionBusy =
+        reassignMutation.isPending || snoozeMutation.isPending || reopenMutation.isPending;
+    const sortedAssigneeOptions = useMemo(
+        () => sortAssigneeOptionsByLoad(assigneeOptionsQuery.data?.items ?? []),
+        [assigneeOptionsQuery.data?.items],
+    );
+    const fallbackRecommendedAssignee = useMemo(
+        () => resolveRecommendedAssignee(sortedAssigneeOptions, caseDetail.assigned_to_id),
+        [sortedAssigneeOptions, caseDetail.assigned_to_id],
+    );
+    const routingRecommendation = assigneeOptionsQuery.data?.routing ?? null;
+    const recommendedAssignee = useMemo(
+        () => {
+            if (routingRecommendation?.recommended_agent_id) {
+                return sortedAssigneeOptions.find(
+                    (item) => String(item.agent_id) === String(routingRecommendation.recommended_agent_id),
+                ) ?? fallbackRecommendedAssignee;
+            }
+            return fallbackRecommendedAssignee;
+        },
+        [fallbackRecommendedAssignee, routingRecommendation?.recommended_agent_id, sortedAssigneeOptions],
+    );
+    const currentAssigneeOption = useMemo(
+        () => sortedAssigneeOptions.find((item) => item.is_current) ?? null,
+        [sortedAssigneeOptions],
+    );
+    const selectedAssigneeOption = useMemo(
+        () => sortedAssigneeOptions.find((item) => String(item.agent_id) === selectedAssigneeId) ?? null,
+        [selectedAssigneeId, sortedAssigneeOptions],
+    );
+    const transferableAssigneeOptions = useMemo(
+        () => sortedAssigneeOptions.filter((item) => !item.is_current),
+        [sortedAssigneeOptions],
+    );
+    const eligibleTransferableCount = useMemo(
+        () => transferableAssigneeOptions.filter((item) => item.assignment_eligible).length,
+        [transferableAssigneeOptions],
+    );
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
+    const compactContextLimit = layout === "inbox" ? 110 : 180;
     const contextTitle = caseDetail.context_summary ? "Суть запроса" : "Последнее сообщение";
     const lastInbound = caseDetail.last_inbound_at
         ? new Date(caseDetail.last_inbound_at).toLocaleString("ru-RU")
@@ -309,19 +669,17 @@ export default function CaseConversation({
     const assignedLabel = caseDetail.assigned_to_name ?? "Не назначен";
     const showDetailsToggle = typeof onToggleDetails === "function";
     const detailsLabel = detailsOpen ? "Скрыть детали" : "Детали";
+    const showBookingsToggle = canReadCalendar;
+    const bookingsLabel = bookingsOpen ? "Скрыть записи" : "Записи по заявке";
     const isInboxLayout = layout === "inbox";
-    const slaCountdown = getSlaCountdown(caseDetail.created_at || new Date().toISOString());
-    const issueHints: string[] = [];
-    if (caseDetail.has_delivery_error) {
-        issueHints.push("Есть ошибка доставки. Ответ мог не дойти до клиента.");
-    }
-    if (caseDetail.has_pending_outbox) {
-        issueHints.push("Есть сообщения в очереди отправки. Доставка может задерживаться.");
-    }
+    const contextCanExpand = isInboxLayout && contextText.length > compactContextLimit;
+    const contextBody = contextCanExpand && !contextExpanded
+        ? `${contextText.slice(0, compactContextLimit).trimEnd()}...`
+        : contextText;
     const headerClass = `flex flex-col gap-4 border-b border-border/60 pb-4 ${
         isInboxLayout ? "px-5 pt-5" : ""
     }`;
-    const contextClass = `rounded-lg border border-border/60 bg-card p-3 text-sm ${
+    const contextClass = `rounded-lg border border-border/60 bg-card ${isInboxLayout ? "p-2.5" : "p-3"} text-sm ${
         isInboxLayout ? "mx-5" : ""
     }`;
     const humanLockStatus = humanLockQuery.data?.status;
@@ -357,14 +715,21 @@ export default function CaseConversation({
     ]
         .filter(Boolean)
         .join(" · ");
+    const slaIndicator = getCaseSlaIndicator(caseDetail);
+    const businessStatus = getCaseBusinessStatusBadge(caseDetail);
+    const originSummary = getCaseOriginSummary(caseDetail);
+    const bookingSemanticSummary = getCaseBookingSemanticSummary(caseDetail.booking_summary);
     const outreachBusy =
         sendOutreachMutation.isPending || pauseMutation.isPending || releasePauseMutation.isPending;
     const canSubmitOutreach = Boolean(outreachDestination.trim() && outreachContent.trim());
-    const openOutreachPanel = () => {
-        setOutreachExpanded(true);
-        window.requestAnimationFrame(() => {
-            outreachPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-        });
+    const toggleOutreachPanel = () => {
+        const nextExpanded = !outreachExpanded;
+        setOutreachExpanded(nextExpanded);
+        if (nextExpanded) {
+            window.requestAnimationFrame(() => {
+                outreachPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+        }
     };
     const replyPauseConfig = {
         enabled: replyPauseEnabled,
@@ -422,6 +787,9 @@ export default function CaseConversation({
     ) : (
         replyPauseControls
     );
+    const calendarHref = caseDetail.conversation_id
+        ? `/calendar?conversation_id=${encodeURIComponent(caseDetail.conversation_id)}&case_id=${encodeURIComponent(caseId)}&return_panel=bookings`
+        : `/calendar?case_id=${encodeURIComponent(caseId)}&return_panel=bookings`;
     const humanLockPanel = (
         <div
             className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${
@@ -454,50 +822,331 @@ export default function CaseConversation({
             )}
         </div>
     );
+    const currentSnoozeLabel = caseDetail.snoozed_until
+        ? new Date(caseDetail.snoozed_until).toLocaleString("ru-RU", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+        })
+        : null;
+    const actionPanelClass = `rounded-lg border border-border/60 bg-card px-4 py-3 text-sm ${
+        isInboxLayout ? "mx-5" : ""
+    }`;
+    const semanticSummaryClass = `${isInboxLayout ? "mx-5" : ""} grid gap-3 ${bookingSemanticSummary ? "xl:grid-cols-2" : ""}`;
+    const actionPanelContent = actionPanel === "reassign" ? (
+        <div className={actionPanelClass} data-testid="case-reassign-panel">
+            <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">Передать заявку</p>
+                    <p className="text-xs text-muted-foreground">
+                        Выберите следующего ответственного. История и чат останутся в этой же заявке.
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => setActionPanel(null)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 text-base font-semibold text-muted-foreground hover:text-foreground"
+                    aria-label="Закрыть панель передачи"
+                    data-testid="case-reassign-close"
+                >
+                    ×
+                </button>
+            </div>
+            <div className="mt-3 space-y-3">
+                {currentAssigneeOption && (
+                    <div className="rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            Сейчас отвечает
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">
+                            {currentAssigneeOption.agent_name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            {formatAssigneeMetaLabel(currentAssigneeOption)}
+                        </p>
+                    </div>
+                )}
+                <div className="rounded-xl border border-border/60 bg-muted/20 px-3 py-3">
+                    <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        Политика
+                    </label>
+                    <select
+                        value={selectedRoutingPolicy}
+                        onChange={(event) => setSelectedRoutingPolicy(event.target.value as CaseRoutingPolicy)}
+                        disabled={caseActionBusy || assigneeOptionsQuery.isLoading}
+                        className="mt-2 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm text-foreground disabled:opacity-50"
+                        data-testid="case-reassign-policy-select"
+                    >
+                        {Object.entries(CASE_ROUTING_POLICY_LABELS).map(([value, label]) => (
+                            <option key={value} value={value}>
+                                {label}
+                            </option>
+                        ))}
+                    </select>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                        {CASE_ROUTING_POLICY_HINTS[selectedRoutingPolicy]}
+                    </p>
+                </div>
+                {recommendedAssignee && (
+                    <div
+                        className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3"
+                        data-testid="case-reassign-recommendation"
+                    >
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-900/70">
+                            Рекомендуем
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+                            <div className="space-y-1">
+                                <p className="text-sm font-semibold text-emerald-950">
+                                    {recommendedAssignee.agent_name}
+                                </p>
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-900/70">
+                                    {CASE_ROUTING_POLICY_LABELS[selectedRoutingPolicy]}
+                                </p>
+                                <p className="text-xs text-emerald-900/80">
+                                    {formatAssigneeMetaLabel(recommendedAssignee)}
+                                </p>
+                                <p className="text-xs text-emerald-900/80">
+                                    {formatRoutingRecommendationCopy(
+                                        routingRecommendation,
+                                        recommendedAssignee,
+                                        currentAssigneeOption,
+                                    )}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSelectedAssigneeId(String(recommendedAssignee.agent_id));
+                                    reassignMutation.mutate("manual");
+                                }}
+                                disabled={caseActionBusy || !recommendedAssignee.assignment_eligible}
+                                className="rounded bg-emerald-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                                data-testid="case-reassign-recommend-submit"
+                            >
+                                {reassignMutation.isPending && selectedAssigneeId === String(recommendedAssignee.agent_id)
+                                    ? "Передаём..."
+                                    : `Передать ${recommendedAssignee.agent_name}`}
+                            </button>
+                        </div>
+                    </div>
+                )}
+                {assigneeOptionsQuery.isLoading ? (
+                    <p className="text-xs text-muted-foreground">Загружаем список менеджеров...</p>
+                ) : transferableAssigneeOptions.length ? (
+                    <div className="space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-xs font-semibold text-muted-foreground">
+                                Другой ответственный
+                            </span>
+                            {routingRecommendation && (
+                                <button
+                                    type="button"
+                                    onClick={() => reassignMutation.mutate("policy")}
+                                    disabled={caseActionBusy || assigneeOptionsQuery.isLoading || !recommendedAssignee}
+                                    className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 disabled:opacity-50"
+                                    data-testid="case-reassign-policy-submit"
+                                >
+                                    {reassignMutation.isPending ? "Распределяем..." : "Назначить по политике"}
+                                </button>
+                            )}
+                        </div>
+                        <div className="space-y-2">
+                            {transferableAssigneeOptions.map((item) => {
+                                const isSelected = selectedAssigneeId === String(item.agent_id);
+                                return (
+                                    <button
+                                        key={item.agent_id}
+                                        type="button"
+                                        onClick={() => {
+                                            if (!item.assignment_eligible) {
+                                                return;
+                                            }
+                                            setSelectedAssigneeId(String(item.agent_id));
+                                        }}
+                                        disabled={!item.assignment_eligible}
+                                        className={`flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-3 text-left transition ${
+                                            isSelected
+                                                ? "border-primary bg-primary/5"
+                                                : item.assignment_eligible
+                                                    ? "border-border/60 bg-background hover:bg-muted/40"
+                                                    : "border-amber-200 bg-amber-50/70 opacity-80"
+                                        }`}
+                                        data-testid={isSelected ? "case-reassign-select" : undefined}
+                                    >
+                                        <div className="space-y-1">
+                                            <p className="text-sm font-semibold text-foreground">{item.agent_name}</p>
+                                            <p className="text-xs text-muted-foreground">{formatAssigneeMetaLabel(item)}</p>
+                                            {formatAssigneeAvailabilityLabel(item) ? (
+                                                <p className="text-[11px] text-muted-foreground">
+                                                    {formatAssigneeAvailabilityLabel(item)}
+                                                </p>
+                                            ) : null}
+                                            {formatAssigneeUnavailableReason(item) ? (
+                                                <p className="text-[11px] text-amber-700">
+                                                    {formatAssigneeUnavailableReason(item)}
+                                                </p>
+                                            ) : null}
+                                        </div>
+                                        <span
+                                            className={`mt-0.5 rounded-full px-2 py-1 text-[10px] font-semibold ${
+                                                isSelected
+                                                    ? "bg-primary text-primary-foreground"
+                                                    : item.assignment_eligible
+                                                        ? "bg-muted text-muted-foreground"
+                                                        : "bg-amber-100 text-amber-800"
+                                            }`}
+                                        >
+                                            {!item.assignment_eligible ? "Недоступен" : isSelected ? "Выбрано" : "Выбрать"}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ) : (
+                    <p className="text-xs text-muted-foreground">
+                        Нет доступных менеджеров для передачи в текущем контексте.
+                    </p>
+                )}
+                <div className="flex flex-wrap justify-end gap-2 border-t border-border/60 pt-3">
+                    <button
+                        type="button"
+                        onClick={() => setActionPanel(null)}
+                        className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                    >
+                        Отмена
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => reassignMutation.mutate("manual")}
+                        disabled={
+                            caseActionBusy
+                            || assigneeOptionsQuery.isLoading
+                            || eligibleTransferableCount === 0
+                            || !selectedAssigneeOption
+                            || !selectedAssigneeOption.assignment_eligible
+                        }
+                        className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                        data-testid="case-reassign-submit"
+                    >
+                        {reassignMutation.isPending ? "Передаём..." : "Передать выбранному"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    ) : actionPanel === "snooze" ? (
+        <div className={actionPanelClass} data-testid="case-snooze-panel">
+            <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">Отложить заявку</p>
+                    <p className="text-xs text-muted-foreground">
+                        Уберите заявку из срочной очереди до конкретного времени. Новый входящий ответ клиента вернёт её в работу.
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => setActionPanel(null)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 text-base font-semibold text-muted-foreground hover:text-foreground"
+                    aria-label="Закрыть панель отсрочки"
+                    data-testid="case-snooze-close"
+                >
+                    ×
+                </button>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-[180px_1fr]">
+                <label className="space-y-1">
+                    <span className="text-xs text-muted-foreground">На сколько минут</span>
+                    <input
+                        type="number"
+                        min={1}
+                        max={1440}
+                        value={snoozeMinutes}
+                        onChange={(event) => {
+                            const next = Number(event.target.value);
+                            const normalized = Number.isFinite(next) ? Math.min(Math.max(next, 1), 1440) : 1;
+                            setSnoozeMinutes(normalized);
+                        }}
+                        className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                        data-testid="case-snooze-minutes"
+                    />
+                </label>
+                <label className="space-y-1">
+                    <span className="text-xs text-muted-foreground">Причина для команды</span>
+                    <input
+                        type="text"
+                        value={snoozeReason}
+                        onChange={(event) => setSnoozeReason(event.target.value)}
+                        className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                        placeholder="Например: ждём подтверждение времени"
+                        maxLength={120}
+                        data-testid="case-snooze-reason"
+                    />
+                </label>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+                {CASE_SNOOZE_PRESETS.map((preset) => (
+                    <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setSnoozeMinutes(preset)}
+                        className="rounded border border-border/60 px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground"
+                        data-testid={`case-snooze-preset-${preset}`}
+                    >
+                        {preset} мин
+                    </button>
+                ))}
+                {currentSnoozeLabel && (
+                    <span className="text-xs text-muted-foreground">
+                        Сейчас отложено до {currentSnoozeLabel}
+                    </span>
+                )}
+            </div>
+            <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-border/60 pt-3">
+                <button
+                    type="button"
+                    onClick={() => setActionPanel(null)}
+                    className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                >
+                    Отмена
+                </button>
+                <button
+                    type="button"
+                    onClick={() => snoozeMutation.mutate()}
+                    disabled={caseActionBusy}
+                    className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                    data-testid="case-snooze-submit"
+                >
+                    {snoozeMutation.isPending ? "Сохраняем..." : "Отложить заявку"}
+                </button>
+            </div>
+        </div>
+    ) : null;
 
     return (
         <div className={`flex flex-col h-full ${isInboxLayout ? "gap-4" : "gap-5"}`} data-testid="case-conversation">
             <div className={headerClass}>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <h1 className="text-2xl font-bold" data-testid="case-title">
-                                Заявка {caseDetail.id.slice(0, 8)}
-                            </h1>
-                            <SlaBadge status={caseDetail.sla_status} />
-                            <span className={`rounded px-2 py-1 text-[11px] font-medium ${slaCountdown.className}`} data-testid="case-sla-countdown">
-                                {slaCountdown.label}
-                            </span>
-                            {caseDetail.needs_reply && (
-                                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-yellow-100 text-yellow-800">
-                                    Нужно ответить
+                <div className="flex flex-col gap-4">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h1 className="text-2xl font-bold" data-testid="case-title">
+                                    Заявка {caseDetail.id.slice(0, 8)}
+                                </h1>
+                                <span className={`rounded px-2 py-1 text-[11px] font-semibold ${businessStatus.className}`} data-testid="case-business-status">
+                                    {businessStatus.label}
                                 </span>
-                            )}
+                                <span className={`rounded px-2 py-1 text-[11px] font-semibold ${slaIndicator.className}`} data-testid="case-next-action">
+                                    {slaIndicator.label}
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                <span data-testid="case-owner-label">
+                                    Владелец: <span className="font-semibold text-foreground">{assignedLabel}</span>
+                                </span>
+                            </div>
                         </div>
-                        <div className="flex flex-wrap gap-2 text-xs">
-                            <span
-                                className={`px-2 py-0.5 rounded font-semibold ${caseDetail.status === "resolved"
-                                    ? "bg-muted text-muted-foreground"
-                                    : isActive
-                                        ? "bg-green-100 text-green-800"
-                                        : isPending
-                                            ? "bg-yellow-100 text-yellow-800"
-                                            : "bg-muted text-muted-foreground"
-                                    }`}
-                            >
-                                {getStatusLabel(caseDetail.status)}
-                            </span>
-                            <span
-                                className={`px-2 py-0.5 rounded font-semibold ${
-                                    caseDetail.assigned_to_name ? "bg-secondary text-secondary-foreground" : "bg-muted text-muted-foreground"
-                                }`}
-                            >
-                                👤 {assignedLabel}
-                            </span>
-                        </div>
-                    </div>
-
-                    <div className="flex flex-col items-end gap-2">
                         {showDetailsToggle && (
                             <button
                                 type="button"
@@ -512,16 +1161,41 @@ export default function CaseConversation({
                                 {detailsLabel}
                             </button>
                         )}
-                        <div className="flex gap-2">
+                    </div>
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="flex flex-wrap items-center gap-2">
                             {canOutreach && (
                                 <button
                                     type="button"
-                                    onClick={openOutreachPanel}
+                                    onClick={toggleOutreachPanel}
                                     className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
                                     data-testid="outreach-open"
                                 >
-                                    Связаться с клиентом
+                                    {outreachExpanded ? "Скрыть блок связи" : "Связаться с клиентом"}
                                 </button>
+                            )}
+                            {showBookingsToggle && (
+                                typeof onToggleBookings === "function" ? (
+                                    <button
+                                        type="button"
+                                        onClick={onToggleBookings}
+                                        className={`rounded border border-border/60 px-4 py-2 text-sm font-semibold ${
+                                            bookingsOpen ? "bg-muted text-foreground" : "text-foreground hover:bg-muted"
+                                        }`}
+                                        aria-pressed={bookingsOpen}
+                                        data-testid="case-open-calendar"
+                                    >
+                                        {bookingsLabel}
+                                    </button>
+                                ) : (
+                                    <Link
+                                        href={calendarHref}
+                                        className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
+                                        data-testid="case-open-calendar"
+                                    >
+                                        {bookingsLabel}
+                                    </Link>
+                                )
                             )}
                             {canGoNextCase && (
                                 <button
@@ -533,45 +1207,115 @@ export default function CaseConversation({
                                     Следующая заявка
                                 </button>
                             )}
-                            {canWrite ? (
-                                <>
-                                    {isPending && (
-                                        <button
-                                            onClick={() => takeMutation.mutate()}
-                                            disabled={takeMutation.isPending}
-                                            className="bg-primary text-primary-foreground px-4 py-2 rounded hover:bg-primary/90 disabled:opacity-50"
-                                        >
-                                            {takeMutation.isPending ? "Берём..." : "Взять заявку"}
-                                        </button>
-                                    )}
-                                    {isActive && (
-                                        <>
-                                            <button
-                                                onClick={() => resolveMutation.mutate()}
-                                                disabled={resolveMutation.isPending}
-                                                className="bg-foreground text-background px-4 py-2 rounded hover:bg-foreground/90 disabled:opacity-50"
-                                            >
-                                                {resolveMutation.isPending ? "Закрываем..." : "Закрыть заявку"}
-                                            </button>
-                                            <button
-                                                onClick={() => returnMutation.mutate()}
-                                                disabled={returnMutation.isPending}
-                                                className="border border-border/60 px-4 py-2 rounded text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
-                                            >
-                                                {returnMutation.isPending ? "Возвращаем..." : "Вернуть боту"}
-                                            </button>
-                                        </>
-                                    )}
-                                </>
-                            ) : (
-                                <span className="text-xs text-muted-foreground self-center">
-                                    Только просмотр
+                        </div>
+                        <div className="flex min-w-0 flex-col items-start gap-2 sm:items-end">
+                            {canWrite && (
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                    Работа по заявке
                                 </span>
                             )}
+                            <div className="flex flex-wrap justify-end gap-2">
+                                {canWrite ? (
+                                    <>
+                                        {isPending && (
+                                            <button
+                                                onClick={() => takeMutation.mutate()}
+                                                disabled={takeMutation.isPending || caseActionBusy}
+                                                className="rounded bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                                            >
+                                                {takeMutation.isPending ? "Берём..." : "Взять заявку"}
+                                            </button>
+                                        )}
+                                        {isActive && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setActionPanel((current) => current === "reassign" ? null : "reassign")}
+                                                    disabled={caseActionBusy}
+                                                    className={`rounded border px-4 py-2 text-sm font-semibold disabled:opacity-50 ${
+                                                        actionPanel === "reassign"
+                                                            ? "border-primary bg-primary/5 text-primary"
+                                                            : "border-border/60 text-foreground hover:bg-muted"
+                                                    }`}
+                                                    aria-pressed={actionPanel === "reassign"}
+                                                    data-testid="case-reassign-toggle"
+                                                >
+                                                    Передать
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setActionPanel((current) => current === "snooze" ? null : "snooze")}
+                                                    disabled={caseActionBusy}
+                                                    className={`rounded border px-4 py-2 text-sm font-semibold disabled:opacity-50 ${
+                                                        actionPanel === "snooze"
+                                                            ? "border-primary bg-primary/5 text-primary"
+                                                            : "border-border/60 text-foreground hover:bg-muted"
+                                                    }`}
+                                                    aria-pressed={actionPanel === "snooze"}
+                                                    data-testid="case-snooze-toggle"
+                                                >
+                                                    {caseDetail.snoozed_until ? "Изменить отсрочку" : "Отложить"}
+                                                </button>
+                                                <button
+                                                    onClick={() => returnMutation.mutate()}
+                                                    disabled={returnMutation.isPending || caseActionBusy}
+                                                    className="rounded border border-border/60 px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
+                                                >
+                                                    {returnMutation.isPending ? "Возвращаем..." : "Вернуть боту"}
+                                                </button>
+                                                <button
+                                                    onClick={() => resolveMutation.mutate()}
+                                                    disabled={resolveMutation.isPending || caseActionBusy}
+                                                    className="rounded bg-foreground px-4 py-2 text-sm font-semibold text-background hover:bg-foreground/90 disabled:opacity-50"
+                                                >
+                                                    {resolveMutation.isPending ? "Закрываем..." : "Закрыть заявку"}
+                                                </button>
+                                            </>
+                                        )}
+                                        {isResolved && (
+                                            <button
+                                                type="button"
+                                                onClick={() => reopenMutation.mutate()}
+                                                disabled={reopenMutation.isPending}
+                                                className="rounded bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                                                data-testid="case-reopen"
+                                            >
+                                                {reopenMutation.isPending ? "Возвращаем..." : "Вернуть в работу"}
+                                            </button>
+                                        )}
+                                    </>
+                                ) : (
+                                    <span className="self-center text-xs text-muted-foreground">
+                                        Только просмотр
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
                 {caseDetail.conversation_id && humanLockPanel}
+            </div>
+            {actionPanelContent}
+
+            <div className={semanticSummaryClass} data-testid="case-semantic-summary">
+                <SemanticSummaryCard
+                    eyebrow="Почему заявка открыта"
+                    title={originSummary.title}
+                    detail={originSummary.detail}
+                    badge={caseDetail.trigger_type ? (caseDetail.trigger_type === "manual" ? "Вручную" : "От бота") : null}
+                    badgeClassName="bg-slate-100 text-slate-700"
+                    testId="case-origin-summary"
+                />
+                {bookingSemanticSummary ? (
+                    <SemanticSummaryCard
+                        eyebrow="Что по записи"
+                        title={bookingSemanticSummary.operatorSummary}
+                        detail={bookingSemanticSummary.meta}
+                        badge={bookingSemanticSummary.label}
+                        badgeClassName={bookingSemanticSummary.className}
+                        testId="case-booking-summary"
+                    />
+                ) : null}
             </div>
 
             <div className={contextClass}>
@@ -579,16 +1323,19 @@ export default function CaseConversation({
                     <span>{contextTitle}</span>
                     <span>Последнее входящее: {lastInbound}</span>
                 </div>
-                <p className="text-sm text-foreground">{contextText}</p>
+                <p className="text-sm text-foreground">{contextBody}</p>
+                {contextCanExpand && (
+                    <button
+                        type="button"
+                        onClick={() => setContextExpanded((value) => !value)}
+                        className="mt-2 rounded border border-border/60 px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                        data-testid="case-context-toggle"
+                    >
+                        {contextExpanded ? "Свернуть контекст" : "Показать контекст"}
+                    </button>
+                )}
             </div>
-            {issueHints.length > 0 && (
-                <div className={`rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 ${
-                    isInboxLayout ? "mx-5" : ""
-                }`}>
-                    {issueHints.join(" ")}
-                </div>
-            )}
-            {canOutreach && (
+            {canOutreach && outreachExpanded && (
                 <div
                     ref={outreachPanelRef}
                     className={`rounded-lg border border-border/60 bg-card px-3 py-3 text-sm ${
@@ -615,115 +1362,106 @@ export default function CaseConversation({
                             </span>
                             <button
                                 type="button"
-                                onClick={() => setOutreachExpanded((value) => !value)}
+                                onClick={toggleOutreachPanel}
                                 className="rounded border border-border/60 px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
                                 data-testid="outreach-toggle"
                             >
-                                {outreachExpanded ? "Свернуть" : "Открыть"}
+                                Свернуть
                             </button>
                         </div>
                     </div>
-                    {!outreachExpanded && (
-                        <p className="rounded border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                            Откройте блок, чтобы отправить сообщение клиенту и при необходимости включить паузу бота.
-                        </p>
-                    )}
-                    {outreachExpanded && (
-                        <>
-                            <div className="grid gap-2 md:grid-cols-[2fr_1fr]">
-                                <label className="space-y-1">
-                                    <span className="text-xs text-muted-foreground">WhatsApp номер или JID</span>
-                                    <input
-                                        type="text"
-                                        value={outreachDestination}
-                                        onChange={(event) => setOutreachDestination(event.target.value)}
-                                        className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
-                                        placeholder="+7 777 123 45 67"
-                                        data-testid="outreach-destination"
-                                    />
-                                </label>
-                                <label className="space-y-1">
-                                    <span className="text-xs text-muted-foreground">Пауза (мин)</span>
-                                    <input
-                                        type="number"
-                                        min={0}
-                                        max={1440}
-                                        value={pauseMinutes}
-                                        onChange={(event) => {
-                                            const next = Number(event.target.value);
-                                            const normalized = Number.isFinite(next) ? Math.min(Math.max(next, 0), 1440) : 0;
-                                            setPauseMinutes(normalized);
-                                        }}
-                                        disabled={!outreachPauseEnabled}
-                                        className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
-                                        data-testid="human-lock-minutes"
-                                    />
-                                </label>
-                            </div>
-                            <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                                <input
-                                    type="checkbox"
-                                    checked={outreachPauseEnabled}
-                                    onChange={(event) => setOutreachPauseEnabled(event.target.checked)}
-                                    className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                    data-testid="outreach-pause-toggle"
-                                />
-                                Ставить паузу после отправки
-                            </label>
-                            <label className="mt-2 block space-y-1">
-                                <span className="text-xs text-muted-foreground">Сообщение клиенту</span>
-                                <textarea
-                                    value={outreachContent}
-                                    onChange={(event) => setOutreachContent(event.target.value)}
-                                    rows={3}
-                                    className="w-full resize-y rounded border border-border/60 bg-background px-3 py-2 text-sm"
-                                    placeholder="Например: Мы на связи, продолжаем вручную"
-                                    data-testid="outreach-message"
-                                />
-                            </label>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        if (!canSubmitOutreach) {
-                                            toast.error("Заполните номер и текст сообщения");
-                                            return;
-                                        }
-                                        sendOutreachMutation.mutate();
-                                    }}
-                                    disabled={outreachBusy || !canSubmitOutreach}
-                                    className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
-                                    data-testid="outreach-send"
-                                >
-                                    {sendOutreachMutation.isPending ? "Отправка..." : "Отправить клиенту"}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        if (!pauseMinutes || pauseMinutes < 1) {
-                                            toast.error("Укажите длительность паузы");
-                                            return;
-                                        }
-                                        pauseMutation.mutate();
-                                    }}
-                                    disabled={outreachBusy}
-                                    className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-foreground disabled:opacity-50"
-                                    data-testid="human-lock-pause"
-                                >
-                                    {pauseMutation.isPending ? "Ставим паузу..." : "Пауза бота"}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => releasePauseMutation.mutate()}
-                                    disabled={outreachBusy || !humanLockActive}
-                                    className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground disabled:opacity-50"
-                                    data-testid="human-lock-release"
-                                >
-                                    {releasePauseMutation.isPending ? "Снимаем..." : "Снять паузу"}
-                                </button>
-                            </div>
-                        </>
-                    )}
+                    <div className="grid gap-2 md:grid-cols-[2fr_1fr]">
+                        <label className="space-y-1">
+                            <span className="text-xs text-muted-foreground">WhatsApp номер или JID</span>
+                            <input
+                                type="text"
+                                value={outreachDestination}
+                                onChange={(event) => setOutreachDestination(event.target.value)}
+                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                                placeholder="+7 777 123 45 67"
+                                data-testid="outreach-destination"
+                            />
+                        </label>
+                        <label className="space-y-1">
+                            <span className="text-xs text-muted-foreground">Пауза (мин)</span>
+                            <input
+                                type="number"
+                                min={0}
+                                max={1440}
+                                value={pauseMinutes}
+                                onChange={(event) => {
+                                    const next = Number(event.target.value);
+                                    const normalized = Number.isFinite(next) ? Math.min(Math.max(next, 0), 1440) : 0;
+                                    setPauseMinutes(normalized);
+                                }}
+                                disabled={!outreachPauseEnabled}
+                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                                data-testid="human-lock-minutes"
+                            />
+                        </label>
+                    </div>
+                    <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                        <input
+                            type="checkbox"
+                            checked={outreachPauseEnabled}
+                            onChange={(event) => setOutreachPauseEnabled(event.target.checked)}
+                            className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                            data-testid="outreach-pause-toggle"
+                        />
+                        Ставить паузу после отправки
+                    </label>
+                    <label className="mt-2 block space-y-1">
+                        <span className="text-xs text-muted-foreground">Сообщение клиенту</span>
+                        <textarea
+                            value={outreachContent}
+                            onChange={(event) => setOutreachContent(event.target.value)}
+                            rows={3}
+                            className="w-full resize-y rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                            placeholder="Например: Мы на связи, продолжаем вручную"
+                            data-testid="outreach-message"
+                        />
+                    </label>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (!canSubmitOutreach) {
+                                    toast.error("Заполните номер и текст сообщения");
+                                    return;
+                                }
+                                sendOutreachMutation.mutate();
+                            }}
+                            disabled={outreachBusy || !canSubmitOutreach}
+                            className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                            data-testid="outreach-send"
+                        >
+                            {sendOutreachMutation.isPending ? "Отправка..." : "Отправить клиенту"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (!pauseMinutes || pauseMinutes < 1) {
+                                    toast.error("Укажите длительность паузы");
+                                    return;
+                                }
+                                pauseMutation.mutate();
+                            }}
+                            disabled={outreachBusy}
+                            className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-foreground disabled:opacity-50"
+                            data-testid="human-lock-pause"
+                        >
+                            {pauseMutation.isPending ? "Ставим паузу..." : "Пауза бота"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => releasePauseMutation.mutate()}
+                            disabled={outreachBusy || !humanLockActive}
+                            className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground disabled:opacity-50"
+                            data-testid="human-lock-release"
+                        >
+                            {releasePauseMutation.isPending ? "Снимаем..." : "Снять паузу"}
+                        </button>
+                    </div>
                 </div>
             )}
 

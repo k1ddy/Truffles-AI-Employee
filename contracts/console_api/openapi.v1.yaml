@@ -39,6 +39,290 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
+  /console/v1/queue-state/current:
+    get:
+      tags:
+      - console
+      summary: Get Current Queue State
+      operationId: get_current_queue_state_console_v1_queue_state_current_get
+      parameters:
+      - name: surface
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Surface
+      - name: case_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Id
+      - name: conversation_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Conversation Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleQueueStateCurrentResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - console
+      summary: Put Current Queue State
+      operationId: put_current_queue_state_console_v1_queue_state_current_put
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleQueueStateCurrentRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleQueueStateCurrentResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/queue-state/views:
+    get:
+      tags:
+      - console
+      summary: List Queue State Views
+      operationId: list_queue_state_views_console_v1_queue_state_views_get
+      parameters:
+      - name: surface
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Surface
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSavedViewListResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - console
+      summary: Create Queue State View
+      operationId: create_queue_state_view_console_v1_queue_state_views_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleSavedViewCreateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSavedView'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/queue-state/views/{view_id}:
+    get:
+      tags:
+      - console
+      summary: Get Queue State View
+      operationId: get_queue_state_view_console_v1_queue_state_views__view_id__get
+      parameters:
+      - name: view_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: View Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSavedView'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - console
+      summary: Update Queue State View
+      operationId: update_queue_state_view_console_v1_queue_state_views__view_id__patch
+      parameters:
+      - name: view_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: View Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleSavedViewUpdateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSavedView'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - console
+      summary: Delete Queue State View
+      operationId: delete_queue_state_view_console_v1_queue_state_views__view_id__delete
+      parameters:
+      - name: view_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: View Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/agents:
     get:
       tags:
@@ -118,6 +402,14 @@ paths:
           - type: string
           - type: 'null'
           title: Status
+      - name: queue_view
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Queue View
       - name: q
         in: query
         required: false
@@ -141,6 +433,21 @@ paths:
           type: boolean
           default: false
           title: Assigned To Me
+      - name: assignee_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assignee Id
+      - name: unassigned
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Unassigned
       - name: phone
         in: query
         required: false
@@ -202,6 +509,22 @@ paths:
           - type: string
           - type: 'null'
           title: Date To
+      - name: resolved_from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Resolved From
+      - name: resolved_to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Resolved To
       - name: cursor
         in: query
         required: false
@@ -230,6 +553,190 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
           description: Unauthorized
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/bulk:
+    post:
+      tags:
+      - console
+      summary: Bulk Case Action
+      operationId: bulk_case_action_console_v1_cases_bulk_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleCaseBulkActionRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseBulkActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/assignees:
+    get:
+      tags:
+      - console
+      summary: List Queue Case Assignees
+      operationId: list_queue_case_assignees_console_v1_cases_assignees_get
+      parameters:
+      - name: branch_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Branch Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseAssigneeListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/{case_id}/assignees:
+    get:
+      tags:
+      - console
+      summary: List Case Assignees
+      operationId: list_case_assignees_console_v1_cases__case_id__assignees_get
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Case Id
+      - name: policy
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - least_open_cases
+            - follow_up_sla_balance
+            type: string
+          - type: 'null'
+          title: Policy
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseAssigneeListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/{case_id}/reassign:
+    post:
+      tags:
+      - console
+      summary: Reassign Case
+      operationId: reassign_case_console_v1_cases__case_id__reassign_post
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Case Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleCaseReassignRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/{case_id}/snooze:
+    post:
+      tags:
+      - console
+      summary: Snooze Case
+      operationId: snooze_case_console_v1_cases__case_id__snooze_post
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Case Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleCaseSnoozeRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/{case_id}/reopen:
+    post:
+      tags:
+      - console
+      summary: Reopen Case
+      operationId: reopen_case_console_v1_cases__case_id__reopen_post
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Case Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleCaseActionResponse'
         '422':
           description: Validation Error
           content:
@@ -365,6 +872,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/cases/{case_id}/stream:
+    get:
+      tags:
+      - console
+      summary: Stream Case Updates
+      description: SSE stream for a single case with polling fallback on the frontend.
+      operationId: stream_case_updates_console_v1_cases__case_id__stream_get
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Case Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+            text/event-stream: {}
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/inbox/macros:
     get:
       tags:
@@ -485,6 +1026,63 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
           description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/inbox/macros/{macro_id}/execute:
+    post:
+      tags:
+      - console
+      summary: Execute Inbox Macro
+      operationId: execute_inbox_macro_console_v1_inbox_macros__macro_id__execute_post
+      parameters:
+      - name: macro_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Macro Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleMacroExecuteRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMacroExecuteResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Conflict
         '422':
           description: Validation Error
           content:
@@ -4950,6 +5548,157 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/routing-profiles:
+    get:
+      tags:
+      - console
+      summary: List Routing Profiles
+      operationId: list_routing_profiles_console_v1_admin_routing_profiles_get
+      parameters:
+      - name: client_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Client Id
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Id
+      - name: branch_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Branch Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleRoutingProfileListResponse'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - console
+      summary: Upsert Routing Profile
+      operationId: upsert_routing_profile_console_v1_admin_routing_profiles_put
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleRoutingProfileUpsertRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleRoutingProfile'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/routing-profiles/{agent_id}:
+    delete:
+      tags:
+      - console
+      summary: Delete Routing Profile
+      operationId: delete_routing_profile_console_v1_admin_routing_profiles__agent_id__delete
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Agent Id
+      - name: client_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Client Id
+      - name: branch_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Branch Id
+      - name: reason
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleRoutingProfileDeleteResponse'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/agents/{agent_id}/disable:
     post:
       tags:
@@ -6439,6 +7188,56 @@ paths:
           - type: string
           - type: 'null'
           title: Specialist Id
+      - name: conversation_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Conversation Id
+      - name: case_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Id
+      - name: lane
+        in: query
+        required: false
+        schema:
+          enum:
+          - attention
+          - all
+          type: string
+          default: all
+          title: Lane
+      - name: needs_action
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Needs Action
+      - name: follow_up_owner_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Follow Up Owner Id
+      - name: follow_up_overdue
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Follow Up Overdue
       - name: date_from
         in: query
         required: false
@@ -6463,6 +7262,14 @@ paths:
           - type: string
           - type: 'null'
           title: Status
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
       - name: limit
         in: query
         required: false
@@ -6586,6 +7393,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/calendar/bookings/{booking_id}/follow-up-governance:
+    post:
+      tags:
+      - Calendar
+      summary: Update Booking Follow Up Governance
+      description: Update no-show follow-up owner/due governance for a booking.
+      operationId: update_booking_follow_up_governance_console_v1_calendar_bookings__booking_id__follow_up_governance_post
+      parameters:
+      - name: booking_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Booking Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingFollowUpGovernanceRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/calendar/google/connect:
     get:
       tags:
@@ -6689,11 +7529,36 @@ components:
           title: Success
         booking:
           $ref: '#/components/schemas/BookingResponse'
+        case_effects:
+          items:
+            $ref: '#/components/schemas/BookingCaseEffect'
+          type: array
+          title: Case Effects
       type: object
       required:
       - success
       - booking
       title: BookingActionResponse
+    BookingCaseEffect:
+      properties:
+        case_id:
+          type: string
+          title: Case Id
+        action:
+          type: string
+          enum:
+          - reopened_for_booking_attention
+          - linked_rebooked_booking
+          title: Action
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - case_id
+      - action
+      - message
+      title: BookingCaseEffect
     BookingCreate:
       properties:
         specialist_id:
@@ -6732,12 +7597,32 @@ components:
           - type: string
           - type: 'null'
           title: Conversation Id
+        case_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Id
       type: object
       required:
       - specialist_id
       - start_at
       - end_at
       title: BookingCreate
+    BookingFollowUpGovernanceRequest:
+      properties:
+        owner_agent_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Owner Agent Id
+        due_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Due At
+      type: object
+      title: BookingFollowUpGovernanceRequest
     BookingNoShowFollowUpRequest:
       properties:
         result:
@@ -6819,11 +7704,49 @@ components:
           - type: string
           - type: 'null'
           title: No Show Followup Rebooked Appointment Id
+        follow_up_owner_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Follow Up Owner Id
+        follow_up_owner_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Follow Up Owner Name
+        follow_up_due_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Follow Up Due At
+        follow_up_overdue:
+          type: boolean
+          title: Follow Up Overdue
+          default: false
         google_event_id:
           anyOf:
           - type: string
           - type: 'null'
           title: Google Event Id
+        conversation_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Conversation Id
+        case_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Case Id
+        needs_action:
+          type: boolean
+          title: Needs Action
+          default: false
+        attention_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Attention Reason
         created_at:
           type: string
           title: Created At
@@ -6861,6 +7784,15 @@ components:
             $ref: '#/components/schemas/BookingResponse'
           type: array
           title: Items
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
       type: object
       required:
       - items
@@ -9533,6 +10465,16 @@ components:
         status:
           type: string
           title: Status
+        business_status_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Business Status Code
+        business_status_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Business Status Label
         trigger_type:
           type: string
           title: Trigger Type
@@ -9551,6 +10493,11 @@ components:
           - type: string
           - type: 'null'
           title: User Message
+        assigned_to_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assigned To Id
         assigned_to_name:
           anyOf:
           - type: string
@@ -9591,6 +10538,31 @@ components:
           - type: 'null'
           title: Sla Status
           default: ok
+        sla_action_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sla Action State
+        sla_overdue_minutes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Sla Overdue Minutes
+        priority_tier:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Priority Tier
+        attention_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Attention Reason
+        target_response_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Response At
         customer_name:
           anyOf:
           - type: string
@@ -9702,9 +10674,28 @@ components:
           - type: string
           - type: 'null'
           title: Human Lock By
+        snoozed_until:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Snoozed Until
+        snoozed_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Snoozed Reason
+        snoozed_by:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Snoozed By
         telegram_trail:
           anyOf:
           - $ref: '#/components/schemas/ConsoleTelegramTrail'
+          - type: 'null'
+        booking_summary:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCaseBookingSummary'
           - type: 'null'
       type: object
       required:
@@ -9725,6 +10716,10 @@ components:
           anyOf:
           - $ref: '#/components/schemas/ConsoleCaseActionSync'
           - type: 'null'
+        routing:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCaseRoutingDecision'
+          - type: 'null'
       type: object
       required:
       - success
@@ -9742,6 +10737,258 @@ components:
           - type: 'null'
       type: object
       title: ConsoleCaseActionSync
+    ConsoleCaseAssigneeListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleCaseAssigneeOption'
+          type: array
+          title: Items
+        routing:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCaseRoutingDecision'
+          - type: 'null'
+      type: object
+      required:
+      - items
+      title: ConsoleCaseAssigneeListResponse
+    ConsoleCaseAssigneeOption:
+      properties:
+        agent_id:
+          type: string
+          format: uuid
+          title: Agent Id
+        agent_name:
+          type: string
+          title: Agent Name
+        role:
+          type: string
+          title: Role
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        is_current:
+          type: boolean
+          title: Is Current
+          default: false
+        open_case_count:
+          type: integer
+          title: Open Case Count
+          default: 0
+        routing_status:
+          type: string
+          enum:
+          - available
+          - paused
+          - follow_up_only
+          title: Routing Status
+          default: available
+        routing_profile_source:
+          type: string
+          enum:
+          - default
+          - client
+          - branch
+          title: Routing Profile Source
+          default: default
+        max_open_case_count:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Open Case Count
+        at_capacity:
+          type: boolean
+          title: At Capacity
+          default: false
+        assignment_eligible:
+          type: boolean
+          title: Assignment Eligible
+          default: true
+        assignment_block_reason_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assignment Block Reason Code
+      type: object
+      required:
+      - agent_id
+      - agent_name
+      - role
+      title: ConsoleCaseAssigneeOption
+    ConsoleCaseBookingSummary:
+      properties:
+        booking_id:
+          type: string
+          format: uuid
+          title: Booking Id
+        status:
+          type: string
+          title: Status
+        start_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Start At
+        specialist_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Specialist Name
+        service_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Service Type
+        needs_action:
+          type: boolean
+          title: Needs Action
+          default: false
+        attention_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Attention Reason
+        no_show_followup_done:
+          type: boolean
+          title: No Show Followup Done
+          default: false
+        no_show_followup_result:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: No Show Followup Result
+        operator_summary:
+          type: string
+          title: Operator Summary
+      type: object
+      required:
+      - booking_id
+      - status
+      - operator_summary
+      title: ConsoleCaseBookingSummary
+    ConsoleCaseBulkActionRequest:
+      properties:
+        action:
+          type: string
+          enum:
+          - reassign
+          - snooze
+          - route
+          title: Action
+        case_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Case Ids
+        agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Id
+        policy:
+          anyOf:
+          - type: string
+            enum:
+            - least_open_cases
+            - follow_up_sla_balance
+          - type: 'null'
+          title: Policy
+        minutes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Minutes
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      required:
+      - action
+      - case_ids
+      title: ConsoleCaseBulkActionRequest
+    ConsoleCaseBulkActionResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        action:
+          type: string
+          enum:
+          - reassign
+          - snooze
+          - route
+          title: Action
+        requested_count:
+          type: integer
+          title: Requested Count
+        processed_count:
+          type: integer
+          title: Processed Count
+        skipped_count:
+          type: integer
+          title: Skipped Count
+        failed_count:
+          type: integer
+          title: Failed Count
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleCaseBulkActionResult'
+          type: array
+          title: Items
+      type: object
+      required:
+      - success
+      - action
+      - requested_count
+      - processed_count
+      - skipped_count
+      - failed_count
+      - items
+      title: ConsoleCaseBulkActionResponse
+    ConsoleCaseBulkActionResult:
+      properties:
+        case_id:
+          type: string
+          format: uuid
+          title: Case Id
+        status:
+          type: string
+          enum:
+          - processed
+          - skipped
+          - failed
+          title: Status
+        code:
+          type: string
+          title: Code
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+        case:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCase'
+          - type: 'null'
+        routing:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCaseRoutingDecision'
+          - type: 'null'
+      type: object
+      required:
+      - case_id
+      - status
+      - code
+      title: ConsoleCaseBulkActionResult
     ConsoleCaseListResponse:
       properties:
         items:
@@ -9767,6 +11014,131 @@ components:
       - items
       - has_more
       title: ConsoleCaseListResponse
+    ConsoleCaseReassignRequest:
+      properties:
+        agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Id
+        mode:
+          type: string
+          enum:
+          - manual
+          - policy
+          title: Mode
+          default: manual
+        policy:
+          anyOf:
+          - type: string
+            enum:
+            - least_open_cases
+            - follow_up_sla_balance
+          - type: 'null'
+          title: Policy
+      additionalProperties: false
+      type: object
+      title: ConsoleCaseReassignRequest
+    ConsoleCaseRoutingDecision:
+      properties:
+        policy:
+          type: string
+          enum:
+          - least_open_cases
+          - follow_up_sla_balance
+          title: Policy
+        recommended_agent_id:
+          type: string
+          format: uuid
+          title: Recommended Agent Id
+        recommended_agent_name:
+          type: string
+          title: Recommended Agent Name
+        recommended_open_case_count:
+          type: integer
+          title: Recommended Open Case Count
+          default: 0
+        current_agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Current Agent Id
+        current_agent_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Current Agent Name
+        current_open_case_count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Current Open Case Count
+        will_reassign:
+          type: boolean
+          title: Will Reassign
+          default: true
+        reason_code:
+          type: string
+          title: Reason Code
+        reason_summary:
+          type: string
+          title: Reason Summary
+        recommended_score:
+          type: integer
+          title: Recommended Score
+          default: 0
+        current_score:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Current Score
+        score_breakdown:
+          items:
+            $ref: '#/components/schemas/ConsoleCaseRoutingScoreFactor'
+          type: array
+          title: Score Breakdown
+          default: []
+      type: object
+      required:
+      - policy
+      - recommended_agent_id
+      - recommended_agent_name
+      - reason_code
+      - reason_summary
+      title: ConsoleCaseRoutingDecision
+    ConsoleCaseRoutingScoreFactor:
+      properties:
+        code:
+          type: string
+          title: Code
+        label:
+          type: string
+          title: Label
+        value:
+          type: integer
+          title: Value
+      type: object
+      required:
+      - code
+      - label
+      - value
+      title: ConsoleCaseRoutingScoreFactor
+    ConsoleCaseSnoozeRequest:
+      properties:
+        minutes:
+          type: integer
+          title: Minutes
+          default: 30
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      title: ConsoleCaseSnoozeRequest
     ConsoleClient:
       properties:
         id:
@@ -11950,6 +13322,10 @@ components:
         body:
           type: string
           title: Body
+        action:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleMacroAction'
+          - type: 'null'
         is_active:
           type: boolean
           title: Is Active
@@ -11971,6 +13347,32 @@ components:
       - body
       - is_active
       title: ConsoleMacro
+    ConsoleMacroAction:
+      properties:
+        type:
+          type: string
+          enum:
+          - take_case
+          - resolve_case
+          - return_to_bot
+          - reopen_case
+          - snooze_case
+          title: Type
+        minutes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Minutes
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      required:
+      - type
+      title: ConsoleMacroAction
     ConsoleMacroCreateRequest:
       properties:
         scope:
@@ -11985,6 +13387,10 @@ components:
         body:
           type: string
           title: Body
+        action:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleMacroAction'
+          - type: 'null'
         is_active:
           anyOf:
           - type: boolean
@@ -12005,6 +13411,36 @@ components:
       required:
       - macro
       title: ConsoleMacroCreateResponse
+    ConsoleMacroExecuteRequest:
+      properties:
+        case_id:
+          type: string
+          format: uuid
+          title: Case Id
+      additionalProperties: false
+      type: object
+      required:
+      - case_id
+      title: ConsoleMacroExecuteRequest
+    ConsoleMacroExecuteResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        macro:
+          $ref: '#/components/schemas/ConsoleMacro'
+        case:
+          $ref: '#/components/schemas/ConsoleCase'
+        sync:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleCaseActionSync'
+          - type: 'null'
+      type: object
+      required:
+      - success
+      - macro
+      - case
+      title: ConsoleMacroExecuteResponse
     ConsoleMacroListResponse:
       properties:
         items:
@@ -12028,6 +13464,10 @@ components:
           - type: string
           - type: 'null'
           title: Body
+        action:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleMacroAction'
+          - type: 'null'
         is_active:
           anyOf:
           - type: boolean
@@ -13241,6 +14681,48 @@ components:
             - need
           - type: 'null'
           title: First Response Status
+        queue_lag_seconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Queue Lag Seconds
+        queue_lag_status:
+          anyOf:
+          - type: string
+            enum:
+            - fact
+            - estimate
+            - need
+          - type: 'null'
+          title: Queue Lag Status
+        stale_view_rate:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Stale View Rate
+        stale_view_status:
+          anyOf:
+          - type: string
+            enum:
+            - fact
+            - estimate
+            - need
+          - type: 'null'
+          title: Stale View Status
+        case_action_apply_latency_seconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Case Action Apply Latency Seconds
+        case_action_apply_latency_status:
+          anyOf:
+          - type: string
+            enum:
+            - fact
+            - estimate
+            - need
+          - type: 'null'
+          title: Case Action Apply Latency Status
         after_hours_total:
           anyOf:
           - type: integer
@@ -15792,6 +17274,85 @@ components:
       - priority
       - recommended_action
       title: ConsoleProviderOpsQueueItem
+    ConsoleQueueStateCurrentRequest:
+      properties:
+        surface:
+          type: string
+          enum:
+          - cases
+          - calendar
+          title: Surface
+        case_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Case Id
+        conversation_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Conversation Id
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
+          default: 1
+        query_state:
+          type: object
+          title: Query State
+      additionalProperties: false
+      type: object
+      required:
+      - surface
+      title: ConsoleQueueStateCurrentRequest
+    ConsoleQueueStateCurrentResponse:
+      properties:
+        found:
+          type: boolean
+          title: Found
+          default: false
+        surface:
+          type: string
+          enum:
+          - cases
+          - calendar
+          title: Surface
+        selected_branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Selected Branch Id
+        case_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Case Id
+        conversation_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Conversation Id
+        version:
+          type: integer
+          title: Version
+          default: 1
+        query_state:
+          type: object
+          title: Query State
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - surface
+      title: ConsoleQueueStateCurrentResponse
     ConsoleReferencePack:
       properties:
         id:
@@ -16099,6 +17660,323 @@ components:
       - skipped
       - matched
       title: ConsoleReminderRetryResponse
+    ConsoleRoutingProfile:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        agent_id:
+          type: string
+          format: uuid
+          title: Agent Id
+        agent_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Name
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        scope:
+          type: string
+          enum:
+          - client
+          - branch
+          title: Scope
+          default: client
+        routing_status:
+          type: string
+          enum:
+          - available
+          - paused
+          - follow_up_only
+          title: Routing Status
+          default: available
+        max_open_case_count:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Open Case Count
+        updated_by_agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Updated By Agent Id
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - id
+      - agent_id
+      - client_id
+      title: ConsoleRoutingProfile
+    ConsoleRoutingProfileDeleteResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+      type: object
+      required:
+      - success
+      title: ConsoleRoutingProfileDeleteResponse
+    ConsoleRoutingProfileListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleRoutingProfile'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: ConsoleRoutingProfileListResponse
+    ConsoleRoutingProfileUpsertRequest:
+      properties:
+        agent_id:
+          type: string
+          format: uuid
+          title: Agent Id
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        routing_status:
+          type: string
+          enum:
+          - available
+          - paused
+          - follow_up_only
+          title: Routing Status
+          default: available
+        max_open_case_count:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Open Case Count
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      type: object
+      required:
+      - agent_id
+      - client_id
+      title: ConsoleRoutingProfileUpsertRequest
+    ConsoleSavedView:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        surface:
+          type: string
+          enum:
+          - cases
+          - calendar
+          title: Surface
+        scope:
+          type: string
+          enum:
+          - personal
+          - team
+          title: Scope
+          default: personal
+        name:
+          type: string
+          title: Name
+        version:
+          type: integer
+          title: Version
+          default: 1
+        query_state:
+          type: object
+          title: Query State
+        is_default:
+          type: boolean
+          title: Is Default
+          default: false
+        is_applicable:
+          type: boolean
+          title: Is Applicable
+          default: true
+        created_by_agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Created By Agent Id
+        target_branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Target Branch Id
+        target_role:
+          anyOf:
+          - type: string
+            enum:
+            - owner
+            - admin
+            - manager
+            - support
+            - platform_admin
+            - specialist
+            - viewer
+          - type: 'null'
+          title: Target Role
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - id
+      - surface
+      - name
+      title: ConsoleSavedView
+    ConsoleSavedViewCreateRequest:
+      properties:
+        surface:
+          type: string
+          enum:
+          - cases
+          - calendar
+          title: Surface
+        scope:
+          type: string
+          enum:
+          - personal
+          - team
+          title: Scope
+          default: personal
+        name:
+          type: string
+          title: Name
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
+          default: 1
+        query_state:
+          type: object
+          title: Query State
+        is_default:
+          type: boolean
+          title: Is Default
+          default: false
+        target_branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Target Branch Id
+        target_role:
+          anyOf:
+          - type: string
+            enum:
+            - owner
+            - admin
+            - manager
+            - support
+            - platform_admin
+            - specialist
+            - viewer
+          - type: 'null'
+          title: Target Role
+      additionalProperties: false
+      type: object
+      required:
+      - surface
+      - name
+      title: ConsoleSavedViewCreateRequest
+    ConsoleSavedViewListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleSavedView'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: ConsoleSavedViewListResponse
+    ConsoleSavedViewUpdateRequest:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Version
+        query_state:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Query State
+        is_default:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Default
+        target_branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Target Branch Id
+        target_role:
+          anyOf:
+          - type: string
+            enum:
+            - owner
+            - admin
+            - manager
+            - support
+            - platform_admin
+            - specialist
+            - viewer
+          - type: 'null'
+          title: Target Role
+      additionalProperties: false
+      type: object
+      title: ConsoleSavedViewUpdateRequest
     ConsoleSettingsResponse:
       properties:
         branches:
@@ -16750,6 +18628,11 @@ components:
           - type: string
           - type: 'null'
           title: Detail
+        operator_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Operator Message
       type: object
       required:
       - status

@@ -296,6 +296,12 @@ const INSIGHTS_TOOLTIPS = {
         "Как быстро отвечаем: обычно / почти всегда.",
     firstResponseP50:
         "Как быстро отвечаем обычно.",
+    queueLag:
+        "Операционный lag очереди: p50 времени до первого ответа менеджера.",
+    staleView:
+        "Прокси stale view: доля no_response_alert в inbound_conversations за день.",
+    caseActionLatency:
+        "Скорость применения действия менеджером: медиана ручного ответа.",
     afterHours:
         "Доля обращений вне рабочего времени, где бот ответил быстро.",
     escalationQuality:
@@ -403,6 +409,14 @@ export default function InsightsPage() {
     const responseDetail = metrics?.first_response_missing_total
         ? `Без ответа: ${formatCount(metrics?.first_response_missing_total)}`
         : null;
+    const queueLagHint = "Цель: p50 до первого ответа <= 3 минут.";
+    const staleViewDetail = metrics?.inbound_conversations_total !== undefined
+        ? `No-response: ${formatCount(metrics?.no_response_alert_total)} из ${formatCount(
+            metrics?.inbound_conversations_total,
+        )}`
+        : null;
+    const staleViewHint = "Прокси stale view по дневному snapshots metrics.";
+    const caseActionLatencyHint = "Цель: медианная скорость действия <= 5 минут.";
 
     const afterHoursDetail = metrics?.after_hours_covered !== undefined
         ? `Покрыто: ${formatCount(metrics?.after_hours_covered)} из ${formatCount(
@@ -575,6 +589,28 @@ export default function InsightsPage() {
                             status={metrics?.first_response_status}
                             detail={responseDetail}
                             tooltip={INSIGHTS_TOOLTIPS.firstResponse}
+                        />
+                        <KpiTile
+                            label="Queue lag (p50)"
+                            value={formatSeconds(metrics?.queue_lag_seconds)}
+                            status={metrics?.queue_lag_status}
+                            hint={queueLagHint}
+                            tooltip={INSIGHTS_TOOLTIPS.queueLag}
+                        />
+                        <KpiTile
+                            label="Stale view rate"
+                            value={formatPercent(metrics?.stale_view_rate)}
+                            status={metrics?.stale_view_status}
+                            detail={staleViewDetail}
+                            hint={staleViewHint}
+                            tooltip={INSIGHTS_TOOLTIPS.staleView}
+                        />
+                        <KpiTile
+                            label="Latency применения действия"
+                            value={formatSeconds(metrics?.case_action_apply_latency_seconds)}
+                            status={metrics?.case_action_apply_latency_status}
+                            hint={caseActionLatencyHint}
+                            tooltip={INSIGHTS_TOOLTIPS.caseActionLatency}
                         />
                         <KpiTile
                             label="После-часов покрытие"

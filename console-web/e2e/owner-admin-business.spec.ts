@@ -1,9 +1,14 @@
 import { expect, test } from '@playwright/test';
+import {
+    buildSignInUrl,
+    loginThroughKeycloak,
+    shouldStayOnBaseOrigin,
+} from './support/keycloak-auth';
 
 const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
 const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
-const stayOnBaseOrigin = /localhost|127\.0\.0\.1/.test(baseURL);
+const stayOnBaseOrigin = shouldStayOnBaseOrigin(baseURL);
 const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
 const isLocalBaseURL = /localhost|127\.0\.0\.1/.test(baseURL);
@@ -12,14 +17,6 @@ const quarantineLocal = !!process.env.CI && isLocalBaseURL;
 let resolvedBaseURL = baseURL;
 
 test.skip(quarantineLocal, 'Quarantine local CI owner/admin suite while stabilizing console-e2e.');
-
-function buildSignInUrl(origin: string, callbackOrigin = origin) {
-    return `${origin}/api/auth/signin?callbackUrl=${encodeURIComponent(callbackOrigin)}`;
-}
-
-function resolvePreferredOrigin(actionOrigin: string) {
-    return stayOnBaseOrigin ? baseURL : actionOrigin;
-}
 
 function urlPathPattern(path: string) {
     return new RegExp(`${path.replace(/\//g, '\\/')}(\\?|$)`);
@@ -30,11 +27,32 @@ async function resolveAuthOrigin(page: import('@playwright/test').Page) {
     const providerForm = page.locator('form[action*="keycloak"]').first();
     const action = await providerForm.getAttribute('action');
     const actionOrigin = action ? new URL(action).origin : baseURL;
-    resolvedBaseURL = resolvePreferredOrigin(actionOrigin);
+    resolvedBaseURL = stayOnBaseOrigin ? baseURL : actionOrigin;
 }
 
 async function gotoConsoleRoot(page: import('@playwright/test').Page) {
     await page.goto(resolvedBaseURL, { waitUntil: 'domcontentloaded' });
+}
+
+function keycloakAuthOptions() {
+    return {
+        baseURL,
+        consoleHostPattern,
+        keycloakHostPattern,
+        stayOnBaseOrigin,
+        authWaitTimeoutMs: 15000,
+        onResolvedOrigin: (origin: string) => {
+            resolvedBaseURL = origin;
+        },
+    };
+}
+
+async function loginWithSharedHelper(page: import('@playwright/test').Page) {
+    await loginThroughKeycloak(page, {
+        ...keycloakAuthOptions(),
+        loginUser,
+        loginPassword,
+    });
 }
 
 async function selectOptionIfNeeded(selector: import('@playwright/test').Locator) {
@@ -91,50 +109,6 @@ async function resolveSelectionGate(page: import('@playwright/test').Page) {
     await selectOptionIfNeeded(page.getByTestId('context-branch-select'));
 }
 
-async function startKeycloakLogin(page: import('@playwright/test').Page) {
-    await page.goto(buildSignInUrl(baseURL), { waitUntil: 'domcontentloaded' });
-    let providerForm = page.locator('form[action*="keycloak"]').first();
-    const action = await providerForm.getAttribute('action');
-    const actionOrigin = action ? new URL(action).origin : baseURL;
-    if (actionOrigin !== baseURL) {
-        const callbackOrigin = stayOnBaseOrigin ? baseURL : actionOrigin;
-        await page.goto(buildSignInUrl(actionOrigin, callbackOrigin), { waitUntil: 'domcontentloaded' });
-        providerForm = page.locator('form[action*="keycloak"]').first();
-    }
-    resolvedBaseURL = resolvePreferredOrigin(actionOrigin);
-    const providerButton = page.getByRole('button', { name: /sign in with keycloak/i });
-    if (await providerButton.isVisible().catch(() => false)) {
-        await providerButton.click();
-    } else if (await providerForm.isVisible().catch(() => false)) {
-        await providerForm.waitFor({ state: 'visible', timeout: 15000 });
-        const submitButton = providerForm
-            .locator('button[type="submit"], input[type="submit"]')
-            .first();
-        await submitButton.click();
-    } else {
-        return false;
-    }
-    await Promise.race([
-        page.waitForURL(keycloakHostPattern, { timeout: 15000 }),
-        page.waitForURL(consoleHostPattern, { timeout: 15000 }),
-    ]);
-    return true;
-}
-
-async function loginThroughKeycloak(page: import('@playwright/test').Page) {
-    const started = await startKeycloakLogin(page);
-    if (!started) {
-        return;
-    }
-    if (!(await page.locator('#username').isVisible().catch(() => false))) {
-        return;
-    }
-    await page.fill('#username', loginUser);
-    await page.fill('#password', loginPassword);
-    await page.click('#kc-login');
-    await page.waitForURL(consoleHostPattern);
-}
-
 async function ensureLoggedIn(page: import('@playwright/test').Page) {
     await resolveAuthOrigin(page);
     await gotoConsoleRoot(page);
@@ -142,10 +116,28 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     const logoutButton = page.getByTestId('logout-button');
     await page.waitForSelector('[data-testid="login-button"], [data-testid="logout-button"]', { timeout: 15000 });
     if (!(await logoutButton.isVisible().catch(() => false)) && (await loginButton.isVisible().catch(() => false))) {
-        await loginThroughKeycloak(page);
+        await loginWithSharedHelper(page);
         await gotoConsoleRoot(page);
     }
     await resolveSelectionGate(page);
+}
+
+async function resolveConsoleRole(page: import('@playwright/test').Page) {
+    return page.evaluate(async () => {
+        const response = await fetch('/api/proxy/me', { credentials: 'include' }).catch(() => null);
+        if (!response?.ok) {
+            return null;
+        }
+        const payload = await response.json().catch(() => null) as { agent?: { role?: string } } | null;
+        return payload?.agent?.role ?? null;
+    });
+}
+
+async function requireOwnerAdminRoleOrSkip(page: import('@playwright/test').Page) {
+    const role = await resolveConsoleRole(page);
+    if (role && role !== 'owner' && role !== 'admin') {
+        test.skip(true, `owner/admin credentials required for this lane; current role=${role}`);
+    }
 }
 
 test.describe('Owner/Admin Business Control', () => {
@@ -155,6 +147,7 @@ test.describe('Owner/Admin Business Control', () => {
     });
 
     test('should expose owner/admin control navigation and business summary @smoke', async ({ page }) => {
+        await requireOwnerAdminRoleOrSkip(page);
         const navModeToggle = page.getByTestId('nav-owner-admin-toggle');
         if (!(await navModeToggle.isVisible().catch(() => false))) {
             await page.getByTestId('nav-toggle').click();
@@ -186,6 +179,7 @@ test.describe('Owner/Admin Business Control', () => {
     });
 
     test('should render data-trust and team-performance operational surfaces @smoke', async ({ page }) => {
+        await requireOwnerAdminRoleOrSkip(page);
         await page.getByTestId('nav-data-trust').click();
         await expect(page).toHaveURL(urlPathPattern('/business/data-trust'));
         await expect(page.getByTestId('data-trust-title')).toBeVisible();
@@ -226,6 +220,7 @@ test.describe('Owner/Admin Business Control', () => {
     });
 
     test('should render simple owner settings and explainability surface @smoke', async ({ page }) => {
+        await requireOwnerAdminRoleOrSkip(page);
         await page.getByTestId('nav-settings').click();
         await expect(page).toHaveURL(urlPathPattern('/settings'));
         await expect(page.getByTestId('settings-simple-card')).toBeVisible();

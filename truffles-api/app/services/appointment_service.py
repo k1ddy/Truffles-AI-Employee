@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -236,6 +237,7 @@ class SchedulingService:
         notes: Optional[str] = None,
         created_by: Optional[UUID] = None,
         conversation_id: Optional[UUID] = None,
+        case_id: Optional[UUID] = None,
         status: str = "CONFIRMED",
         source: str = "console",
         confirmation_policy: Optional[str] = None,
@@ -264,6 +266,7 @@ class SchedulingService:
             branch_id=branch_id,
             specialist_id=specialist_id,
             conversation_id=conversation_id,
+            case_id=case_id,
             status=status,
             source=source,
             confirmation_policy=resolved_confirmation,
@@ -496,9 +499,18 @@ class SchedulingService:
         client_id: UUID,
         specialist_id: Optional[UUID] = None,
         branch_ids: Optional[List[UUID]] = None,
+        conversation_id: Optional[UUID] = None,
+        case_id: Optional[UUID] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
         status: Optional[str] = None,
+        status_filters: Optional[List[str]] = None,
+        lane: Optional[str] = None,
+        needs_action: Optional[bool] = None,
+        follow_up_owner_id: Optional[UUID] = None,
+        follow_up_overdue: Optional[bool] = None,
+        cursor_start_at: Optional[datetime] = None,
+        cursor_id: Optional[UUID] = None,
         limit: int = 50,
     ) -> List[Appointment]:
         query = self.db.query(Appointment).filter(Appointment.client_id == client_id)
@@ -507,14 +519,81 @@ class SchedulingService:
             query = query.filter(Appointment.specialist_id == specialist_id)
         if branch_ids:
             query = query.filter(Appointment.branch_id.in_(branch_ids))
+        if conversation_id:
+            query = query.filter(Appointment.conversation_id == conversation_id)
+        if case_id:
+            query = query.filter(Appointment.case_id == case_id)
         if date_from:
             query = query.filter(Appointment.start_at >= date_from)
         if date_to:
             query = query.filter(Appointment.start_at <= date_to)
+        if status_filters:
+            query = query.filter(Appointment.status.in_(status_filters))
         if status:
             query = query.filter(Appointment.status == status)
+        if lane not in (None, "all", "attention"):
+            raise ValueError(f"Unsupported lane: {lane}")
 
-        return query.order_by(Appointment.start_at.desc()).limit(limit).all()
+        followup_exists = self.db.query(AppointmentAudit.id).filter(
+            AppointmentAudit.appointment_id == Appointment.id,
+            AppointmentAudit.action == "no_show_followup",
+        ).exists()
+        pending_no_show_followup_expr = and_(
+            Appointment.status == "NO_SHOW",
+            ~followup_exists,
+        )
+        needs_action_expr = or_(
+            Appointment.status.in_(["PENDING_CONFIRMATION", "RESCHEDULE_REQUESTED", "HOLD"]),
+            pending_no_show_followup_expr,
+        )
+
+        if lane == "attention":
+            query = query.filter(needs_action_expr)
+
+        if needs_action is True:
+            query = query.filter(needs_action_expr)
+        elif needs_action is False:
+            query = query.filter(~needs_action_expr)
+
+        if follow_up_owner_id:
+            query = query.filter(
+                pending_no_show_followup_expr,
+                Appointment.follow_up_owner_id == follow_up_owner_id,
+            )
+
+        if follow_up_overdue is not None:
+            now = datetime.now(timezone.utc)
+            overdue_expr = and_(
+                pending_no_show_followup_expr,
+                Appointment.follow_up_due_at.is_not(None),
+                Appointment.follow_up_due_at < now,
+            )
+            if follow_up_overdue:
+                query = query.filter(overdue_expr)
+            else:
+                query = query.filter(
+                    pending_no_show_followup_expr,
+                    or_(
+                        Appointment.follow_up_due_at.is_(None),
+                        Appointment.follow_up_due_at >= now,
+                    ),
+                )
+
+        if cursor_start_at:
+            if cursor_id:
+                query = query.filter(
+                    or_(
+                        Appointment.start_at < cursor_start_at,
+                        and_(
+                            Appointment.start_at == cursor_start_at,
+                            Appointment.id < cursor_id,
+                        ),
+                    )
+                )
+            else:
+                query = query.filter(Appointment.start_at < cursor_start_at)
+
+        return query.order_by(Appointment.start_at.desc(), Appointment.id.desc()).limit(limit).all()
 
     @staticmethod
     def _times_overlap(start1: datetime, end1: datetime, start2: datetime, end2: datetime) -> bool:

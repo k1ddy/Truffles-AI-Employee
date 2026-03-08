@@ -496,6 +496,30 @@ const apiClient = createApiClient();
 export type Case = components["schemas"]["ConsoleCase"];
 export type CaseListResponse = components["schemas"]["ConsoleCaseListResponse"];
 export type CaseActionResponse = components["schemas"]["ConsoleCaseActionResponse"];
+export type CaseAssigneeOption = components["schemas"]["ConsoleCaseAssigneeOption"];
+export type CaseAssigneeListResponse = components["schemas"]["ConsoleCaseAssigneeListResponse"];
+export type CaseBulkActionRequest = components["schemas"]["ConsoleCaseBulkActionRequest"];
+export type CaseBulkActionResponse = components["schemas"]["ConsoleCaseBulkActionResponse"];
+export type CaseBulkActionResult = components["schemas"]["ConsoleCaseBulkActionResult"];
+export type CaseReassignRequest = components["schemas"]["ConsoleCaseReassignRequest"];
+export type CaseSnoozeRequest = components["schemas"]["ConsoleCaseSnoozeRequest"];
+export type CaseRoutingPolicy = "least_open_cases" | "follow_up_sla_balance";
+export const DEFAULT_CASE_ROUTING_POLICY: CaseRoutingPolicy = "follow_up_sla_balance";
+export type QueueStateSurface = components["schemas"]["ConsoleQueueStateCurrentRequest"]["surface"];
+export type QueueSavedView = components["schemas"]["ConsoleSavedView"];
+export type QueueSavedViewCreateRequest = components["schemas"]["ConsoleSavedViewCreateRequest"];
+export type QueueSavedViewListResponse = components["schemas"]["ConsoleSavedViewListResponse"];
+export type QueueSavedViewUpdateRequest = components["schemas"]["ConsoleSavedViewUpdateRequest"];
+export type RoutingProfile = components["schemas"]["ConsoleRoutingProfile"];
+export type RoutingProfileDeleteResponse = components["schemas"]["ConsoleRoutingProfileDeleteResponse"];
+export type RoutingProfileListResponse = components["schemas"]["ConsoleRoutingProfileListResponse"];
+export type RoutingProfileStatus = components["schemas"]["ConsoleRoutingProfile"]["routing_status"];
+export type QueueSavedViewCreateInput = Omit<QueueSavedViewCreateRequest, "query_state"> & {
+    query_state?: Record<string, unknown>;
+};
+export type QueueSavedViewUpdateInput = Omit<QueueSavedViewUpdateRequest, "query_state"> & {
+    query_state?: Record<string, unknown>;
+};
 export type Message = components["schemas"]["ConsoleMessage"];
 export type MessageListResponse = components["schemas"]["ConsoleMessageListResponse"];
 export type OutreachDeliveryStatus = "queued" | "delivered" | "failed";
@@ -540,6 +564,8 @@ export type InboxMacroListResponse = components["schemas"]["ConsoleMacroListResp
 export type InboxMacroCreateRequest = components["schemas"]["ConsoleMacroCreateRequest"];
 export type InboxMacroCreateResponse = components["schemas"]["ConsoleMacroCreateResponse"];
 export type InboxMacroUpdateRequest = components["schemas"]["ConsoleMacroUpdateRequest"];
+export type InboxMacroExecuteRequest = components["schemas"]["ConsoleMacroExecuteRequest"];
+export type InboxMacroExecuteResponse = components["schemas"]["ConsoleMacroExecuteResponse"];
 export type Client = components["schemas"]["ConsoleClient"];
 export type MeResponse = components["schemas"]["ConsoleMeResponse"];
 export type Agent = components["schemas"]["ConsoleAgent"];
@@ -1234,17 +1260,54 @@ export const casesApi = {
     get: (caseId: string) =>
         apiClient.get<Case>(`/cases/${caseId}`),
 
+    listQueueAssignees: (branchId?: string) =>
+        apiClient.get<CaseAssigneeListResponse>("/cases/assignees", {
+            params: branchId ? { branch_id: branchId } : undefined,
+        }),
+
+    listAssignees: (caseId: string, policy?: CaseRoutingPolicy) =>
+        apiClient.get<CaseAssigneeListResponse>(`/cases/${caseId}/assignees`, {
+            params: policy ? { policy } : undefined,
+        }),
+
     take: (caseId: string) =>
         apiClient.post<CaseActionResponse>(`/cases/${caseId}/take`),
 
+    reassign: (caseId: string, data: CaseReassignRequest) =>
+        apiClient.post<CaseActionResponse>(`/cases/${caseId}/reassign`, data),
+
+    snooze: (caseId: string, data: CaseSnoozeRequest) =>
+        apiClient.post<CaseActionResponse>(`/cases/${caseId}/snooze`, data),
+
+    bulkAction: (data: CaseBulkActionRequest) =>
+        apiClient.post<CaseBulkActionResponse>("/cases/bulk", data),
+
     resolve: (caseId: string) =>
         apiClient.post<CaseActionResponse>(`/cases/${caseId}/resolve`),
+
+    reopen: (caseId: string) =>
+        apiClient.post<CaseActionResponse>(`/cases/${caseId}/reopen`),
 
     returnToBot: (caseId: string) =>
         apiClient.post<CaseActionResponse>(`/cases/${caseId}/return`),
 
     getMessages: (caseId: string, params?: { cursor?: string; limit?: number }) =>
         apiClient.get<MessageListResponse>(`/cases/${caseId}/messages`, { params }),
+};
+
+export const queueStateApi = {
+    listViews: (surface: QueueStateSurface) =>
+        apiClient.get<QueueSavedViewListResponse>("/queue-state/views", {
+            params: { surface },
+        }),
+    getView: (viewId: string) =>
+        apiClient.get<QueueSavedView>(`/queue-state/views/${viewId}`),
+    createView: (data: QueueSavedViewCreateInput) =>
+        apiClient.post<QueueSavedView>("/queue-state/views", data as QueueSavedViewCreateRequest),
+    updateView: (viewId: string, data: QueueSavedViewUpdateInput) =>
+        apiClient.patch<QueueSavedView>(`/queue-state/views/${viewId}`, data as QueueSavedViewUpdateRequest),
+    deleteView: (viewId: string) =>
+        apiClient.delete<{ success: boolean }>(`/queue-state/views/${viewId}`),
 };
 
 /** Inbox macros endpoints */
@@ -1260,6 +1323,10 @@ export const inboxApi = {
         }),
     updateMacro: (macroId: string, data: InboxMacroUpdateRequest, branchId?: string | null) =>
         apiClient.patch<InboxMacro>(`/inbox/macros/${macroId}`, data, {
+            headers: branchId ? { "X-Branch-Id": branchId } : undefined,
+        }),
+    executeMacro: (macroId: string, data: InboxMacroExecuteRequest, branchId?: string | null) =>
+        apiClient.post<InboxMacroExecuteResponse>(`/inbox/macros/${macroId}/execute`, data, {
             headers: branchId ? { "X-Branch-Id": branchId } : undefined,
         }),
 };
@@ -1431,6 +1498,15 @@ export const adminApi = {
         apiClient.post<IntegrationBranchActionResponse>(`/admin/integrations/${branchId}/reconcile`, data),
     listMemberships: (params?: ListMembershipsParams) =>
         apiClient.get<components["schemas"]["ConsoleMembershipListResponse"]>("/admin/memberships", { params }),
+    listRoutingProfiles: (params: { client_id: string; agent_id?: string; branch_id?: string }) =>
+        apiClient.get<RoutingProfileListResponse>("/admin/routing-profiles", { params }),
+    upsertRoutingProfile: (data: components["schemas"]["ConsoleRoutingProfileUpsertRequest"]) =>
+        apiClient.put<RoutingProfile>("/admin/routing-profiles", data),
+    deleteRoutingProfile: (
+        agentId: string,
+        params: { client_id: string; branch_id?: string; reason?: string },
+    ) =>
+        apiClient.delete<RoutingProfileDeleteResponse>(`/admin/routing-profiles/${agentId}`, { params }),
     createCompany: (data: components["schemas"]["ConsoleCompanyCreateRequest"]) =>
         apiClient.post<components["schemas"]["ConsoleCompanyCreateResponse"]>("/admin/companies", data),
     patchCompany: (companyId: string, data: components["schemas"]["ConsoleCompanyUpdateRequest"]) =>

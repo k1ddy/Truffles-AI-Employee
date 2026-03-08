@@ -63,6 +63,9 @@ ConsoleAgentRole = Literal[
     "viewer",
 ]
 ConsoleMembershipScope = Literal["company", "client", "branch"]
+ConsoleRoutingProfileScope = Literal["client", "branch"]
+ConsoleRoutingProfileSource = Literal["default", "client", "branch"]
+ConsoleRoutingStatus = Literal["available", "paused", "follow_up_only"]
 ConsoleGoLiveState = Literal["pending", "approved", "rejected"]
 
 
@@ -567,11 +570,27 @@ class ConsoleMarketingCampaignLifecycleActionRequest(ConsoleRequestModel):
     reason: Optional[StrictStr] = None
 
 
+ConsoleMacroActionType = Literal[
+    "take_case",
+    "resolve_case",
+    "return_to_bot",
+    "reopen_case",
+    "snooze_case",
+]
+
+
+class ConsoleMacroAction(ConsoleRequestModel):
+    type: ConsoleMacroActionType
+    minutes: Optional[int] = None
+    reason: Optional[StrictStr] = None
+
+
 class ConsoleMacro(BaseModel):
     id: UUID
     scope: Literal["personal", "team"]
     label: str
     body: str
+    action: Optional[ConsoleMacroAction] = None
     is_active: bool
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -585,6 +604,7 @@ class ConsoleMacroCreateRequest(BaseModel):
     scope: Literal["personal", "team"]
     label: str
     body: str
+    action: Optional[ConsoleMacroAction] = None
     is_active: Optional[bool] = True
 
 
@@ -595,6 +615,7 @@ class ConsoleMacroCreateResponse(BaseModel):
 class ConsoleMacroUpdateRequest(BaseModel):
     label: Optional[str] = None
     body: Optional[str] = None
+    action: Optional[ConsoleMacroAction] = None
     is_active: Optional[bool] = None
 
 
@@ -930,6 +951,37 @@ class ConsoleMembershipUpdateRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class ConsoleRoutingProfile(BaseModel):
+    id: UUID
+    agent_id: UUID
+    agent_name: Optional[str] = None
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    scope: ConsoleRoutingProfileScope = "client"
+    routing_status: ConsoleRoutingStatus = "available"
+    max_open_case_count: Optional[int] = Field(default=None, ge=1)
+    updated_by_agent_id: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleRoutingProfileListResponse(BaseModel):
+    items: list[ConsoleRoutingProfile]
+
+
+class ConsoleRoutingProfileDeleteResponse(BaseModel):
+    success: bool
+
+
+class ConsoleRoutingProfileUpsertRequest(BaseModel):
+    agent_id: UUID
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    routing_status: ConsoleRoutingStatus = "available"
+    max_open_case_count: Optional[int] = Field(default=None, ge=1)
+    reason: Optional[str] = None
+
+
 class ConsoleAgentLifecycleActionRequest(BaseModel):
     reason: str
 
@@ -976,14 +1028,30 @@ class ConsoleTelegramTrail(BaseModel):
     delivered_at: Optional[str] = None
 
 
+class ConsoleCaseBookingSummary(BaseModel):
+    booking_id: UUID
+    status: str
+    start_at: Optional[str] = None
+    specialist_name: Optional[str] = None
+    service_type: Optional[str] = None
+    needs_action: bool = False
+    attention_reason: Optional[str] = None
+    no_show_followup_done: bool = False
+    no_show_followup_result: Optional[str] = None
+    operator_summary: str
+
+
 class ConsoleCase(BaseModel):
     id: UUID
     conversation_id: UUID
     status: str
+    business_status_code: Optional[str] = None
+    business_status_label: Optional[str] = None
     trigger_type: str
     trigger_value: Optional[str] = None
     context_summary: Optional[str] = None
     user_message: Optional[str] = None
+    assigned_to_id: Optional[str] = None
     assigned_to_name: Optional[str] = None
     first_response_at: Optional[str] = None
     resolved_at: Optional[str] = None
@@ -992,6 +1060,11 @@ class ConsoleCase(BaseModel):
     channel: Optional[str] = None
     created_at: str
     sla_status: Optional[str] = "ok"  # ok, warning, breached
+    sla_action_state: Optional[str] = None  # reply_due, overdue, waiting_client, delivery_issue, pending_outbox, resolved
+    sla_overdue_minutes: Optional[int] = None
+    priority_tier: Optional[str] = None  # low, normal, high, urgent
+    attention_reason: Optional[str] = None
+    target_response_at: Optional[str] = None
     # Customer info
     customer_name: Optional[str] = None
     customer_phone: Optional[str] = None
@@ -1017,8 +1090,14 @@ class ConsoleCase(BaseModel):
     human_lock_source: Optional[str] = None
     human_lock_reason: Optional[str] = None
     human_lock_by: Optional[str] = None
+    # Case snooze
+    snoozed_until: Optional[str] = None
+    snoozed_reason: Optional[str] = None
+    snoozed_by: Optional[str] = None
     # Telegram trail (for escalation visibility)
     telegram_trail: Optional[ConsoleTelegramTrail] = None
+    # Linked booking semantic summary
+    booking_summary: Optional[ConsoleCaseBookingSummary] = None
 
 
 class ConsoleCaseListResponse(BaseModel):
@@ -1028,9 +1107,82 @@ class ConsoleCaseListResponse(BaseModel):
     total: Optional[int] = None
 
 
+ConsoleQueueStateSurface = Literal["cases", "calendar"]
+ConsoleSavedViewScope = Literal["personal", "team"]
+ConsoleSavedViewTargetRole = Literal[
+    "platform_admin",
+    "owner",
+    "admin",
+    "manager",
+    "support",
+    "specialist",
+    "viewer",
+]
+
+
+class ConsoleQueueStateCurrentRequest(ConsoleRequestModel):
+    surface: ConsoleQueueStateSurface
+    case_id: Optional[UUID] = None
+    conversation_id: Optional[UUID] = None
+    version: int = Field(default=1, ge=1)
+    query_state: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConsoleQueueStateCurrentResponse(BaseModel):
+    found: bool = False
+    surface: ConsoleQueueStateSurface
+    selected_branch_id: Optional[UUID] = None
+    case_id: Optional[UUID] = None
+    conversation_id: Optional[UUID] = None
+    version: int = 1
+    query_state: dict[str, Any] = Field(default_factory=dict)
+    updated_at: Optional[str] = None
+
+
+class ConsoleSavedView(BaseModel):
+    id: UUID
+    surface: ConsoleQueueStateSurface
+    scope: ConsoleSavedViewScope = "personal"
+    name: str
+    version: int = 1
+    query_state: dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+    is_applicable: bool = True
+    created_by_agent_id: Optional[UUID] = None
+    target_branch_id: Optional[UUID] = None
+    target_role: Optional[ConsoleSavedViewTargetRole] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleSavedViewListResponse(BaseModel):
+    items: list[ConsoleSavedView]
+
+
+class ConsoleSavedViewCreateRequest(ConsoleRequestModel):
+    surface: ConsoleQueueStateSurface
+    scope: ConsoleSavedViewScope = "personal"
+    name: StrictStr
+    version: int = Field(default=1, ge=1)
+    query_state: dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+    target_branch_id: Optional[UUID] = None
+    target_role: Optional[ConsoleSavedViewTargetRole] = None
+
+
+class ConsoleSavedViewUpdateRequest(ConsoleRequestModel):
+    name: Optional[StrictStr] = None
+    version: Optional[int] = Field(default=None, ge=1)
+    query_state: Optional[dict[str, Any]] = None
+    is_default: Optional[bool] = None
+    target_branch_id: Optional[UUID] = None
+    target_role: Optional[ConsoleSavedViewTargetRole] = None
+
+
 class ConsoleSyncStatus(BaseModel):
     status: Literal["ok", "skipped", "failed"]
     detail: Optional[str] = None
+    operator_message: Optional[str] = None
 
 
 class ConsoleCaseActionSync(BaseModel):
@@ -1038,10 +1190,109 @@ class ConsoleCaseActionSync(BaseModel):
     client_notify: Optional[ConsoleSyncStatus] = None
 
 
+ConsoleCaseRoutingPolicyType = Literal["least_open_cases", "follow_up_sla_balance"]
+
+
+class ConsoleCaseRoutingScoreFactor(BaseModel):
+    code: str
+    label: str
+    value: int
+
+
+class ConsoleCaseRoutingDecision(BaseModel):
+    policy: ConsoleCaseRoutingPolicyType
+    recommended_agent_id: UUID
+    recommended_agent_name: str
+    recommended_open_case_count: int = 0
+    current_agent_id: Optional[UUID] = None
+    current_agent_name: Optional[str] = None
+    current_open_case_count: Optional[int] = None
+    will_reassign: bool = True
+    reason_code: str
+    reason_summary: str
+    recommended_score: int = 0
+    current_score: Optional[int] = None
+    score_breakdown: list[ConsoleCaseRoutingScoreFactor] = []
+
+
 class ConsoleCaseActionResponse(BaseModel):
     success: bool
     case: ConsoleCase
     sync: Optional[ConsoleCaseActionSync] = None
+    routing: Optional[ConsoleCaseRoutingDecision] = None
+
+
+class ConsoleMacroExecuteRequest(ConsoleRequestModel):
+    case_id: UUID
+
+
+class ConsoleMacroExecuteResponse(BaseModel):
+    success: bool
+    macro: ConsoleMacro
+    case: ConsoleCase
+    sync: Optional[ConsoleCaseActionSync] = None
+
+
+class ConsoleCaseAssigneeOption(BaseModel):
+    agent_id: UUID
+    agent_name: str
+    role: str
+    branch_id: Optional[UUID] = None
+    is_current: bool = False
+    open_case_count: int = 0
+    routing_status: ConsoleRoutingStatus = "available"
+    routing_profile_source: ConsoleRoutingProfileSource = "default"
+    max_open_case_count: Optional[int] = Field(default=None, ge=1)
+    at_capacity: bool = False
+    assignment_eligible: bool = True
+    assignment_block_reason_code: Optional[str] = None
+
+
+class ConsoleCaseAssigneeListResponse(BaseModel):
+    items: list[ConsoleCaseAssigneeOption]
+    routing: Optional[ConsoleCaseRoutingDecision] = None
+
+
+class ConsoleCaseReassignRequest(ConsoleRequestModel):
+    agent_id: Optional[UUID] = None
+    mode: Literal["manual", "policy"] = "manual"
+    policy: Optional[ConsoleCaseRoutingPolicyType] = None
+
+
+class ConsoleCaseSnoozeRequest(ConsoleRequestModel):
+    minutes: int = 30
+    reason: Optional[StrictStr] = None
+
+
+ConsoleCaseBulkActionType = Literal["reassign", "snooze", "route"]
+
+
+class ConsoleCaseBulkActionRequest(ConsoleRequestModel):
+    action: ConsoleCaseBulkActionType
+    case_ids: list[UUID]
+    agent_id: Optional[UUID] = None
+    policy: Optional[ConsoleCaseRoutingPolicyType] = None
+    minutes: Optional[int] = None
+    reason: Optional[StrictStr] = None
+
+
+class ConsoleCaseBulkActionResult(BaseModel):
+    case_id: UUID
+    status: Literal["processed", "skipped", "failed"]
+    code: str
+    message: Optional[str] = None
+    case: Optional[ConsoleCase] = None
+    routing: Optional[ConsoleCaseRoutingDecision] = None
+
+
+class ConsoleCaseBulkActionResponse(BaseModel):
+    success: bool
+    action: ConsoleCaseBulkActionType
+    requested_count: int
+    processed_count: int
+    skipped_count: int
+    failed_count: int
+    items: list[ConsoleCaseBulkActionResult]
 
 
 class ConsoleMessageListResponse(BaseModel):
@@ -2694,6 +2945,12 @@ class ConsoleMetricsDailyResponse(BaseModel):
     first_response_p90_seconds: Optional[float] = None
     first_response_missing_total: Optional[int] = None
     first_response_status: Optional[KpiStatus] = None
+    queue_lag_seconds: Optional[float] = None
+    queue_lag_status: Optional[KpiStatus] = None
+    stale_view_rate: Optional[float] = None
+    stale_view_status: Optional[KpiStatus] = None
+    case_action_apply_latency_seconds: Optional[float] = None
+    case_action_apply_latency_status: Optional[KpiStatus] = None
     after_hours_total: Optional[int] = None
     after_hours_covered: Optional[int] = None
     after_hours_missing_total: Optional[int] = None
