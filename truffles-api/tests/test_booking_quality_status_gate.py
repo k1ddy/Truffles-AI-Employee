@@ -39,6 +39,10 @@ def _load_quality_helpers():
         "LLM_QUALITY_HARDCODE_SCOPE_SERVICE_SUFFIXES",
         "LLM_QUALITY_MATRIX_MIN_NON_SALON_PACKS",
         "LLM_QUALITY_MATRIX_NON_SALON_EXCLUDED_SLUGS",
+        "LLM_QUALITY_OPEN_WORLD_REQUIRED_LANGUAGE_PROFILES",
+        "LLM_QUALITY_OPEN_WORLD_REQUIRED_SURFACE_NOISE_PROFILES",
+        "LLM_QUALITY_OPEN_WORLD_REQUIRED_SEMANTIC_VARIATION_PROFILES",
+        "LLM_QUALITY_OPEN_WORLD_REQUIRED_SLOT_FORMAT_PROFILES",
         "LLM_QUALITY_HARDCODE_ALLOW_MARKER",
         "LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS",
         "LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE",
@@ -66,6 +70,7 @@ def _load_quality_helpers():
         "_llm_quality_baseline_is_canonical",
         "_llm_quality_build_infra_status",
         "_llm_quality_build_delivery_acceptance_status",
+        "_llm_quality_compute_invariant_metrics",
         "_llm_quality_check_thresholds",
         "_llm_quality_check_regression",
         "_llm_quality_collect_override_reason_codes",
@@ -90,6 +95,9 @@ def _load_quality_helpers():
         "_llm_quality_build_quality_constant_status",
         "_parse_csv_values",
         "_llm_quality_normalize_matrix_client_slugs",
+        "_llm_quality_collect_scenario_profile_coverage",
+        "_llm_quality_build_open_world_profile_status",
+        "_llm_quality_build_p6_acceptance_closure_status",
         "_llm_quality_build_cross_domain_matrix_contract_status",
         "_llm_quality_collect_workaround_marker_hits",
         "_llm_quality_collect_workaround_register_ids",
@@ -375,6 +383,66 @@ def test_threshold_defaults_are_aligned_with_acceptance_contract():
 
     assert thresholds["strict_pass_rate"] == 0.95
     assert thresholds["degraded_fallback_rate"] == 0.05
+    assert thresholds["fact_without_evidence_rate"] == 0.0
+    assert thresholds["irrelevant_fact_rate"] == 0.0
+    assert thresholds["booking_commit_without_required_contact"] == 0.0
+    assert thresholds["semantic_override_rate"] == 0.0
+    assert thresholds["stale_state_leak_rate"] == 0.0
+
+
+def test_compute_invariant_metrics_collects_required_rates():
+    ns = _load_quality_helpers()
+    compute = ns["_llm_quality_compute_invariant_metrics"]
+
+    metrics = compute(
+        failure_counts={
+            "fact_without_evidence": 2,
+            "irrelevant_fact": 1,
+            "booking_commit_without_required_contact": 1,
+            "stale_state_leak": 3,
+        },
+        stats={"turns": 20},
+        rewrite_governance={"rewrite_budget_turns": 2, "policy_core_turns": 10},
+    )
+
+    assert metrics["counts"]["fact_without_evidence"] == 2
+    assert metrics["rates"]["fact_without_evidence_rate"] == 0.1
+    assert metrics["rates"]["irrelevant_fact_rate"] == 0.05
+    assert metrics["rates"]["booking_commit_without_required_contact"] == 0.05
+    assert metrics["rates"]["semantic_override_rate"] == 0.2
+    assert metrics["rates"]["stale_state_leak_rate"] == 0.15
+
+
+def test_thresholds_include_llm_first_invariant_gates():
+    ns = _load_quality_helpers()
+    check_thresholds = ns["_llm_quality_check_thresholds"]
+
+    metrics = {
+        "rates": {
+            "reply_rate": 1.0,
+            "strict_pass_rate": 1.0,
+            "expected_reply_rate": 1.0,
+            "info_answer_rate": 1.0,
+            "hard_fail_rate": 0.0,
+            "unknown_state_rate": 0.0,
+            "degraded_fallback_rate": 0.0,
+            "booking_slot_progress_rate": 1.0,
+            "handoff_correct_rate": 1.0,
+            "fact_without_evidence_rate": 0.1,
+            "irrelevant_fact_rate": 0.1,
+            "booking_commit_without_required_contact": 0.1,
+            "semantic_override_rate": 0.1,
+            "stale_state_leak_rate": 0.1,
+        }
+    }
+
+    _results, breaches = check_thresholds(metrics)
+
+    assert "fact_without_evidence_rate" in breaches
+    assert "irrelevant_fact_rate" in breaches
+    assert "booking_commit_without_required_contact" in breaches
+    assert "semantic_override_rate" in breaches
+    assert "stale_state_leak_rate" in breaches
 
 
 def test_regression_checks_degraded_fallback_rate_as_max_direction():
@@ -823,6 +891,111 @@ def test_run_economy_allows_lock_with_unchanged_canonical_fingerprint():
     assert "lock_fingerprint_unchanged_after_non_canonical" not in allowed["reasons"]
 
 
+def test_run_economy_allows_non_canonical_lock_retry_for_process_stop_reason():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    initial = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    lock_fingerprint = initial["lock_fingerprint"]
+    assert isinstance(lock_fingerprint, str) and lock_fingerprint
+
+    allowed = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        allow_non_canonical_lock_retry=True,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        previous_lock_state={
+            "lock_fingerprint": lock_fingerprint,
+            "canonical_valid": False,
+            "stop_reason": "invalid_quality_constant_preflight",
+            "run_id": "lock-process-fail",
+        },
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    assert allowed["valid"] is True
+    assert allowed["non_canonical_lock_retry_eligible"] is True
+    assert allowed["non_canonical_lock_retry_applied"] is True
+    assert "lock_fingerprint_unchanged_after_non_canonical" not in allowed["reasons"]
+
+
+def test_run_economy_blocks_non_canonical_lock_retry_for_non_process_stop_reason():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    initial = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    lock_fingerprint = initial["lock_fingerprint"]
+    assert isinstance(lock_fingerprint, str) and lock_fingerprint
+
+    blocked = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        allow_non_canonical_lock_retry=True,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        previous_lock_state={
+            "lock_fingerprint": lock_fingerprint,
+            "canonical_valid": False,
+            "stop_reason": "done",
+            "run_id": "lock-semantic-fail",
+        },
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    assert blocked["valid"] is False
+    assert blocked["non_canonical_lock_retry_eligible"] is False
+    assert blocked["non_canonical_lock_retry_applied"] is False
+    assert "lock_fingerprint_unchanged_after_non_canonical" in blocked["reasons"]
+    assert "lock_retry_override_not_eligible" in blocked["reasons"]
+
+
 def test_run_economy_blocks_replay_with_non_canonical_baseline():
     ns = _load_quality_helpers()
     build = ns["_llm_quality_build_run_economy_status"]
@@ -897,6 +1070,10 @@ def test_quality_constant_acceptance_lane_requires_canonical_envelope():
         allow_no_code_delta=False,
         skip_outbox=False,
         update_baseline=False,
+        timeout_profile="realistic",
+        timeout=30,
+        poll_timeout=25,
+        trace_timeout=25,
     )
     assert valid["valid"] is True
     assert valid["reasons"] == []
@@ -922,6 +1099,10 @@ def test_quality_constant_acceptance_lane_requires_canonical_envelope():
         allow_no_code_delta=True,
         skip_outbox=True,
         update_baseline=False,
+        timeout_profile="fast-replay",
+        timeout=12,
+        poll_timeout=10,
+        trace_timeout=10,
     )
     assert invalid["valid"] is False
     assert "acceptance_requires_fail_on_thresholds" in invalid["reasons"]
@@ -936,6 +1117,10 @@ def test_quality_constant_acceptance_lane_requires_canonical_envelope():
     assert "acceptance_disallows_allow_judge_off" in invalid["reasons"]
     assert "acceptance_disallows_allow_no_code_delta" in invalid["reasons"]
     assert "acceptance_disallows_skip_outbox" in invalid["reasons"]
+    assert "acceptance_requires_timeout_profile_realistic" in invalid["reasons"]
+    assert "acceptance_requires_timeout_gte_30" in invalid["reasons"]
+    assert "acceptance_requires_poll_timeout_gte_25" in invalid["reasons"]
+    assert "acceptance_requires_trace_timeout_gte_25" in invalid["reasons"]
 
 
 def test_quality_constant_dev_lane_disallows_baseline_update_only():
@@ -962,6 +1147,10 @@ def test_quality_constant_dev_lane_disallows_baseline_update_only():
         allow_no_code_delta=True,
         skip_outbox=True,
         update_baseline=False,
+        timeout_profile="fast-replay",
+        timeout=12,
+        poll_timeout=10,
+        trace_timeout=10,
     )
     assert allowed["valid"] is True
     assert allowed["reasons"] == []
@@ -987,9 +1176,113 @@ def test_quality_constant_dev_lane_disallows_baseline_update_only():
         allow_no_code_delta=True,
         skip_outbox=True,
         update_baseline=True,
+        timeout_profile="fast-replay",
+        timeout=12,
+        poll_timeout=10,
+        trace_timeout=10,
     )
     assert blocked["valid"] is False
     assert blocked["reasons"] == ["dev_lane_disallows_update_baseline"]
+
+
+def test_quality_constant_acceptance_requires_zero_semantic_override_budgets():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_quality_constant_status"]
+
+    status = build(
+        mode="block",
+        lane="acceptance",
+        scenarios_file="/tmp/booking_quality/lock/scenarios.json",
+        run_mode="llm",
+        count=10,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+        judge_mode="all",
+        run_economy_gate="block",
+        manual_audit_gate="block",
+        tool_evidence_policy="strict",
+        fail_on_thresholds=True,
+        fail_on_regression=True,
+        allow_weak_oracle=False,
+        allow_incomplete_run_artifacts=False,
+        allow_judge_off=False,
+        allow_no_code_delta=False,
+        skip_outbox=False,
+        update_baseline=False,
+        timeout_profile="realistic",
+        timeout=30,
+        poll_timeout=25,
+        trace_timeout=25,
+        max_post_llm_semantic_rewrite_rate=0.02,
+        max_keyword_override_rate=0.1,
+    )
+
+    assert status["valid"] is False
+    assert "acceptance_requires_max_post_llm_semantic_rewrite_rate_zero" in status["reasons"]
+    assert "acceptance_requires_max_keyword_override_rate_zero" in status["reasons"]
+
+
+def test_quality_constant_acceptance_allows_non_canonical_lock_retry_for_lock_only():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_quality_constant_status"]
+
+    lock_mode = build(
+        mode="block",
+        lane="acceptance",
+        scenarios_file=None,
+        run_mode="llm",
+        count=10,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+        judge_mode="all",
+        run_economy_gate="block",
+        manual_audit_gate="block",
+        tool_evidence_policy="strict",
+        fail_on_thresholds=True,
+        fail_on_regression=False,
+        allow_weak_oracle=False,
+        allow_incomplete_run_artifacts=False,
+        allow_judge_off=False,
+        allow_no_code_delta=False,
+        allow_non_canonical_lock_retry=True,
+        skip_outbox=False,
+        update_baseline=False,
+        timeout_profile="realistic",
+        timeout=30,
+        poll_timeout=25,
+        trace_timeout=25,
+    )
+    assert lock_mode["valid"] is True
+    assert "acceptance_non_canonical_lock_retry_requires_lock_mode" not in lock_mode["reasons"]
+
+    replay_mode = build(
+        mode="block",
+        lane="acceptance",
+        scenarios_file="/tmp/booking_quality/lock/scenarios.json",
+        run_mode="llm",
+        count=10,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+        judge_mode="all",
+        run_economy_gate="block",
+        manual_audit_gate="block",
+        tool_evidence_policy="strict",
+        fail_on_thresholds=True,
+        fail_on_regression=True,
+        allow_weak_oracle=False,
+        allow_incomplete_run_artifacts=False,
+        allow_judge_off=False,
+        allow_no_code_delta=False,
+        allow_non_canonical_lock_retry=True,
+        skip_outbox=False,
+        update_baseline=False,
+        timeout_profile="realistic",
+        timeout=30,
+        poll_timeout=25,
+        trace_timeout=25,
+    )
+    assert replay_mode["valid"] is False
+    assert "acceptance_non_canonical_lock_retry_requires_lock_mode" in replay_mode["reasons"]
 
 
 def test_cross_domain_matrix_contract_accepts_two_non_salon_slugs():
@@ -1897,6 +2190,274 @@ def test_governance_closure_status_invalid_for_incomplete_evidence(tmp_path):
     assert status["checks"]["manual_audit_done"] is False
 
 
+def test_open_world_profile_status_requires_all_profiles(tmp_path):
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_open_world_profile_status"]
+
+    scenarios_path = tmp_path / "scenarios-ru.json"
+    scenarios_path.write_text(
+        json.dumps(
+            {
+                "language_profile": "ru",
+                "semantic_variation_profile": "canonical",
+                "slot_format_profile": "canonical",
+                "surface_noise_profile": "clean",
+                "dialogs": [
+                    {
+                        "dialog_id": "d1",
+                        "language_profile": "ru",
+                        "semantic_variation_profile": "canonical",
+                        "slot_format_profile": "canonical",
+                        "surface_noise_profile": "clean",
+                        "turns": [{"text": "test"}],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    status = build(scenario_paths=[str(scenarios_path)])
+
+    assert status["valid"] is False
+    assert "language_profiles_missing:kk,mixed,mixed_translit" in status["reasons"]
+    assert "surface_noise_profiles_missing:typo" in status["reasons"]
+    assert "semantic_variation_profiles_missing:synonym" in status["reasons"]
+    assert "slot_format_profiles_missing:variant" in status["reasons"]
+
+
+def test_p6_acceptance_closure_status_valid_for_complete_proof_bundle(tmp_path):
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_p6_acceptance_closure_status"]
+
+    deterministic_profiles = [
+        ("ru", "canonical", "canonical", "clean"),
+        ("kk", "canonical", "canonical", "clean"),
+        ("mixed", "synonym", "variant", "typo"),
+        ("mixed_translit", "synonym", "variant", "typo"),
+    ]
+    deterministic_paths = []
+    for index, (language, semantic, slot_format, surface_noise) in enumerate(
+        deterministic_profiles,
+        start=1,
+    ):
+        path = tmp_path / f"deterministic-{index}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "language_profile": language,
+                    "semantic_variation_profile": semantic,
+                    "slot_format_profile": slot_format,
+                    "surface_noise_profile": surface_noise,
+                    "dialogs": [
+                        {
+                            "dialog_id": f"d{index}",
+                            "language_profile": language,
+                            "semantic_variation_profile": semantic,
+                            "slot_format_profile": slot_format,
+                            "surface_noise_profile": surface_noise,
+                            "turns": [{"text": f"turn-{index}"}],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        deterministic_paths.append(str(path))
+
+    child_rows = []
+    for index, (client_slug, branch_slug, seed) in enumerate(
+        (("demo_salon", "branch-a", 42), ("dental_pack", "branch-b", 1337)),
+        start=1,
+    ):
+        child_dir = tmp_path / f"child-{index}"
+        child_dir.mkdir(parents=True, exist_ok=True)
+        child_summary_path = child_dir / "summary.json"
+        child_summary_path.write_text(
+            json.dumps(
+                {
+                    "config": {"seed": seed},
+                    "judge": {"enabled": True},
+                    "metrics": {
+                        "rates": {
+                            "fact_without_evidence_rate": 0.0,
+                            "irrelevant_fact_rate": 0.0,
+                            "booking_commit_without_required_contact": 0.0,
+                            "semantic_override_rate": 0.0,
+                            "stale_state_leak_rate": 0.0,
+                        }
+                    },
+                    "quality_constant": {"lane_effective": "dev"},
+                    "quality_status": {
+                        "blocking_reason_count": 0,
+                        "threshold_breaches": [],
+                        "run_integrity_valid": True,
+                        "fact_without_evidence_rate": 0.0,
+                        "irrelevant_fact_rate": 0.0,
+                        "booking_commit_without_required_contact": 0.0,
+                        "semantic_override_rate": 0.0,
+                        "stale_state_leak_rate": 0.0,
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        child_rows.append(
+            {
+                "client_slug": client_slug,
+                "branch_slug": branch_slug,
+                "run_id": f"matrix-row-{index}",
+                "status": "ok",
+                "infra_valid": True,
+                "semantic_valid": True,
+                "scenario_context_valid": True,
+                "summary": str(child_summary_path),
+            }
+        )
+
+    matrix_summary_path = tmp_path / "matrix_summary.json"
+    matrix_summary_path.write_text(
+        json.dumps(
+            {
+                "all_ok": True,
+                "cross_domain_contract": {"required": True, "valid": True},
+                "failure_families": {"family_count": 0, "families": []},
+                "rows": child_rows,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    status = build(
+        matrix_summary_paths=[str(matrix_summary_path)],
+        deterministic_scenario_paths=deterministic_paths,
+    )
+
+    assert status["valid"] is True
+    assert status["reasons"] == []
+    assert status["matrix"]["row_count"] == 2
+    assert status["matrix"]["distinct_clients"] == ["demo_salon", "dental_pack"]
+    assert status["matrix"]["distinct_seeds"] == ["1337", "42"]
+
+
+def test_llm_quality_open_world_closure_command_blocks_on_missing_profiles(tmp_path):
+    deterministic_path = tmp_path / "deterministic-ru.json"
+    deterministic_path.write_text(
+        json.dumps(
+            {
+                "language_profile": "ru",
+                "semantic_variation_profile": "canonical",
+                "slot_format_profile": "canonical",
+                "surface_noise_profile": "clean",
+                "dialogs": [
+                    {
+                        "dialog_id": "ru-only",
+                        "language_profile": "ru",
+                        "semantic_variation_profile": "canonical",
+                        "slot_format_profile": "canonical",
+                        "surface_noise_profile": "clean",
+                        "turns": [{"text": "test"}],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    child_dir = tmp_path / "child"
+    child_dir.mkdir(parents=True, exist_ok=True)
+    child_summary_path = child_dir / "summary.json"
+    child_summary_path.write_text(
+        json.dumps(
+            {
+                "config": {"seed": 42},
+                "judge": {"enabled": True},
+                "quality_status": {
+                    "blocking_reason_count": 0,
+                    "threshold_breaches": [],
+                    "run_integrity_valid": True,
+                    "fact_without_evidence_rate": 0.0,
+                    "irrelevant_fact_rate": 0.0,
+                    "booking_commit_without_required_contact": 0.0,
+                    "semantic_override_rate": 0.0,
+                    "stale_state_leak_rate": 0.0,
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    matrix_summary_path = tmp_path / "matrix_summary.json"
+    matrix_summary_path.write_text(
+        json.dumps(
+            {
+                "all_ok": True,
+                "cross_domain_contract": {"required": True, "valid": True},
+                "failure_families": {"family_count": 0, "families": []},
+                "rows": [
+                    {
+                        "client_slug": "demo_salon",
+                        "branch_slug": "branch-a",
+                        "run_id": "matrix-row-1",
+                        "status": "ok",
+                        "infra_valid": True,
+                        "semantic_valid": True,
+                        "scenario_context_valid": True,
+                        "summary": str(child_summary_path),
+                    },
+                    {
+                        "client_slug": "dental_pack",
+                        "branch_slug": "branch-b",
+                        "run_id": "matrix-row-2",
+                        "status": "ok",
+                        "infra_valid": True,
+                        "semantic_valid": True,
+                        "scenario_context_valid": True,
+                        "summary": str(child_summary_path),
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    repo_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            "python3",
+            "ops/diagnose.py",
+            "llm-quality-open-world-closure",
+            "--matrix-summary",
+            str(matrix_summary_path),
+            "--deterministic-scenarios",
+            str(deterministic_path),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["command"] == "llm-quality-open-world-closure"
+    assert payload["valid"] is False
+    assert "language_profiles_missing:kk,mixed,mixed_translit" in payload["reasons"]
+
+
 def test_manual_audit_gate_blocks_when_latest_run_is_pending(tmp_path):
     ns = _load_quality_helpers()
     build_gate = ns["_llm_quality_build_manual_audit_gate_status"]
@@ -1997,6 +2558,104 @@ def test_manual_audit_sync_updates_summary_and_quality_status(tmp_path):
     assert updated["manual_audit"]["status"] == "done"
     assert updated["quality_status"]["manual_audit_status"] == "done"
     assert updated["quality_status"]["manual_audit_path"] == str(run_dir / "manual_audit.md")
+
+
+def test_manual_audit_sync_refreshes_stale_evidence_handoff(tmp_path):
+    ns = _load_quality_helpers()
+    sync_summary = ns["_llm_quality_sync_manual_audit_summary"]
+
+    run_dir = tmp_path / "run-audit-refresh"
+    run_dir.mkdir()
+    summary_path = run_dir / "summary.json"
+    for artifact in (
+        "brief.md",
+        "scenarios.json",
+        "responses.jsonl",
+        "trace_bundle.jsonl",
+        "run_manifest.json",
+        "manual_audit.md",
+    ):
+        (run_dir / artifact).write_text("{}", encoding="utf-8")
+    stale_summary = {
+        "run_id": "run-audit-refresh",
+        "infra_valid": True,
+        "semantic_valid": True,
+        "run_integrity": {"valid": True, "reasons": []},
+        "manual_audit": {
+            "required": True,
+            "status": "pending",
+            "path": str(run_dir / "manual_audit.md"),
+            "json_path": str(run_dir / "manual_audit.json"),
+            "command": "python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/run --status done --strict-artifacts",
+        },
+        "quality_status": {
+            "infra_valid": True,
+            "semantic_valid": True,
+            "run_integrity_valid": True,
+            "manual_audit_required": True,
+            "manual_audit_status": "pending",
+            "manual_audit_path": str(run_dir / "manual_audit.md"),
+            "evidence_handoff_valid": False,
+            "evidence_handoff_reasons": [
+                "evidence_artifacts_missing:manual_audit.json,manual_audit.md",
+                "manual_audit_not_done",
+            ],
+        },
+        "evidence_handoff": {
+            "valid": False,
+            "reasons": [
+                "evidence_artifacts_missing:manual_audit.json,manual_audit.md",
+                "manual_audit_not_done",
+            ],
+            "missing": ["manual_audit.json", "manual_audit.md"],
+        },
+    }
+    summary_path.write_text(
+        json.dumps(stale_summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (run_dir / "manual_audit.json").write_text(
+        json.dumps(
+            {
+                "status": "done",
+                "run_id": "run-audit-refresh",
+                "analyst": "a1",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "analyst_root_causes": ["contract_validated"],
+                "analyst_next_steps": ["promote_next_chain_step"],
+                "judge_alignment": "not_applicable",
+                "winner": "contract",
+                "resolution_summary": "manual audit completed",
+                "findings": [],
+                "oracle_arbitration": {
+                    "conflict_count": 0,
+                    "judge_alignment": "not_applicable",
+                    "winner": "contract",
+                    "resolution_summary": "manual audit completed",
+                },
+                "finding_count": 0,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    changed = sync_summary(
+        run_dir=str(run_dir),
+        status="done",
+        manual_audit_path=str(run_dir / "manual_audit.md"),
+        manual_audit_json_path=str(run_dir / "manual_audit.json"),
+    )
+
+    assert changed is True
+    updated = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert updated["manual_audit"]["status"] == "done"
+    assert updated["quality_status"]["manual_audit_status"] == "done"
+    assert updated["evidence_handoff"]["valid"] is True
+    assert updated["evidence_handoff"]["missing"] == []
+    assert updated["quality_status"]["evidence_handoff_valid"] is True
+    assert updated["quality_status"]["evidence_handoff_reasons"] == []
 
 
 def _write_run_summary(run_dir, run_id, *, chain_id=None):
@@ -2607,3 +3266,24 @@ def test_acceptance_entrypoint_hint_replay_mode_contains_required_flags():
     assert "--baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json" in hint
     assert "--reset-before-dialog" in hint
     assert "--fail-on-regression" in hint
+
+
+def test_llm_quality_gates_defaults_do_not_raise_type_error():
+    repo_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        ["python3", "ops/diagnose.py", "llm-quality-gates", "--pretty"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode in {0, 2}
+    assert "TypeError" not in (result.stderr or "")
+    assert result.stdout.strip()
+
+    payload = json.loads(result.stdout)
+    assert payload.get("command") == "llm-quality-gates"
+    quality_constant_gate = (payload.get("gates") or {}).get("quality_constant_gate")
+    assert isinstance(quality_constant_gate, dict)
+    assert quality_constant_gate.get("timeout_profile") == "realistic"

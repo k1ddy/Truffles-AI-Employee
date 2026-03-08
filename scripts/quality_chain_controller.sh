@@ -765,20 +765,22 @@ def _summary_manual_audit_status(summary: dict) -> str:
     ).strip().casefold()
 
 
-def _summary_evidence_handoff_status(summary: dict, output_dir: str):
+def _summary_manual_audit_status_with_artifacts(summary: dict, output_dir: str) -> str:
+    summary_status = _summary_manual_audit_status(summary)
+    if summary_status in VALID_DONE_AUDIT_STATES:
+        return summary_status
+    manual_audit_json = load_json(os.path.join(output_dir, "manual_audit.json"))
+    if isinstance(manual_audit_json, dict):
+        artifact_status = str(manual_audit_json.get("status") or "").strip().casefold()
+        if artifact_status:
+            return artifact_status
+    return summary_status
+
+
+def _summary_evidence_handoff_fallback(summary: dict, output_dir: str):
     quality_status = (
         summary.get("quality_status") if isinstance(summary.get("quality_status"), dict) else {}
     )
-    explicit_valid = parse_status_bool(quality_status.get("evidence_handoff_valid"))
-    if explicit_valid is True:
-        return True, None
-    if explicit_valid is False:
-        reasons = [str(item).strip() for item in (quality_status.get("evidence_handoff_reasons") or []) if str(item).strip()]
-        if reasons:
-            return False, f"summary_evidence_handoff_invalid:{';'.join(reasons)}"
-        return False, "summary_evidence_handoff_invalid"
-
-    # Legacy fallback when explicit evidence_handoff status is absent.
     artifact_integrity = (
         summary.get("artifact_integrity") if isinstance(summary.get("artifact_integrity"), dict) else {}
     )
@@ -808,10 +810,33 @@ def _summary_evidence_handoff_status(summary: dict, output_dir: str):
     if missing_required:
         return False, f"summary_artifact_incomplete:{','.join(missing_required)}"
 
-    manual_status = _summary_manual_audit_status(summary)
+    manual_status = _summary_manual_audit_status_with_artifacts(summary, output_dir)
     if manual_status not in VALID_DONE_AUDIT_STATES:
         return False, f"summary_manual_audit_incomplete:{manual_status or 'missing'}"
     return True, None
+
+
+def _summary_evidence_handoff_status(summary: dict, output_dir: str):
+    quality_status = (
+        summary.get("quality_status") if isinstance(summary.get("quality_status"), dict) else {}
+    )
+    fallback_valid, fallback_reason = _summary_evidence_handoff_fallback(summary, output_dir)
+    explicit_valid = parse_status_bool(quality_status.get("evidence_handoff_valid"))
+    if explicit_valid is True:
+        return True, None
+    if explicit_valid is False:
+        if fallback_valid:
+            return True, None
+        reasons = [str(item).strip() for item in (quality_status.get("evidence_handoff_reasons") or []) if str(item).strip()]
+        if reasons:
+            return False, f"summary_evidence_handoff_invalid:{';'.join(reasons)}"
+        if fallback_reason:
+            return False, fallback_reason
+        return False, "summary_evidence_handoff_invalid"
+
+    if fallback_valid:
+        return True, None
+    return False, fallback_reason or "summary_evidence_handoff_invalid"
 
 
 def validate_multi_seed_evidence(payload: dict, source: dict, *, freshness_hours):

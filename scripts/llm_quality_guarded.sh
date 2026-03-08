@@ -107,6 +107,8 @@ QUALITY_LANE_REQUESTED="auto"
 FAIL_ON_THRESHOLDS=0
 FAIL_ON_REGRESSION=0
 UPDATE_BASELINE=0
+HAS_MAX_POST_REWRITE_RATE=0
+HAS_MAX_KEYWORD_OVERRIDE_RATE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -199,6 +201,18 @@ for idx in "${!QUALITY_ARGS[@]}"; do
     --update-baseline)
       UPDATE_BASELINE=1
       ;;
+    --max-post-llm-semantic-rewrite-rate)
+      HAS_MAX_POST_REWRITE_RATE=1
+      ;;
+    --max-post-llm-semantic-rewrite-rate=*)
+      HAS_MAX_POST_REWRITE_RATE=1
+      ;;
+    --max-keyword-override-rate)
+      HAS_MAX_KEYWORD_OVERRIDE_RATE=1
+      ;;
+    --max-keyword-override-rate=*)
+      HAS_MAX_KEYWORD_OVERRIDE_RATE=1
+      ;;
     --chain-id)
       has_chain_id_arg=1
       ;;
@@ -220,6 +234,15 @@ if [[ "$QUALITY_LANE_EFFECTIVE" == "auto" ]]; then
     QUALITY_LANE_EFFECTIVE="acceptance"
   else
     QUALITY_LANE_EFFECTIVE="dev"
+  fi
+fi
+
+if [[ "$QUALITY_LANE_EFFECTIVE" == "acceptance" ]]; then
+  if [[ "$HAS_MAX_POST_REWRITE_RATE" -ne 1 ]]; then
+    QUALITY_ARGS+=(--max-post-llm-semantic-rewrite-rate 0.0)
+  fi
+  if [[ "$HAS_MAX_KEYWORD_OVERRIDE_RATE" -ne 1 ]]; then
+    QUALITY_ARGS+=(--max-keyword-override-rate 0.0)
   fi
 fi
 

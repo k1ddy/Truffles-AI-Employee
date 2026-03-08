@@ -6145,9 +6145,13 @@ eval_cases:
   - хочу записаться на маникюр
   - после обеда
   expected:
-    action: reply
-    must_include:
-    - как вас зовут
+    action: booking_prompt
+    intent: booking
+    meta:
+      action: booking_prompt
+      source: booking
+      expected_reply_type: time
+      expected_reply_reason: booking_prompt
     trace_contains:
     - stage: question_contract
       decision: matched
@@ -6325,9 +6329,20 @@ eval_cases:
   - Подскажите уход за бровями
   - Хочу записаться
   expected:
-    action: reply
-    must_include:
-    - услугу
+    action: booking_prompt
+    intent: booking
+    meta:
+      action: booking_prompt
+      source: booking
+      expected_reply_type: service_choice
+      expected_reply_reason: booking_prompt
+    trace_contains:
+    - stage: consult_return
+      decision: attached
+      current_goal: consult
+    - stage: question_contract
+      decision: set
+      expected_reply_type: service_choice
 - id: E567
   tier: long
   turns:
@@ -6368,13 +6383,20 @@ eval_cases:
   - Подскажите по чувствительной коже
   - Можно записаться?
   expected:
-    action: reply
-    must_include:
-    - услугу
+    action: booking_prompt
+    intent: booking
+    meta:
+      action: booking_prompt
+      source: booking
+      expected_reply_type: service_choice
+      expected_reply_reason: booking_prompt
     trace_contains:
     - stage: consult_return
       decision: attached
       current_goal: consult
+    - stage: question_contract
+      decision: set
+      expected_reply_type: service_choice
 - id: E569
   tier: long
   turns:
@@ -8440,11 +8462,17 @@ eval_cases:
   tier: chaos
   user: Прятки с привидениями. Запишите на 19:00.
   expected:
-    action: reply
-    intent: booking_intake
-    must_include_any:
-    - на какую услугу
-    - подтвердит
+    action: booking_prompt
+    intent: booking
+    meta:
+      action: booking_prompt
+      source: booking
+      expected_reply_type: service_choice
+      expected_reply_reason: booking_prompt
+    trace_contains:
+    - stage: question_contract
+      decision: set
+      expected_reply_type: service_choice
 - id: SCN4-08
   tier: chaos
   user: Побрить кактус. Сколько стоит детская стрижка?
@@ -8503,11 +8531,17 @@ eval_cases:
   tier: chaos
   user: Запись на стрижку на выходные?
   expected:
-    action: reply
-    intent: booking_intake
-    must_include_any:
-    - на какую
-    - время
+    action: booking_prompt
+    intent: booking
+    meta:
+      action: booking_prompt
+      source: booking
+      expected_reply_type: time
+      expected_reply_reason: booking_prompt
+    trace_contains:
+    - stage: question_contract
+      decision: set
+      expected_reply_type: time
 - id: SCN5-04
   tier: chaos
   user: Карета по Абая 150 превратится в тыкву после 21:00?

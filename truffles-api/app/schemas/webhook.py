@@ -83,6 +83,19 @@ class WebhookResponse(BaseModel):
 class IntentContract(BaseModel):
     intent: Optional[str] = None
     slots: Optional[dict[str, Any]] = None
+    pack_refs: Optional[list[str]] = None
+    next_question: Optional[str] = None
+    open_questions: Optional[list[str]] = None
+    goal: Optional[str] = None
+    reason: Optional[str] = None
+    needs_manager: Optional[bool] = None
+    entity_refs: Optional[list[dict[str, Any]]] = None
+    subject_kind: Optional[str] = None
+    capability: Optional[str] = None
+    temporal_scope: Optional[str] = None
+    resolution_mode: Optional[str] = None
+    resolver_id: Optional[str] = None
+    resolver_version: Optional[str] = None
     language: Optional[str] = None
     emotion: Optional[str] = None
     confidence: Optional[float] = None
@@ -129,6 +142,9 @@ class MemoryContract(BaseModel):
     goal_stack: Optional[list[str]] = None
     pending_slots: Optional[dict[str, str]] = None
     unanswered_questions: Optional[list[str]] = None
+    current_referents: Optional[dict[str, str]] = None
+    pending_question_contract: Optional[dict[str, Any]] = None
+    consult_state: Optional[dict[str, Any]] = None
 
 
 class TraceContract(BaseModel):

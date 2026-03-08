@@ -195,17 +195,57 @@ def build_context_contract(
 
 
 def build_intent_contract(
-    signals: DecisionSignals,
-    intent_decomp_payload: dict[str, Any] | None,
+    signals: DecisionSignals | None = None,
+    intent_decomp_payload: dict[str, Any] | None = None,
+    *,
+    intent: str | None = None,
+    slots: dict[str, Any] | None = None,
+    pack_refs: list[str] | None = None,
+    next_question: str | None = None,
+    open_questions: list[str] | None = None,
+    goal: str | None = None,
+    reason: str | None = None,
+    needs_manager: bool | None = None,
+    entity_refs: list[dict[str, Any]] | None = None,
+    subject_kind: str | None = None,
+    capability: str | None = None,
+    temporal_scope: str | None = None,
+    resolution_mode: str | None = None,
+    resolver_id: str | None = None,
+    resolver_version: str | None = None,
+    language: str | None = None,
+    confidence: float | None = None,
+    risk_signals: list[str] | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    """Build and validate intent contract from signals and decomposition."""
+    """Build and validate the intent contract.
+
+    Explicit keyword arguments take precedence over the early router signals/decomposition
+    payload so the same builder can be reused for the policy-core semantic envelope.
+    """
     contract_payload = {
-        "intent": signals.intent.value if signals and signals.intent else None,
-        "slots": dict(intent_decomp_payload) if isinstance(intent_decomp_payload, dict) else None,
-        "language": None,
+        "intent": intent if isinstance(intent, str) else (signals.intent.value if signals and signals.intent else None),
+        "slots": (
+            dict(slots)
+            if isinstance(slots, dict)
+            else (dict(intent_decomp_payload) if isinstance(intent_decomp_payload, dict) else None)
+        ),
+        "pack_refs": list(pack_refs) if isinstance(pack_refs, list) else None,
+        "next_question": next_question if isinstance(next_question, str) else None,
+        "open_questions": list(open_questions) if isinstance(open_questions, list) else None,
+        "goal": goal if isinstance(goal, str) else None,
+        "reason": reason if isinstance(reason, str) else None,
+        "needs_manager": needs_manager if isinstance(needs_manager, bool) else None,
+        "entity_refs": list(entity_refs) if isinstance(entity_refs, list) else None,
+        "subject_kind": subject_kind if isinstance(subject_kind, str) else None,
+        "capability": capability if isinstance(capability, str) else None,
+        "temporal_scope": temporal_scope if isinstance(temporal_scope, str) else None,
+        "resolution_mode": resolution_mode if isinstance(resolution_mode, str) else None,
+        "resolver_id": resolver_id if isinstance(resolver_id, str) else None,
+        "resolver_version": resolver_version if isinstance(resolver_version, str) else None,
+        "language": language if isinstance(language, str) else None,
         "emotion": None,
-        "confidence": None,
-        "risk_signals": None,
+        "confidence": float(confidence) if isinstance(confidence, (int, float)) else None,
+        "risk_signals": list(risk_signals) if isinstance(risk_signals, list) else None,
     }
     try:
         contract = IntentContract(**contract_payload)

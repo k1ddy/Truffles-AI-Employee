@@ -43,9 +43,11 @@ from app.services.booking_signal_service import (
 from app.services.booking_signal_service import (
     strip_daypart_tokens as _strip_daypart_tokens,
 )
+from app.services.booking_transition_owner import resolve_booking_contact_minimum
 from app.services.calendar_sync_service import enqueue_appointment_sync, get_provider_health
 from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.capability_manifest_service import resolve_tool_protocol_decision
+from app.services.expected_reply_contract import EXPECTED_REPLY_NAME, EXPECTED_REPLY_PHONE
 from app.services.info_signal_service import (
     looks_like_booking_verification_message as _looks_like_booking_verification_message,
 )
@@ -91,6 +93,10 @@ _CALENDAR_PROVIDER_HARD_FAILURES = {
     "token_expired",
 }
 
+BOOKING_CREATE_WRITE_BOUNDARY = "booking_create_request_uow_v1"
+BOOKING_MUTATION_WRITE_BOUNDARY = "booking_mutation_request_uow_v1"
+MSG_BOOKING_ASK_PHONE = "Подскажите, пожалуйста, номер телефона для подтверждения записи."
+
 
 @dataclass(frozen=True)
 class ToolExecutionResult:
@@ -101,6 +107,16 @@ class ToolExecutionResult:
     decision_meta: dict[str, Any]
     trace: dict[str, Any]
     expected_reply_type: str | None = None
+
+
+class BookingWriteBoundaryError(RuntimeError):
+    def __init__(self, *, stage: str, error_code: str | None) -> None:
+        super().__init__(f"{stage}:{error_code or 'unknown'}")
+        self.stage = stage
+        self.error_code = error_code
+
+
+BookingCreateBoundaryError = BookingWriteBoundaryError
 
 
 def is_tool_action(action: str | None) -> bool:
@@ -983,6 +999,7 @@ def _book_slot(
     customer_name: str | None,
     customer_phone: str | None,
     conversation_id: UUID | None,
+    commit: bool = True,
 ) -> tuple[Appointment | None, str | None]:
     if not start_at:
         return None, "missing_start_at"
@@ -1012,9 +1029,32 @@ def _book_slot(
             "action": "create",
             "payload": {"tool_action": "calendar.book_slot"},
         },
-        commit=True,
+        commit=commit,
     )
     return appointment, None
+
+
+def _run_booking_write_boundary(
+    db: Session,
+    operation: Any,
+) -> Any:
+    if isinstance(db, Session):
+        with db.begin_nested():
+            return operation()
+    try:
+        return operation()
+    except Exception:
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            rollback()
+        raise
+
+
+def _run_booking_create_write_boundary(
+    db: Session,
+    operation: Any,
+) -> Any:
+    return _run_booking_write_boundary(db, operation)
 
 
 def _reschedule_booking(
@@ -1023,6 +1063,7 @@ def _reschedule_booking(
     appointment: Appointment,
     start_at: datetime | None,
     end_at: datetime | None,
+    commit: bool = True,
 ) -> tuple[Appointment | None, str | None]:
     if not start_at or not end_at:
         return None, "missing_datetime"
@@ -1048,7 +1089,10 @@ def _reschedule_booking(
             correlation_id=str(appointment.conversation_id) if appointment.conversation_id else None,
         )
     )
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return appointment, None
 
 
@@ -1057,6 +1101,7 @@ def _cancel_booking(
     *,
     appointment: Appointment,
     reason: str | None,
+    commit: bool = True,
 ) -> tuple[Appointment | None, str | None]:
     prev_status = appointment.status
     prev_version = appointment.version
@@ -1078,7 +1123,10 @@ def _cancel_booking(
             correlation_id=str(appointment.conversation_id) if appointment.conversation_id else None,
         )
     )
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return appointment, None
 
 
@@ -1229,6 +1277,8 @@ def execute_tool_action(
     now: datetime | None = None,
     user_name: str | None = None,
     user_phone: str | None = None,
+    user_phone_source: str | None = None,
+    user_remote_jid: str | None = None,
 ) -> ToolExecutionResult:
     if tool_action not in TOOL_ACTIONS:
         return ToolExecutionResult(
@@ -1438,12 +1488,15 @@ def execute_tool_action(
                 decision_meta={
                     "tool_action": tool_action,
                     "tool_decision": "specialist_missing",
+                    "specialist_name": specialist_name,
+                    "info_sections": ["master", "specialist"],
                 },
                 trace={
                     "stage": "tool_registry",
                     "decision": "specialist_missing",
                     "tool_action": tool_action,
                     "specialist_name": specialist_name,
+                    "info_sections": ["master", "specialist"],
                 },
             )
         requested_time = _extract_time_token(message_text)
@@ -1697,25 +1750,106 @@ def execute_tool_action(
                 decision_meta={
                     "tool_action": tool_action,
                     "tool_decision": "specialist_missing",
+                    "specialist_name": specialist_name,
+                    "info_sections": ["master", "specialist"],
                 },
                 trace={
                     "stage": "tool_registry",
                     "decision": "specialist_missing",
                     "tool_action": tool_action,
                     "specialist_name": specialist_name,
+                    "info_sections": ["master", "specialist"],
                 },
             )
+        contact_resolution = resolve_booking_contact_minimum(
+            customer_name=tool_args.get("customer_name"),
+            customer_phone=tool_args.get("customer_phone"),
+            user_name=user_name,
+            user_phone=user_phone,
+            user_phone_source=user_phone_source,
+            user_remote_jid=user_remote_jid,
+        )
+        resolved_customer_name = contact_resolution.name
+        resolved_customer_phone = contact_resolution.phone
+        customer_name_source = contact_resolution.name_source
+        customer_phone_source = contact_resolution.phone_source
+        if contact_resolution.missing_fields:
+            missing_field = contact_resolution.missing_fields[0]
+            response_text = (
+                "Как вас зовут, чтобы подтвердить запись?"
+                if missing_field == "name"
+                else MSG_BOOKING_ASK_PHONE
+            )
+            return ToolExecutionResult(
+                handled=True,
+                ok=False,
+                response_text=response_text,
+                error_code=f"missing_contact_{missing_field}",
+                decision_meta={
+                    "tool_action": tool_action,
+                    "tool_decision": "contact_minimum_missing",
+                    "missing_slot": missing_field,
+                    "contact_minimum": ["name", "phone"],
+                    "customer_name_source": customer_name_source,
+                    "customer_phone_source": contact_resolution.phone_source,
+                },
+                trace={
+                    "stage": "tool_registry",
+                    "decision": "contact_minimum_missing",
+                    "tool_action": tool_action,
+                    "missing_slot": missing_field,
+                    "contact_minimum": ["name", "phone"],
+                    "customer_name_source": customer_name_source,
+                    "customer_phone_source": contact_resolution.phone_source,
+                },
+                expected_reply_type=(
+                    EXPECTED_REPLY_NAME if missing_field == "name" else EXPECTED_REPLY_PHONE
+                ),
+            )
         try:
-            appointment, error = _book_slot(
+            scheduled: list[Any] = []
+
+            def _create_booking_bundle() -> tuple[Appointment | None, str | None, list[Any]]:
+                appointment, error = _book_slot(
+                    db,
+                    branch=branch,
+                    specialist_id=specialist.id if specialist else None,
+                    start_at=start_at,
+                    end_at=end_at,
+                    service_name=service_query,
+                    customer_name=resolved_customer_name,
+                    customer_phone=resolved_customer_phone,
+                    conversation_id=conversation_id,
+                    commit=False,
+                )
+                if error:
+                    return appointment, error, []
+                if appointment is None:
+                    raise BookingCreateBoundaryError(
+                        stage="appointment_create",
+                        error_code="appointment_missing",
+                    )
+                enqueued, sync_error = enqueue_appointment_sync(
+                    db,
+                    appointment=appointment,
+                    action="create",
+                    commit=False,
+                )
+                if not enqueued and sync_error not in {None, "duplicate"}:
+                    raise BookingCreateBoundaryError(
+                        stage="calendar_sync",
+                        error_code=sync_error,
+                    )
+                scheduled = schedule_default_reminders(
+                    db,
+                    appointment=appointment,
+                    commit=False,
+                )
+                return appointment, None, scheduled
+
+            appointment, error, scheduled = _run_booking_create_write_boundary(
                 db,
-                branch=branch,
-                specialist_id=specialist.id if specialist else None,
-                start_at=start_at,
-                end_at=end_at,
-                service_name=service_query,
-                customer_name=tool_args.get("customer_name") or user_name,
-                customer_phone=tool_args.get("customer_phone") or user_phone,
-                conversation_id=conversation_id,
+                _create_booking_bundle,
             )
         except AppointmentConflictError:
             requested_time_from_message = _extract_time_token(message_text)
@@ -1768,6 +1902,32 @@ def execute_tool_action(
                 },
                 expected_reply_type=_normalize_expected_reply_hint(expected_reply_type),
             )
+        except BookingCreateBoundaryError as exc:
+            decision_meta, trace = _with_provider_health_meta(
+                {
+                    "tool_action": tool_action,
+                    "tool_decision": "provider_unavailable",
+                    "provider_reason": exc.error_code,
+                    "write_boundary": BOOKING_CREATE_WRITE_BOUNDARY,
+                },
+                {
+                    "stage": "tool_registry",
+                    "decision": "provider_unavailable",
+                    "tool_action": tool_action,
+                    "provider_reason": exc.error_code,
+                    "write_boundary": BOOKING_CREATE_WRITE_BOUNDARY,
+                },
+                reason=provider_health_reason or exc.error_code,
+            )
+            return ToolExecutionResult(
+                handled=True,
+                ok=False,
+                response_text="Сейчас календарь недоступен. Напишите удобное время, и мы уточним.",
+                error_code="provider_unavailable",
+                decision_meta=decision_meta,
+                trace=trace,
+                expected_reply_type=_normalize_expected_reply_hint(expected_reply_type),
+            )
         if error:
             from app.routers.webhook import _legacy as legacy
 
@@ -1791,17 +1951,6 @@ def execute_tool_action(
                 },
                 expected_reply_type=legacy.EXPECTED_REPLY_TIME if missing_slot else None,
             )
-        enqueue_appointment_sync(
-            db,
-            appointment=appointment,
-            action="create",
-            commit=True,
-        )
-        scheduled = schedule_default_reminders(
-            db,
-            appointment=appointment,
-            commit=True,
-        )
         decision_meta, trace = _with_provider_health_meta(
             {
                 "tool_action": tool_action,
@@ -1813,6 +1962,9 @@ def execute_tool_action(
                 "specialist_name": specialist.name if specialist else None,
                 "specialist_selection": specialist_selection,
                 "booking_blocked_reason": None,
+                "customer_name_source": customer_name_source,
+                "customer_phone_source": customer_phone_source,
+                "write_boundary": BOOKING_CREATE_WRITE_BOUNDARY,
             },
             {
                 "stage": "tool_registry",
@@ -1823,6 +1975,9 @@ def execute_tool_action(
                 "reminder_jobs_scheduled": len(scheduled),
                 "specialist_id": str(specialist.id) if specialist else None,
                 "specialist_selection": specialist_selection,
+                "customer_name_source": customer_name_source,
+                "customer_phone_source": customer_phone_source,
+                "write_boundary": BOOKING_CREATE_WRITE_BOUNDARY,
             },
             reason=provider_health_reason,
         )
@@ -1885,12 +2040,70 @@ def execute_tool_action(
             fallback_tz=branch.timezone,
             now=now,
         )
-        updated, error = _reschedule_booking(
-            db,
-            appointment=appointment,
-            start_at=start_at,
-            end_at=end_at,
-        )
+        try:
+            def _reschedule_bundle() -> tuple[Appointment | None, str | None, list[Any], list[Any]]:
+                updated, error = _reschedule_booking(
+                    db,
+                    appointment=appointment,
+                    start_at=start_at,
+                    end_at=end_at,
+                    commit=False,
+                )
+                if error:
+                    return updated, error, [], []
+                if updated is None:
+                    raise BookingWriteBoundaryError(
+                        stage="reschedule",
+                        error_code="appointment_missing",
+                    )
+                enqueued, sync_error = enqueue_appointment_sync(
+                    db,
+                    appointment=updated,
+                    action="update",
+                    commit=False,
+                )
+                if not enqueued and sync_error not in {None, "duplicate"}:
+                    raise BookingWriteBoundaryError(
+                        stage="calendar_sync",
+                        error_code=sync_error,
+                    )
+                cancelled_jobs = mark_pending_reminders_failed(
+                    db,
+                    appointment_id=updated.id,
+                    reason="rescheduled",
+                    commit=False,
+                )
+                scheduled = schedule_default_reminders(
+                    db,
+                    appointment=updated,
+                    commit=False,
+                )
+                return updated, None, cancelled_jobs, scheduled
+
+            updated, error, cancelled_jobs, scheduled = _run_booking_write_boundary(
+                db,
+                _reschedule_bundle,
+            )
+        except BookingWriteBoundaryError as exc:
+            return ToolExecutionResult(
+                handled=True,
+                ok=False,
+                response_text="Сейчас календарь недоступен. Напишите удобное время, и мы уточним.",
+                error_code="provider_unavailable",
+                decision_meta={
+                    "tool_action": tool_action,
+                    "tool_decision": "provider_unavailable",
+                    "provider_reason": exc.error_code,
+                    "write_boundary": BOOKING_MUTATION_WRITE_BOUNDARY,
+                },
+                trace={
+                    "stage": "tool_registry",
+                    "decision": "provider_unavailable",
+                    "tool_action": tool_action,
+                    "provider_reason": exc.error_code,
+                    "write_boundary": BOOKING_MUTATION_WRITE_BOUNDARY,
+                },
+            )
         if error:
             return ToolExecutionResult(
                 handled=True,
@@ -1904,23 +2117,6 @@ def execute_tool_action(
                     "tool_action": tool_action,
                 },
             )
-        enqueue_appointment_sync(
-            db,
-            appointment=updated,
-            action="update",
-            commit=True,
-        )
-        cancelled_jobs = mark_pending_reminders_failed(
-            db,
-            appointment_id=updated.id,
-            reason="rescheduled",
-            commit=False,
-        )
-        scheduled = schedule_default_reminders(
-            db,
-            appointment=updated,
-            commit=True,
-        )
         return ToolExecutionResult(
             handled=True,
             ok=True,
@@ -1932,6 +2128,7 @@ def execute_tool_action(
                 "appointment_id": str(updated.id),
                 "reminder_jobs_cancelled": len(cancelled_jobs),
                 "reminder_jobs_scheduled": len(scheduled),
+                "write_boundary": BOOKING_MUTATION_WRITE_BOUNDARY,
             },
             trace={
                 "stage": "tool_registry",
@@ -1940,6 +2137,7 @@ def execute_tool_action(
                 "appointment_id": str(updated.id),
                 "reminder_jobs_cancelled": len(cancelled_jobs),
                 "reminder_jobs_scheduled": len(scheduled),
+                "write_boundary": BOOKING_MUTATION_WRITE_BOUNDARY,
             },
         )
 
@@ -1967,11 +2165,64 @@ def execute_tool_action(
                     "tool_action": tool_action,
                 },
             )
-        updated, error = _cancel_booking(
-            db,
-            appointment=appointment,
-            reason=tool_args.get("reason"),
-        )
+        try:
+            def _cancel_bundle() -> tuple[Appointment | None, str | None, list[Any]]:
+                updated, error = _cancel_booking(
+                    db,
+                    appointment=appointment,
+                    reason=tool_args.get("reason"),
+                    commit=False,
+                )
+                if error:
+                    return updated, error, []
+                if updated is None:
+                    raise BookingWriteBoundaryError(
+                        stage="cancel",
+                        error_code="appointment_missing",
+                    )
+                enqueued, sync_error = enqueue_appointment_sync(
+                    db,
+                    appointment=updated,
+                    action="cancel",
+                    commit=False,
+                )
+                if not enqueued and sync_error not in {None, "duplicate"}:
+                    raise BookingWriteBoundaryError(
+                        stage="calendar_sync",
+                        error_code=sync_error,
+                    )
+                cancelled_jobs = mark_pending_reminders_failed(
+                    db,
+                    appointment_id=updated.id,
+                    reason="cancelled",
+                    commit=False,
+                )
+                return updated, None, cancelled_jobs
+
+            updated, error, cancelled_jobs = _run_booking_write_boundary(
+                db,
+                _cancel_bundle,
+            )
+        except BookingWriteBoundaryError as exc:
+            return ToolExecutionResult(
+                handled=True,
+                ok=False,
+                response_text="Сейчас календарь недоступен. Напишите удобное время, и мы уточним.",
+                error_code="provider_unavailable",
+                decision_meta={
+                    "tool_action": tool_action,
+                    "tool_decision": "provider_unavailable",
+                    "provider_reason": exc.error_code,
+                    "write_boundary": BOOKING_MUTATION_WRITE_BOUNDARY,
+                },
+                trace={
+                    "stage": "tool_registry",
+                    "decision": "provider_unavailable",
+                    "tool_action": tool_action,
+                    "provider_reason": exc.error_code,
+                    "write_boundary": BOOKING_MUTATION_WRITE_BOUNDARY,
+                },
+            )
         if error:
             return ToolExecutionResult(
                 handled=True,
@@ -1981,18 +2232,6 @@ def execute_tool_action(
                 decision_meta={"tool_action": tool_action, "tool_decision": "error"},
                 trace={"stage": "tool_registry", "decision": "error", "tool_action": tool_action},
             )
-        enqueue_appointment_sync(
-            db,
-            appointment=updated,
-            action="cancel",
-            commit=True,
-        )
-        cancelled_jobs = mark_pending_reminders_failed(
-            db,
-            appointment_id=updated.id,
-            reason="cancelled",
-            commit=True,
-        )
         return ToolExecutionResult(
             handled=True,
             ok=True,
@@ -2003,6 +2242,7 @@ def execute_tool_action(
                 "tool_decision": "ok",
                 "appointment_id": str(updated.id),
                 "reminder_jobs_cancelled": len(cancelled_jobs),
+                "write_boundary": BOOKING_MUTATION_WRITE_BOUNDARY,
             },
             trace={
                 "stage": "tool_registry",
@@ -2010,6 +2250,7 @@ def execute_tool_action(
                 "tool_action": tool_action,
                 "appointment_id": str(updated.id),
                 "reminder_jobs_cancelled": len(cancelled_jobs),
+                "write_boundary": BOOKING_MUTATION_WRITE_BOUNDARY,
             },
         )
 

@@ -34,3 +34,9 @@ def test_turn_outcome_rejects_invalid_expected_reply_type():
         assert "expected_reply_type_invalid" in str(exc)
     else:
         raise AssertionError("ValidationError was not raised")
+
+
+def test_turn_outcome_accepts_phone_expected_reply_type():
+    outcome = TurnOutcome(expected_reply_type=" phone ")
+
+    assert outcome.expected_reply_type == "phone"
