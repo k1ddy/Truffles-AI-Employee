@@ -2,6 +2,7 @@
 Calendar and Booking API Router.
 Provides endpoints for slots, bookings, and Google Calendar OAuth.
 """
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Literal, Optional
 from uuid import UUID, uuid4
@@ -122,9 +123,9 @@ class BookingCreate(BaseModel):
     specialist_id: str
     start_at: datetime
     end_at: datetime
-    customer_name: Optional[str] = None
-    customer_phone: Optional[str] = None
-    service_type: Optional[str] = None
+    customer_name: str = Field(min_length=1, max_length=255)
+    customer_phone: str = Field(min_length=7, max_length=32)
+    service_type: str = Field(min_length=1, max_length=255)
     notes: Optional[str] = None
     conversation_id: Optional[str] = None
     case_id: Optional[str] = None
@@ -212,6 +213,38 @@ def _normalize_required_text(value: str, *, field_name: str) -> str:
     if not cleaned:
         raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is required")
     return cleaned
+
+
+def _normalize_operator_grade_text(
+    value: str,
+    *,
+    field_name: str,
+    min_length: int = 2,
+) -> str:
+    cleaned = _normalize_required_text(value, field_name=field_name)
+    if len(cleaned) < min_length:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is too short")
+    return cleaned
+
+
+def _normalize_calendar_customer_phone(
+    value: str,
+    *,
+    field_name: str = "customer_phone",
+) -> str:
+    cleaned = _normalize_required_text(value, field_name=field_name)
+    if not re.fullmatch(r"[+\d\s().-]+", cleaned):
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is invalid")
+    digits = re.sub(r"\D+", "", cleaned)
+    if len(digits) == 10:
+        digits = f"7{digits}"
+    elif len(digits) == 11 and digits[0] in {"7", "8"}:
+        digits = f"7{digits[-10:]}"
+    else:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is invalid")
+    if len(digits) != 11 or not digits.startswith("7"):
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is invalid")
+    return f"+{digits}"
 
 
 def _parse_booking_cursor(cursor: Optional[str]) -> tuple[datetime, Optional[UUID]] | None:
@@ -1013,6 +1046,11 @@ async def create_booking(
     if specialist.branch_id is None:
         raise ConsoleAPIError(400, "BRANCH_REQUIRED", "Specialist branch is required")
 
+    customer_name = _normalize_operator_grade_text(data.customer_name, field_name="customer_name")
+    customer_phone = _normalize_calendar_customer_phone(data.customer_phone, field_name="customer_phone")
+    service_type = _normalize_operator_grade_text(data.service_type, field_name="service_type")
+    notes = _normalize_optional_text(data.notes)
+
     service = SchedulingService(db)
     conversation_uuid = _parse_uuid(data.conversation_id, field_name="conversation_id") if data.conversation_id else None
     case_uuid = _parse_uuid(data.case_id, field_name="case_id") if data.case_id else None
@@ -1054,10 +1092,10 @@ async def create_booking(
             specialist_id=UUID(data.specialist_id),
             start_at=data.start_at,
             end_at=data.end_at,
-            customer_name=data.customer_name,
-            customer_phone=data.customer_phone,
-            service_type=data.service_type,
-            notes=data.notes,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            service_type=service_type,
+            notes=notes,
             created_by=context.agent.id,
             conversation_id=conversation_uuid,
             case_id=case_uuid,
@@ -1431,6 +1469,12 @@ async def register_booking_no_show_followup(
     result = (data.result or "contacted").strip().lower()
     note = _normalize_optional_text(data.note)
     rebooked_appointment_id = _normalize_optional_text(data.rebooked_appointment_id)
+    if result == "rebooked" and not rebooked_appointment_id:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "rebooked_appointment_id is required when result=rebooked",
+        )
     if result != "rebooked" and rebooked_appointment_id:
         raise ConsoleAPIError(
             400,

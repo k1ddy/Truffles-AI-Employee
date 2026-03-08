@@ -2,11 +2,11 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave31-a1.md
-- branch: feat/2026-03-08-inbox-calendar-ux-reconstruction-wave31-recheck-a1
+- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave36-a1.md
+- branch: feat/2026-03-08-inbox-calendar-ux-reconstruction-wave36-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
-- base_ref: feat/2026-03-08-inbox-calendar-ux-reconstruction-wave35-a1
-- scope: Завершить `Wave31` re-check after Wave35 closure: открыть separate `PR #954`, затем зафиксировать go/no-go по routing v2 и оставить Wave31 в explicit hold при отсутствии новых server-owned capability inputs.
+- base_ref: origin/main
+- scope: Полностью пересобрать `Записи` как operator-grade surface: plain-language copy, sanitized follow-up ownership, guided booking composer, strong inline validation, visual inspections after each major phase, and valid/invalid interaction proof.
 - done:
   - Wave32 docs-only audit started and canonized:
     - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md` and artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-08-inbox-calendar-ux-logic-audit-a1.md`;
@@ -513,8 +513,23 @@
     - `PR #952` — Wave33 Inbox first-screen decomposition
     - `PR #953` — Wave34 Calendar first-screen decomposition (stacked on Wave33)
     - `PR #954` — Wave35 operator proof (stacked on Wave34)
+  - Wave36 TP activated before implementation:
+    - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave36-a1.md` for a full Calendar operator-grade rebuild;
+    - recorded factual gaps behind the user complaint: raw `Follow-up` copy, technical owner fallbacks, overflow-prone filter controls, and under-guarded booking creation flow in `console-web/src/app/calendar/page.tsx`;
+    - locked the block to Calendar-only redesign with mandatory visual inspection after each major phase and valid+invalid interaction proof before merge.
   - Wave31 re-check completed as explicit no-go:
     - current routing truth still stops at Wave29/Wave30 server-owned inputs: access eligibility, open-case load, booking follow-up continuity, SLA-sensitive scoring, and routing profiles;
     - `ConsoleCaseRoutingPolicyType` still exposes only `least_open_cases` and `follow_up_sla_balance`, while unknown `skills_presence` stays rejected by tests;
     - there is still no server-owned assignee skills matrix, presence heartbeat, or shift/schedule model, so routing v2 remains on hold until a future TP proves new inputs.
-- last_updated: 2026-03-08T13:33:47+05:00
+  - Wave36 Calendar operator-grade rebuild completed locally:
+    - rebuilt `console-web/src/app/calendar/page.tsx` around plain Russian operator copy, safe historical owner labels, hidden technical follow-up-owner options, guided `мастер -> услуга -> день -> слот -> клиент` booking flow, case-prefill, inline validation, and misuse-resistant no-show follow-up actions;
+    - tightened `truffles-api/app/routers/calendar.py` so calendar create requires coherent `customer_name`, normalized `customer_phone`, and `service_type`, while `result=rebooked` now requires a linked appointment id;
+    - extended `console-web/e2e/inspect_case.spec.ts` so the deterministic mock lane proves hidden technical owners, safe labels, blocked invalid booking submit, valid guided booking creation, required rebook linkage, and medium-width layout stability;
+    - final visual inspection on fresh built assets at `1280px` and `1440px` confirmed wrapped filter copy, readable booking composer, safe owner masking (`Служебный аккаунт` instead of `admin console`), formatted phones, and no panel overflow; evidence saved in `/tmp/wave36-calendar-*.png`;
+    - local evidence:
+      - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+      - `cd console-web && npm run build` (`pass`)
+      - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "calendar secondary panels isolate filters and booking actions|calendar hides technical follow-up owners and keeps operator-safe labels|guided booking composer blocks invalid submit until service name phone and slot are coherent, then creates booking|no-show rebook path requires linked booking selection before submit|medium-width inbox and calendar keep primary queue surfaces visible|booking no-show reopens resolved case and preserves case-booking semantics"` (`6 passed`)
+      - `cd truffles-api && pytest -q tests/test_calendar_bookings_router.py tests/test_calendar_noshow_followup_router.py tests/test_console_openapi_calendar_contract.py` (`42 passed`)
+      - `cd truffles-api && ruff check app/routers/calendar.py tests/test_calendar_bookings_router.py tests/test_calendar_noshow_followup_router.py tests/test_console_openapi_calendar_contract.py` (`pass`)
+- last_updated: 2026-03-08T16:37:05+05:00

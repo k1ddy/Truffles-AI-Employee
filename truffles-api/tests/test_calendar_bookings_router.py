@@ -204,3 +204,188 @@ async def test_list_bookings_accepts_cursor_lane_and_case_filters(monkeypatch):
     assert captured["cursor_start_at"] == start_at
     assert captured["cursor_id"] == cursor_id
     assert response.items[0].case_id == str(case_id)
+
+
+@pytest.mark.asyncio
+async def test_create_booking_normalizes_operator_grade_fields(monkeypatch):
+    client_id = uuid4()
+    agent_id = uuid4()
+    specialist_id = uuid4()
+    branch_id = uuid4()
+    booking_id = uuid4()
+    captured = {}
+
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=agent_id, name="Manager"),
+    )
+    specialist = SimpleNamespace(
+        id=specialist_id,
+        client_id=client_id,
+        branch_id=branch_id,
+        branch=None,
+        name="Spec",
+    )
+
+    class _SchedulingServiceStub:
+        def __init__(self, _db):
+            pass
+
+        def create_appointment(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(id=booking_id)
+
+    db = SimpleNamespace(
+        query=lambda model: _QueryStub(rows=[specialist]) if model is calendar_router.Specialist else _QueryStub(rows=[]),
+    )
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceStub)
+    monkeypatch.setattr(calendar_router, "schedule_default_reminders", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        calendar_router,
+        "_build_booking_response",
+        lambda _db, _booking: calendar_router.BookingResponse(
+            id=str(booking_id),
+            specialist_id=str(specialist_id),
+            specialist_name="Spec",
+            start_at="2026-03-06T10:00:00+00:00",
+            end_at="2026-03-06T11:00:00+00:00",
+            customer_name=captured["customer_name"],
+            customer_phone=captured["customer_phone"],
+            service_type=captured["service_type"],
+            status="CONFIRMED",
+            created_at="2026-03-06T09:00:00+00:00",
+        ),
+    )
+
+    response = await calendar_router.create_booking(
+        request=SimpleNamespace(),
+        data=calendar_router.BookingCreate(
+            specialist_id=str(specialist_id),
+            start_at=datetime(2026, 3, 6, 10, 0, tzinfo=timezone.utc),
+            end_at=datetime(2026, 3, 6, 11, 0, tzinfo=timezone.utc),
+            customer_name="  Айгуль  ",
+            customer_phone="8 (700) 123-45-67",
+            service_type="  Маникюр  ",
+            notes="  Позвонить за час  ",
+        ),
+        db=db,
+    )
+
+    assert response.success is True
+    assert captured["customer_name"] == "Айгуль"
+    assert captured["customer_phone"] == "+77001234567"
+    assert captured["service_type"] == "Маникюр"
+    assert captured["notes"] == "Позвонить за час"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field_name", "field_value"),
+    [
+        ("customer_name", " "),
+        ("service_type", "\t"),
+    ],
+)
+async def test_create_booking_rejects_blank_operator_fields(monkeypatch, field_name, field_value):
+    client_id = uuid4()
+    specialist_id = uuid4()
+    branch_id = uuid4()
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=uuid4(), name="Manager"),
+    )
+    specialist = SimpleNamespace(
+        id=specialist_id,
+        client_id=client_id,
+        branch_id=branch_id,
+        branch=None,
+        name="Spec",
+    )
+
+    class _SchedulingServiceGuard:
+        def __init__(self, _db):
+            pass
+
+        def create_appointment(self, **_kwargs):  # pragma: no cover
+            raise AssertionError("create_appointment must not run for invalid operator fields")
+
+    db = SimpleNamespace(
+        query=lambda model: _QueryStub(rows=[specialist]) if model is calendar_router.Specialist else _QueryStub(rows=[]),
+    )
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceGuard)
+
+    payload = {
+        "specialist_id": str(specialist_id),
+        "start_at": datetime(2026, 3, 6, 10, 0, tzinfo=timezone.utc),
+        "end_at": datetime(2026, 3, 6, 11, 0, tzinfo=timezone.utc),
+        "customer_name": "Айгуль",
+        "customer_phone": "+77001234567",
+        "service_type": "Маникюр",
+    }
+    payload[field_name] = field_value
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await calendar_router.create_booking(
+            request=SimpleNamespace(),
+            data=calendar_router.BookingCreate(**payload),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_create_booking_rejects_invalid_customer_phone(monkeypatch):
+    client_id = uuid4()
+    specialist_id = uuid4()
+    branch_id = uuid4()
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=uuid4(), name="Manager"),
+    )
+    specialist = SimpleNamespace(
+        id=specialist_id,
+        client_id=client_id,
+        branch_id=branch_id,
+        branch=None,
+        name="Spec",
+    )
+
+    class _SchedulingServiceGuard:
+        def __init__(self, _db):
+            pass
+
+        def create_appointment(self, **_kwargs):  # pragma: no cover
+            raise AssertionError("create_appointment must not run for invalid phone")
+
+    db = SimpleNamespace(
+        query=lambda model: _QueryStub(rows=[specialist]) if model is calendar_router.Specialist else _QueryStub(rows=[]),
+    )
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceGuard)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await calendar_router.create_booking(
+            request=SimpleNamespace(),
+            data=calendar_router.BookingCreate(
+                specialist_id=str(specialist_id),
+                start_at=datetime(2026, 3, 6, 10, 0, tzinfo=timezone.utc),
+                end_at=datetime(2026, 3, 6, 11, 0, tzinfo=timezone.utc),
+                customer_name="Айгуль",
+                customer_phone="abc-123",
+                service_type="Маникюр",
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"

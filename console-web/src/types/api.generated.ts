@@ -2749,11 +2749,11 @@ export interface components {
              */
             end_at: string;
             /** Customer Name */
-            customer_name?: string | null;
+            customer_name: string;
             /** Customer Phone */
-            customer_phone?: string | null;
+            customer_phone: string;
             /** Service Type */
-            service_type?: string | null;
+            service_type: string;
             /** Notes */
             notes?: string | null;
             /** Conversation Id */
