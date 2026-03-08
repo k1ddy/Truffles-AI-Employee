@@ -2,12 +2,17 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave30-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave33-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Реализовать Wave30 server-owned assignee routing profiles поверх Wave29 explainable routing: добавить admin-managed routing status/capacity/manual restrictions без fake skills/presence и встроить их в текущие reassignment surfaces и Team governance.
+- scope: Выполнить `Wave33` Inbox surface decomposition: убрать saved views/share, advanced filters, view prefs и bulk-form surfaces с первого экрана `Заявки`, оставить только triage controls, затем переподтвердить targeted operator workflow lane.
 - done:
+  - Wave32 docs-only audit started and canonized:
+    - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md` and artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-08-inbox-calendar-ux-logic-audit-a1.md`;
+    - recorded root causes for the remaining operator defect: `CaseList` and `calendar/page.tsx` are now interaction-architecture bottlenecks, not missing-server-truth gaps;
+    - confirmed strong backend contract coverage (`103 passed`) but incomplete frontend workflow/layout proof (`4 passed / 1 failed` on targeted Playwright lane, isolated local server `http://localhost:3101`);
+    - opened backlog items `UX-34`, `UX-35`, and `UX-36` so the next valid blocks are inbox surface decomposition, calendar surface decomposition, and operator proof lanes rather than routing v2.
   - Wave30 implementation completed locally:
     - backend adds `console_routing_profiles` model + migration + service, explicit admin list/upsert/delete API, and deterministic precedence `branch override -> client profile -> default`;
     - assignee options now expose routing-profile facts (`routing_status`, source, capacity, eligibility, block reason), and both routing policies plus manual reassignment honor paused/capacity/follow-up-only constraints without hiding the current owner;
@@ -475,4 +480,13 @@
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`3 passed`)
   - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
   - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title \"fix(console): harden operator action feedback\" ...` (`PR #937`)
-- last_updated: 2026-03-07T20:18:38+05:00
+  - Wave33 Inbox decomposition completed locally:
+    - created and activated `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave33-a1.md` as the bounded follow-up to the Wave32 audit;
+    - rebuilt `console-web/src/components/CaseList.tsx` so the first screen keeps only `cases-mode-scopes`, `cases-queue-views`, `cases-filter-search`, `cases-filter-owner-scope`, and `cases-refresh`, while saved views/share, advanced filters, view settings, and bulk forms now live in a secondary right-side panel;
+    - updated `console-web/e2e/inspect_case.spec.ts` to drive the new secondary surfaces and current routing/calendar semantics instead of stale inline controls and stale routing-policy/calendar-history expectations;
+    - local evidence:
+      - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file e2e/inspect_case.spec.ts --file e2e/smoke.spec.ts` (`pass`)
+      - `cd console-web && npm run build` (`pass`)
+      - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "inspect first case|manager history modes hide queue views and keep owner scope role-gated|manage and apply action macro|action feedback hides raw sync reason codes and keeps reopen internal-only|booking no-show reopens resolved case and preserves case-booking semantics"` (`5 passed`)
+      - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+- last_updated: 2026-03-08T11:20:34+05:00

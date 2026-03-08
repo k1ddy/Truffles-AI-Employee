@@ -9,6 +9,11 @@
 ## Название/цель
 Закрыть программу доказательством, что новая панель `Заявки` не допускает плохие и нерабочие состояния при всех ключевых сценариях менеджера и администратора, включая связь с ботом и календарём записей.
 
+## Closure status
+- `Part A` deterministic matrix proof merged via `PR #944`.
+- `Part B` live-proof closure and helper hardening merged via `PR #946`.
+- Final verdict: the inbox/calendar semantic reconstruction is closed with deterministic and live evidence, without remaining blocking correctness gaps in the original program scope.
+
 ## Canon refs
 - `AGENTS.md`
 - `STATE.md`
@@ -100,13 +105,13 @@
 
 ## Residual architecture debt (mandatory)
 - `Current residuals accepted in this block`: only optional future productivity features, not correctness gaps.
-- `Why not in this block`: this wave is strictly for proof and closeout.
-- `Risk if deferred`: semantic regressions stay invisible until operator complaints.
-- `Linked follow-up Task Package(s)`: `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-live-proof-a1.md` while explicit safe live proof is still blocked.
-- `Expiry/trigger to stop deferral`: any red matrix slice or blocked live proof keeps the overall program open.
+- `Why not in this block`: this wave was strictly for proof and closeout of the shipped semantic model.
+- `Risk if deferred`: none for closure of the original program; future maturity work should be tracked independently.
+- `Linked follow-up Task Package(s)`: none required for closure; `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-live-proof-a1.md` is completed.
+- `Expiry/trigger to stop deferral`: any future semantic expansion must start under a new TP with fresh matrix coverage, not by reopening this closed wave.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: execute the dedicated live-proof closure block with an approved safe case id and explicit `pass|fail|blocked` evidence.
+- `Next block objective`: no mandatory next block inside Wave22; the proof program is closed.
 - `First deterministic check command`: `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line`
-- `Blocked-by conditions`: unresolved safe-case approval, live auth/env issues, or any red deterministic slice.
+- `Blocked-by conditions`: none for closure; any new work requires a new TP and fresh acceptance plan.
 - `Owner role for closure`: Brain / Top Architect.
