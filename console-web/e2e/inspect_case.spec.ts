@@ -61,6 +61,32 @@ async function closeCasesSecondaryPanel(page: import('@playwright/test').Page) {
         await expect(panel).toHaveCount(0);
     }
 }
+
+async function openCalendarSecondaryPanel(
+    page: import('@playwright/test').Page,
+    section: 'filters' | 'saved_views' | 'scheduling',
+) {
+    const panel = page.getByTestId('calendar-secondary-panel');
+    if (!(await panel.isVisible().catch(() => false))) {
+        const toggleBySection: Record<typeof section, string> = {
+            filters: 'calendar-secondary-panel-toggle',
+            saved_views: 'calendar-saved-views-panel-toggle',
+            scheduling: 'calendar-scheduling-panel-toggle',
+        };
+        await page.getByTestId(toggleBySection[section]).click({ force: true });
+        await expect(panel).toBeVisible({ timeout: 15000 });
+    }
+    await page.getByTestId(`calendar-secondary-tab-${section}`).click({ force: true });
+}
+
+async function closeCalendarSecondaryPanel(page: import('@playwright/test').Page) {
+    const panel = page.getByTestId('calendar-secondary-panel');
+    if (await panel.isVisible().catch(() => false)) {
+        await page.getByTestId('calendar-secondary-panel-close').click({ force: true });
+        await expect(panel).toHaveCount(0);
+    }
+}
+
 async function installConsoleMocks(
     page: import('@playwright/test').Page,
     options?: { viewerRole?: 'admin' | 'manager' | 'owner' },
@@ -1034,7 +1060,10 @@ async function assertCalendarQueueSurface(page: import('@playwright/test').Page)
     await expect(page.getByTestId('calendar-page')).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId('calendar-queue-controls')).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId('calendar-queue-lane-attention')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('calendar-secondary-panel-toggle')).toBeVisible({ timeout: 20000 });
+    await openCalendarSecondaryPanel(page, 'filters');
     await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
+    await closeCalendarSecondaryPanel(page);
     const screenshotPath = path.resolve('calendar_no_cases_context.png');
     await page.screenshot({ path: screenshotPath, fullPage: true });
     console.log(`Calendar no-cases screenshot saved to: ${screenshotPath}`);
@@ -1533,8 +1562,11 @@ test('inspect first case', async ({ page }) => {
         await expect(page.getByTestId('calendar-queue-controls')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-mode-ops')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-mode-history')).toBeVisible({ timeout: 20000 });
-        await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
+        await expect(page.getByTestId('calendar-secondary-panel-toggle')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-history-all-dates-hint')).toBeVisible({ timeout: 20000 });
+        await openCalendarSecondaryPanel(page, 'filters');
+        await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
+        await closeCalendarSecondaryPanel(page);
 
         const calendarScreenshotPath = path.resolve('calendar_case_context.png');
         await page.screenshot({ path: calendarScreenshotPath, fullPage: true });
@@ -1754,6 +1786,34 @@ test('booking no-show reopens resolved case and preserves case-booking semantics
     await expect(page.getByTestId('case-business-status')).toContainText('Нужен ответ', { timeout: 15000 });
     await expect(page.getByTestId('case-next-action')).toContainText('Ответить до', { timeout: 15000 });
     await expect(page.getByTestId('case-booking-summary')).toContainText('Клиент не пришел', { timeout: 15000 });
+});
+
+test('calendar secondary panels isolate filters and booking actions', async ({ page }) => {
+    test.skip(!useRouteMocks, 'Wave34 calendar decomposition is covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page);
+    await ensureLoggedIn(page);
+    await gotoWithRetry(page, `${baseURL}/calendar`);
+    await expect(page.getByTestId('calendar-page')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('calendar-queue-controls')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('calendar-queue-status-filter')).toHaveCount(0);
+    await expect(page.getByTestId('calendar-follow-up-governance-card')).toHaveCount(0);
+
+    await openCalendarSecondaryPanel(page, 'filters');
+    await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
+    await closeCalendarSecondaryPanel(page);
+
+    await page.getByTestId('calendar-booking-open-actions').first().click({ force: true });
+    const bookingPanel = page.getByTestId('calendar-booking-panel');
+    await expect(bookingPanel).toBeVisible({ timeout: 20000 });
+    await bookingPanel.getByRole('button', { name: 'Не пришел', exact: true }).click();
+    await expect(bookingPanel.getByTestId('calendar-follow-up-governance-owner')).toBeVisible({ timeout: 20000 });
+    await expect(bookingPanel.getByRole('button', { name: 'Связались', exact: true })).toBeVisible({ timeout: 20000 });
+
+    await page.getByTestId('calendar-booking-panel-close').click({ force: true });
+    await expect(page.getByTestId('calendar-booking-panel')).toHaveCount(0);
+    await expect(page.getByTestId('calendar-follow-up-governance-card')).toHaveCount(0);
 });
 
 test('live action feedback validation requires explicit safe case and hides raw sync codes', {

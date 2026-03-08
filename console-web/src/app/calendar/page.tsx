@@ -71,6 +71,22 @@ interface TimeSlot {
     available: boolean;
 }
 
+type CalendarSecondaryPanelSection = "filters" | "saved_views" | "scheduling";
+
+const CALENDAR_STATUS_FILTER_LABELS: Record<BookingStatusFilter, string> = {
+    all: "Все статусы",
+    scheduled: "Запланированные",
+    completed: "Пришёл",
+    no_show: "Не пришёл",
+    cancelled: "Отменённые",
+};
+
+const CALENDAR_SECONDARY_PANEL_TABS: Array<{ id: CalendarSecondaryPanelSection; label: string }> = [
+    { id: "filters", label: "Фильтры" },
+    { id: "saved_views", label: "Виды" },
+    { id: "scheduling", label: "Планирование" },
+];
+
 async function fetchSpecialists(): Promise<{ items: Specialist[] }> {
     const response = await api.get("/calendar/specialists");
     return response.data;
@@ -357,6 +373,9 @@ export default function CalendarPage() {
     const [saveViewDefaultTouched, setSaveViewDefaultTouched] = useState(false);
     const [selectedTeamTargetBranchIdDraft, setSelectedTeamTargetBranchIdDraft] = useState("");
     const [selectedTeamTargetRoleDraft, setSelectedTeamTargetRoleDraft] = useState<ConsoleRole | "">("");
+    const [secondaryPanelOpen, setSecondaryPanelOpen] = useState(false);
+    const [secondaryPanelSection, setSecondaryPanelSection] = useState<CalendarSecondaryPanelSection>("filters");
+    const [bookingActionsBookingId, setBookingActionsBookingId] = useState<string | null>(null);
 
     const currentQueueStateQuery = useQuery({
         queryKey: ["queue-state", "calendar", calendarWorkspaceScope, focusedCaseId, focusedConversationId],
@@ -867,6 +886,77 @@ export default function CalendarPage() {
         : queueMode === "history"
             ? "История записей"
             : "Записи";
+    const followUpOwnerFilterLabel = followUpOwnerId
+        ? followUpOwnerOptions.find((agent) => agent.id === followUpOwnerId)?.name ?? followUpOwnerId
+        : null;
+    const queueSummaryChips = [
+        queueMode === "history"
+            ? {
+                key: "mode",
+                label: "История",
+            }
+            : {
+                key: "lane",
+                label: queueLane === "attention" ? "Только действия" : "Все записи",
+            },
+        queueSearch.trim()
+            ? {
+                key: "search",
+                label: `Поиск: ${queueSearch.trim()}`,
+            }
+            : null,
+        queueStatusFilter !== "all"
+            ? {
+                key: "status",
+                label: `Статус: ${CALENDAR_STATUS_FILTER_LABELS[queueStatusFilter]}`,
+            }
+            : null,
+        followUpOwnerFilterLabel
+            ? {
+                key: "owner",
+                label: `Follow-up owner: ${followUpOwnerFilterLabel}`,
+            }
+            : null,
+        followUpOverdueOnly
+            ? {
+                key: "overdue",
+                label: "Только просроченный follow-up",
+            }
+            : null,
+        selectedSavedView
+            ? {
+                key: "view",
+                label: `Вид: ${selectedSavedView.name}`,
+            }
+            : null,
+    ].filter((chip): chip is { key: string; label: string } => Boolean(chip));
+    const schedulingSummary = [
+        selectedSpecialist
+            ? specialists.find((specialist) => specialist.id === selectedSpecialist)?.name ?? selectedSpecialist
+            : null,
+        selectedService?.name ?? null,
+        selectedDate
+            ? new Date(selectedDate).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })
+            : null,
+        selectedSlot?.start_time ?? null,
+    ].filter((part): part is string => Boolean(part));
+    const queueScopeHint = queueMode === "history" && !selectedDate
+        ? "История сейчас показывает все даты. Укажите день, только если хотите сузить архивный список."
+        : focusedConversationId && !selectedDate
+            ? "Сейчас показываем все даты по этой заявке. Выберите дату, только если хотите сузить список."
+            : null;
+    const schedulingSummaryLabel = schedulingSummary.length > 0
+        ? schedulingSummary.join(" · ")
+        : "Мастер, услуга, дата и слот пока не выбраны.";
+    const bookingActionsBooking = bookingActionsBookingId
+        ? bookings.find((booking) => booking.id === bookingActionsBookingId) ?? null
+        : null;
+
+    useEffect(() => {
+        if (bookingActionsBookingId && !bookingActionsBooking) {
+            setBookingActionsBookingId(null);
+        }
+    }, [bookingActionsBooking, bookingActionsBookingId]);
 
     const applyCalendarQueueSnapshot = (
         snapshot: CalendarQueueStateSnapshot,
@@ -1228,6 +1318,32 @@ export default function CalendarPage() {
         }
     };
 
+    const openSecondaryPanel = (section: CalendarSecondaryPanelSection) => {
+        setBookingActionsBookingId(null);
+        setSecondaryPanelSection(section);
+        setSecondaryPanelOpen(true);
+    };
+
+    const closeSecondaryPanel = () => {
+        setSecondaryPanelOpen(false);
+    };
+
+    const clearQueueFilters = () => {
+        setQueueSearch("");
+        setQueueStatusFilter("all");
+        setFollowUpOwnerId("");
+        setFollowUpOverdueOnly(false);
+    };
+
+    const openBookingActionsPanel = (bookingId: string) => {
+        setSecondaryPanelOpen(false);
+        setBookingActionsBookingId(bookingId);
+    };
+
+    const closeBookingActionsPanel = () => {
+        setBookingActionsBookingId(null);
+    };
+
     const setFollowUpGovernanceDraft = (
         bookingId: string,
         patch: Partial<{ ownerAgentId: string; dueAt: string }>,
@@ -1335,7 +1451,7 @@ export default function CalendarPage() {
                             )}
                             <Link
                                 href="/calendar"
-                                className="rounded border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-background"
+                                className="rounded border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-background hover:text-foreground"
                                 data-testid="calendar-clear-case-context"
                             >
                                 Показать все записи
@@ -1345,406 +1461,458 @@ export default function CalendarPage() {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Left: Filters & Slots */}
-                <div className="lg:col-span-2 space-y-6">
-                    {/* Debug/Error info */}
-                    {specialistsError && (
-                        <div className="card-surface p-4 text-destructive">
-                            <h3 className="font-semibold mb-1">Не удалось загрузить список мастеров</h3>
-                            <p className="text-sm text-muted-foreground">
-                                Проверьте соединение и попробуйте обновить страницу.
-                            </p>
-                            <details className="mt-2 text-xs text-muted-foreground">
-                                <summary className="cursor-pointer">Технические детали</summary>
-                                <pre className="mt-2 overflow-auto whitespace-pre-wrap">
-                                    {JSON.stringify(specialistsErrorData, null, 2)}
-                                </pre>
-                            </details>
-                        </div>
-                    )}
+            {specialistsError && (
+                <div className="card-surface p-4 text-destructive">
+                    <h3 className="mb-1 font-semibold">Не удалось загрузить список мастеров</h3>
+                    <p className="text-sm text-muted-foreground">
+                        Проверьте соединение и попробуйте обновить страницу.
+                    </p>
+                    <details className="mt-2 text-xs text-muted-foreground">
+                        <summary className="cursor-pointer">Технические детали</summary>
+                        <pre className="mt-2 overflow-auto whitespace-pre-wrap">
+                            {JSON.stringify(specialistsErrorData, null, 2)}
+                        </pre>
+                    </details>
+                </div>
+            )}
 
-                    {/* Filters */}
-                    <div className="card-surface p-4 space-y-4">
-                        <h2 className="font-semibold text-lg">Выберите мастера и дату</h2>
-
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {/* Specialist */}
-                            <div>
-                                <label className="block text-sm font-medium text-muted-foreground mb-1">
-                                    Мастер
-                                </label>
-                                <select
-                                    value={selectedSpecialist}
-                                    onChange={(e) => {
-                                        setSelectedSpecialist(e.target.value);
-                                        setSelectedSlot(null);
-                                        setSelectedService(null);
-                                    }}
-                                    className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                >
-                                    <option value="">Выберите мастера</option>
-                                    {specialists.map((s) => (
-                                        <option key={s.id} value={s.id}>
-                                            {s.name} {s.branch_name ? `(${s.branch_name})` : ""}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            {/* Service */}
-                            {currentSpecialist && currentSpecialist.services.length > 0 && (
-                                <div>
-                                    <label className="block text-sm font-medium text-muted-foreground mb-1">
-                                        Услуга
-                                    </label>
-                                    <select
-                                        value={selectedService?.name || ""}
-                                        onChange={(e) => {
-                                            const service = currentSpecialist.services.find(s => s.name === e.target.value);
-                                            setSelectedService(service || null);
-                                            setSelectedSlot(null);
-                                        }}
-                                        className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    >
-                                        <option value="">Любая услуга</option>
-                                        {currentSpecialist.services.map((s, i) => (
-                                            <option key={i} value={s.name}>
-                                                {s.name} ({s.duration_min} мин, {s.price}₸)
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
-
-                            {/* Date */}
-                            <div>
-                                <label
-                                    className="block text-sm font-medium text-muted-foreground mb-1"
-                                    htmlFor="calendar-date"
-                                >
-                                    Дата
-                                </label>
-                                <input
-                                    id="calendar-date"
-                                    type="date"
-                                    value={selectedDate}
-                                    onChange={(e) => {
-                                        setSelectedDate(e.target.value);
-                                        setSelectedSlot(null);
-                                    }}
-                                    min={allowPastDateSelection ? undefined : today}
-                                    className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                />
-                                {queueMode === "history" && !selectedDate ? (
-                                    <p className="mt-2 text-xs text-muted-foreground" data-testid="calendar-history-all-dates-hint">
-                                        История сейчас показывает все даты. Укажите день, только если хотите сузить архивный список.
-                                    </p>
-                                ) : focusedConversationId && !selectedDate && (
-                                    <p className="mt-2 text-xs text-muted-foreground" data-testid="calendar-case-all-dates-hint">
-                                        Сейчас показываем все даты по этой заявке. Выберите дату, только если хотите сузить список.
-                                    </p>
-                                )}
-                                <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                                    <input
-                                        type="checkbox"
-                                        checked={allowPastDateSelection}
-                                        onChange={(event) => {
-                                            if (queueMode === "history") {
-                                                return;
-                                            }
-                                            const enabled = event.target.checked;
-                                            setShowPastDates(enabled);
-                                            if (!enabled && selectedDate < today) {
-                                                setSelectedDate(today);
-                                                setSelectedSlot(null);
-                                            }
-                                        }}
-                                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                        disabled={queueMode === "history"}
-                                        data-testid="calendar-show-past-dates"
-                                    />
-                                    {queueMode === "history" ? "История всегда разрешает прошлые даты" : "Показывать прошлые даты"}
-                                </label>
-                            </div>
-                        </div>
+            <div className="card-surface space-y-4 p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-1">
+                        <h2 className="text-lg font-semibold">{queueHeading}</h2>
+                        <p className="text-xs text-muted-foreground">
+                            Первый экран оставляет только triage очереди. Фильтры, saved views/share, booking governance и планирование открываются в отдельных панелях.
+                        </p>
                     </div>
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            onClick={() => openSecondaryPanel("filters")}
+                            className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-background hover:text-foreground"
+                            data-testid="calendar-secondary-panel-toggle"
+                        >
+                            Фильтры
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => openSecondaryPanel("saved_views")}
+                            className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-background hover:text-foreground"
+                            data-testid="calendar-saved-views-panel-toggle"
+                        >
+                            Виды и share
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => openSecondaryPanel("scheduling")}
+                            className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"
+                            data-testid="calendar-scheduling-panel-toggle"
+                        >
+                            Планирование
+                        </button>
+                    </div>
+                </div>
 
-                    {/* Slots Grid */}
-                    {selectedSpecialist && selectedDate && (
-                        <div className="card-surface p-4">
-                            <h2 className="font-semibold text-lg mb-4">
-                                Доступные слоты на {new Date(selectedDate).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
-                            </h2>
-
-                            {slotsLoading ? (
-                                <div className="animate-pulse grid grid-cols-4 md:grid-cols-6 gap-2">
-                                    {[...Array(12)].map((_, i) => (
-                                        <div key={i} className="h-12 bg-muted/70 rounded"></div>
-                                    ))}
-                                </div>
-                            ) : slots.length === 0 ? (
-                                <p className="text-muted-foreground text-center py-8">
-                                    Нет доступных слотов на выбранную дату. Возможно, это выходной день.
-                                </p>
-                            ) : (
-                                <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
-                                    {slots.map((slot, i) => (
-                                        <button
-                                            key={i}
-                                            onClick={() => handleSlotClick(slot)}
-                                            disabled={!slot.available}
-                                            className={`
-                                                py-3 px-2 rounded-lg text-sm font-medium transition-colors
-                                                ${slot.available
-                                                    ? selectedSlot?.start === slot.start
-                                                        ? "bg-primary text-primary-foreground"
-                                                        : "bg-green-50 text-green-800 hover:bg-green-100 border border-green-200"
-                                                    : "bg-muted text-muted-foreground cursor-not-allowed"
-                                                }
-                                            `}
-                                        >
-                                            {slot.start_time}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-
-                            <div className="mt-4 flex gap-4 text-xs text-muted-foreground">
-                                <span className="flex items-center gap-1">
-                                    <span className="w-3 h-3 bg-green-100 border border-green-200 rounded"></span>
-                                    Свободно
-                                </span>
-                                <span className="flex items-center gap-1">
-                                    <span className="w-3 h-3 bg-muted rounded"></span>
-                                    Занято
-                                </span>
-                                <span className="flex items-center gap-1">
-                                    <span className="w-3 h-3 bg-primary rounded"></span>
-                                    Выбрано
-                                </span>
-                            </div>
-                        </div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                    <span className="rounded bg-muted px-2.5 py-1 text-muted-foreground">
+                        Всего: <span className="font-semibold text-foreground">{bookingsSorted.length}</span>
+                    </span>
+                    <span className="rounded bg-amber-100 px-2.5 py-1 text-amber-900">
+                        Требуют внимания: <span className="font-semibold">{attentionCount}</span>
+                    </span>
+                    <span className="rounded bg-red-100 px-2.5 py-1 text-red-900">
+                        Неявки без связи: <span className="font-semibold">{noShowAttentionCount}</span>
+                    </span>
+                    {bookingsData?.has_more && (
+                        <span className="rounded bg-primary/10 px-2.5 py-1 text-primary">
+                            Показаны первые {bookingsSorted.length}
+                        </span>
                     )}
-                    {selectedSpecialist && !selectedDate && (
-                        <div className="card-surface p-4 text-sm text-muted-foreground" data-testid="calendar-select-date-hint">
-                            Выберите дату, чтобы посмотреть слоты по мастеру. Очередь справа уже показывает все связанные записи по заявке.
+                </div>
+
+                <div className="space-y-3" data-testid="calendar-queue-controls">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => handleQueueModeChange("ops")}
+                            className={`rounded border px-2.5 py-1 text-xs font-semibold ${
+                                queueMode === "ops"
+                                    ? "border-primary/40 bg-primary/10 text-primary"
+                                    : "border-border/60 text-muted-foreground hover:text-foreground"
+                            }`}
+                            data-testid="calendar-queue-mode-ops"
+                        >
+                            Операции
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleQueueModeChange("history")}
+                            className={`rounded border px-2.5 py-1 text-xs font-semibold ${
+                                queueMode === "history"
+                                    ? "border-slate-300 bg-slate-100 text-slate-900"
+                                    : "border-border/60 text-muted-foreground hover:text-foreground"
+                            }`}
+                            data-testid="calendar-queue-mode-history"
+                        >
+                            История
+                        </button>
+                    </div>
+                    {queueMode === "ops" ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setQueueLane("attention")}
+                                className={`rounded border px-2.5 py-1 text-xs font-semibold ${
+                                    queueLane === "attention"
+                                        ? "border-amber-300 bg-amber-100 text-amber-900"
+                                        : "border-border/60 text-muted-foreground hover:text-foreground"
+                                }`}
+                                data-testid="calendar-queue-lane-attention"
+                            >
+                                Только действия
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setQueueLane("all")}
+                                className={`rounded border px-2.5 py-1 text-xs font-semibold ${
+                                    queueLane === "all"
+                                        ? "border-primary/40 bg-primary/10 text-primary"
+                                        : "border-border/60 text-muted-foreground hover:text-foreground"
+                                }`}
+                                data-testid="calendar-queue-lane-all"
+                            >
+                                Все записи
+                            </button>
                         </div>
-                    )}
-
-                    {/* Booking Form */}
-                    {showForm && selectedSlot && (
-                        <div className="card-surface p-4">
-                            <h2 className="font-semibold text-lg mb-4">Данные клиента</h2>
-
-                            <form onSubmit={handleSubmit} className="space-y-4">
-                                <div className="bg-muted p-3 rounded-lg text-sm">
-                                    <strong>Мастер:</strong> {currentSpecialist?.name}<br />
-                                    <strong>Время:</strong> {selectedSlot.start_time} - {selectedSlot.end_time}<br />
-                                    {selectedService && (
-                                        <>
-                                            <strong>Услуга:</strong> {selectedService.name} ({selectedService.price}₸)
-                                        </>
-                                    )}
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-muted-foreground mb-1">
-                                            Имя клиента
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={customerName}
-                                            onChange={(e) => setCustomerName(e.target.value)}
-                                            placeholder="Иван Иванов"
-                                            className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-muted-foreground mb-1">
-                                            Телефон
-                                        </label>
-                                        <input
-                                            type="tel"
-                                            value={customerPhone}
-                                            onChange={(e) => setCustomerPhone(e.target.value)}
-                                            placeholder="+7 777 123 4567"
-                                            className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-muted-foreground mb-1">
-                                        Примечания
-                                    </label>
-                                    <textarea
-                                        value={notes}
-                                        onChange={(e) => setNotes(e.target.value)}
-                                        placeholder="Дополнительная информация..."
-                                        rows={2}
-                                        className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    />
-                                </div>
-
-                                <div className="flex gap-3">
-                                    <button
-                                        type="submit"
-                                        disabled={createMutation.isPending}
-                                        className="btn-primary disabled:opacity-50"
-                                    >
-                                        {createMutation.isPending ? "Создаём..." : "Записать клиента"}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={resetForm}
-                                        className="btn-ghost"
-                                    >
-                                        Отмена
-                                    </button>
-                                </div>
-                            </form>
+                    ) : (
+                        <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                            История всегда показывает полный архивный срез без режима &quot;Только действия&quot;.
                         </div>
                     )}
                 </div>
 
-                {/* Right: Today's Bookings */}
-                <div className="space-y-6">
-                    <div className="card-surface p-4">
-                        <h2 className="font-semibold text-lg mb-4">
-                            {queueHeading}
-                        </h2>
-                        <div className="mb-3 flex flex-wrap gap-2 text-xs">
-                            <span className="rounded bg-muted px-2.5 py-1 text-muted-foreground">
-                                Всего: <span className="font-semibold text-foreground">{bookingsSorted.length}</span>
-                            </span>
-                            <span className="rounded bg-amber-100 px-2.5 py-1 text-amber-900">
-                                Требуют внимания: <span className="font-semibold">{attentionCount}</span>
-                            </span>
-                            <span className="rounded bg-red-100 px-2.5 py-1 text-red-900">
-                                Неявки без связи: <span className="font-semibold">{noShowAttentionCount}</span>
-                            </span>
-                            {bookingsData?.has_more && (
-                                <span className="rounded bg-primary/10 px-2.5 py-1 text-primary">
-                                    Показаны первые {bookingsSorted.length}
+                {queueScopeHint && (
+                    <div
+                        className="rounded border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+                        data-testid={queueMode === "history" && !selectedDate ? "calendar-history-all-dates-hint" : "calendar-case-all-dates-hint"}
+                    >
+                        {queueScopeHint}
+                    </div>
+                )}
+
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
+                    <div className="rounded-xl border border-border/60 bg-background/80 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                Queue summary
+                            </p>
+                            {queueSummaryChips.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => openSecondaryPanel("filters")}
+                                    className="text-xs font-semibold text-primary"
+                                >
+                                    Изменить
+                                </button>
+                            )}
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                            {queueSummaryChips.length > 0 ? (
+                                queueSummaryChips.map((chip) => (
+                                    <span key={chip.key} className="rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground/80">
+                                        {chip.label}
+                                    </span>
+                                ))
+                            ) : (
+                                <span className="rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground/80">
+                                    Без дополнительных фильтров и saved views
                                 </span>
                             )}
                         </div>
-                        <div className="mb-4 space-y-2" data-testid="calendar-queue-controls">
-                            <div className="flex flex-wrap items-center gap-2">
+                    </div>
+                    <div className="rounded-xl border border-border/60 bg-background/80 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                Scheduling summary
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => openSecondaryPanel("scheduling")}
+                                className="text-xs font-semibold text-primary"
+                            >
+                                Открыть
+                            </button>
+                        </div>
+                        <p className="mt-3 text-sm text-foreground/90">
+                            {schedulingSummaryLabel}
+                        </p>
+                        {showForm && selectedSlot && (
+                            <p className="mt-2 text-xs text-amber-700">
+                                Есть незавершённая запись клиента на выбранный слот.
+                            </p>
+                        )}
+                    </div>
+                </div>
+
+                {bookingsLoading ? (
+                    <div className="animate-pulse space-y-3">
+                        {[...Array(3)].map((_, i) => (
+                            <div key={i} className="h-24 rounded bg-muted/70"></div>
+                        ))}
+                    </div>
+                ) : bookingsVisible.length === 0 ? (
+                    <p className="py-4 text-center text-muted-foreground">
+                        {focusedConversationId
+                            ? "По этой заявке нет записей под выбранные фильтры"
+                            : "Нет записей под выбранные фильтры"}
+                    </p>
+                ) : (
+                    <div className="space-y-3">
+                        {bookingsVisible.map((booking) => {
+                            const attentionLabel = getBookingAttentionLabel(booking);
+                            const isNoShow = booking.status.toUpperCase() === "NO_SHOW";
+                            const followUpOwnerLabel = booking.follow_up_owner_name?.trim()
+                                || (booking.follow_up_owner_id ? `Agent ${booking.follow_up_owner_id.slice(0, 8)}` : "Без владельца");
+                            const followUpDueLabel = formatDueAtLabel(booking.follow_up_due_at);
+                            const visitActions = getVisitActionOptions(booking.status);
+                            const hasBookingActionSurface = visitActions.length > 0
+                                || (canWriteCalendar && isNoShow && !booking.no_show_followup_done)
+                                || (canManageFollowUpGovernance && isNoShow && !booking.no_show_followup_done);
+                            return (
+                                <div
+                                    key={booking.id}
+                                    className="rounded-xl border border-border/60 p-4 transition hover:bg-muted/40"
+                                    data-testid="calendar-booking-card"
+                                >
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div className="space-y-1">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="text-sm font-semibold">
+                                                    {new Date(booking.start_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                                                    {" - "}
+                                                    {new Date(booking.end_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                                                </span>
+                                                <span className={`rounded px-2 py-0.5 text-xs font-medium ${getBookingStatusColor(booking.status)}`}>
+                                                    {getBookingStatusLabel(booking.status)}
+                                                </span>
+                                            </div>
+                                            <div className="text-sm text-muted-foreground">{booking.specialist_name}</div>
+                                            {booking.customer_name && (
+                                                <div className="text-sm">
+                                                    {booking.customer_name}
+                                                    {booking.customer_phone && (
+                                                        <span className="text-muted-foreground"> • {booking.customer_phone}</span>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {booking.service_type && (
+                                                <div className="text-xs text-muted-foreground">
+                                                    {booking.service_type}
+                                                </div>
+                                            )}
+                                        </div>
+                                        {hasBookingActionSurface && (
+                                            <button
+                                                type="button"
+                                                onClick={() => openBookingActionsPanel(booking.id)}
+                                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-background hover:text-foreground"
+                                                data-testid="calendar-booking-open-actions"
+                                            >
+                                                Действия
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {attentionLabel && (
+                                        <div className="mt-3">
+                                            <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
+                                                {attentionLabel}
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    {isNoShow && (
+                                        <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                                            <span className="rounded bg-muted px-2 py-0.5 font-semibold text-foreground/80">
+                                                Owner: {followUpOwnerLabel}
+                                            </span>
+                                            <span className={`rounded px-2 py-0.5 font-semibold ${booking.follow_up_overdue ? "bg-red-100 text-red-900" : "bg-slate-100 text-slate-700"}`}>
+                                                {followUpDueLabel ? `Due: ${followUpDueLabel}` : "Due не задан"}
+                                            </span>
+                                            {booking.follow_up_overdue && !booking.no_show_followup_done && (
+                                                <span className="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-900">
+                                                    Просрочено
+                                                </span>
+                                            )}
+                                            {booking.no_show_followup_done && (
+                                                <span className="rounded bg-green-100 px-2 py-0.5 font-semibold text-green-800">
+                                                    {booking.no_show_followup_result === "rebooked"
+                                                        ? "После неявки: перезаписан"
+                                                        : "После неявки: связались"}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {booking.case_id && (
+                                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                                            <Link
+                                                href={buildCaseHref(booking.case_id)}
+                                                className="rounded border border-border/60 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-background"
+                                                data-testid="calendar-booking-open-case"
+                                            >
+                                                Открыть чат заявки
+                                            </Link>
+                                            {focusedCaseId && booking.case_id === focusedCaseId && (
+                                                <span className="rounded bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                                                    Текущая заявка
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+
+            {secondaryPanelOpen && (
+                <div className="fixed inset-0 z-40" data-testid="calendar-secondary-panel-overlay">
+                    <div
+                        className="absolute inset-0 bg-foreground/20"
+                        onClick={closeSecondaryPanel}
+                        aria-hidden="true"
+                    />
+                    <div
+                        className="absolute inset-y-0 right-0 flex h-full w-full max-w-[640px] flex-col gap-4 overflow-y-auto bg-background p-4 shadow-xl"
+                        data-testid="calendar-secondary-panel"
+                    >
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                                <p className="text-sm font-semibold">Панели календаря</p>
+                                <p className="text-xs text-muted-foreground">
+                                    Filters, saved views/share и scheduling вынесены с первого экрана, чтобы queue triage оставался компактным.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeSecondaryPanel}
+                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                data-testid="calendar-secondary-panel-close"
+                            >
+                                Закрыть
+                            </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                            {CALENDAR_SECONDARY_PANEL_TABS.map((tab) => (
                                 <button
+                                    key={tab.id}
                                     type="button"
-                                    onClick={() => handleQueueModeChange("ops")}
-                                    className={`rounded border px-2.5 py-1 text-xs font-semibold ${
-                                        queueMode === "ops"
+                                    onClick={() => openSecondaryPanel(tab.id)}
+                                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                                        secondaryPanelSection === tab.id
                                             ? "border-primary/40 bg-primary/10 text-primary"
                                             : "border-border/60 text-muted-foreground hover:text-foreground"
                                     }`}
-                                    data-testid="calendar-queue-mode-ops"
+                                    data-testid={`calendar-secondary-tab-${tab.id}`}
                                 >
-                                    Операции
+                                    {tab.label}
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={() => handleQueueModeChange("history")}
-                                    className={`rounded border px-2.5 py-1 text-xs font-semibold ${
-                                        queueMode === "history"
-                                            ? "border-slate-300 bg-slate-100 text-slate-900"
-                                            : "border-border/60 text-muted-foreground hover:text-foreground"
-                                    }`}
-                                    data-testid="calendar-queue-mode-history"
-                                >
-                                    История
-                                </button>
-                            </div>
-                            {queueMode === "ops" ? (
-                                <div className="flex flex-wrap items-center gap-2">
+                            ))}
+                        </div>
+
+                        {secondaryPanelSection === "filters" && (
+                            <div className="rounded-xl border border-border/60 bg-card/80 p-4" data-testid="calendar-secondary-filters">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                            Queue filters
+                                        </p>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            Поиск, статус и follow-up ownership вынесены отдельно от triage режима очереди.
+                                        </p>
+                                    </div>
                                     <button
                                         type="button"
-                                        onClick={() => setQueueLane("attention")}
-                                        className={`rounded border px-2.5 py-1 text-xs font-semibold ${
-                                            queueLane === "attention"
-                                                ? "border-amber-300 bg-amber-100 text-amber-900"
-                                                : "border-border/60 text-muted-foreground hover:text-foreground"
-                                        }`}
-                                        data-testid="calendar-queue-lane-attention"
+                                        onClick={clearQueueFilters}
+                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
                                     >
-                                        Только действия
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setQueueLane("all")}
-                                        className={`rounded border px-2.5 py-1 text-xs font-semibold ${
-                                            queueLane === "all"
-                                                ? "border-primary/40 bg-primary/10 text-primary"
-                                                : "border-border/60 text-muted-foreground hover:text-foreground"
-                                        }`}
-                                        data-testid="calendar-queue-lane-all"
-                                    >
-                                        Все записи
+                                        Сбросить фильтры
                                     </button>
                                 </div>
-                            ) : (
-                                <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-                                    История всегда показывает полный архивный срез без режима `Только действия`.
-                                </div>
-                            )}
-                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                                <input
-                                    type="text"
-                                    value={queueSearch}
-                                    onChange={(event) => setQueueSearch(event.target.value)}
-                                    placeholder="Поиск по клиенту, телефону, услуге или ID записи"
-                                    className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    data-testid="calendar-queue-search"
-                                />
-                                <select
-                                    value={queueStatusFilter}
-                                    onChange={(event) => setQueueStatusFilter(event.target.value as BookingStatusFilter)}
-                                    className="rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    data-testid="calendar-queue-status-filter"
-                                >
-                                    <option value="all">Все статусы</option>
-                                    <option value="scheduled">Запланированные</option>
-                                    <option value="completed">Пришёл</option>
-                                    <option value="no_show">Не пришёл</option>
-                                    <option value="cancelled">Отменённые</option>
-                                </select>
-                                {canReadTeam && (
-                                    <select
-                                        value={followUpOwnerId}
-                                        onChange={(event) => setFollowUpOwnerId(event.target.value)}
-                                        className="rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                        data-testid="calendar-follow-up-owner-filter"
-                                    >
-                                        <option value="">Все follow-up owners</option>
-                                        {followUpOwnerOptions.map((agent) => (
-                                            <option key={agent.id} value={agent.id}>
-                                                {agent.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                )}
-                                <label className="flex min-h-[38px] items-center gap-2 rounded border border-border/60 bg-background px-3 py-2 text-xs text-muted-foreground">
+                                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                                     <input
-                                        type="checkbox"
-                                        checked={followUpOverdueOnly}
-                                        onChange={(event) => setFollowUpOverdueOnly(event.target.checked)}
-                                        className="h-4 w-4 rounded border-border/60"
-                                        data-testid="calendar-follow-up-overdue-filter"
+                                        type="text"
+                                        value={queueSearch}
+                                        onChange={(event) => setQueueSearch(event.target.value)}
+                                        placeholder="Поиск по клиенту, телефону, услуге или ID записи"
+                                        className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        data-testid="calendar-queue-search"
                                     />
-                                    <span>Только просроченный follow-up</span>
-                                </label>
+                                    <select
+                                        value={queueStatusFilter}
+                                        onChange={(event) => setQueueStatusFilter(event.target.value as BookingStatusFilter)}
+                                        className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        data-testid="calendar-queue-status-filter"
+                                    >
+                                        <option value="all">Все статусы</option>
+                                        <option value="scheduled">Запланированные</option>
+                                        <option value="completed">Пришёл</option>
+                                        <option value="no_show">Не пришёл</option>
+                                        <option value="cancelled">Отменённые</option>
+                                    </select>
+                                    {canReadTeam && (
+                                        <select
+                                            value={followUpOwnerId}
+                                            onChange={(event) => setFollowUpOwnerId(event.target.value)}
+                                            className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                            data-testid="calendar-follow-up-owner-filter"
+                                        >
+                                            <option value="">Все follow-up owners</option>
+                                            {followUpOwnerOptions.map((agent) => (
+                                                <option key={agent.id} value={agent.id}>
+                                                    {agent.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
+                                    <label className="flex min-h-[42px] items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm text-muted-foreground">
+                                        <input
+                                            type="checkbox"
+                                            checked={followUpOverdueOnly}
+                                            onChange={(event) => setFollowUpOverdueOnly(event.target.checked)}
+                                            className="h-4 w-4 rounded border-border/60"
+                                            data-testid="calendar-follow-up-overdue-filter"
+                                        />
+                                        <span>Только просроченный follow-up</span>
+                                    </label>
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                                    {queueSummaryChips.length > 0 ? (
+                                        queueSummaryChips.map((chip) => (
+                                            <span key={chip.key} className="rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground/80">
+                                                {chip.label}
+                                            </span>
+                                        ))
+                                    ) : (
+                                        <span className="rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground/80">
+                                            Дополнительные фильтры не заданы
+                                        </span>
+                                    )}
+                                </div>
                             </div>
-                            <div className="rounded-lg border border-border/60 bg-background/80 p-3" data-testid="calendar-saved-views">
+                        )}
+
+                        {secondaryPanelSection === "saved_views" && (
+                            <div className="rounded-xl border border-border/60 bg-card/80 p-4" data-testid="calendar-saved-views">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                     <div>
                                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                                             Сохранённые виды
                                         </p>
                                         <p className="mt-1 text-xs text-muted-foreground">
-                                            Личные виды и командные пресеты календарной очереди.
+                                            Личные виды, командные пресеты и shareable URL для календарной очереди.
                                         </p>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2">
@@ -1837,7 +2005,7 @@ export default function CalendarPage() {
                                             }
                                             handleApplySavedView(nextId);
                                         }}
-                                        className="rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                         disabled={savedViewsLoading || savedViewMutationPending}
                                         data-testid="calendar-saved-view-select"
                                     >
@@ -1917,7 +2085,7 @@ export default function CalendarPage() {
                                             <select
                                                 value={selectedTeamTargetBranchIdDraft}
                                                 onChange={(event) => setSelectedTeamTargetBranchIdDraft(event.target.value)}
-                                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                                 disabled={savedViewMutationPending}
                                                 data-testid="calendar-saved-view-team-branch"
                                             >
@@ -1936,7 +2104,7 @@ export default function CalendarPage() {
                                             <select
                                                 value={selectedTeamTargetRoleDraft}
                                                 onChange={(event) => setSelectedTeamTargetRoleDraft(event.target.value as ConsoleRole | "")}
-                                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                                 disabled={savedViewMutationPending}
                                                 data-testid="calendar-saved-view-team-role"
                                             >
@@ -1964,7 +2132,7 @@ export default function CalendarPage() {
                                                 }
                                             }}
                                             placeholder="Например: Неявки сегодня"
-                                            className="min-w-[220px] flex-1 rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                            className="min-w-[220px] flex-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                             data-testid="calendar-saved-view-name-input"
                                         />
                                         {canManageTeamPresets && (
@@ -1976,7 +2144,7 @@ export default function CalendarPage() {
                                                     <select
                                                         value={saveViewScopeDraft}
                                                         onChange={(event) => setSaveViewScopeDraft(event.target.value as "personal" | "team")}
-                                                        className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                        className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                                         disabled={createSavedViewMutation.isPending}
                                                         data-testid="calendar-saved-view-scope"
                                                     >
@@ -1993,7 +2161,7 @@ export default function CalendarPage() {
                                                             <select
                                                                 value={saveViewTargetBranchIdDraft}
                                                                 onChange={(event) => setSaveViewTargetBranchIdDraft(event.target.value)}
-                                                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                                                 disabled={createSavedViewMutation.isPending}
                                                                 data-testid="calendar-saved-view-target-branch"
                                                             >
@@ -2012,7 +2180,7 @@ export default function CalendarPage() {
                                                             <select
                                                                 value={saveViewTargetRoleDraft}
                                                                 onChange={(event) => setSaveViewTargetRoleDraft(event.target.value as ConsoleRole | "")}
-                                                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                                                 disabled={createSavedViewMutation.isPending}
                                                                 data-testid="calendar-saved-view-target-role"
                                                             >
@@ -2086,269 +2254,511 @@ export default function CalendarPage() {
                                     </div>
                                 )}
                             </div>
-                        </div>
+                        )}
 
-                        {bookingsLoading ? (
-                            <div className="animate-pulse space-y-3">
-                                {[...Array(3)].map((_, i) => (
-                                    <div key={i} className="h-16 bg-muted/70 rounded"></div>
-                                ))}
-                            </div>
-                        ) : bookingsVisible.length === 0 ? (
-                            <p className="text-muted-foreground text-center py-4">
-                                {focusedConversationId
-                                    ? "По этой заявке нет записей под выбранные фильтры"
-                                    : "Нет записей под выбранные фильтры"}
-                            </p>
-                        ) : (
-                            <div className="space-y-3">
-                                {bookingsVisible.map((booking) => {
-                                    const attentionLabel = getBookingAttentionLabel(booking);
-                                    const isNoShow = booking.status.toUpperCase() === "NO_SHOW";
-                                    const followUpOwnerLabel = booking.follow_up_owner_name?.trim()
-                                        || (booking.follow_up_owner_id ? `Agent ${booking.follow_up_owner_id.slice(0, 8)}` : "Без владельца");
-                                    const currentDueInput = formatDateTimeLocalInput(booking.follow_up_due_at);
-                                    const followUpDueLabel = formatDueAtLabel(booking.follow_up_due_at);
-                                    const followUpGovernanceDraft = followUpGovernanceDrafts[booking.id] ?? {
-                                        ownerAgentId: booking.follow_up_owner_id ?? "",
-                                        dueAt: currentDueInput,
-                                    };
-                                    const followUpGovernanceDirty = followUpGovernanceDraft.ownerAgentId !== (booking.follow_up_owner_id ?? "")
-                                        || followUpGovernanceDraft.dueAt !== currentDueInput;
-                                    const governancePending = followUpGovernanceMutation.isPending
-                                        && followUpGovernanceBookingId === booking.id;
-                                    return (
-                                        <div
-                                            key={booking.id}
-                                            className="p-3 border border-border/60 rounded-lg hover:bg-muted/60"
-                                            data-testid="calendar-booking-card"
-                                        >
-                                            <div className="flex justify-between items-start mb-1">
-                                                <span className="font-medium text-sm">
-                                                    {new Date(booking.start_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-                                                    {" - "}
-                                                    {new Date(booking.end_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-                                                </span>
-                                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${getBookingStatusColor(booking.status)}`}>
-                                                    {getBookingStatusLabel(booking.status)}
-                                                </span>
-                                            </div>
-                                            <div className="text-sm text-muted-foreground">
-                                                {booking.specialist_name}
-                                            </div>
-                                            {booking.customer_name && (
-                                                <div className="text-sm">
-                                                    {booking.customer_name}
-                                                    {booking.customer_phone && (
-                                                        <span className="text-muted-foreground"> • {booking.customer_phone}</span>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {booking.service_type && (
-                                                <div className="text-xs text-muted-foreground mt-1">
-                                                    {booking.service_type}
-                                                </div>
-                                            )}
-                                            {attentionLabel && (
-                                                <div className="mt-2">
-                                                    <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
-                                                        {attentionLabel}
-                                                    </span>
-                                                </div>
-                                            )}
-                                            {isNoShow && (
-                                                <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-                                                    <span className="rounded bg-muted px-2 py-0.5 font-semibold text-foreground/80">
-                                                        Owner: {followUpOwnerLabel}
-                                                    </span>
-                                                    <span className={`rounded px-2 py-0.5 font-semibold ${booking.follow_up_overdue ? "bg-red-100 text-red-900" : "bg-slate-100 text-slate-700"}`}>
-                                                        {followUpDueLabel ? `Due: ${followUpDueLabel}` : "Due не задан"}
-                                                    </span>
-                                                    {booking.follow_up_overdue && !booking.no_show_followup_done && (
-                                                        <span className="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-900">
-                                                            Просрочено
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {booking.case_id && (
-                                                <div className="mt-2 flex items-center gap-2">
-                                                    <Link
-                                                        href={buildCaseHref(booking.case_id)}
-                                                        className="rounded border border-border/60 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-background"
-                                                        data-testid="calendar-booking-open-case"
-                                                    >
-                                                        Открыть чат заявки
-                                                    </Link>
-                                                    {focusedCaseId && booking.case_id === focusedCaseId && (
-                                                        <span className="rounded bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-                                                            Текущая заявка
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {canWriteCalendar && getVisitActionOptions(booking.status).length > 0 && (
-                                                <div className="mt-3 flex flex-wrap gap-2">
-                                                    {getVisitActionOptions(booking.status).map((action) => {
-                                                        const isPending = statusMutation.isPending && statusUpdateBookingId === booking.id;
-                                                        return (
-                                                            <button
-                                                                key={`${booking.id}-${action.status}`}
-                                                                type="button"
-                                                                onClick={() => statusMutation.mutate({ bookingId: booking.id, status: action.status })}
-                                                                disabled={isPending}
-                                                                className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
-                                                            >
-                                                                {isPending ? "Обновляем..." : action.label}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-                                            {canWriteCalendar && isNoShow && (
-                                                <div className="mt-2 flex flex-wrap gap-2">
-                                                    {booking.no_show_followup_done ? (
-                                                        <>
-                                                            <span className="px-2.5 py-1.5 rounded-md bg-green-100 text-green-800 text-xs font-medium">
-                                                                {booking.no_show_followup_result === "rebooked"
-                                                                    ? "После неявки: перезаписан"
-                                                                    : "После неявки: связались"}
-                                                            </span>
-                                                            {booking.no_show_followup_rebooked_appointment_id && (
-                                                                <span className="px-2.5 py-1.5 rounded-md bg-muted text-muted-foreground text-xs font-medium">
-                                                                    Новая запись: {booking.no_show_followup_rebooked_appointment_id.slice(0, 8)}
-                                                                </span>
-                                                            )}
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() =>
-                                                                    followUpMutation.mutate({
-                                                                        bookingId: booking.id,
-                                                                        result: "contacted",
-                                                                    })
-                                                                }
-                                                                disabled={followUpMutation.isPending && followUpBookingId === booking.id}
-                                                                className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
-                                                            >
-                                                                {followUpMutation.isPending && followUpBookingId === booking.id
-                                                                    ? "Фиксируем..."
-                                                                    : "Связались"}
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() =>
-                                                                    followUpMutation.mutate({
-                                                                        bookingId: booking.id,
-                                                                        result: "rebooked",
-                                                                    })
-                                                                }
-                                                                disabled={followUpMutation.isPending && followUpBookingId === booking.id}
-                                                                className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
-                                                            >
-                                                                Перезаписали
-                                                            </button>
-                                                        </>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {canManageFollowUpGovernance && isNoShow && !booking.no_show_followup_done && (
-                                                <div className="mt-3 rounded-lg border border-border/60 bg-background/80 p-3" data-testid="calendar-follow-up-governance-card">
-                                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                                            Follow-up governance
-                                                        </p>
-                                                        {booking.follow_up_overdue && (
-                                                            <span className="rounded bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-900">
-                                                                overdue
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <div className="grid gap-2 sm:grid-cols-2">
-                                                        <label className="space-y-1">
-                                                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                                                Owner
-                                                            </span>
-                                                            <select
-                                                                value={followUpGovernanceDraft.ownerAgentId}
-                                                                onChange={(event) => setFollowUpGovernanceDraft(booking.id, { ownerAgentId: event.target.value })}
-                                                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                                                disabled={governancePending}
-                                                                data-testid="calendar-follow-up-governance-owner"
-                                                            >
-                                                                <option value="">Без владельца</option>
-                                                                {followUpOwnerOptions.map((agent) => (
-                                                                    <option key={agent.id} value={agent.id}>
-                                                                        {agent.name}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                        </label>
-                                                        <label className="space-y-1">
-                                                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                                                Due
-                                                            </span>
-                                                            <input
-                                                                type="datetime-local"
-                                                                value={followUpGovernanceDraft.dueAt}
-                                                                onChange={(event) => setFollowUpGovernanceDraft(booking.id, { dueAt: event.target.value })}
-                                                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                                                disabled={governancePending}
-                                                                data-testid="calendar-follow-up-governance-due"
-                                                            />
-                                                        </label>
-                                                    </div>
-                                                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setFollowUpGovernanceDraft(booking.id, { ownerAgentId: meData?.agent?.id ?? followUpGovernanceDraft.ownerAgentId })}
-                                                            className="rounded border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
-                                                            disabled={governancePending}
-                                                        >
-                                                            Назначить мне
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => followUpGovernanceMutation.mutate({
-                                                                bookingId: booking.id,
-                                                                ownerAgentId: followUpGovernanceDraft.ownerAgentId,
-                                                                dueAt: followUpGovernanceDraft.dueAt,
-                                                            })}
-                                                            className="rounded border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary disabled:opacity-50"
-                                                            disabled={!followUpGovernanceDirty || governancePending}
-                                                            data-testid="calendar-follow-up-governance-save"
-                                                        >
-                                                            {governancePending ? "Сохраняем..." : "Сохранить governance"}
-                                                        </button>
-                                                        {followUpGovernanceDirty && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setFollowUpGovernanceDrafts((current) => {
-                                                                        const next = { ...current };
-                                                                        delete next[booking.id];
-                                                                        return next;
-                                                                    });
-                                                                }}
-                                                                className="rounded border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
-                                                                disabled={governancePending}
-                                                            >
-                                                                Сбросить
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            )}
+                        {secondaryPanelSection === "scheduling" && (
+                            <div className="space-y-4" data-testid="calendar-scheduling-panel">
+                                <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                                    <div className="space-y-1">
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                            Scheduling
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">
+                                            Выбор мастера, даты, слота и форма создания записи вынесены отдельно от triage списка.
+                                        </p>
+                                    </div>
+                                    <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                                        <div>
+                                            <label className="mb-1 block text-sm font-medium text-muted-foreground">
+                                                Мастер
+                                            </label>
+                                            <select
+                                                value={selectedSpecialist}
+                                                onChange={(event) => {
+                                                    setSelectedSpecialist(event.target.value);
+                                                    setSelectedSlot(null);
+                                                    setSelectedService(null);
+                                                }}
+                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                            >
+                                                <option value="">Выберите мастера</option>
+                                                {specialists.map((specialist) => (
+                                                    <option key={specialist.id} value={specialist.id}>
+                                                        {specialist.name} {specialist.branch_name ? `(${specialist.branch_name})` : ""}
+                                                    </option>
+                                                ))}
+                                            </select>
                                         </div>
-                                    );
-                                })}
+                                        {currentSpecialist && currentSpecialist.services.length > 0 && (
+                                            <div>
+                                                <label className="mb-1 block text-sm font-medium text-muted-foreground">
+                                                    Услуга
+                                                </label>
+                                                <select
+                                                    value={selectedService?.name || ""}
+                                                    onChange={(event) => {
+                                                        const service = currentSpecialist.services.find((item) => item.name === event.target.value);
+                                                        setSelectedService(service || null);
+                                                        setSelectedSlot(null);
+                                                    }}
+                                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                >
+                                                    <option value="">Любая услуга</option>
+                                                    {currentSpecialist.services.map((service, index) => (
+                                                        <option key={index} value={service.name}>
+                                                            {service.name} ({service.duration_min} мин, {service.price}₸)
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+                                        <div>
+                                            <label
+                                                className="mb-1 block text-sm font-medium text-muted-foreground"
+                                                htmlFor="calendar-date"
+                                            >
+                                                Дата
+                                            </label>
+                                            <input
+                                                id="calendar-date"
+                                                type="date"
+                                                value={selectedDate}
+                                                onChange={(event) => {
+                                                    setSelectedDate(event.target.value);
+                                                    setSelectedSlot(null);
+                                                }}
+                                                min={allowPastDateSelection ? undefined : today}
+                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                            />
+                                            <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={allowPastDateSelection}
+                                                    onChange={(event) => {
+                                                        if (queueMode === "history") {
+                                                            return;
+                                                        }
+                                                        const enabled = event.target.checked;
+                                                        setShowPastDates(enabled);
+                                                        if (!enabled && selectedDate < today) {
+                                                            setSelectedDate(today);
+                                                            setSelectedSlot(null);
+                                                        }
+                                                    }}
+                                                    className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                                    disabled={queueMode === "history"}
+                                                    data-testid="calendar-show-past-dates"
+                                                />
+                                                {queueMode === "history" ? "История всегда разрешает прошлые даты" : "Показывать прошлые даты"}
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {selectedSpecialist && selectedDate && (
+                                    <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                                        <h2 className="mb-4 text-lg font-semibold">
+                                            Доступные слоты на {new Date(selectedDate).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
+                                        </h2>
+
+                                        {slotsLoading ? (
+                                            <div className="grid grid-cols-4 gap-2 animate-pulse md:grid-cols-6">
+                                                {[...Array(12)].map((_, index) => (
+                                                    <div key={index} className="h-12 rounded bg-muted/70"></div>
+                                                ))}
+                                            </div>
+                                        ) : slots.length === 0 ? (
+                                            <p className="py-8 text-center text-muted-foreground">
+                                                Нет доступных слотов на выбранную дату. Возможно, это выходной день.
+                                            </p>
+                                        ) : (
+                                            <div className="grid grid-cols-4 gap-2 md:grid-cols-6">
+                                                {slots.map((slot, index) => (
+                                                    <button
+                                                        key={index}
+                                                        type="button"
+                                                        onClick={() => handleSlotClick(slot)}
+                                                        disabled={!slot.available}
+                                                        className={`rounded-lg px-2 py-3 text-sm font-medium transition-colors ${
+                                                            slot.available
+                                                                ? selectedSlot?.start === slot.start
+                                                                    ? "bg-primary text-primary-foreground"
+                                                                    : "border border-green-200 bg-green-50 text-green-800 hover:bg-green-100"
+                                                                : "cursor-not-allowed bg-muted text-muted-foreground"
+                                                        }`}
+                                                    >
+                                                        {slot.start_time}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        <div className="mt-4 flex gap-4 text-xs text-muted-foreground">
+                                            <span className="flex items-center gap-1">
+                                                <span className="h-3 w-3 rounded border border-green-200 bg-green-100"></span>
+                                                Свободно
+                                            </span>
+                                            <span className="flex items-center gap-1">
+                                                <span className="h-3 w-3 rounded bg-muted"></span>
+                                                Занято
+                                            </span>
+                                            <span className="flex items-center gap-1">
+                                                <span className="h-3 w-3 rounded bg-primary"></span>
+                                                Выбрано
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {selectedSpecialist && !selectedDate && (
+                                    <div className="rounded-xl border border-border/60 bg-card/80 p-4 text-sm text-muted-foreground" data-testid="calendar-select-date-hint">
+                                        Выберите дату, чтобы посмотреть слоты по мастеру. Очередь сверху уже показывает текущий queue slice и приоритеты.
+                                    </div>
+                                )}
+
+                                {showForm && selectedSlot && (
+                                    <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                                        <h2 className="mb-4 text-lg font-semibold">Данные клиента</h2>
+
+                                        <form onSubmit={handleSubmit} className="space-y-4">
+                                            <div className="rounded-lg bg-muted p-3 text-sm">
+                                                <strong>Мастер:</strong> {currentSpecialist?.name}<br />
+                                                <strong>Время:</strong> {selectedSlot.start_time} - {selectedSlot.end_time}<br />
+                                                {selectedService && (
+                                                    <>
+                                                        <strong>Услуга:</strong> {selectedService.name} ({selectedService.price}₸)
+                                                    </>
+                                                )}
+                                            </div>
+
+                                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                                <div>
+                                                    <label className="mb-1 block text-sm font-medium text-muted-foreground">
+                                                        Имя клиента
+                                                    </label>
+                                                    <input
+                                                        type="text"
+                                                        value={customerName}
+                                                        onChange={(event) => setCustomerName(event.target.value)}
+                                                        placeholder="Иван Иванов"
+                                                        className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="mb-1 block text-sm font-medium text-muted-foreground">
+                                                        Телефон
+                                                    </label>
+                                                    <input
+                                                        type="tel"
+                                                        value={customerPhone}
+                                                        onChange={(event) => setCustomerPhone(event.target.value)}
+                                                        placeholder="+7 777 123 4567"
+                                                        className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className="mb-1 block text-sm font-medium text-muted-foreground">
+                                                    Примечания
+                                                </label>
+                                                <textarea
+                                                    value={notes}
+                                                    onChange={(event) => setNotes(event.target.value)}
+                                                    placeholder="Дополнительная информация..."
+                                                    rows={2}
+                                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                />
+                                            </div>
+
+                                            <div className="flex gap-3">
+                                                <button
+                                                    type="submit"
+                                                    disabled={createMutation.isPending}
+                                                    className="btn-primary disabled:opacity-50"
+                                                >
+                                                    {createMutation.isPending ? "Создаём..." : "Записать клиента"}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={resetForm}
+                                                    className="btn-ghost"
+                                                >
+                                                    Отмена
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
                 </div>
-            </div>
+            )}
+
+            {bookingActionsBooking && (() => {
+                const booking = bookingActionsBooking;
+                const isNoShow = booking.status.toUpperCase() === "NO_SHOW";
+                const currentDueInput = formatDateTimeLocalInput(booking.follow_up_due_at);
+                const followUpGovernanceDraft = followUpGovernanceDrafts[booking.id] ?? {
+                    ownerAgentId: booking.follow_up_owner_id ?? "",
+                    dueAt: currentDueInput,
+                };
+                const followUpGovernanceDirty = followUpGovernanceDraft.ownerAgentId !== (booking.follow_up_owner_id ?? "")
+                    || followUpGovernanceDraft.dueAt !== currentDueInput;
+                const governancePending = followUpGovernanceMutation.isPending && followUpGovernanceBookingId === booking.id;
+                const visitActions = getVisitActionOptions(booking.status);
+                const followUpOwnerLabel = booking.follow_up_owner_name?.trim()
+                    || (booking.follow_up_owner_id ? `Agent ${booking.follow_up_owner_id.slice(0, 8)}` : "Без владельца");
+                const followUpDueLabel = formatDueAtLabel(booking.follow_up_due_at);
+                return (
+                    <div className="fixed inset-0 z-50" data-testid="calendar-booking-panel-overlay">
+                        <div
+                            className="absolute inset-0 bg-foreground/20"
+                            onClick={closeBookingActionsPanel}
+                            aria-hidden="true"
+                        />
+                        <div
+                            className="absolute inset-y-0 right-0 flex h-full w-full max-w-[560px] flex-col gap-4 overflow-y-auto bg-background p-4 shadow-xl"
+                            data-testid="calendar-booking-panel"
+                        >
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="space-y-1">
+                                    <p className="text-sm font-semibold">Действия по записи</p>
+                                    <p className="text-xs text-muted-foreground">
+                                        Booking actions и follow-up governance вынесены в отдельную панель, чтобы не перегружать очередь.
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={closeBookingActionsPanel}
+                                    className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                    data-testid="calendar-booking-panel-close"
+                                >
+                                    Закрыть
+                                </button>
+                            </div>
+
+                            <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm font-semibold">
+                                        {new Date(booking.start_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                                        {" - "}
+                                        {new Date(booking.end_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                                    </span>
+                                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${getBookingStatusColor(booking.status)}`}>
+                                        {getBookingStatusLabel(booking.status)}
+                                    </span>
+                                </div>
+                                <p className="mt-2 text-sm text-foreground/90">{booking.specialist_name}</p>
+                                {booking.customer_name && (
+                                    <p className="text-sm text-foreground/90">
+                                        {booking.customer_name}
+                                        {booking.customer_phone && <span className="text-muted-foreground"> • {booking.customer_phone}</span>}
+                                    </p>
+                                )}
+                                {booking.service_type && (
+                                    <p className="mt-1 text-xs text-muted-foreground">{booking.service_type}</p>
+                                )}
+                                {isNoShow && (
+                                    <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                                        <span className="rounded bg-muted px-2 py-0.5 font-semibold text-foreground/80">
+                                            Owner: {followUpOwnerLabel}
+                                        </span>
+                                        <span className={`rounded px-2 py-0.5 font-semibold ${booking.follow_up_overdue ? "bg-red-100 text-red-900" : "bg-slate-100 text-slate-700"}`}>
+                                            {followUpDueLabel ? `Due: ${followUpDueLabel}` : "Due не задан"}
+                                        </span>
+                                        {booking.follow_up_overdue && !booking.no_show_followup_done && (
+                                            <span className="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-900">
+                                                Просрочено
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+                                {booking.case_id && (
+                                    <div className="mt-3">
+                                        <Link
+                                            href={buildCaseHref(booking.case_id)}
+                                            className="rounded border border-border/60 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-background"
+                                            data-testid="calendar-booking-open-case"
+                                        >
+                                            Открыть чат заявки
+                                        </Link>
+                                    </div>
+                                )}
+                            </div>
+
+                            {canWriteCalendar && visitActions.length > 0 && (
+                                <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                        Booking actions
+                                    </p>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        {visitActions.map((action) => {
+                                            const isPending = statusMutation.isPending && statusUpdateBookingId === booking.id;
+                                            return (
+                                                <button
+                                                    key={`${booking.id}-${action.status}`}
+                                                    type="button"
+                                                    onClick={() => statusMutation.mutate({ bookingId: booking.id, status: action.status })}
+                                                    disabled={isPending}
+                                                    className="rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                >
+                                                    {isPending ? "Обновляем..." : action.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {canWriteCalendar && isNoShow && (
+                                <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                        Follow-up actions
+                                    </p>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        {booking.no_show_followup_done ? (
+                                            <>
+                                                <span className="rounded-md bg-green-100 px-2.5 py-1.5 text-xs font-medium text-green-800">
+                                                    {booking.no_show_followup_result === "rebooked"
+                                                        ? "После неявки: перезаписан"
+                                                        : "После неявки: связались"}
+                                                </span>
+                                                {booking.no_show_followup_rebooked_appointment_id && (
+                                                    <span className="rounded-md bg-muted px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
+                                                        Новая запись: {booking.no_show_followup_rebooked_appointment_id.slice(0, 8)}
+                                                    </span>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        followUpMutation.mutate({
+                                                            bookingId: booking.id,
+                                                            result: "contacted",
+                                                        })
+                                                    }
+                                                    disabled={followUpMutation.isPending && followUpBookingId === booking.id}
+                                                    className="rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                >
+                                                    {followUpMutation.isPending && followUpBookingId === booking.id
+                                                        ? "Фиксируем..."
+                                                        : "Связались"}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        followUpMutation.mutate({
+                                                            bookingId: booking.id,
+                                                            result: "rebooked",
+                                                        })
+                                                    }
+                                                    disabled={followUpMutation.isPending && followUpBookingId === booking.id}
+                                                    className="rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                >
+                                                    Перезаписали
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {canManageFollowUpGovernance && isNoShow && !booking.no_show_followup_done && (
+                                <div className="rounded-xl border border-border/60 bg-card/80 p-4" data-testid="calendar-follow-up-governance-card">
+                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                            Follow-up governance
+                                        </p>
+                                        {booking.follow_up_overdue && (
+                                            <span className="rounded bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-900">
+                                                overdue
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="grid gap-2 sm:grid-cols-2">
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                Owner
+                                            </span>
+                                            <select
+                                                value={followUpGovernanceDraft.ownerAgentId}
+                                                onChange={(event) => setFollowUpGovernanceDraft(booking.id, { ownerAgentId: event.target.value })}
+                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                disabled={governancePending}
+                                                data-testid="calendar-follow-up-governance-owner"
+                                            >
+                                                <option value="">Без владельца</option>
+                                                {followUpOwnerOptions.map((agent) => (
+                                                    <option key={agent.id} value={agent.id}>
+                                                        {agent.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                Due
+                                            </span>
+                                            <input
+                                                type="datetime-local"
+                                                value={followUpGovernanceDraft.dueAt}
+                                                onChange={(event) => setFollowUpGovernanceDraft(booking.id, { dueAt: event.target.value })}
+                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                disabled={governancePending}
+                                                data-testid="calendar-follow-up-governance-due"
+                                            />
+                                        </label>
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setFollowUpGovernanceDraft(booking.id, { ownerAgentId: meData?.agent?.id ?? followUpGovernanceDraft.ownerAgentId })}
+                                            className="rounded border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
+                                            disabled={governancePending}
+                                        >
+                                            Назначить мне
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => followUpGovernanceMutation.mutate({
+                                                bookingId: booking.id,
+                                                ownerAgentId: followUpGovernanceDraft.ownerAgentId,
+                                                dueAt: followUpGovernanceDraft.dueAt,
+                                            })}
+                                            className="rounded border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary disabled:opacity-50"
+                                            disabled={!followUpGovernanceDirty || governancePending}
+                                            data-testid="calendar-follow-up-governance-save"
+                                        >
+                                            {governancePending ? "Сохраняем..." : "Сохранить governance"}
+                                        </button>
+                                        {followUpGovernanceDirty && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setFollowUpGovernanceDrafts((current) => {
+                                                        const next = { ...current };
+                                                        delete next[booking.id];
+                                                        return next;
+                                                    });
+                                                }}
+                                                className="rounded border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                                disabled={governancePending}
+                                            >
+                                                Сбросить
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
+
 }
