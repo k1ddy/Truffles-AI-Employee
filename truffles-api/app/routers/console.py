@@ -73,6 +73,9 @@ from app.models import (
 from app.models import (
     ConsoleMacro as ConsoleMacroModel,
 )
+from app.models import (
+    ConsoleRoutingProfile as ConsoleRoutingProfileModel,
+)
 from app.models.appointment import Appointment
 from app.models.appointment_audit import AppointmentAudit
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
@@ -305,6 +308,10 @@ from app.schemas.console import (
     ConsoleReminderListResponse,
     ConsoleReminderRetryRequest,
     ConsoleReminderRetryResponse,
+    ConsoleRoutingProfile,
+    ConsoleRoutingProfileDeleteResponse,
+    ConsoleRoutingProfileListResponse,
+    ConsoleRoutingProfileUpsertRequest,
     ConsoleSavedView,
     ConsoleSavedViewCreateRequest,
     ConsoleSavedViewListResponse,
@@ -469,6 +476,9 @@ from app.services.console_case_routing import (
 )
 from app.services.console_case_routing import (
     adjust_case_routing_loads as _adjust_case_routing_loads_service,
+)
+from app.services.console_case_routing import (
+    annotate_case_assignee_options as _annotate_case_assignee_options_service,
 )
 from app.services.console_case_routing import (
     build_case_routing_decision as _build_case_routing_decision_service,
@@ -647,6 +657,21 @@ from app.services.console_router_utils import (
 )
 from app.services.console_router_utils import (
     validate_limit as _validate_limit_util,
+)
+from app.services.console_routing_profiles import (
+    ROUTING_STATUS_AVAILABLE as _ROUTING_STATUS_AVAILABLE,
+)
+from app.services.console_routing_profiles import (
+    delete_routing_profile as _delete_routing_profile_service,
+)
+from app.services.console_routing_profiles import (
+    list_routing_profiles as _list_routing_profiles_service,
+)
+from app.services.console_routing_profiles import (
+    resolve_routing_profile_map as _resolve_routing_profile_map_service,
+)
+from app.services.console_routing_profiles import (
+    upsert_routing_profile as _upsert_routing_profile_service,
 )
 from app.services.console_saved_views import (
     create_saved_view as _create_saved_view,
@@ -6082,6 +6107,72 @@ def _serialize_membership(
     )
 
 
+def _serialize_routing_profile(
+    profile: ConsoleRoutingProfileModel,
+    *,
+    agent_name: Optional[str] = None,
+) -> ConsoleRoutingProfile:
+    scope: Literal["client", "branch"] = "branch" if profile.branch_id else "client"
+    return ConsoleRoutingProfile(
+        id=profile.id,
+        agent_id=profile.agent_id,
+        agent_name=agent_name,
+        client_id=profile.client_id,
+        branch_id=profile.branch_id,
+        scope=scope,
+        routing_status=profile.routing_status,
+        max_open_case_count=profile.max_open_case_count,
+        updated_by_agent_id=profile.updated_by_agent_id,
+        created_at=profile.created_at.isoformat() if profile.created_at else None,
+        updated_at=profile.updated_at.isoformat() if profile.updated_at else None,
+    )
+
+
+def _routing_profile_reason_message(option: ConsoleCaseAssigneeOption) -> str:
+    reason = (option.assignment_block_reason_code or "").strip().lower()
+    if reason == "paused":
+        return f"{option.agent_name} сейчас на паузе для новых заявок."
+    if reason == "follow_up_only":
+        return f"{option.agent_name} принимает только явные follow-up continuity кейсы."
+    if reason == "at_capacity":
+        capacity = option.max_open_case_count
+        if capacity is not None:
+            return f"{option.agent_name} достиг лимита открытых заявок ({option.open_case_count}/{capacity})."
+        return f"{option.agent_name} достиг лимита открытых заявок."
+    return f"{option.agent_name} сейчас недоступен для назначения."
+
+
+def _apply_routing_profiles_to_assignee_options(
+    db: Session,
+    *,
+    client_id: UUID,
+    branch_id: UUID | None,
+    options_by_agent_id: dict[UUID, ConsoleCaseAssigneeOption],
+) -> None:
+    profile_map = _resolve_routing_profile_map_service(
+        db,
+        client_id=client_id,
+        agent_ids=set(options_by_agent_id.keys()),
+        branch_id=branch_id,
+    )
+    for agent_id, option in options_by_agent_id.items():
+        profile = profile_map.get(agent_id)
+        if profile is None:
+            option.routing_status = _ROUTING_STATUS_AVAILABLE
+            option.routing_profile_source = "default"
+            option.max_open_case_count = None
+            option.at_capacity = False
+            option.assignment_eligible = True
+            option.assignment_block_reason_code = None
+            continue
+        option.routing_status = profile.routing_status
+        option.routing_profile_source = profile.source
+        option.max_open_case_count = profile.max_open_case_count
+        option.at_capacity = False
+        option.assignment_eligible = True
+        option.assignment_block_reason_code = None
+
+
 def _list_case_assignee_options(
     db: Session,
     *,
@@ -6169,6 +6260,12 @@ def _list_case_assignee_options(
     )
     for agent_id, option in options_by_agent_id.items():
         option.open_case_count = load_map.get(agent_id, 0)
+    _apply_routing_profiles_to_assignee_options(
+        db,
+        client_id=client_id,
+        branch_id=branch_id,
+        options_by_agent_id=options_by_agent_id,
+    )
 
     return sorted(
         options_by_agent_id.values(),
@@ -12355,6 +12452,11 @@ async def bulk_case_action(
                             )
                             continue
                     else:
+                        _annotate_case_assignee_options_service(
+                            assignee_cache[branch_id],
+                            current_assignee_id=current_assignee_id,
+                            booking_context=None,
+                        )
                         target_option = next(
                             (
                                 option
@@ -12371,6 +12473,19 @@ async def bulk_case_action(
                                     status="skipped",
                                     code="NOT_FOUND",
                                     message="Assignee not available for this case",
+                                    handover=handover,
+                                    branch_id=branch_id,
+                                )
+                            )
+                            continue
+                        if not target_option.assignment_eligible:
+                            skipped_count += 1
+                            results.append(
+                                _build_case_bulk_result(
+                                    case_id=case_id,
+                                    status="skipped",
+                                    code="ASSIGNEE_UNAVAILABLE",
+                                    message=_routing_profile_reason_message(target_option),
                                     handover=handover,
                                     branch_id=branch_id,
                                 )
@@ -12559,6 +12674,11 @@ async def list_queue_case_assignees(
         branch_id=requested_branch_id,
         current_assignee_id=None,
     )
+    _annotate_case_assignee_options_service(
+        items,
+        current_assignee_id=None,
+        booking_context=None,
+    )
     return ConsoleCaseAssigneeListResponse(items=items)
 
 
@@ -12598,6 +12718,11 @@ async def list_case_assignees(
         db,
         case_ids=[case.id],
     ).get(case.id)
+    _annotate_case_assignee_options_service(
+        items,
+        current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+        booking_context=booking_context,
+    )
     routing, _recommended_option = _build_case_routing_decision(
         assignee_options=items,
         current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
@@ -12664,6 +12789,15 @@ async def reassign_case(
             branch_id=branch_id,
             current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
         )
+        booking_context = _load_case_booking_routing_contexts(
+            db,
+            case_ids=[case.id],
+        ).get(case.id)
+        _annotate_case_assignee_options_service(
+            assignee_options,
+            current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
+            booking_context=booking_context,
+        )
         routing: Optional[ConsoleCaseRoutingDecision] = None
         if mode == "policy":
             signal_context = _load_single_case_routing_signal_context(
@@ -12672,10 +12806,6 @@ async def reassign_case(
                 handover=case,
                 conversation=conversation,
             )
-            booking_context = _load_case_booking_routing_contexts(
-                db,
-                case_ids=[case.id],
-            ).get(case.id)
             routing, target_option = _build_case_routing_decision(
                 assignee_options=assignee_options,
                 current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
@@ -12694,6 +12824,12 @@ async def reassign_case(
             )
             if target_option is None:
                 raise ConsoleAPIError(404, "NOT_FOUND", "Assignee not found")
+            if not target_option.assignment_eligible:
+                raise ConsoleAPIError(
+                    409,
+                    "ASSIGNEE_UNAVAILABLE",
+                    _routing_profile_reason_message(target_option),
+                )
 
         response = _execute_case_reassign(
             db=db,
@@ -24152,6 +24288,208 @@ async def update_membership(
     )
     db.commit()
     return _serialize_membership(membership, agent=agent)
+
+
+@router.get(
+    "/admin/routing-profiles",
+    response_model=ConsoleRoutingProfileListResponse,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def list_routing_profiles(
+    request: Request,
+    client_id: str,
+    agent_id: Optional[str] = Query(default=None),
+    branch_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> ConsoleRoutingProfileListResponse:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "team",
+        "read",
+        message="Only team supervisors can view routing profiles",
+    )
+
+    parsed_client_id = _parse_uuid_param("client_id", client_id)
+    if parsed_client_id is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "client_id is required")
+    _require_client_access(context, parsed_client_id)
+
+    parsed_agent_id = _parse_uuid_param("agent_id", agent_id)
+    parsed_branch_id = _parse_uuid_param("branch_id", branch_id)
+    if parsed_branch_id is not None:
+        branch = db.query(Branch).filter(Branch.id == parsed_branch_id).first()
+        if not branch:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        if branch.client_id != parsed_client_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
+
+    records = _list_routing_profiles_service(
+        db,
+        client_id=parsed_client_id,
+        agent_id=parsed_agent_id,
+        branch_id=parsed_branch_id,
+    )
+    if not records:
+        return ConsoleRoutingProfileListResponse(items=[])
+
+    agent_names = {
+        agent.id: agent.name
+        for agent in db.query(Agent).filter(
+            Agent.id.in_({record.agent_id for record in records}),
+        ).all()
+    }
+    return ConsoleRoutingProfileListResponse(
+        items=[
+            _serialize_routing_profile(
+                record,
+                agent_name=agent_names.get(record.agent_id),
+            )
+            for record in records
+        ]
+    )
+
+
+@router.put(
+    "/admin/routing-profiles",
+    response_model=ConsoleRoutingProfile,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def upsert_routing_profile(
+    request: Request,
+    body: ConsoleRoutingProfileUpsertRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleRoutingProfile:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "team",
+        "write",
+        message="Only owner/admin can manage routing profiles",
+    )
+    _require_client_access(context, body.client_id)
+
+    agent = db.query(Agent).filter(Agent.id == body.agent_id).first()
+    if not agent:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
+    if agent.client_id != body.client_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "agent_id does not belong to client_id")
+    if agent.role not in _CASE_ASSIGNABLE_ROLES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Agent role is not eligible for case routing")
+
+    branch_id = body.branch_id
+    if branch_id is not None:
+        branch = db.query(Branch).filter(Branch.id == branch_id).first()
+        if not branch:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        if branch.client_id != body.client_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
+
+    record = _upsert_routing_profile_service(
+        db,
+        client_id=body.client_id,
+        agent_id=body.agent_id,
+        branch_id=branch_id,
+        routing_status=body.routing_status,
+        max_open_case_count=body.max_open_case_count,
+        updated_by_agent_id=context.agent.id,
+    )
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="routing_profile_upserted",
+        entity_type="console_routing_profile",
+        entity_id=record.id,
+        payload={
+            "reason": _normalize_optional_text(body.reason),
+            "agent_id": str(record.agent_id),
+            "client_id": str(record.client_id),
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "routing_status": record.routing_status,
+            "max_open_case_count": record.max_open_case_count,
+        },
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+    )
+    db.commit()
+    return _serialize_routing_profile(record, agent_name=agent.name)
+
+
+@router.delete(
+    "/admin/routing-profiles/{agent_id}",
+    response_model=ConsoleRoutingProfileDeleteResponse,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def delete_routing_profile(
+    agent_id: UUID,
+    request: Request,
+    client_id: str,
+    branch_id: Optional[str] = Query(default=None),
+    reason: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> ConsoleRoutingProfileDeleteResponse:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "team",
+        "write",
+        message="Only owner/admin can manage routing profiles",
+    )
+
+    parsed_client_id = _parse_uuid_param("client_id", client_id)
+    if parsed_client_id is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "client_id is required")
+    _require_client_access(context, parsed_client_id)
+
+    parsed_branch_id = _parse_uuid_param("branch_id", branch_id)
+    if parsed_branch_id is not None:
+        branch = db.query(Branch).filter(Branch.id == parsed_branch_id).first()
+        if not branch:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        if branch.client_id != parsed_client_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
+
+    record = _delete_routing_profile_service(
+        db,
+        client_id=parsed_client_id,
+        agent_id=agent_id,
+        branch_id=parsed_branch_id,
+    )
+    if record is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Routing profile not found")
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="routing_profile_deleted",
+        entity_type="console_routing_profile",
+        entity_id=record.id,
+        payload={
+            "reason": _normalize_optional_text(reason),
+            "agent_id": str(record.agent_id),
+            "client_id": str(record.client_id),
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+        },
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+    )
+    db.commit()
+    return ConsoleRoutingProfileDeleteResponse(success=True)
 
 
 @router.post(

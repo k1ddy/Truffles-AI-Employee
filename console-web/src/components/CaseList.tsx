@@ -216,6 +216,9 @@ function caseNoun(count: number) {
 
 function sortAssigneeOptionsByLoad(options: CaseAssigneeOption[]) {
     return [...options].sort((left, right) => {
+        if (left.assignment_eligible !== right.assignment_eligible) {
+            return left.assignment_eligible ? -1 : 1;
+        }
         const leftLoad = left.open_case_count ?? 0;
         const rightLoad = right.open_case_count ?? 0;
         if (leftLoad !== rightLoad) {
@@ -226,11 +229,61 @@ function sortAssigneeOptionsByLoad(options: CaseAssigneeOption[]) {
 }
 
 function sortAssigneeOptionsByName(options: CaseAssigneeOption[]) {
-    return [...options].sort((left, right) => left.agent_name.localeCompare(right.agent_name, "ru"));
+    return [...options].sort((left, right) => {
+        if (left.assignment_eligible !== right.assignment_eligible) {
+            return left.assignment_eligible ? -1 : 1;
+        }
+        return left.agent_name.localeCompare(right.agent_name, "ru");
+    });
+}
+
+function formatBulkAssigneeAvailability(option: CaseAssigneeOption) {
+    const parts: string[] = [];
+    if (option.routing_status === "paused") {
+        parts.push("пауза");
+    } else if (option.routing_status === "follow_up_only") {
+        parts.push("только follow-up");
+    } else if (option.routing_profile_source === "branch") {
+        parts.push("branch override");
+    } else if (option.routing_profile_source === "client") {
+        parts.push("client profile");
+    }
+    if (option.max_open_case_count != null) {
+        parts.push(`лимит ${option.open_case_count ?? 0}/${option.max_open_case_count}`);
+    }
+    return parts.join(" · ");
+}
+
+function formatBulkAssigneeUnavailableReason(option: CaseAssigneeOption) {
+    if (option.assignment_eligible) {
+        return null;
+    }
+    if (option.assignment_block_reason_code === "paused") {
+        return "Новые заявки временно отключены.";
+    }
+    if (option.assignment_block_reason_code === "follow_up_only") {
+        return "Для bulk доступны только общие assignee, follow-up continuity сюда не входит.";
+    }
+    if (option.assignment_block_reason_code === "at_capacity") {
+        if (option.max_open_case_count != null) {
+            return `Достигнут лимит ${option.open_case_count ?? 0}/${option.max_open_case_count}.`;
+        }
+        return "Достигнут лимит открытых заявок.";
+    }
+    return "Сейчас недоступен для назначения.";
 }
 
 function formatBulkAssigneeOptionLabel(option: CaseAssigneeOption) {
-    return `${option.agent_name} · ${option.open_case_count ?? 0} в работе`;
+    const parts = [`${option.agent_name}`, `${option.open_case_count ?? 0} в работе`];
+    const availability = formatBulkAssigneeAvailability(option);
+    const blockedReason = !option.assignment_eligible ? formatBulkAssigneeUnavailableReason(option) : null;
+    if (availability) {
+        parts.push(availability);
+    }
+    if (blockedReason) {
+        parts.push(blockedReason);
+    }
+    return parts.join(" · ");
 }
 
 function bulkToggleClass(active: boolean) {
@@ -242,10 +295,11 @@ function bulkToggleClass(active: boolean) {
 }
 
 function resolveRecommendedAssignee(options: CaseAssigneeOption[]) {
-    if (options.length === 0) {
+    const eligibleOptions = options.filter((item) => item.assignment_eligible);
+    if (eligibleOptions.length === 0) {
         return null;
     }
-    return [...options].sort((left, right) => {
+    return [...eligibleOptions].sort((left, right) => {
         const leftLoad = left.open_case_count ?? 0;
         const rightLoad = right.open_case_count ?? 0;
         if (leftLoad !== rightLoad) {
@@ -1233,9 +1287,7 @@ export default function CaseList({
         ),
         [selectedCases],
     );
-    const bulkAssigneeSourceCaseId = selectedBranchIds.length === 1
-        ? selectedCases.find((item) => item.branch_id === selectedBranchIds[0])?.id
-        : undefined;
+    const bulkAssigneeBranchId = selectedBranchIds.length === 1 ? selectedBranchIds[0] : undefined;
     const bulkBranchLabel = selectedBranchIds.length === 1
         ? branchMap.get(selectedBranchIds[0]) || selectedBranchIds[0]
         : null;
@@ -1252,15 +1304,15 @@ export default function CaseList({
             : null;
 
     const { data: bulkAssigneesData, isFetching: assigneesLoading } = useQuery({
-        queryKey: ["case-assignees-bulk", bulkAssigneeSourceCaseId],
+        queryKey: ["case-assignees-bulk", bulkAssigneeBranchId || "all"],
         queryFn: async () => {
-            if (!bulkAssigneeSourceCaseId) {
+            if (!bulkAssigneeBranchId) {
                 return { items: [] as CaseAssigneeOption[] };
             }
-            const response = await casesApi.listAssignees(bulkAssigneeSourceCaseId);
+            const response = await casesApi.listQueueAssignees(bulkAssigneeBranchId);
             return response.data;
         },
-        enabled: canBulkManage && bulkActionMode === "reassign" && !!bulkAssigneeSourceCaseId,
+        enabled: canBulkManage && bulkActionMode === "reassign" && !!bulkAssigneeBranchId,
     });
     const bulkAssignees = useMemo(
         () => sortAssigneeOptionsByLoad(bulkAssigneesData?.items ?? []),
@@ -1290,6 +1342,10 @@ export default function CaseList({
     const recommendedBulkAssignee = useMemo(
         () => resolveRecommendedAssignee(bulkAssignees),
         [bulkAssignees],
+    );
+    const selectedBulkAssignee = useMemo(
+        () => bulkAssignees.find((option) => String(option.agent_id) === bulkAssigneeId) ?? null,
+        [bulkAssigneeId, bulkAssignees],
     );
     const refinementChips = [
         modeScope !== "open"
@@ -2780,12 +2836,19 @@ export default function CaseList({
                                                 Рекомендуем
                                             </p>
                                             <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-                                                <p
-                                                    className="text-xs text-emerald-900"
-                                                    data-testid="cases-bulk-reassign-recommendation"
-                                                >
-                                                    {recommendedBulkAssignee.agent_name} · {recommendedBulkAssignee.open_case_count ?? 0} в работе.
-                                                </p>
+                                                <div className="space-y-1">
+                                                    <p
+                                                        className="text-xs text-emerald-900"
+                                                        data-testid="cases-bulk-reassign-recommendation"
+                                                    >
+                                                        {recommendedBulkAssignee.agent_name} · {recommendedBulkAssignee.open_case_count ?? 0} в работе.
+                                                    </p>
+                                                    {formatBulkAssigneeAvailability(recommendedBulkAssignee) ? (
+                                                        <p className="text-[11px] text-emerald-900/80">
+                                                            {formatBulkAssigneeAvailability(recommendedBulkAssignee)}
+                                                        </p>
+                                                    ) : null}
+                                                </div>
                                                 <button
                                                     type="button"
                                                     onClick={() => setBulkAssigneeId(String(recommendedBulkAssignee.agent_id))}
@@ -2810,7 +2873,11 @@ export default function CaseList({
                                         >
                                             <option value="">Выберите менеджера</option>
                                             {bulkAssignees.map((option) => (
-                                                <option key={option.agent_id} value={option.agent_id}>
+                                                <option
+                                                    key={option.agent_id}
+                                                    value={option.agent_id}
+                                                    disabled={!option.assignment_eligible}
+                                                >
                                                     {formatBulkAssigneeOptionLabel(option)}
                                                 </option>
                                             ))}
@@ -2818,13 +2885,33 @@ export default function CaseList({
                                         <button
                                             type="button"
                                             onClick={() => bulkActionMutation.mutate()}
-                                            disabled={!bulkAssigneeId || assigneesLoading || bulkActionMutation.isPending}
+                                            disabled={
+                                                !selectedBulkAssignee
+                                                || !selectedBulkAssignee.assignment_eligible
+                                                || assigneesLoading
+                                                || bulkActionMutation.isPending
+                                            }
                                             className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                                             data-testid="cases-bulk-reassign-submit"
                                         >
                                             {bulkActionMutation.isPending ? "Передаём..." : "Передать выбранному"}
                                         </button>
                                     </div>
+                                    {selectedBulkAssignee && (
+                                        <div className="rounded-lg border border-border/60 bg-background px-3 py-2 text-xs">
+                                            <p className="font-medium text-foreground">
+                                                {selectedBulkAssignee.agent_name}
+                                            </p>
+                                            <p className="mt-1 text-muted-foreground">
+                                                {formatBulkAssigneeOptionLabel(selectedBulkAssignee)}
+                                            </p>
+                                            {formatBulkAssigneeUnavailableReason(selectedBulkAssignee) ? (
+                                                <p className="mt-1 text-amber-700">
+                                                    {formatBulkAssigneeUnavailableReason(selectedBulkAssignee)}
+                                                </p>
+                                            ) : null}
+                                        </div>
+                                    )}
                                     <div className="flex flex-wrap justify-end gap-2">
                                         <button
                                             type="button"

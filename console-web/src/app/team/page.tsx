@@ -57,6 +57,9 @@ type TeamMe = {
 type AgentRole = components["schemas"]["ConsoleAgentCreateRequest"]["role"];
 type MembershipScope = components["schemas"]["ConsoleMembershipCreateRequest"]["scope"];
 type AgentMembership = components["schemas"]["ConsoleAgentMembership"];
+type RoutingProfile = components["schemas"]["ConsoleRoutingProfile"];
+type RoutingProfileScope = RoutingProfile["scope"];
+type RoutingProfileStatus = RoutingProfile["routing_status"];
 
 const TEAM_AGENT_ROLES: AgentRole[] = [
     "platform_admin",
@@ -70,6 +73,8 @@ const TEAM_AGENT_ROLES: AgentRole[] = [
 const TEAM_ASSIGNABLE_AGENT_ROLES: AgentRole[] = ["owner", "admin", "manager", "viewer"];
 
 const TEAM_MEMBERSHIP_SCOPES: MembershipScope[] = ["company", "client", "branch"];
+const TEAM_ROUTING_PROFILE_SCOPES: RoutingProfileScope[] = ["client", "branch"];
+const TEAM_ROUTING_PROFILE_STATUSES: RoutingProfileStatus[] = ["available", "paused", "follow_up_only"];
 
 const TEAM_TABS: Array<{ id: TeamTab; label: string; hint: string }> = [
     { id: "users", label: "Пользователи", hint: "роль/доступ" },
@@ -128,6 +133,27 @@ function membershipTargetLabel(
         return "company: —";
     }
     return companiesById.get(membership.company_id)?.name ?? membership.company_id.slice(0, 8);
+}
+
+function buildRoutingProfileKey(agentId: string, branchId?: string | null) {
+    return `${agentId}:${branchId || "client"}`;
+}
+
+function formatRoutingProfileScopeLabel(profile: RoutingProfile, branches: TeamBranch[]) {
+    if (profile.scope === "branch") {
+        return `Филиал: ${formatBranchLabel(profile.branch_id, branches)}`;
+    }
+    return "Клиент по умолчанию";
+}
+
+function formatRoutingProfileStatusLabel(status: RoutingProfileStatus) {
+    if (status === "paused") {
+        return "Пауза";
+    }
+    if (status === "follow_up_only") {
+        return "Только follow-up";
+    }
+    return "Доступен";
 }
 
 async function fetchSpecialists(branchId?: string): Promise<SpecialistsResponse> {
@@ -283,6 +309,14 @@ function UsersPanel({
     const [editingBranchId, setEditingBranchId] = useState("");
     const [editingIsActive, setEditingIsActive] = useState(true);
     const [editingReason, setEditingReason] = useState("");
+    const [routingProfileAgentId, setRoutingProfileAgentId] = useState("");
+    const [routingProfileScope, setRoutingProfileScope] = useState<RoutingProfileScope>("client");
+    const [routingProfileBranchId, setRoutingProfileBranchId] = useState("");
+    const [routingProfileStatus, setRoutingProfileStatus] = useState<RoutingProfileStatus>("available");
+    const [routingProfileCapacity, setRoutingProfileCapacity] = useState("");
+    const [routingProfileReason, setRoutingProfileReason] = useState("");
+    const [editingRoutingProfileKey, setEditingRoutingProfileKey] = useState<string | null>(null);
+    const [routingProfileTarget, setRoutingProfileTarget] = useState<string | null>(null);
 
     const agentsQuery = useQuery({
         queryKey: ["agents"],
@@ -346,6 +380,8 @@ function UsersPanel({
         setEditingClientId(clientId ?? "");
         setMembershipCompanyId(companyId ?? "");
         setEditingCompanyId(companyId ?? "");
+        setRoutingProfileBranchId("");
+        setEditingRoutingProfileKey(null);
     }, [clientId, companyId]);
 
     const membershipsQuery = useQuery({
@@ -379,6 +415,26 @@ function UsersPanel({
             ).data,
         enabled: !!session && canReadTeam && !!branchLookupClientId,
     });
+    const routingProfilesQuery = useQuery({
+        queryKey: ["routing-profiles", clientId ?? ""],
+        queryFn: async () => {
+            if (!clientId) {
+                return { items: [] as RoutingProfile[] };
+            }
+            return (await adminApi.listRoutingProfiles({ client_id: clientId })).data;
+        },
+        enabled: !!session && canReadTeam && !!clientId,
+    });
+    const routingBranchesQuery = useQuery({
+        queryKey: ["routing-branches", clientId ?? ""],
+        queryFn: async () => {
+            if (!clientId) {
+                return { items: [] as TeamBranch[] };
+            }
+            return (await adminApi.listBranches({ client_id: clientId })).data;
+        },
+        enabled: !!session && canReadTeam && !!clientId,
+    });
 
     useEffect(() => {
         if (agentsQuery.error) {
@@ -396,10 +452,23 @@ function UsersPanel({
             handleError(membershipBranchesQuery.error);
         }
     }, [membershipBranchesQuery.error, handleError]);
+    useEffect(() => {
+        if (routingProfilesQuery.error) {
+            handleError(routingProfilesQuery.error);
+        }
+    }, [routingProfilesQuery.error, handleError]);
+    useEffect(() => {
+        if (routingBranchesQuery.error) {
+            handleError(routingBranchesQuery.error);
+        }
+    }, [routingBranchesQuery.error, handleError]);
 
     const memberships = useMemo(() => {
         return (membershipsQuery.data?.items ?? []) as AgentMembership[];
     }, [membershipsQuery.data]);
+    const routingProfiles = useMemo(() => {
+        return (routingProfilesQuery.data?.items ?? []) as RoutingProfile[];
+    }, [routingProfilesQuery.data]);
     const membershipBranchOptions = useMemo(() => {
         const apiItems = ((membershipBranchesQuery.data?.items ?? []) as TeamBranch[]).filter((branch) => Boolean(branch.id));
         if (apiItems.length > 0) {
@@ -410,6 +479,24 @@ function UsersPanel({
         }
         return [];
     }, [branchLookupClientId, branches, clientId, membershipBranchesQuery.data]);
+    const routingBranchOptions = useMemo(() => {
+        const apiItems = ((routingBranchesQuery.data?.items ?? []) as TeamBranch[]).filter((branch) => Boolean(branch.id));
+        if (apiItems.length > 0) {
+            return apiItems;
+        }
+        return branches.filter((branch) => Boolean(branch.id));
+    }, [branches, routingBranchesQuery.data]);
+    const routingProfileAgents = useMemo(() => {
+        return agents.filter((agent) => {
+            if (!agent.id) {
+                return false;
+            }
+            if (agent.client_id !== clientId) {
+                return false;
+            }
+            return agent.role === "owner" || agent.role === "admin" || agent.role === "manager";
+        });
+    }, [agents, clientId]);
     const selectedMembershipAgent = membershipAgentId ? agentsById.get(membershipAgentId) : undefined;
     const selectedMembershipAgentIsProtected = selectedMembershipAgent?.role === "platform_admin";
 
@@ -428,6 +515,7 @@ function UsersPanel({
     const owners = agents.filter((agent) => agent.role === "owner").length;
     const managers = agents.filter((agent) => agent.role === "manager").length;
     const membershipsActiveCount = memberships.filter((membership) => membership.is_active).length;
+    const routingProfilesCount = routingProfiles.length;
     const filteredAgentsCount = filteredAgents.length;
     const selectedClientLabel = clientId
         ? (clientsById.get(clientId)?.name ?? clientId.slice(0, 8))
@@ -465,6 +553,11 @@ function UsersPanel({
             setMembershipBranchId("");
         }
     }, [membershipScope, clientId, companyId, membershipClientId, membershipCompanyId]);
+    useEffect(() => {
+        if (routingProfileScope !== "branch") {
+            setRoutingProfileBranchId("");
+        }
+    }, [routingProfileScope]);
 
     const createAgentMutation = useMutation({
         mutationFn: async () => {
@@ -560,6 +653,91 @@ function UsersPanel({
             setMembershipTarget(null);
         },
     });
+    const resetRoutingProfileForm = () => {
+        setRoutingProfileAgentId("");
+        setRoutingProfileScope("client");
+        setRoutingProfileBranchId("");
+        setRoutingProfileStatus("available");
+        setRoutingProfileCapacity("");
+        setRoutingProfileReason("");
+        setEditingRoutingProfileKey(null);
+    };
+    const upsertRoutingProfileMutation = useMutation({
+        mutationFn: async () => {
+            if (!clientId) {
+                throw new Error("Выберите клиентский контекст");
+            }
+            if (!routingProfileAgentId) {
+                throw new Error("Выберите пользователя");
+            }
+            if (routingProfileScope === "branch" && !routingProfileBranchId) {
+                throw new Error("Выберите филиал для branch override");
+            }
+            const rawCapacity = routingProfileCapacity.trim();
+            const parsedCapacity = rawCapacity ? Number(rawCapacity) : null;
+            if (rawCapacity && (parsedCapacity === null || !Number.isFinite(parsedCapacity) || parsedCapacity < 1)) {
+                throw new Error("Лимит должен быть числом >= 1");
+            }
+            const maxOpenCaseCount = parsedCapacity;
+            return (
+                await adminApi.upsertRoutingProfile({
+                    agent_id: routingProfileAgentId,
+                    client_id: clientId,
+                    branch_id: routingProfileScope === "branch" ? routingProfileBranchId : null,
+                    routing_status: routingProfileStatus,
+                    max_open_case_count: maxOpenCaseCount,
+                    reason: routingProfileReason.trim() || undefined,
+                })
+            ).data;
+        },
+        onMutate: () => {
+            setRoutingProfileTarget(editingRoutingProfileKey || buildRoutingProfileKey(routingProfileAgentId, routingProfileBranchId || null));
+        },
+        onSuccess: () => {
+            toast.success(editingRoutingProfileKey ? "Routing profile обновлен" : "Routing profile сохранен");
+            resetRoutingProfileForm();
+            queryClient.invalidateQueries({ queryKey: ["routing-profiles"] });
+            queryClient.invalidateQueries({ queryKey: ["case-assignees"] });
+        },
+        onError: (error) => {
+            if (error instanceof Error && !(error as { response?: unknown }).response) {
+                toast.error(error.message);
+                return;
+            }
+            handleError(error);
+        },
+        onSettled: () => {
+            setRoutingProfileTarget(null);
+        },
+    });
+    const deleteRoutingProfileMutation = useMutation({
+        mutationFn: async (payload: { agentId: string; branchId?: string | null; reason?: string; key: string }) => {
+            if (!clientId) {
+                throw new Error("Выберите клиентский контекст");
+            }
+            return (
+                await adminApi.deleteRoutingProfile(payload.agentId, {
+                    client_id: clientId,
+                    branch_id: payload.branchId || undefined,
+                    reason: payload.reason,
+                })
+            ).data;
+        },
+        onMutate: ({ key }) => {
+            setRoutingProfileTarget(key);
+        },
+        onSuccess: () => {
+            toast.success("Routing override удален");
+            queryClient.invalidateQueries({ queryKey: ["routing-profiles"] });
+            queryClient.invalidateQueries({ queryKey: ["case-assignees"] });
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+        onSettled: () => {
+            setRoutingProfileTarget(null);
+        },
+    });
 
     const startMembershipEdit = (membership: AgentMembership) => {
         if (isProtectedMembership(membership)) {
@@ -637,6 +815,28 @@ function UsersPanel({
                 reason: reason.trim(),
             },
         });
+    };
+    const startRoutingProfileEdit = (profile: RoutingProfile) => {
+        setEditingRoutingProfileKey(buildRoutingProfileKey(profile.agent_id, profile.branch_id));
+        setRoutingProfileAgentId(profile.agent_id);
+        setRoutingProfileScope(profile.scope);
+        setRoutingProfileBranchId(profile.branch_id ?? "");
+        setRoutingProfileStatus(profile.routing_status);
+        setRoutingProfileCapacity(profile.max_open_case_count ? String(profile.max_open_case_count) : "");
+        setRoutingProfileReason("");
+    };
+    const handleDeleteRoutingProfile = (profile: RoutingProfile) => {
+        const reason = window.prompt("Причина удаления override (optional)")?.trim() || undefined;
+        const key = buildRoutingProfileKey(profile.agent_id, profile.branch_id);
+        deleteRoutingProfileMutation.mutate({
+            agentId: profile.agent_id,
+            branchId: profile.branch_id,
+            reason,
+            key,
+        });
+        if (editingRoutingProfileKey === key) {
+            resetRoutingProfileForm();
+        }
     };
 
     const linkMutation = useMutation({
@@ -1301,6 +1501,190 @@ function UsersPanel({
                                             </div>
                                         </div>
                                     ) : null}
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+            </div>
+
+            <div className="card-surface p-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h3 className="text-base font-semibold">Routing Profiles</h3>
+                        <p className="text-sm text-muted-foreground mt-1">
+                            Server-owned availability и capacity для case routing policies. Branch override перекрывает client default.
+                        </p>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                        profiles: {routingProfilesCount}
+                    </div>
+                </div>
+                {!clientId ? (
+                    <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        Нет клиентского контекста. Выберите клиента в Tenants, затем обновите Team.
+                    </div>
+                ) : null}
+                {clientId && canManage ? (
+                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+                        <select
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={routingProfileAgentId}
+                            onChange={(event) => setRoutingProfileAgentId(event.target.value)}
+                            disabled={!canManage}
+                        >
+                            <option value="">Выберите owner/admin/manager</option>
+                            {routingProfileAgents.map((agent) => (
+                                <option key={`routing-agent-${agent.id}`} value={agent.id}>
+                                    {(agent.name || "Без имени")} · {agent.role}
+                                </option>
+                            ))}
+                        </select>
+                        <select
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={routingProfileScope}
+                            onChange={(event) => setRoutingProfileScope(event.target.value as RoutingProfileScope)}
+                            disabled={!canManage}
+                        >
+                            {TEAM_ROUTING_PROFILE_SCOPES.map((scopeValue) => (
+                                <option key={`routing-scope-${scopeValue}`} value={scopeValue}>
+                                    {scopeValue === "client" ? "client default" : "branch override"}
+                                </option>
+                            ))}
+                        </select>
+                        {routingProfileScope === "branch" ? (
+                            <select
+                                className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                value={routingProfileBranchId}
+                                onChange={(event) => setRoutingProfileBranchId(event.target.value)}
+                                disabled={!canManage}
+                            >
+                                <option value="">
+                                    {routingBranchesQuery.isLoading ? "Загрузка филиалов..." : "Выберите филиал"}
+                                </option>
+                                {routingBranchOptions.map((branch) => (
+                                    <option key={`routing-branch-${branch.id}`} value={branch.id}>
+                                        {branch.name ?? branch.id}
+                                    </option>
+                                ))}
+                            </select>
+                        ) : (
+                            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                                Применится ко всему клиенту
+                            </div>
+                        )}
+                        <select
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={routingProfileStatus}
+                            onChange={(event) => setRoutingProfileStatus(event.target.value as RoutingProfileStatus)}
+                            disabled={!canManage}
+                        >
+                            {TEAM_ROUTING_PROFILE_STATUSES.map((statusValue) => (
+                                <option key={`routing-status-${statusValue}`} value={statusValue}>
+                                    {formatRoutingProfileStatusLabel(statusValue)}
+                                </option>
+                            ))}
+                        </select>
+                        <input
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            placeholder="max open cases (optional)"
+                            inputMode="numeric"
+                            value={routingProfileCapacity}
+                            onChange={(event) => setRoutingProfileCapacity(event.target.value.replace(/[^\d]/g, ""))}
+                            disabled={!canManage}
+                        />
+                        <input
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            placeholder="reason (optional)"
+                            value={routingProfileReason}
+                            onChange={(event) => setRoutingProfileReason(event.target.value)}
+                            disabled={!canManage}
+                        />
+                        <div className="xl:col-span-6 flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs text-muted-foreground">
+                                `paused` блокирует новые назначения. `follow_up_only` оставляет только явную continuity по follow-up. Пустой лимит = без capacity cap.
+                            </p>
+                            <div className="flex items-center gap-2">
+                                {editingRoutingProfileKey ? (
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={resetRoutingProfileForm}
+                                        disabled={upsertRoutingProfileMutation.isPending}
+                                    >
+                                        Отмена
+                                    </button>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onClick={() => upsertRoutingProfileMutation.mutate()}
+                                    disabled={!canManage || upsertRoutingProfileMutation.isPending}
+                                >
+                                    {upsertRoutingProfileMutation.isPending ? "Сохранение..." : editingRoutingProfileKey ? "Обновить profile" : "Сохранить profile"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
+                {clientId && !canManage ? (
+                    <p className="mt-4 text-xs text-muted-foreground">
+                        У вас read-only доступ. Изменять routing profiles могут только owner/admin/platform admin.
+                    </p>
+                ) : null}
+                <div className="mt-4 space-y-2">
+                    {routingProfilesQuery.isLoading ? (
+                        <div className="text-sm text-muted-foreground">Загрузка routing profiles...</div>
+                    ) : routingProfiles.length === 0 ? (
+                        <div className="text-sm text-muted-foreground">Routing profiles не заданы. Работает fallback `available` без capacity cap.</div>
+                    ) : (
+                        routingProfiles.map((profile) => {
+                            const key = buildRoutingProfileKey(profile.agent_id, profile.branch_id);
+                            const rowLoading = routingProfileTarget === key;
+                            return (
+                                <div key={key} className="rounded-lg border border-border/60 px-3 py-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div className="text-sm">
+                                            <span className="font-medium">{profile.agent_name ?? profile.agent_id.slice(0, 8)}</span>
+                                            <span className="text-muted-foreground">
+                                                {" · "}
+                                                {formatRoutingProfileScopeLabel(profile, routingBranchOptions)}
+                                            </span>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="rounded-full border border-border/60 px-2 py-1 text-xs font-medium">
+                                                {formatRoutingProfileStatusLabel(profile.routing_status)}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {profile.max_open_case_count ? `cap ${profile.max_open_case_count}` : "без cap"}
+                                            </span>
+                                            {canManage ? (
+                                                <button
+                                                    type="button"
+                                                    className="btn-ghost"
+                                                    onClick={() => startRoutingProfileEdit(profile)}
+                                                    disabled={rowLoading}
+                                                >
+                                                    Edit
+                                                </button>
+                                            ) : null}
+                                            {canManage ? (
+                                                <button
+                                                    type="button"
+                                                    className="btn-ghost"
+                                                    onClick={() => handleDeleteRoutingProfile(profile)}
+                                                    disabled={rowLoading || deleteRoutingProfileMutation.isPending}
+                                                >
+                                                    {rowLoading ? "..." : "Удалить override"}
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                        updated: {profile.updated_at ? new Date(profile.updated_at).toLocaleString("ru-RU") : "—"}
+                                        {" · "}
+                                        id: {profile.id.slice(0, 8)}
+                                    </div>
                                 </div>
                             );
                         })
