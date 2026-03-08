@@ -654,7 +654,14 @@ Evaluation contract (state-aware)
 - Info requests must match `info_sections`/intents (price/location/hours/promo/duration/parking/master).
 - Info matching is current-turn scoped (pipeline window); stale historical trace must not satisfy current info request.
 - Booking-active turns should show slot progress; stalls are flagged.
+- When `expected_reply` / requested-slot continuity is active, evaluator and oracle must distinguish pending-question interaction acts instead of compressing them into generic collect noise:
+  - `fill_requested_slot`
+  - `ask_about_requested_slot`
+  - `slot_constraint`
+  - `slot_compare`
+  - `mixed_fill_plus_question`
 - `booking_slot_stall` checks only slot-relevant turns (service/time/date/no-tag), not generic booking noise.
+- `booking_slot_stall` is valid only when there is neither real slot progress nor explicit `decision_meta` / `decision_trace` evidence that the turn was handled as one of the pending-question interaction acts while preserving the resume contract for the active slot.
 - If response text claims booking confirmation, evaluator requires appointment/calendar evidence; otherwise `false_booking_confirmation`.
 - If appointment/calendar path is active without successful calendar outcome, evaluator reports `calendar_tool_contract_miss`.
 - Booking `expected_reply_type` is limited to `service_choice`/`time`/`name` (phone/confirm are not expected_reply_type).
@@ -662,6 +669,7 @@ Evaluation contract (state-aware)
   - use `expect.meta.expected_reply_type=service_choice` when the canonical outcome is service clarify;
   - use `expect.meta.expected_reply_type=time` when the service is already grounded and the canonical outcome is datetime collect;
   - use `expect.trace_contains` for referent/canonical-state evidence (`question_contract`, `consult_return`, `referent_resolver`) instead of `must_include` wording.
+- Surface-mutation families (`paraphrase`, `translit`, `typo`, `format`) preserve the existing ontology; if a guarded run surfaces a new interaction-act class, docs/runbook/taxonomy must be updated before the next expensive closure attempt.
 
 Reason codes (summary.failures / failure_counts)
 - decision_meta_missing

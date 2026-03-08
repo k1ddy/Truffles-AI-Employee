@@ -57,6 +57,7 @@
 - [ ] **Hybrid LLM‑plan:** LLM возвращает план (outcome/tool_action/tool_args/pack_refs/language/confidence/goal); валидатор подтверждает pack_refs и инструменты; валидный tool_action выполняется, при нарушении контракта/политики → COLLECT/clarify или HANDOFF по правилам.
 - [ ] **Booking/info interrupt contract:** при активной записи информационный запрос (`pricing|duration|hours|location|master|contact`) обязан завершаться `FACT/COLLECT` по info-контракту с `info_sections`; booking-подсказка в этом же turn допустима только как явный follow-up sidecar по контракту.
 - [ ] **Expected-reply single owner contract:** если tool-contract вернул `clear_expected_reply=true`, этот turn не имеет права повторно выставлять `expected_reply_type` downstream-эвристиками без явного whitelist reason-code.
+- [ ] **Pending-question interaction contract:** при активном `expected_reply` / requested slot runtime обязан различать как минимум `fill_requested_slot`, `ask_about_requested_slot`, `slot_constraint`, `slot_compare`, `mixed_fill_plus_question`; эти акты не имеют права схлопываться в generic `booking_prompt` без явного `decision_trace/decision_meta` owner и resume-контракта.
 
 ### Точность фактов
 - [ ] Факты только из Client Pack / tools (адрес, цены, услуги, правила).

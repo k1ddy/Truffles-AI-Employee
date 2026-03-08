@@ -114,7 +114,11 @@ def test_tool_registry_book_slot_conflict_without_requested_time_has_no_fabricat
         result = tool_registry_service.execute_tool_action(
             db,
             tool_action="calendar.book_slot",
-            tool_args={"start_at": "2026-02-20T00:00:00+05:00"},
+            tool_args={
+                "start_at": "2026-02-20T00:00:00+05:00",
+                "customer_name": "Марина",
+                "customer_phone": "+77010000000",
+            },
             conversation_id=uuid4(),
             branch_id=branch.id,
             client_slug="demo_salon",

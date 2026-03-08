@@ -561,4 +561,26 @@
   - PR sync:
     - opened PR `#879`: `https://github.com/k1ddy/Truffles-AI-Employee/pull/879`.
   - PR #880 session-gate remediation (docs-only): confirmed CI root cause from run `22618699980` (`ERROR: Missing session log updates (docs/SESSIONS + docs/SESSION_INDEX.md)`) and added mandatory `docs/SESSIONS + docs/SESSION_INDEX` updates.
-- last_updated: 2026-03-03T16:05:00+05:00
+  - Opened draft PR `#951` with the full accumulated worktree state and merged remote branch tip into `fix/llm-first-firebreak-2026-02-19`.
+  - Investigated red CI on PR `#951`: extracted failing jobs `session-gate` and `unit-tests` from GitHub Actions.
+  - Fixed unit-test regressions:
+    - `truffles-api/app/services/reasoning_core.py`: restored module-level delegation contract so tests can monkeypatch `decision._handle_webhook_payload` and fallback constants stay aligned with `decision` runtime namespace.
+    - `truffles-api/app/routers/webhook/decision.py`: re-exposed `MSG_DELIVERY_FAILED` from `runtime_primitives` in module namespace for existing contract callers/tests.
+    - `ops/diagnose.py`: made `_llm_quality_extract_expectations` self-sufficient so AST-loaded sanitizer tests no longer depend on omitted helper definitions.
+    - `truffles-api/tests/test_booking_appointments.py` and `truffles-api/tests/test_calendar_slot_response_contract.py`: updated conflict-path fixtures to satisfy current booking contact-minimum preconditions while preserving conflict assertions.
+  - Validation for PR-red fix:
+    - `pytest -q truffles-api/tests/test_booking_appointments.py -k "tool_registry_book_slot_conflict_verification_mentions_confirmation_failure or tool_registry_book_slot_conflict_returns_requested_time_alternatives"` (`2 passed`)
+    - `pytest -q truffles-api/tests/test_booking_quality_expectation_sanitizer.py truffles-api/tests/test_reasoning_core.py truffles-api/tests/test_calendar_slot_response_contract.py::test_tool_registry_book_slot_conflict_without_requested_time_has_no_fabricated_clock` (`9 passed`)
+    - `python3 -m py_compile ops/diagnose.py truffles-api/app/services/reasoning_core.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_booking_appointments.py truffles-api/tests/test_calendar_slot_response_contract.py` (`OK`)
+    - `ruff check ops/diagnose.py truffles-api/app/services/reasoning_core.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_booking_appointments.py truffles-api/tests/test_calendar_slot_response_contract.py` (`All checks passed`)
+  - Restored canon artifacts required by `session-gate` after branch merge drift:
+    - restored deleted session logs `docs/SESSIONS/SESSION-2026-03-04-runtime-hygiene-gate-a1.md`, `docs/SESSIONS/SESSION-2026-03-05-inbox-calendar-ux-reconstruction-a1.md`, `docs/SESSIONS/SESSION-2026-03-05-uvc-closure-review16-a705.md` from `origin/main`,
+    - restored missing referenced Task Packages `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review16-a705.md` and `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave29-a1.md`,
+    - rebuilt `docs/SESSION_INDEX.md` and re-ran `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD` (`doc-truth: OK`, exit 0).
+  - Fixed remaining env-sensitive unit regressions surfaced by the exact CI command:
+    - `truffles-api/tests/test_calendar_provider_sync.py`: set `CALENDAR_SYNC_INBOUND_ENABLED=1` explicitly in stale-sync scheduling test.
+    - `truffles-api/tests/test_outbox_service_app.py`: pinned `OUTBOX_COALESCE_SECONDS=8` / `OUTBOX_MAX_WAIT_SECONDS=10` in process-route test.
+  - Final local CI contour for PR `#951`:
+    - `pytest -v --tb=short --ignore=tests/test_demo_salon_eval.py --ignore=tests/test_message_endpoint.py --ignore=tests/test_chatflow_contract.py --ignore=tests/test_knowledge_service.py` (`1810 passed, 5 warnings`)
+
+- last_updated: 2026-03-08T11:45:00+05:00

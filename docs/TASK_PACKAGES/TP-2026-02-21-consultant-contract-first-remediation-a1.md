@@ -16,7 +16,7 @@
   - `P1 Single Semantic Owner`: `re-open`.
   - Rollout (`canary/full`): `STOP-THE-LINE` до полного closure P1 + обязательного локального realism контура.
   - `P1.6` promotion discovery loop: `budget-blocked after latest evidence`; новые дорогие `dev/acceptance` quality run не являются default dev-loop до следующего acceptance window.
-  - Current execution focus: `P1.6o16 booking time-guidance question owner`; guarded rerun `p1.6o6-l2-dev-20260308-a1-r11` is audited but non-admissible (`infra_valid=false`, `semantic_valid=false`) and surfaced the next semantic family on `На какое время лучше записаться?`, so no new expensive `dev L2` action is allowed until `docs/TASK_PACKAGES/TP-2026-03-08-p1.6o16-booking-time-guidance-question-owner-a1.md` is green on deterministic contour and transport is stable again.
+  - Current execution focus: `P1.6o16 pending-question interaction model gap (doc-first rescope before code)`; guarded rerun `p1.6o6-l2-dev-20260308-a1-r11` is audited but non-admissible (`infra_valid=false`, `semantic_valid=false`) and surfaced the next semantic family on `На какое время лучше записаться?`, which proved a broader documentation/process gap around active pending-question interaction semantics, so no new expensive `dev L2` action is allowed until `docs/TASK_PACKAGES/TP-2026-03-08-p1.6o16-booking-time-guidance-question-owner-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md`, and `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` are synced on the doc-first contract and the bounded runtime child slice is explicit.
 - Форензика состояния chain:
   - `/tmp/booking_quality/_chain/20260305-firebreak-e2e3-a1-r33.json` -> `blocked_reason=canary_rollback_executed`.
   - `/tmp/booking_quality/booking-canary-20260305-firebreak-e2e3-a1-r33/rollback.json` -> `status=executed`, `source=auto_canary_no_go`.
@@ -31,6 +31,13 @@
   - `demo_salon` используется как acceptance canary-pack, а не как модель мира для core.
 - Следствие:
   - любой фикс, который улучшает поведение только под текущий pack/лексикон/язык и не переносит знание в data/config/capability layer, считается неполным.
+
+## Process Gap Clarification (binding)
+
+- `P1.6o1`..`P1.6o15` закрывали semantic ownership по осям `aboutness/state/referent/capability/oracle`, но не заморозили отдельную ось `interaction over active pending question`.
+- Следствие: expensive guarded loop честно находил новые семьи, но оставался реактивным — surfaced family reopening worked as a truthfulness gate, not as a completeness gate.
+- `P6A/P6B` расширяли surface coverage (`translit/typo/paraphrase/format/context-aware synthesis`), но сохраняли существующую scenario ontology (`tags/expect`); поэтому они не могли заранее поймать класс, которого не было в taxonomy/TP contract.
+- До синхронизации docs/runbook/taxonomy любой узкий фикс вида `одна фраза -> один owner` считается process-incomplete даже если он локально green на deterministic contour.
 
 ## Atomic Sub-TP Matrix (binding)
 
@@ -347,16 +354,16 @@
 ## Next-block Contract (mandatory)
 
 - Next block objective:
-  - execute `P1.6o1` as the first active child block under `P1.6o`; after that move to `P1.6o2/P1.6o3` for referent continuity and capability arbitration, and only then return to one fresh guarded `demo_salon` `dev L2`.
+  - complete the doc-first rescope of `P1.6o16` so the canon explicitly models interaction semantics over the active pending question (`fill_requested_slot`, `ask_about_requested_slot`, `slot_constraint`, `slot_compare`, `mixed_fill_plus_question`), then start only the bounded runtime slice for the first surfaced family before any fresh guarded `demo_salon` `dev L2`.
 
 - First deterministic check command:
-  - `pytest -q truffles-api/tests/test_llm_policy_core.py::test_validate_llm_policy_core_output_accepts_semantic_envelope_fields && pytest -q truffles-api/tests/test_message_endpoint.py::test_llm_policy_core_semantic_envelope_fields_persist_in_meta`
+  - `rg -n "Pending-question interaction contract|fill_requested_slot|ask_about_requested_slot|slot_constraint|slot_compare|mixed_fill_plus_question" STRATEGY/REQUIREMENTS.md docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md docs/TASK_PACKAGES/TP-2026-03-08-p1.6o16-booking-time-guidance-question-owner-a1.md docs/runbooks/BOOKING_CONFIRM_VERIFY.md && git diff --check`
 
 - Blocked-by conditions:
-  - `P1.6o` child TP hierarchy не создана и не синхронизирована в docs.
-  - Не закрыт `P1.6o1` на deterministic contour.
-  - Runtime `http://127.0.0.1:18184` не обновлен после code delta.
-  - Нет подготовленного guarded `dev L2` run-id / `PG checklist` для следующего окна.
+  - `P1.6o16` remains framed as a one-phrase `time guidance` fix instead of a broader pending-question interaction gap.
+  - runbook / TP / requirements taxonomy are not synchronized on the new interaction-act vocabulary.
+  - The bounded post-doc runtime child slice is not explicit.
+  - Runtime `http://127.0.0.1:18184` is not restarted from the post-doc code state before the next guarded window.
 
 - Owner role for closure:
   - `Top Architect + Brain`

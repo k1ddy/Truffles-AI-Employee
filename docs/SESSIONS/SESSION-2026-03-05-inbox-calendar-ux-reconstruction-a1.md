@@ -1,0 +1,466 @@
+# SESSION 2026-03-05-inbox-calendar-ux-reconstruction-a1 — Inbox+Calendar UX Reconstruction
+
+- status: active
+- owner: Top Architect | Brain | Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave29-a1.md
+- branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
+- worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
+- base_ref: origin/main
+- scope: Реализовать Wave29 richer routing v1 как explainable opt-in policy поверх Wave28 booking governance: добавить `follow_up_sla_balance` без тихой подмены `least_open_cases`, с server-owned score/explainability contract и explicit policy selection в текущих reassignment surfaces.
+- done:
+  - Wave29 richer routing v1 implemented locally:
+    - backend adds explainable policy `follow_up_sla_balance` on top of current assignee eligibility/load, explicit booking `NO_SHOW` follow-up continuity, and SLA-weighted load balancing while preserving `least_open_cases`;
+    - `/cases/{case_id}/assignees` now accepts explicit `policy`, and routing responses/actions carry `recommended_score`, `current_score`, and `score_breakdown`;
+    - frontend `CaseConversation` and `CaseList` now expose explicit routing-policy selectors in the existing single-case and bulk surfaces, defaulting the UI to the richer policy without silently replacing the backend default.
+  - Wave29 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `87 passed`
+    - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py app/services/console_case_routing.py tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/api-client.ts --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx` → `pass`
+    - `cd console-web && npm run build` → `pass`
+  - Wave28 implementation completed locally:
+    - backend adds explicit booking governance fields `appointments.follow_up_owner_id` and `appointments.follow_up_due_at`, deterministic `NO_SHOW` defaults, `/calendar/bookings` filters for `follow_up_owner_id` and `follow_up_overdue`, and bounded owner/admin mutation `POST /calendar/bookings/{booking_id}/follow-up-governance`;
+    - calendar queue-state canon now persists/restores `queue_mode`, `follow_up_owner_id`, and `follow_up_overdue_only` on the same Wave24-27 server/current/saved-view/share-link contract;
+    - frontend calendar now exposes explicit `Операции / История` modes, follow-up owner/overdue filters, owner/due/overdue chips on booking cards, and supervisor reassignment/due controls for pending no-show follow-up.
+  - Wave28 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_calendar_noshow_followup_router.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `40 passed`
+    - `cd truffles-api && ruff check app/models/appointment.py app/routers/calendar.py app/services/appointment_service.py app/services/console_queue_state.py tests/test_calendar_noshow_followup_router.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/calendar-bookings.ts --file src/lib/queue-state.ts --file src/lib/inbox-workspace.ts --file src/app/calendar/page.tsx` → `pass`
+    - `cd console-web && npm run build` → `pass`
+  - Wave27 implementation completed locally:
+    - backend adds `GET /console/v1/queue-state/views/{view_id}` so a specific saved view can be resolved with the same ACL semantics as the existing catalog;
+    - frontend `CaseList` and `calendar/page.tsx` now restore queue state by precedence `URL queue params -> URL view_id -> server current -> managed team default -> personal default -> local fallback`;
+    - both queue surfaces now keep the browser URL aligned with the active queue slice and expose one-click `Копировать ссылку` actions built from explicit queue params plus optional `view_id`.
+  - Wave27 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `40 passed`
+    - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/api-client.ts --file src/lib/queue-state.ts --file src/components/CaseList.tsx --file src/app/calendar/page.tsx` → `pass`
+    - `cd console-web && npm run build` → `pass`
+  - Wave26 implementation completed locally:
+    - backend extends `console_saved_views` with managed scope/targeting (`scope`, `created_by_agent_id`, `target_branch_id`, `target_role`) and keeps personal/team presets on one canonical queue-state object;
+    - `/console/v1/queue-state/views` now returns personal views plus applicable/all team presets depending on permission, and owner/admin mutations enforce `team.write` ACL plus branch/role targeting validation;
+    - frontend cases/calendar now surface team presets in the same catalog, allow owner/admin-managed branch/role/default controls, and restore defaults in precedence `URL override -> server current -> managed team default -> personal default -> local fallback`.
+  - Wave26 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `38 passed`
+    - `cd truffles-api && ruff check app/models/__init__.py app/models/console_saved_view.py app/services/console_saved_views.py app/routers/console.py app/schemas/console.py tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/queue-state.ts --file src/lib/api-client.ts --file src/components/CaseList.tsx --file src/app/calendar/page.tsx` → `pass`
+    - `cd console-web && npm run build` → `pass`
+    - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
+  - `PR #947` opened for Wave24 foundation: `https://github.com/k1ddy/Truffles-AI-Employee/pull/947`.
+  - Wave25 implementation completed locally:
+    - backend added `console_saved_views` model + migration + CRUD service + `/console/v1/queue-state/views` `GET/POST/PATCH/DELETE`;
+    - frontend cases/calendar now list, save, apply, update, delete, and mark default personal saved views on top of the queue-state canon;
+    - restore precedence is now effectively `URL override -> server current -> default saved view -> local fallback`, while saved views still exclude local presentation state.
+  - Wave25 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `31 passed`
+    - `cd truffles-api && ruff check app/models/__init__.py app/models/console_saved_view.py app/services/console_saved_views.py app/routers/console.py app/schemas/console.py tests/test_console_saved_views_api.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/queue-state.ts --file src/lib/api-client.ts --file src/components/CaseList.tsx --file src/app/calendar/page.tsx` → `pass`
+    - `cd console-web && npm run build` → `pass`
+    - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
+  - Wave24 implementation completed locally:
+    - backend added `console_queue_states` model + migration + normalization service + `/console/v1/queue-state/current` `GET/PUT`;
+    - frontend inbox/calendar now restore operational queue state in precedence `URL override -> server current state -> local fallback`;
+    - local storage remains only for migration/presentation state (`selected case`/panel/visible fields stay local-only).
+  - Wave24 local evidence is green:
+    - `cd truffles-api && pytest -q tests/test_console_queue_state_api.py tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` → `78 passed`
+    - `cd truffles-api && ruff check app/models/__init__.py app/models/console_queue_state.py app/services/console_queue_state.py app/routers/console.py app/schemas/console.py tests/test_console_queue_state_api.py tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/lib/inbox-workspace.ts --file src/lib/inbox-case-filters.ts --file src/lib/queue-state.ts --file src/components/CaseList.tsx --file src/app/calendar/page.tsx --file src/lib/calendar-bookings.ts --file e2e/inspect_case.spec.ts` → `pass`
+    - `cd console-web && npm run build` → `pass`
+  - Wave23 docs-only post-closeout analysis completed in the current worktree: remaining maturity defects are now localized as `D1 local-only queue state`, `D2 no server-owned saved-view object`, `D3 non-shareable queue URLs`, `D4 calendar not yet supervisor-grade`, and `D5 routing inputs too narrow`.
+  - Wave24 TP created as the first bounded execution block after closure: server-owned `Queue State Canon` now gates any future saved views, managed presets, shareable queue URLs, or richer routing work.
+  - Master/session/state/structure canon synced so the next valid execution order is explicit: `Queue State Canon` -> saved views/presets/shareable URLs -> bookings supervisor-grade governance -> richer routing.
+  - `PR #946` merged into `main` on 2026-03-07; Wave22 live-proof helper hardening and explicit safe-case evidence are shipped.
+  - Final closeout verdict recorded:
+    - explicit live no-mocks proof passed on safe demo case `2e2de879-e4be-405e-83f6-c11dd95cad65`
+    - user-provided case `01fdf4ed-ccdd-4752-9592-f44ee2614458` remains documented as accessible but unsuitable for reopen-proof because the hydrated live state was `В работе` with no visible reopen control
+    - original `Заявки/Записи` reconstruction program is closed without remaining blocking correctness gaps
+  - `PR #944` merged into `main` on 2026-03-07; Wave22 deterministic proof is shipped.
+  - Wave22 was explicitly split after merge into a final live-proof closure block because the remaining gap is operational evidence, not product semantics.
+  - `PR #943` merged into `main` on 2026-03-07; Wave21 Part B booking-state propagation is shipped.
+  - Wave22 implementation started locally:
+    - deterministic validation now includes a manager history-mode matrix, proving that queue views disappear outside `Открытые`, role-gated owner scope does not leak privileged options, and `resolved/all/open` mode transitions emit stable query semantics.
+    - a dedicated validation runbook now documents deterministic/local and live no-mocks proof, including exact `pass | blocked | fail` classification for explicit safe-case mutation checks.
+  - Wave22 local evidence is green:
+    - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts` → `pass`
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` → `6 passed, 1 skipped`
+    - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
+  - Wave22 live-proof execution with real case evidence:
+    - user-provided live case `01fdf4ed-ccdd-4752-9592-f44ee2614458` is accessible but not suitable for reopen-proof: live business status resolves to `В работе`, next action `Проверьте отправку`, and no reopen control is exposed after client hydration.
+    - read-only candidate discovery over live resolved cases found explicit reopen-safe cases in the demo tenant.
+    - tagged live lane `@wave22-live-proof` passed against `2e2de879-e4be-405e-83f6-c11dd95cad65`.
+  - `PR #942` merged into `main` on 2026-03-07; Wave21 Part A semantic booking context is shipped.
+  - `PR #941` merged into `main` on 2026-03-07; Wave20 inbox history/archive modes are shipped.
+  - Wave21 Part A implemented locally: case detail API now returns a semantic `booking_summary`, inbox workspace shows `Почему заявка открыта` + `Что по записи`, details panel uses the same operator story, and the case-bookings panel refreshes case summary after booking mutations.
+  - Wave21 local evidence is green:
+    - `pytest -q truffles-api/tests/test_console_cases_helpers.py truffles-api/tests/test_console_openapi_calendar_contract.py` → `70 passed`
+    - `python3 truffles-api/scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/components/CaseConversation.tsx --file src/components/CaseBookingsPanel.tsx --file src/components/CaseDetailsPanel.tsx --file src/utils/labels.ts --file src/types/index.ts --file e2e/inspect_case.spec.ts` → `pass`
+    - `cd console-web && npm run build` → `pass`
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` → `4 passed, 1 skipped`
+    - `SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
+  - `PR #940` merged into `main` on 2026-03-07; Wave18 filter-state correctness is shipped.
+  - Wave19 semantic chain/decomposition block completed locally and recorded in canon; active implementation block switched to Wave20.
+  - Wave20 implementation progressed locally across frontend + backend history contract:
+    - first-screen `Открытые / Закрытые / Все` remains the primary mode switch,
+    - open-only queue views stay hidden outside open mode,
+    - resolved mode now uses backend `sort_by=resolved_at`,
+    - resolved date filters emit `resolved_from/resolved_to` instead of silently reusing open-queue `date_from/date_to`,
+    - compact/table cards now show resolved timeline semantics for closed cases,
+    - inbox workspace prefs bumped to canonical `v5` to avoid stale history-mode leakage from older filter states.
+  - Wave20 local evidence is green:
+    - `pytest -q truffles-api/tests/test_console_cases_helpers.py truffles-api/tests/test_console_openapi_calendar_contract.py` → `68 passed`
+    - `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_cases_helpers.py truffles-api/tests/test_console_openapi_calendar_contract.py` → `pass`
+    - `python3 truffles-api/scripts/generate_openapi.py --check` → `pass`
+    - `cd console-web && npm run generate:api` → `pass`
+    - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/lib/inbox-workspace.ts --file src/lib/inbox-case-filters.ts --file src/types/api.generated.ts --file e2e/inspect_case.spec.ts` → `pass`
+    - `cd console-web && npm run build` → `pass`
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` → `4 passed, 1 skipped`
+    - `SESSION_AGENT=a1 scripts/session_check.sh` → `Session OK`
+  - Owner requirements reframed deeper into one product chain: `бот -> заявка -> менеджер -> запись -> история`, with explicit manager/admin convenience goals and forbidden states; current problem is documented as an IA/semantic-model gap, not only a filter bug.
+  - New atomic planning/implementation TPs created: Wave19 (semantic chain + decomposition), Wave20 (inbox panel IA + modes), Wave21 (cross-surface semantic integration), Wave22 (forbidden-state matrix + live closeout).
+  - Wave18 correctness refactor implemented locally: filter precedence moved into `console-web/src/lib/inbox-case-filters.ts`, `CaseList.tsx` no longer lets queue view silently rewrite owner scope or explicit refinements, and workspace prefs now persist canonical `v3` filter state.
+  - Deterministic coverage extended in `console-web/e2e/inspect_case.spec.ts`: queue-view changes preserve owner/status/sort query params; stale privileged owner-scope restore is normalized before the first request for manager role.
+  - Local checks for Wave18 are green: targeted `lint`, `build`, `Playwright inspect_case` (`4 passed, 1 skipped`), and `SESSION_AGENT=a1 scripts/session_check.sh`.
+  - PR `#939` merged into `main` on 2026-03-07; Wave17 filter-model cleanup is shipped, but new operator feedback confirms remaining correctness bugs in filter precedence and state transitions.
+  - Wave18 opened as the next active block: filter-state correctness will now be treated as a strict contract problem with truth-table/deterministic validation, not as another UI-polish pass.
+  - PR `#939` opened for Wave17: `feat(console): simplify inbox filter model`.
+  - Branch synced with `origin/main` after PR open; `PR #939` is no longer behind base after merge-forward.
+  - Wave17 closeout review started: current verdict is `merge-go if checks are green`, and no separate Wave18 follow-up is required now for queue filters.
+  - PR `#938` merged into `main` on 2026-03-07; Wave16 action/rail redesign is now shipped.
+  - Wave17 implementation progressed in branch: inbox filter contract now separates `queue view` from `owner scope`, removes duplicate owner queue presets, keeps only `queue mode + search + owner scope` on first screen, and moves status/sort/diagnostic/date refinements into the advanced layer with explicit removable chips.
+  - `CaseList` workspace persistence migrated to `v2`: legacy stored `mine/unassigned/assigneeId` filters normalize into a dedicated `ownerScope`, and owner scope no longer gets silently rewritten when queue mode changes.
+  - `inspect_case` deterministic lane updated for Wave17: mock coverage now targets the new owner-scope control and the simplified filter rail without the removed `unassigned` queue-view preset.
+  - PR `#937` merged into `main` on 2026-03-06; Wave15 operator-safe feedback is now shipped.
+  - Wave15 live validation executed as a precise blocker, not a fake pass: the dedicated no-mocks mutation lane now requires explicit `INSPECT_CASE_LIVE_CASE_ID` and skipped because no safe case is configured in the current live scope.
+  - Wave16 implementation started in branch: the case action area now separates utility controls from case actions, `Передать` no longer turns into `Скрыть передачу`, the reassign panel was reduced to recommendation + one explicit confirm path, and the left inbox rail was widened with denser controls/cards reduced.
+  - PR `#937` opened for Wave15: `fix(console): harden operator action feedback`.
+  - Wave15 implemented in branch: `ConsoleSyncStatus` now exposes operator-safe `operator_message`, direct case actions no longer leak raw sync detail strings in default UI, and action-macros use the same follow-up warning model.
+  - `inspect_case` deterministic lane now proves the new contract: sync-bearing macro shows friendly warning copy instead of `chatflow_failed`, and direct `reopen` stays internal-only with no warning leak.
+  - Manual operator-eye analysis completed after Wave14 merge: raw sync reason leakage (`chatflow_failed`) and overloaded action/queue surfaces were confirmed from code + screenshot evidence.
+  - New full-scope follow-up TPs created: Wave15 (operator-safe action feedback), Wave15 live validation, and Wave16 (action surface + queue rail redesign).
+  - Wave14 implemented in branch: `GET /cases` now supports bounded `queue_view` slices (`needs_reply`, `waiting_client`, `snoozed`, `delivery`, `unassigned`) with total-count semantics on the same filtered query.
+  - Inbox queue views migrated from local predicates to server-owned semantics; legacy persisted `paused` view now normalizes into `waiting_client`, and local-only approximation hints are removed from the rail.
+  - `inspect_case` mock lane now proves server-backed queue switching by asserting real row counts for `Требуют ответа`, `Ждём клиента`, and `Отложенные` without regressing the case workspace loop.
+  - PR `#935` merged into `main` on 2026-03-06; Wave13 business-status contract and simplified inbox lifecycle surfaces are now shipped.
+  - Wave14 TP created as the next active block: migrate queue views from local predicates to server-owned queue semantics.
+  - PR `#933` merged into `main` on 2026-03-06; Wave11 reopen-sync correctness and inbox left-rail usability fixes are now shipped.
+  - Wave12 TP created for policy-based routing automation as the next active block.
+  - Wave12 implemented in branch: backend now owns routing recommendation/apply (`least_open_cases`) for single-case and bulk reassignment, while UI adds one-click `Назначить по политике` and `Распределить по политике` without new routes.
+  - PR `#934` merged into `main` on 2026-03-06; Wave12 policy-routing contract is now shipped.
+  - Wave12 live-validation TP created to prove the merged mutation path on real backend without mocks before opening the next routing maturity wave.
+  - Wave12 live-validation classified precisely: live no-mocks fallback still cannot prove the routing mutation without an explicit safe `INSPECT_CASE_LIVE_CASE_ID`; the lane now reports that blocker instead of pretending mutation evidence.
+  - Wave13 TP created as the next active block: introduce server-owned business status and simplify badge-heavy queue/header surfaces around one operator status + one SLA next action.
+  - Wave13 implemented in branch: backend now exposes `business_status_code/business_status_label`, while `CaseList` and `CaseConversation` use that operator status as the primary lifecycle badge instead of raw `pending/active/resolved` chips.
+  - Compact queue cards now keep one business-status badge, one SLA next-action badge, and text metadata for owner/context; extra technical pills were removed from the default compact rail.
+  - Worktree created and baseline rollback completed.
+  - Task Package restored with mandatory gates and one web search evidence.
+  - Backend calendar contract expanded with `conversation_id`/`case_id` linkage and `conversation_id` filter.
+  - Frontend Inbox/Calendar flow connected with contextual navigation and action-oriented SLA copy.
+  - Screenshot-based validation executed for Inbox and Calendar context mode.
+  - Wave2 TP created with root-cause + one web-search + action-first queue scope.
+  - Calendar queue toolbar added (action lanes, status filter, search, attention reasons).
+  - Case first-screen simplified (single action hint, no SLA duplication, compact context).
+  - Terminology simplified for manual message flow and SLA labels.
+  - `inspect_case` smoke extended with queue-controls assertions and live-mode availability fallback.
+  - Master TP upgraded to full multi-wave program contract (TP/PR linkage rules).
+  - Historical wave1 scope extracted into dedicated TP for clean document-level decomposition.
+  - Wave3 TP created for backend/data-contract completion.
+  - Wave4 TP created for realtime/observability/release-safety closure.
+  - Wave3 implementation started: explicit `appointments.case_id` linkage in model/service/create booking flow.
+  - Calendar bookings API upgraded with server-side queue filters (`lane`, `needs_action`, `case_id`) and cursor pagination (`cursor`, `has_more`).
+  - Calendar booking response extended with action semantics (`needs_action`, `attention_reason`) and queue-aware contract.
+  - Inbox case read-model extended with queue semantics fields (`priority_tier`, `attention_reason`, `target_response_at`) for list/get endpoints.
+  - OpenAPI contract synced to include new calendar filters and response fields.
+  - Wave4 runtime slice started: backend `GET /cases/{case_id}/stream` (SSE) with heartbeat + refresh events.
+  - Proxy upgraded to pass through `text/event-stream` and resolve scope from query params for EventSource.
+  - `useCaseData` switched to SSE-first sync with controlled polling fallback and `reason_code` state.
+  - OpenAPI + generated API types synced for new stream endpoint.
+  - Wave4 observability slice implemented in `/metrics/daily`: `queue_lag_seconds`, `stale_view_rate`, `case_action_apply_latency_seconds` + status fields.
+  - Insights/Ops UI updated with realtime reliability KPI cards and action-oriented hints.
+  - OpenAPI contract tests expanded for realtime metrics schema coverage.
+  - Closeout TP created for post-wave4 release discipline with explicit canary/go-no-go/rollback block.
+  - Wave4 release runbook added (`INBOX_CALENDAR_WAVE4_RELEASE.md`) with staged rollout and KPI gates.
+  - `useCaseData` now supports runtime rollback flag (`NEXT_PUBLIC_CASE_SSE_ENABLED=0`) to force polling-only mode.
+  - `inspect_case` live lane hardened with explicit auth-gate reasoned skip and direct-case fallback.
+  - Master/Wave4 TP linkage updated to include closeout block.
+  - Follow-up TP created for live auth hardening (`TP-2026-03-05-console-e2e-live-auth-hardening-a1.md`) with mandatory RCA + one-web-search sections.
+  - Follow-up TP created for shared auth helper unification (`TP-2026-03-06-console-e2e-auth-helper-unification-a1.md`) with mandatory RCA + one-web-search sections.
+  - `inspect_case` live no-mocks hardened against stale workspace filters and fixture-only case fallback.
+  - Added API-backed live case discovery and calendar queue fallback path when no inspectable case exists in current live scope.
+  - Removed flaky auth-gate skip path by re-login recovery + deterministic calendar-surface validation.
+  - Unified Keycloak auth helper added in `console-web/e2e/support/keycloak-auth.ts` and connected to `login/smoke/inspect_case` to remove local `start/login` drift.
+  - Shared auth helper unification merged via PR `#928` (`83f9e9f1fb0c9ff96a40a10c4a84e7657c494b4a`).
+  - Follow-up TP created for rollout of shared auth helper into `marketing/owner-admin-business/platform-admin/tenants-a11y` (`TP-2026-03-06-console-e2e-auth-helper-rollout-a1.md`).
+  - `marketing`, `owner-admin-business`, `platform-admin`, `tenants-a11y` migrated to shared Keycloak helper; local `startKeycloakLogin/loginThroughKeycloak` duplicates removed.
+  - Shared helper hardened to avoid false-positive `/api/auth` URL completion and повторный signin через auth-origin, which caused local `redirect_uri` failures during RCA.
+  - `owner-admin-business` lane now emits explicit skip when the authenticated role is not `owner/admin`, instead of reporting a false UI regression for manager credentials.
+  - Master TP refreshed into an atomic program map with actual `Done/In progress/Planned` wave states and explicit split contracts for all remaining business blocks.
+  - Wave5 TP created for action-driven SLA contract (`backend contract -> frontend surfaces`) as the next product block after merged e2e/auth follow-ups.
+  - Wave5 implementation started: backend case SLA action contract added (`sla_action_state`, `sla_overdue_minutes`) with deadline-based `reply_due/overdue/waiting_client` semantics.
+  - Inbox surfaces (`CaseConversation`, `CaseList`, `CaseDetailsPanel`) switched from abstract SLA copy to action-driven badges and deadline display.
+  - OpenAPI and generated frontend API types synced for new case SLA fields; inspect-case lane now asserts the action badge without legacy `SLA:` prefix.
+  - Wave6 TP created for bounded single-case actions `reassign/snooze/reopen`, with explicit split contract `single-case actions -> bulk/supervisor actions`.
+  - Wave6 Part A implemented: backend assignee/reassign/snooze/reopen contract added, `manager_reopen` fixed to use explicit operator override, and snooze semantics moved to `handover.meta` with stale-state cleanup on reply/resolve/return/reopen.
+  - Inbox operator controls extended with `Передать`, `Отложить`, `Вернуть в работу`; details surface shows snooze metadata; inspect-case mocks now validate the new controls.
+  - PR `#931` opened for Wave5 + Wave6 Part A: `feat(console): action-driven SLA and single-case inbox actions`.
+  - Wave6 Part B TP created for bounded bulk/supervisor actions with explicit split `backend contract -> queue selection UI`.
+  - Wave6 Part B1 backend started: added `/cases/bulk` contract for bulk `reassign`/`snooze` with per-case `processed/skipped/failed` results and contract checks.
+  - Fixed red PR `#931`: Python import ordering and stale `console-web/src/types/api.generated.ts` drift resolved in branch.
+  - Wave6 Part B2 implemented: `CaseList` now supports queue selection, `Выбрать все`, bounded bulk `reassign/snooze` toolbar and payload submission to `/cases/bulk`.
+  - Fixed inbox queue state bug: empty search debounce no longer clears visible cases without changing the actual query, which had hidden queue rows in the mock/workspace lane.
+  - `inspect_case` mock lane now validates bulk selection and `/cases/bulk` payload without breaking the existing case/calendar scenario.
+  - PR `#931` merged into `main` on 2026-03-06; branch synced forward to `origin/main` and Wave7 Part A opened as next active block.
+  - Wave7 Part A implemented and verified: executable macro action contract persisted in `console_macros.action_config`, `/inbox/macros/{macro_id}/execute` added, targeted macro/OpenAPI checks green, canonical contract synced to `openapi.v1.yaml`, and frontend API types regenerated.
+  - Wave7 Part B TP created as the next active block for macro UI builder/apply flow.
+  - Wave7 Part B implemented in frontend: `InboxMacros` now supports action builder/apply flow, `executeMacro` wired into composer-side apply, action hints are visible in use/manage cards, and `inspect_case` mock lane now covers create + apply for action-macros.
+  - PR `#932` opened for Wave7: `feat(console): add executable inbox action-macros`.
+  - Wave8 TP created as the next active block with mandatory one-web-search and bounded split `Part A workspace shell -> Part B context preservation`.
+  - Wave8 Part A implemented in branch: embedded `CaseBookingsPanel` added to Inbox/Case workspace, shared booking helpers extracted from `calendar/page.tsx`, and `ConsoleShell` now keeps `/calendar` in the same wide workspace frame.
+  - Wave8 Part A committed (`5d459211`) and pushed to the existing PR `#932`.
+  - Wave8 Part B TP created as the next active block for context preservation between inbox workspace and full calendar route.
+  - Wave8 Part B implemented in branch: panel mode and calendar case-context prefs now persist via `inbox-workspace`, full calendar links restore `?panel=bookings`, and case-mode calendar no longer hides linked bookings behind the default today filter.
+  - Wave9 TP created as the next active block for supervisor/admin queue governance in the existing inbox queue surface.
+  - Wave9 Part A implemented in branch: `CaseList` now exposes role-aware queue views, active view summary, persisted visible-field toggles, and preserves bulk/select behavior inside the current inbox workspace.
+  - `inspect_case` deterministic lane expanded for Wave9 Part A: mocked queue now covers `needs_reply/paused/delivery/unassigned` slices, queue governance controls, and persisted field toggles without regressing bookings/calendar return flow.
+  - Wave9 Part B TP created as the next active block for server-backed owner/unassigned governance inside the current inbox queue.
+  - Wave9 Part B implemented in branch: backend `GET /cases` now supports `assignee_id`/`unassigned`, queue-level `GET /cases/assignees` added, and privileged owner filter is wired into `CaseList` with workspace persistence and conflict-safe behavior.
+  - `inspect_case` deterministic lane expanded for Wave9 Part B: admin queue lane now validates server-backed owner filtering, `Без владельца` view, and preserved bulk/governance controls without breaking the existing workspace loop.
+  - Wave10 TP created as the next active block for factual assignee workload signals in reassignment surfaces, keeping the current inbox tabs as the only operator workspace.
+  - Wave10 Part A implemented in branch: assignee contracts now expose `open_case_count`, backend load mapping is calculated from scoped open cases, and `CaseConversation`/bulk owner selects now show factual workload hints instead of a flat blind list.
+  - Wave10 Part B TP created as the next active block for one-click recommended routing inside current reassignment panels, without hidden automation.
+  - Wave10 Part B implemented in branch: `CaseConversation` and bulk reassign panels now expose `Выбрать рекомендацию`, prefill the least-loaded assignee deterministically, and explain the choice in plain operator copy.
+  - Closeout-review TP created as the next active block to classify original ТЗ coverage, accepted residuals, and merge-go/no-go for `PR #932`.
+  - `inspect_case` deterministic lane expanded for Wave10 Part B: recommendation CTA is now asserted in both single-case and bulk reassignment flow without breaking macro/bookings coverage.
+  - `inspect_case` deterministic lane expanded for Wave10 Part A: mocked assignee options now carry workload counts and assertions verify those hints in queue owner and reassign surfaces.
+  - Wave11 TP opened as post-merge live hardening block after real-user feedback: fix `Вернуть в работу` reopen sync semantics and rebuild the cramped inbox left rail in the current workspace.
+  - Wave11 Part A implemented: `reopen` no longer reuses `take` external sync semantics; direct `reopen` and macro `reopen_case` now return explicit `skipped/reopen_internal_only` sync instead of false Telegram/client failures.
+  - Direct `take/resolve/return` endpoints now reuse the same finalize helpers as macros, so action-specific sync semantics live in one place instead of duplicated router branches.
+  - Wave11 Part B implemented: inbox desktop rail widened in `InboxView`, compact `CaseList` filters regrouped into a vertical control stack, and queue cards became easier to scan in the left column.
+  - `inspect_case` lane updated for the new compact rail (`cases-filter-compact-layout` + rail width assertion) and refreshed screenshot evidence captured after the layout pass.
+- next:
+  - Wave29 richer routing v1 is locally green; the next valid product question is whether the platform needs capability/presence-aware routing inputs or a bounded routing v2, not another queue-state or status-only heuristic patch.
+  - Do not invent `skills` / `presence` / `availability` as frontend-only selectors; any further routing wave is blocked until those signals are server-owned.
+- evidence:
+  - `truffles-api/app/services/console_case_routing.py`
+  - `truffles-api/app/routers/console.py`
+  - `truffles-api/app/schemas/console.py`
+  - `truffles-api/tests/test_console_cases_helpers.py`
+  - `truffles-api/tests/test_console_queue_state_api.py`
+  - `truffles-api/tests/test_console_openapi_calendar_contract.py`
+  - `contracts/console_api/openapi.v1.yaml`
+  - `console-web/src/lib/api-client.ts`
+  - `console-web/src/components/CaseConversation.tsx`
+  - `console-web/src/components/CaseList.tsx`
+  - `console-web/src/types/api.generated.ts`
+  - `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave29-a1.md`
+  - `truffles-api/app/models/appointment.py`
+  - `truffles-api/migrations/055_add_booking_follow_up_governance.sql`
+  - `truffles-api/app/routers/calendar.py`
+  - `truffles-api/app/services/appointment_service.py`
+  - `truffles-api/app/services/console_queue_state.py`
+  - `truffles-api/tests/test_calendar_noshow_followup_router.py`
+  - `truffles-api/tests/test_console_queue_state_api.py`
+  - `console-web/src/lib/calendar-bookings.ts`
+  - `console-web/src/lib/inbox-workspace.ts`
+  - `console-web/src/lib/queue-state.ts`
+  - `console-web/src/app/calendar/page.tsx`
+  - `contracts/console_api/openapi.v1.yaml`
+  - `console-web/src/types/api.generated.ts`
+  - `cd truffles-api && pytest -q tests/test_calendar_noshow_followup_router.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` (`40 passed`)
+  - `cd truffles-api && ruff check app/models/appointment.py app/routers/calendar.py app/services/appointment_service.py app/services/console_queue_state.py tests/test_calendar_noshow_followup_router.py tests/test_console_queue_state_api.py tests/test_console_openapi_calendar_contract.py` (`pass`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd console-web && npm run lint -- --file src/lib/calendar-bookings.ts --file src/lib/queue-state.ts --file src/lib/inbox-workspace.ts --file src/app/calendar/page.tsx` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `truffles-api/app/models/console_queue_state.py`
+  - `truffles-api/app/services/console_queue_state.py`
+  - `truffles-api/migrations/052_add_console_queue_states.sql`
+  - `truffles-api/tests/test_console_queue_state_api.py`
+  - `console-web/src/lib/queue-state.ts`
+  - `console-web/src/components/CaseList.tsx`
+  - `console-web/src/app/calendar/page.tsx`
+  - `contracts/console_api/openapi.v1.yaml`
+  - `cd truffles-api && pytest -q tests/test_console_queue_state_api.py tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`78 passed`)
+  - `cd truffles-api && ruff check app/models/__init__.py app/models/console_queue_state.py app/services/console_queue_state.py app/routers/console.py app/schemas/console.py tests/test_console_queue_state_api.py tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`pass`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd console-web && npm run lint -- --file src/lib/inbox-workspace.ts --file src/lib/inbox-case-filters.ts --file src/lib/queue-state.ts --file src/components/CaseList.tsx --file src/app/calendar/page.tsx --file src/lib/calendar-bookings.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave23-a1.md`
+  - `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md`
+  - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+  - `PR #946` merged via `acc887dc3e58fc930b9da702b6a599a9ed0a58a4` on `origin/main`
+  - `PR #944` merged via `dc8b720f` on `origin/main`
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 INSPECT_CASE_LIVE_CASE_ID=01fdf4ed-ccdd-4752-9592-f44ee2614458 npx playwright test e2e/inspect_case.spec.ts --grep @wave22-live-proof --project=chromium --reporter=line --workers=1` (`1 skipped`; accessible but unsuitable live case without reopen control)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 INSPECT_CASE_LIVE_CASE_ID=2e2de879-e4be-405e-83f6-c11dd95cad65 npx playwright test e2e/inspect_case.spec.ts --grep @wave22-live-proof --project=chromium --reporter=line --workers=1` (`1 passed`)
+  - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1` (`6 passed, 1 skipped`)
+  - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --grep @wave22-live-proof --project=chromium --reporter=line --workers=1` (`1 skipped`; `blocked` without explicit safe case)
+  - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/lib/inbox-workspace.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`3 passed, 1 skipped`)
+  - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+  - `git worktree list`
+  - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_calendar_noshow_followup_router.py`
+  - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file src/utils/labels.ts --file e2e/inspect_case.spec.ts`
+  - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/components/CaseConversation.tsx --file src/utils/labels.ts --file e2e/inspect_case.spec.ts`
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`skip`, live workspace unavailable)
+  - `console-web/case_inspection.png`
+  - `console-web/calendar_case_context.png`
+  - `python3 -m py_compile truffles-api/app/models/appointment.py truffles-api/app/services/appointment_service.py truffles-api/app/routers/calendar.py truffles-api/app/routers/console.py truffles-api/app/schemas/console.py truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_console_openapi_calendar_contract.py`
+  - `pytest -q truffles-api/tests/test_calendar_bookings_router.py truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_apply_sql_migrations.py` (`26 passed`)
+  - `pytest -q truffles-api/tests/test_console_cases_helpers.py` (`17 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check`
+  - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/components/CaseList.tsx --file src/types/index.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`skip`, live workspace unavailable)
+  - `python3 scripts/check_migration_governance.py --strict` (`pass`)
+  - `scripts/session_check.sh` (`Session OK`)
+  - `python3 scripts/generate_openapi.py`
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd console-web && npm run generate:api`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check`
+  - `pytest -q truffles-api/tests/test_console_openapi_case_stream_contract.py truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_calendar_bookings_router.py` (`12 passed`)
+  - `pytest -q truffles-api/tests/test_console_cases_helpers.py` (`17 passed`)
+  - `cd console-web && npm run lint -- --file src/hooks/useCaseData.ts --file src/app/api/proxy/[...path]/route.ts` (`pass`)
+  - `cd console-web && npm run check:uvc-antidrift` (`pass`)
+  - `cd truffles-api && pytest -q tests/test_console_analytics.py tests/test_console_openapi_case_stream_contract.py tests/test_console_openapi_metrics_contract.py tests/test_console_openapi_calendar_contract.py tests/test_calendar_bookings_router.py tests/test_console_cases_helpers.py` (`41 passed`)
+  - `cd console-web && npm run lint -- --file src/app/insights/page.tsx --file src/components/OpsPage.tsx --file src/hooks/useCaseData.ts --file src/app/api/proxy/[...path]/route.ts` (`pass`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run check:uvc-antidrift` (`pass`)
+  - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`skip`, live data lane unavailable for case assertion)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run lint -- --file src/hooks/useCaseData.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --reporter=line` (`pass`)
+  - `cd console-web && INSPECT_CASE_USE_MOCKS=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --reporter=line` (`skip`, auth gate reasoned)
+  - `scripts/session_check.sh` (`Session OK`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/login.spec.ts --project=chromium-login --reporter=line` (`3 passed`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`, calendar fallback for empty queue)
+  - `cd console-web && npm run lint -- --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `cd console-web && rg -n "async function (startKeycloakLogin|loginThroughKeycloak)" e2e/login.spec.ts e2e/smoke.spec.ts e2e/inspect_case.spec.ts` (no matches)
+  - `cd console-web && npm run lint -- --file e2e/support/keycloak-auth.ts --file e2e/login.spec.ts --file e2e/smoke.spec.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/login.spec.ts --project=chromium-login --reporter=line` (`3 passed`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/smoke.spec.ts --project=chromium --reporter=line --grep "should display filter controls|should navigate to Settings"` (`2 passed`)
+  - `scripts/session_check.sh` (`Session OK`)
+  - `cd console-web && rg -n "async function (startKeycloakLogin|loginThroughKeycloak)" e2e/marketing.spec.ts e2e/owner-admin-business.spec.ts e2e/platform-admin.spec.ts e2e/tenants-a11y.spec.ts` (`no matches`)
+  - `cd console-web && npm run lint -- --file e2e/support/keycloak-auth.ts --file e2e/marketing.spec.ts --file e2e/owner-admin-business.spec.ts --file e2e/platform-admin.spec.ts --file e2e/tenants-a11y.spec.ts` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/marketing.spec.ts --project=chromium --reporter=line --grep "should open marketing page and render lifecycle blocks"` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/owner-admin-business.spec.ts --project=chromium --reporter=line --grep "should expose owner/admin control navigation and business summary"` (`skip`: current local/manual credentials resolve to non-owner role)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 E2E_DETERMINISTIC_AUTH=1 npx playwright test e2e/platform-admin.spec.ts --project=chromium --reporter=line --grep "should render full incident details, allow 30m hide, and navigate via CTA"` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 E2E_DETERMINISTIC_AUTH=1 npx playwright test e2e/tenants-a11y.spec.ts --project=chromium --reporter=line --grep "desktop snapshot"` (`pass`)
+  - `cd console-web && npm run lint -- --file e2e/support/keycloak-auth.ts --file e2e/owner-admin-business.spec.ts` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/owner-admin-business.spec.ts --project=chromium --reporter=line --grep "should expose owner/admin control navigation and business summary"` (`1 skipped`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz npx playwright test e2e/marketing.spec.ts --project=chromium --reporter=line --grep "should open marketing page and render lifecycle blocks"` (`pass`, post-helper-hardening rerun)
+  - `scripts/session_check.sh` (`Session OK`)
+  - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "Wave5|Wave6|Wave7|Wave8|Wave9|Requirement coverage map|Atomic split rule" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md`
+  - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "## (One web search|Root cause|Residual architecture debt|Next-block contract)" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md docs/TASK_PACKAGES/TP-2026-03-06-inbox-calendar-ux-reconstruction-wave5-a1.md`
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`29 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run lint -- --file src/utils/labels.ts --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file src/components/CaseDetailsPanel.tsx --file src/types/index.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`, calendar no-cases fallback)
+  - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title "feat(console): action-driven SLA and single-case inbox actions" ...` (`PR #931`)
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`37 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd truffles-api && pytest -q tests/test_state_service.py tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`67 passed`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd console-web && npm run lint -- --file src/lib/api-client.ts --file src/components/CaseConversation.tsx --file src/components/CaseDetailsPanel.tsx --file src/utils/labels.ts --file src/types/index.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `cd console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz INSPECT_CASE_USE_MOCKS=0 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`, calendar no-cases fallback)
+  - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title "feat(console): action-driven SLA and single-case inbox actions" ...` (`PR #931`)
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`37 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file src/lib/api-client.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`pass`)
+  - `scripts/session_check.sh` (`Session OK`)
+  - `cd truffles-api && pytest -q tests/test_console_inbox_macros.py tests/test_console_openapi_calendar_contract.py` (`23 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py tests/test_console_inbox_macros.py tests/test_console_openapi_calendar_contract.py` (`pass`)
+  - `cd console-web && npm run lint -- --file src/components/InboxMacros.tsx --file src/lib/api-client.ts --file src/components/InboxView.tsx --file src/components/CaseView.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`)
+  - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file src/lib/inbox-workspace.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave9 Part A mock lane)
+  - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title "feat(console): add executable inbox action-macros" ...` (`PR #932`)
+  - `cd console-web && npm run build` (`pass`)
+  - `git push origin HEAD` (`updated PR #932`)
+  - `cd console-web && npm run lint -- --file src/lib/inbox-workspace.ts --file src/components/InboxView.tsx --file src/components/CaseConversation.tsx --file src/components/CaseBookingsPanel.tsx --file src/app/calendar/page.tsx --file src/app/cases/[id]/page.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`)
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`44 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/lib/inbox-workspace.ts --file src/lib/api-client.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave9 Part B mock lane)
+  - `console-web/case_inspection.png`
+  - `console-web/calendar_case_context.png`
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`47 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd console-web && npm run lint -- --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file src/lib/api-client.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave10 Part A mock lane)
+  - `console-web/case_inspection.png`
+  - `console-web/calendar_case_context.png`
+  - `cd console-web && npm run lint -- --file src/components/CaseConversation.tsx --file src/components/CaseList.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave10 Part B mock lane)
+  - `console-web/case_inspection.png`
+  - `console-web/calendar_case_context.png`
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_inbox_macros.py` (`49 passed`)
+  - `cd truffles-api && ruff check app/routers/console.py tests/test_console_cases_helpers.py tests/test_console_inbox_macros.py` (`pass`)
+  - `cd console-web && npm run lint -- --file src/components/InboxView.tsx --file src/components/CaseList.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave11 rail + reopen pass)
+  - `console-web/case_inspection.png`
+  - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+  - `cd truffles-api && pytest -q tests/test_console_cases_helpers.py tests/test_console_openapi_calendar_contract.py` (`64 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/lib/inbox-workspace.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`2 passed`, Wave14 queue-view lane)
+  - `console-web/case_inspection.png`
+  - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+  - `pytest -q truffles-api/tests/test_console_cases_helpers.py truffles-api/tests/test_console_inbox_macros.py` (`66 passed`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py` (`generated`)
+  - `cp contracts/console_api/openapi.generated.yaml contracts/console_api/openapi.v1.yaml`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py` (`13 passed`)
+  - `cd console-web && npm run lint -- --file src/components/CaseConversation.tsx --file src/components/InboxMacros.tsx --file src/utils/labels.ts --file e2e/inspect_case.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`3 passed`)
+  - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+  - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title \"fix(console): harden operator action feedback\" ...` (`PR #937`)
+- last_updated: 2026-03-07T20:18:38+05:00

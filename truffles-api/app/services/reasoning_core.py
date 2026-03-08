@@ -15,8 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger, record_delivery_failure, start_span
 from app.models import Message
-from app.routers.webhook.decision import _handle_webhook_payload
-from app.routers.webhook.runtime_primitives import MSG_AI_ERROR, MSG_DELIVERY_FAILED
+from app.routers.webhook import decision as decision_router
 from app.routers.webhook.trace import (
     DECISION_STAGE_ORDER_SNAPSHOT,
     _update_message_decision_metadata,
@@ -121,7 +120,7 @@ async def handle_webhook_payload(
             return False
 
     try:
-        return await _handle_webhook_payload(
+        return await decision_router._handle_webhook_payload(
             payload,
             db,
             provided_secret=provided_secret,
@@ -188,7 +187,7 @@ async def handle_webhook_payload(
                 result = send_message_safe(
                     instance_id=instance_id,
                     remote_jid=remote_jid,
-                    message=MSG_DELIVERY_FAILED,
+                    message=decision_router.MSG_DELIVERY_FAILED,
                     idempotency_key=message_id,
                     notify_on_failure=True,
                     record_metrics=True,
@@ -212,7 +211,11 @@ async def handle_webhook_payload(
                         break
                     time.sleep(0.5)
 
-        fallback_bot_response = MSG_DELIVERY_FAILED if should_fallback else MSG_AI_ERROR
+        fallback_bot_response = (
+            decision_router.MSG_DELIVERY_FAILED
+            if should_fallback
+            else decision_router.MSG_AI_ERROR
+        )
         result_message = "Fallback response sent" if fallback_sent else "Fallback response skipped"
         return WebhookResponse(
             success=True,

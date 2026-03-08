@@ -4524,6 +4524,64 @@ def _llm_quality_normalize_expect_trace_contains(value):
 
 
 def _llm_quality_extract_expectations(turn):
+    def _normalize_mapping(value):
+        helper = globals().get("_llm_quality_normalize_expect_mapping")
+        if callable(helper):
+            return helper(value)
+        if not isinstance(value, dict):
+            return {}
+        normalized = {}
+        for raw_key, raw_value in value.items():
+            if not isinstance(raw_key, str) or not raw_key.strip():
+                continue
+            key = raw_key.strip()
+            if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
+                normalized[key] = raw_value
+                continue
+            if isinstance(raw_value, list):
+                cleaned = [
+                    item
+                    for item in raw_value
+                    if isinstance(item, (str, int, float, bool)) or item is None
+                ]
+                if cleaned:
+                    normalized[key] = cleaned
+        return normalized
+
+    def _normalize_contains_mapping(value):
+        helper = globals().get("_llm_quality_normalize_expect_contains_mapping")
+        if callable(helper):
+            return helper(value)
+        if not isinstance(value, dict):
+            return {}
+        normalized = {}
+        for raw_key, raw_value in value.items():
+            if not isinstance(raw_key, str) or not raw_key.strip():
+                continue
+            key = raw_key.strip()
+            values = raw_value if isinstance(raw_value, list) else [raw_value]
+            cleaned = [
+                item
+                for item in values
+                if isinstance(item, (str, int, float, bool)) or item is None
+            ]
+            if cleaned:
+                normalized[key] = cleaned
+        return normalized
+
+    def _normalize_trace_contains(value):
+        helper = globals().get("_llm_quality_normalize_expect_trace_contains")
+        if callable(helper):
+            return helper(value)
+        if not isinstance(value, list):
+            return []
+        normalized = []
+        for item in value:
+            mapping = _normalize_mapping(item)
+            if mapping:
+                normalized.append(mapping)
+        return normalized
+
     expect = turn.get("expect")
     if not isinstance(expect, dict):
         return {}
@@ -4603,10 +4661,10 @@ def _llm_quality_extract_expectations(turn):
             allow_booking_stall = None
     if not isinstance(allow_booking_stall, bool):
         allow_booking_stall = False
-    meta = _llm_quality_normalize_expect_mapping(expect.get("meta"))
-    meta_any = _llm_quality_normalize_expect_contains_mapping(expect.get("meta_any"))
-    meta_contains = _llm_quality_normalize_expect_contains_mapping(expect.get("meta_contains"))
-    trace_contains = _llm_quality_normalize_expect_trace_contains(expect.get("trace_contains"))
+    meta = _normalize_mapping(expect.get("meta"))
+    meta_any = _normalize_contains_mapping(expect.get("meta_any"))
+    meta_contains = _normalize_contains_mapping(expect.get("meta_contains"))
+    trace_contains = _normalize_trace_contains(expect.get("trace_contains"))
     return {
         "action": action,
         "info_sections": [section.lower() for section in info_sections],
