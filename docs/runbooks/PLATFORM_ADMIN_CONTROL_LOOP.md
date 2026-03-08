@@ -8,6 +8,32 @@ Prerequisites
 - Network access to Console/API endpoints.
 - Python 3.11+.
 
+## Quickstart (single entrypoint)
+
+Local deterministic run (default: KPI + anti-drift):
+
+```bash
+scripts/platform_admin_control_loop.sh --run-id local-<id> --run-e2e 0
+```
+
+Optional local run with e2e lane:
+
+```bash
+scripts/platform_admin_control_loop.sh \
+  --run-id local-<id>-e2e \
+  --run-e2e 1 \
+  --playwright-base-url http://127.0.0.1:3100
+```
+
+Artifacts:
+- `/tmp/platform_admin_control_loop/<run-id>/summary.json`
+- `/tmp/platform_admin_control_loop/<run-id>/kpi_snapshot.json`
+
+CI automation:
+- Workflow: `.github/workflows/platform-admin-control-loop.yml`
+- Schedule: weekly (`cron: 17 3 * * 1`, UTC)
+- Manual run: `workflow_dispatch` with `run_e2e`, `fail_level`, `playwright_base_url`.
+
 ## 0) Integrity preflight (Wave 0.1 gate)
 
 Run:
@@ -90,10 +116,8 @@ Exit codes
 Run minimally:
 
 ```bash
-npm --prefix console-web run lint
-npm --prefix console-web exec -- playwright test --list
-python3 ops/console_platform_admin_kpi_snapshot.py --pretty
-scripts/session_check.sh
+scripts/platform_admin_control_loop.sh --run-id local-<id> --run-e2e 0
+SESSION_AGENT=<agent> scripts/session_check.sh
 ```
 
 Optional (when available):
