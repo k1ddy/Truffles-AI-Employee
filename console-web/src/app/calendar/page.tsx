@@ -16,8 +16,10 @@ import {
     getVisitActionOptions,
     registerNoShowFollowUp,
     type BookingQueueLane,
+    type BookingQueueMode,
     type BookingStatusFilter,
     type BookingStatusUpdateRequest,
+    updateBookingFollowUpGovernance,
     updateBookingStatus,
 } from "@/lib/calendar-bookings";
 import {
@@ -44,6 +46,7 @@ import {
 import { getBookingStatusLabel, getBookingStatusColor } from "@/utils/labels";
 import AccessDenied from "@/components/AccessDenied";
 import {
+    agentsApi,
     authApi,
     canAccessConsole,
     type ConsoleRole,
@@ -83,6 +86,38 @@ function formatDate(date: Date): string {
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
+}
+
+function formatDateTimeLocalInput(value: string | null | undefined): string {
+    if (!value) {
+        return "";
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return "";
+    }
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, "0");
+    const day = String(parsed.getDate()).padStart(2, "0");
+    const hours = String(parsed.getHours()).padStart(2, "0");
+    const minutes = String(parsed.getMinutes()).padStart(2, "0");
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function formatDueAtLabel(value: string | null | undefined): string | null {
+    if (!value) {
+        return null;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return null;
+    }
+    return parsed.toLocaleString("ru-RU", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
 }
 
 function getApiErrorMessage(error: unknown, fallback: string): string {
@@ -230,7 +265,9 @@ export default function CalendarPage() {
     const role = meData?.agent?.role ?? "manager";
     const canReadCalendar = canAccessConsole(role, "calendar", "read");
     const canWriteCalendar = canAccessConsole(role, "calendar", "write");
+    const canReadTeam = canAccessConsole(role, "team", "read");
     const canManageTeamPresets = canAccessConsole(role, "team", "write");
+    const canManageFollowUpGovernance = canManageTeamPresets;
     const selectedBranchId = meData?.selected_branch_id ?? meData?.agent?.branch_id ?? "";
     const selectableBranches = useMemo(
         () => (meData?.branches ?? []).filter((branch) => !!branch.id),
@@ -266,8 +303,9 @@ export default function CalendarPage() {
     const restoredCalendarScopeRef = useRef<string | null>(null);
     const lastSavedQueueStateRef = useRef<string>("");
     const saveViewInputRef = useRef<HTMLInputElement | null>(null);
+    const defaultQueueMode: BookingQueueMode = focusedConversationId || focusedCaseId ? "history" : "ops";
     const defaultSelectedDate = focusedConversationId || focusedCaseId ? "" : today;
-    const defaultQueueLane: BookingQueueLane = focusedConversationId ? "all" : "attention";
+    const defaultQueueLane: BookingQueueLane = defaultQueueMode === "history" ? "all" : "attention";
     const urlSavedViewId = useMemo(
         () => readQueueStateViewIdFromUrl(searchParams),
         [searchParams],
@@ -276,9 +314,10 @@ export default function CalendarPage() {
         () =>
             readCalendarQueueStateFromUrl(searchParams, {
                 defaultSelectedDate,
+                defaultQueueMode,
                 defaultQueueLane,
             }),
-        [defaultQueueLane, defaultSelectedDate, searchParams],
+        [defaultQueueLane, defaultQueueMode, defaultSelectedDate, searchParams],
     );
     const urlQueueStateKey = useMemo(
         () => JSON.stringify({
@@ -300,9 +339,14 @@ export default function CalendarPage() {
     const [showPastDates, setShowPastDates] = useState(false);
     const [statusUpdateBookingId, setStatusUpdateBookingId] = useState<string | null>(null);
     const [followUpBookingId, setFollowUpBookingId] = useState<string | null>(null);
+    const [followUpGovernanceBookingId, setFollowUpGovernanceBookingId] = useState<string | null>(null);
+    const [queueMode, setQueueMode] = useState<BookingQueueMode>(defaultQueueMode);
     const [queueLane, setQueueLane] = useState<BookingQueueLane>(defaultQueueLane);
     const [queueStatusFilter, setQueueStatusFilter] = useState<BookingStatusFilter>("all");
     const [queueSearch, setQueueSearch] = useState("");
+    const [followUpOwnerId, setFollowUpOwnerId] = useState("");
+    const [followUpOverdueOnly, setFollowUpOverdueOnly] = useState(false);
+    const [followUpGovernanceDrafts, setFollowUpGovernanceDrafts] = useState<Record<string, { ownerAgentId: string; dueAt: string }>>({});
     const [activeSavedViewId, setActiveSavedViewId] = useState<string | null>(null);
     const [saveViewDraftName, setSaveViewDraftName] = useState("");
     const [saveViewComposerOpen, setSaveViewComposerOpen] = useState(false);
@@ -354,9 +398,29 @@ export default function CalendarPage() {
         retry: false,
         staleTime: 60_000,
     });
+    const followUpOwnersQuery = useQuery({
+        queryKey: ["agents", "calendar-follow-up-owners", selectedBranchId],
+        queryFn: async () => {
+            const response = await agentsApi.list();
+            return response.data;
+        },
+        enabled: !!session && canReadTeam,
+        retry: 1,
+        staleTime: 60_000,
+    });
     const savedViews = useMemo(
         () => savedViewsQuery.data?.items ?? [],
         [savedViewsQuery.data?.items],
+    );
+    const followUpOwnerOptions = useMemo(
+        () => (followUpOwnersQuery.data?.items ?? [])
+            .filter((agent) => agent.is_active && canAccessConsole(agent.role, "calendar", "write"))
+            .filter((agent) => !selectedBranchId || !agent.branch_id || agent.branch_id === selectedBranchId)
+            .map((agent) => ({
+                id: agent.id,
+                name: agent.name?.trim() || agent.id,
+            })),
+        [followUpOwnersQuery.data?.items, selectedBranchId],
     );
     const defaultSavedView = useMemo(
         () => findPreferredDefaultSavedView(savedViews),
@@ -377,11 +441,14 @@ export default function CalendarPage() {
     const currentQueueSnapshot = useMemo<CalendarQueueStateSnapshot>(
         () => ({
             selectedDate,
+            queueMode,
             queueLane,
             queueStatusFilter,
             queueSearch,
+            followUpOwnerId,
+            followUpOverdueOnly,
         }),
-        [queueLane, queueSearch, queueStatusFilter, selectedDate],
+        [followUpOverdueOnly, followUpOwnerId, queueLane, queueMode, queueSearch, queueStatusFilter, selectedDate],
     );
     const currentQueueFingerprint = useMemo(
         () => getCalendarQueueStateFingerprint(currentQueueSnapshot),
@@ -445,6 +512,14 @@ export default function CalendarPage() {
     useEffect(() => {
         restoredCalendarScopeRef.current = null;
         lastSavedQueueStateRef.current = "";
+        setFollowUpGovernanceDrafts({});
+        setSelectedDate(defaultSelectedDate);
+        setQueueMode(defaultQueueMode);
+        setQueueLane(defaultQueueLane);
+        setQueueStatusFilter("all");
+        setQueueSearch("");
+        setFollowUpOwnerId("");
+        setFollowUpOverdueOnly(false);
         setActiveSavedViewId(null);
         setSaveViewDraftName("");
         setSaveViewComposerOpen(false);
@@ -455,7 +530,7 @@ export default function CalendarPage() {
         setSaveViewDefaultTouched(false);
         setSelectedTeamTargetBranchIdDraft("");
         setSelectedTeamTargetRoleDraft("");
-    }, [calendarWorkspaceScope, urlQueueStateKey]);
+    }, [calendarWorkspaceScope, defaultQueueLane, defaultQueueMode, defaultSelectedDate, urlQueueStateKey]);
 
     useEffect(() => {
         if (!calendarWorkspaceScope) {
@@ -480,21 +555,27 @@ export default function CalendarPage() {
         const localSnapshot = prefs
             ? {
                 selectedDate: prefs.selectedDate ?? defaultSelectedDate,
+                queueMode: prefs.queueMode ?? defaultQueueMode,
                 queueLane: prefs.queueLane ?? defaultQueueLane,
                 queueStatusFilter: prefs.queueStatusFilter ?? "all",
                 queueSearch: prefs.queueSearch ?? "",
+                followUpOwnerId: prefs.followUpOwnerId ?? "",
+                followUpOverdueOnly: prefs.followUpOverdueOnly ?? false,
             }
             : null;
         const serverSnapshot = readCalendarQueueStateFromServer(currentQueueStateQuery.data, {
             defaultSelectedDate,
+            defaultQueueMode,
             defaultQueueLane,
         });
         const urlSavedViewSnapshot = readCalendarQueueStateFromSavedView(urlSavedView, {
             defaultSelectedDate,
+            defaultQueueMode,
             defaultQueueLane,
         });
         const defaultSavedViewSnapshot = readCalendarQueueStateFromSavedView(defaultSavedView, {
             defaultSelectedDate,
+            defaultQueueMode,
             defaultQueueLane,
         });
         const queueSnapshot = urlQueueState ?? urlSavedViewSnapshot ?? serverSnapshot ?? defaultSavedViewSnapshot ?? localSnapshot;
@@ -519,9 +600,12 @@ export default function CalendarPage() {
                 })
                 : null;
         setSelectedDate(queueSnapshot?.selectedDate ?? defaultSelectedDate);
+        setQueueMode(queueSnapshot?.queueMode ?? defaultQueueMode);
         setQueueLane(queueSnapshot?.queueLane ?? defaultQueueLane);
         setQueueStatusFilter(queueSnapshot?.queueStatusFilter ?? "all");
         setQueueSearch(queueSnapshot?.queueSearch ?? "");
+        setFollowUpOwnerId(queueSnapshot?.followUpOwnerId ?? "");
+        setFollowUpOverdueOnly(queueSnapshot?.followUpOverdueOnly ?? false);
         setActiveSavedViewId(matchedSavedView?.id ?? null);
         setSaveViewDraftName("");
         setSaveViewComposerOpen(false);
@@ -546,6 +630,7 @@ export default function CalendarPage() {
         currentQueueStateQuery.isError,
         currentQueueStateQuery.isFetched,
         defaultQueueLane,
+        defaultQueueMode,
         defaultSelectedDate,
         focusedCaseId,
         focusedConversationId,
@@ -641,11 +726,23 @@ export default function CalendarPage() {
         }
         writeCalendarWorkspacePrefs(calendarWorkspaceScope, {
             selectedDate,
+            queueMode,
             queueLane,
             queueStatusFilter,
             queueSearch,
+            followUpOwnerId,
+            followUpOverdueOnly,
         });
-    }, [calendarWorkspaceScope, queueLane, queueSearch, queueStatusFilter, selectedDate]);
+    }, [
+        calendarWorkspaceScope,
+        followUpOverdueOnly,
+        followUpOwnerId,
+        queueLane,
+        queueMode,
+        queueSearch,
+        queueStatusFilter,
+        selectedDate,
+    ]);
 
     useEffect(() => {
         if (!calendarWorkspaceScope || !session || !canReadCalendar || !restoredCalendarScopeRef.current) {
@@ -704,14 +801,26 @@ export default function CalendarPage() {
     const slots = slotsData?.slots ?? [];
 
     const { data: bookingsData, isLoading: bookingsLoading } = useQuery({
-        queryKey: ["bookings", selectedDate, focusedConversationId, focusedCaseId, queueLane, queueStatusFilter],
+        queryKey: [
+            "bookings",
+            selectedDate,
+            focusedConversationId,
+            focusedCaseId,
+            queueMode,
+            queueLane,
+            queueStatusFilter,
+            followUpOwnerId,
+            followUpOverdueOnly,
+        ],
         queryFn: () =>
             fetchBookings({
                 date: selectedDate || undefined,
                 conversationId: focusedConversationId || undefined,
                 caseId: focusedCaseId || undefined,
-                lane: queueLane,
+                lane: queueMode === "history" ? "all" : queueLane,
                 status: queueStatusFilter,
+                followUpOwnerId: followUpOwnerId || undefined,
+                followUpOverdue: followUpOverdueOnly || undefined,
             }),
         enabled: !!session && canReadCalendar,
     });
@@ -719,6 +828,9 @@ export default function CalendarPage() {
     const bookings = useMemo(() => bookingsData?.items ?? [], [bookingsData?.items]);
     const bookingsSorted = useMemo(() => {
         return [...bookings].sort((left, right) => {
+            if (queueMode === "history") {
+                return new Date(right.start_at).getTime() - new Date(left.start_at).getTime();
+            }
             const leftPriority = bookingNeedsAttention(left) ? 1 : 0;
             const rightPriority = bookingNeedsAttention(right) ? 1 : 0;
             if (leftPriority !== rightPriority) {
@@ -726,7 +838,7 @@ export default function CalendarPage() {
             }
             return new Date(left.start_at).getTime() - new Date(right.start_at).getTime();
         });
-    }, [bookings]);
+    }, [bookings, queueMode]);
     const attentionCount = bookingsSorted.filter((booking) => bookingNeedsAttention(booking)).length;
     const noShowAttentionCount = bookingsSorted.filter(
         (booking) => booking.status.toUpperCase() === "NO_SHOW" && !booking.no_show_followup_done
@@ -749,6 +861,12 @@ export default function CalendarPage() {
             return haystack.includes(queueSearchNormalized);
         });
     }, [bookingsSorted, queueSearchNormalized]);
+    const allowPastDateSelection = showPastDates || queueMode === "history";
+    const queueHeading = selectedDate
+        ? `Записи на ${new Date(selectedDate).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}`
+        : queueMode === "history"
+            ? "История записей"
+            : "Записи";
 
     const applyCalendarQueueSnapshot = (
         snapshot: CalendarQueueStateSnapshot,
@@ -759,10 +877,14 @@ export default function CalendarPage() {
         } = {},
     ) => {
         setSelectedDate(snapshot.selectedDate);
+        setQueueMode(snapshot.queueMode);
         setQueueLane(snapshot.queueLane);
         setQueueStatusFilter(snapshot.queueStatusFilter);
         setQueueSearch(snapshot.queueSearch);
+        setFollowUpOwnerId(snapshot.followUpOwnerId);
+        setFollowUpOverdueOnly(snapshot.followUpOverdueOnly);
         setActiveSavedViewId(savedViewId);
+        setFollowUpGovernanceDrafts({});
         setSaveViewDraftName("");
         setSaveViewComposerOpen(false);
         setSaveViewScopeDraft("personal");
@@ -905,6 +1027,7 @@ export default function CalendarPage() {
         const savedView = savedViews.find((item) => item.id === viewId);
         const snapshot = readCalendarQueueStateFromSavedView(savedView, {
             defaultSelectedDate,
+            defaultQueueMode,
             defaultQueueLane,
         });
         if (!savedView || !snapshot) {
@@ -1040,12 +1163,82 @@ export default function CalendarPage() {
         },
     });
 
+    const followUpGovernanceMutation = useMutation({
+        mutationFn: async (payload: {
+            bookingId: string;
+            ownerAgentId: string;
+            dueAt: string;
+        }) => {
+            setFollowUpGovernanceBookingId(payload.bookingId);
+            return updateBookingFollowUpGovernance(payload.bookingId, {
+                owner_agent_id: payload.ownerAgentId || null,
+                due_at: payload.dueAt ? new Date(payload.dueAt).toISOString() : null,
+            });
+        },
+        onSuccess: (data, variables) => {
+            toast.success("Follow-up owner и дедлайн обновлены");
+            queryClient.invalidateQueries({ queryKey: ["bookings"] });
+            if (focusedCaseId) {
+                queryClient.invalidateQueries({ queryKey: ["case", focusedCaseId] });
+                queryClient.invalidateQueries({ queryKey: ["cases"] });
+            }
+            setFollowUpGovernanceDrafts((current) => {
+                const next = { ...current };
+                delete next[variables.bookingId];
+                return next;
+            });
+        },
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "FOLLOW_UP_ALREADY_CLOSED") {
+                toast.error("Follow-up уже закрыт");
+            } else if (code === "BOOKING_STATUS_REQUIRED") {
+                toast.error("Governance доступен только для статуса 'Не пришел'");
+            } else if (code === "ACCESS_DENIED") {
+                toast.error("Недостаточно прав для управления follow-up");
+            } else {
+                toast.error("Не удалось обновить follow-up governance");
+            }
+        },
+        onSettled: () => {
+            setFollowUpGovernanceBookingId(null);
+        },
+    });
+
     const resetForm = () => {
         setSelectedSlot(null);
         setCustomerName("");
         setCustomerPhone("");
         setNotes("");
         setShowForm(false);
+    };
+
+    const handleQueueModeChange = (nextMode: BookingQueueMode) => {
+        setQueueMode(nextMode);
+        if (nextMode === "history") {
+            setQueueLane("all");
+            return;
+        }
+        if (!selectedDate) {
+            setSelectedDate(today);
+            setSelectedSlot(null);
+        } else if (selectedDate < today && !showPastDates) {
+            setSelectedDate(today);
+            setSelectedSlot(null);
+        }
+    };
+
+    const setFollowUpGovernanceDraft = (
+        bookingId: string,
+        patch: Partial<{ ownerAgentId: string; dueAt: string }>,
+    ) => {
+        setFollowUpGovernanceDrafts((current) => ({
+            ...current,
+            [bookingId]: {
+                ownerAgentId: patch.ownerAgentId ?? current[bookingId]?.ownerAgentId ?? "",
+                dueAt: patch.dueAt ?? current[bookingId]?.dueAt ?? "",
+            },
+        }));
     };
 
     const handleSlotClick = (slot: TimeSlot) => {
@@ -1240,10 +1433,14 @@ export default function CalendarPage() {
                                         setSelectedDate(e.target.value);
                                         setSelectedSlot(null);
                                     }}
-                                    min={showPastDates ? undefined : today}
+                                    min={allowPastDateSelection ? undefined : today}
                                     className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
                                 />
-                                {focusedConversationId && !selectedDate && (
+                                {queueMode === "history" && !selectedDate ? (
+                                    <p className="mt-2 text-xs text-muted-foreground" data-testid="calendar-history-all-dates-hint">
+                                        История сейчас показывает все даты. Укажите день, только если хотите сузить архивный список.
+                                    </p>
+                                ) : focusedConversationId && !selectedDate && (
                                     <p className="mt-2 text-xs text-muted-foreground" data-testid="calendar-case-all-dates-hint">
                                         Сейчас показываем все даты по этой заявке. Выберите дату, только если хотите сузить список.
                                     </p>
@@ -1251,8 +1448,11 @@ export default function CalendarPage() {
                                 <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                                     <input
                                         type="checkbox"
-                                        checked={showPastDates}
+                                        checked={allowPastDateSelection}
                                         onChange={(event) => {
+                                            if (queueMode === "history") {
+                                                return;
+                                            }
                                             const enabled = event.target.checked;
                                             setShowPastDates(enabled);
                                             if (!enabled && selectedDate < today) {
@@ -1261,9 +1461,10 @@ export default function CalendarPage() {
                                             }
                                         }}
                                         className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                        disabled={queueMode === "history"}
                                         data-testid="calendar-show-past-dates"
                                     />
-                                    Показывать прошлые даты
+                                    {queueMode === "history" ? "История всегда разрешает прошлые даты" : "Показывать прошлые даты"}
                                 </label>
                             </div>
                         </div>
@@ -1412,7 +1613,7 @@ export default function CalendarPage() {
                 <div className="space-y-6">
                     <div className="card-surface p-4">
                         <h2 className="font-semibold text-lg mb-4">
-                            Записи на {new Date(selectedDate).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
+                            {queueHeading}
                         </h2>
                         <div className="mb-3 flex flex-wrap gap-2 text-xs">
                             <span className="rounded bg-muted px-2.5 py-1 text-muted-foreground">
@@ -1434,28 +1635,107 @@ export default function CalendarPage() {
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
                                     type="button"
-                                    onClick={() => setQueueLane("attention")}
+                                    onClick={() => handleQueueModeChange("ops")}
                                     className={`rounded border px-2.5 py-1 text-xs font-semibold ${
-                                        queueLane === "attention"
-                                            ? "border-amber-300 bg-amber-100 text-amber-900"
-                                            : "border-border/60 text-muted-foreground hover:text-foreground"
-                                    }`}
-                                    data-testid="calendar-queue-lane-attention"
-                                >
-                                    Только действия
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setQueueLane("all")}
-                                    className={`rounded border px-2.5 py-1 text-xs font-semibold ${
-                                        queueLane === "all"
+                                        queueMode === "ops"
                                             ? "border-primary/40 bg-primary/10 text-primary"
                                             : "border-border/60 text-muted-foreground hover:text-foreground"
                                     }`}
-                                    data-testid="calendar-queue-lane-all"
+                                    data-testid="calendar-queue-mode-ops"
                                 >
-                                    Все записи
+                                    Операции
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleQueueModeChange("history")}
+                                    className={`rounded border px-2.5 py-1 text-xs font-semibold ${
+                                        queueMode === "history"
+                                            ? "border-slate-300 bg-slate-100 text-slate-900"
+                                            : "border-border/60 text-muted-foreground hover:text-foreground"
+                                    }`}
+                                    data-testid="calendar-queue-mode-history"
+                                >
+                                    История
+                                </button>
+                            </div>
+                            {queueMode === "ops" ? (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setQueueLane("attention")}
+                                        className={`rounded border px-2.5 py-1 text-xs font-semibold ${
+                                            queueLane === "attention"
+                                                ? "border-amber-300 bg-amber-100 text-amber-900"
+                                                : "border-border/60 text-muted-foreground hover:text-foreground"
+                                        }`}
+                                        data-testid="calendar-queue-lane-attention"
+                                    >
+                                        Только действия
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setQueueLane("all")}
+                                        className={`rounded border px-2.5 py-1 text-xs font-semibold ${
+                                            queueLane === "all"
+                                                ? "border-primary/40 bg-primary/10 text-primary"
+                                                : "border-border/60 text-muted-foreground hover:text-foreground"
+                                        }`}
+                                        data-testid="calendar-queue-lane-all"
+                                    >
+                                        Все записи
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                                    История всегда показывает полный архивный срез без режима `Только действия`.
+                                </div>
+                            )}
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                                <input
+                                    type="text"
+                                    value={queueSearch}
+                                    onChange={(event) => setQueueSearch(event.target.value)}
+                                    placeholder="Поиск по клиенту, телефону, услуге или ID записи"
+                                    className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                    data-testid="calendar-queue-search"
+                                />
+                                <select
+                                    value={queueStatusFilter}
+                                    onChange={(event) => setQueueStatusFilter(event.target.value as BookingStatusFilter)}
+                                    className="rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                    data-testid="calendar-queue-status-filter"
+                                >
+                                    <option value="all">Все статусы</option>
+                                    <option value="scheduled">Запланированные</option>
+                                    <option value="completed">Пришёл</option>
+                                    <option value="no_show">Не пришёл</option>
+                                    <option value="cancelled">Отменённые</option>
+                                </select>
+                                {canReadTeam && (
+                                    <select
+                                        value={followUpOwnerId}
+                                        onChange={(event) => setFollowUpOwnerId(event.target.value)}
+                                        className="rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        data-testid="calendar-follow-up-owner-filter"
+                                    >
+                                        <option value="">Все follow-up owners</option>
+                                        {followUpOwnerOptions.map((agent) => (
+                                            <option key={agent.id} value={agent.id}>
+                                                {agent.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}
+                                <label className="flex min-h-[38px] items-center gap-2 rounded border border-border/60 bg-background px-3 py-2 text-xs text-muted-foreground">
+                                    <input
+                                        type="checkbox"
+                                        checked={followUpOverdueOnly}
+                                        onChange={(event) => setFollowUpOverdueOnly(event.target.checked)}
+                                        className="h-4 w-4 rounded border-border/60"
+                                        data-testid="calendar-follow-up-overdue-filter"
+                                    />
+                                    <span>Только просроченный follow-up</span>
+                                </label>
                             </div>
                             <div className="rounded-lg border border-border/60 bg-background/80 p-3" data-testid="calendar-saved-views">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1806,28 +2086,6 @@ export default function CalendarPage() {
                                     </div>
                                 )}
                             </div>
-                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
-                                <input
-                                    type="text"
-                                    value={queueSearch}
-                                    onChange={(event) => setQueueSearch(event.target.value)}
-                                    placeholder="Поиск по клиенту, телефону, услуге или ID записи"
-                                    className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    data-testid="calendar-queue-search"
-                                />
-                                <select
-                                    value={queueStatusFilter}
-                                    onChange={(event) => setQueueStatusFilter(event.target.value as BookingStatusFilter)}
-                                    className="rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    data-testid="calendar-queue-status-filter"
-                                >
-                                    <option value="all">Все статусы</option>
-                                    <option value="scheduled">Запланированные</option>
-                                    <option value="completed">Пришёл</option>
-                                    <option value="no_show">Не пришёл</option>
-                                    <option value="cancelled">Отменённые</option>
-                                </select>
-                            </div>
                         </div>
 
                         {bookingsLoading ? (
@@ -1846,128 +2104,243 @@ export default function CalendarPage() {
                             <div className="space-y-3">
                                 {bookingsVisible.map((booking) => {
                                     const attentionLabel = getBookingAttentionLabel(booking);
+                                    const isNoShow = booking.status.toUpperCase() === "NO_SHOW";
+                                    const followUpOwnerLabel = booking.follow_up_owner_name?.trim()
+                                        || (booking.follow_up_owner_id ? `Agent ${booking.follow_up_owner_id.slice(0, 8)}` : "Без владельца");
+                                    const currentDueInput = formatDateTimeLocalInput(booking.follow_up_due_at);
+                                    const followUpDueLabel = formatDueAtLabel(booking.follow_up_due_at);
+                                    const followUpGovernanceDraft = followUpGovernanceDrafts[booking.id] ?? {
+                                        ownerAgentId: booking.follow_up_owner_id ?? "",
+                                        dueAt: currentDueInput,
+                                    };
+                                    const followUpGovernanceDirty = followUpGovernanceDraft.ownerAgentId !== (booking.follow_up_owner_id ?? "")
+                                        || followUpGovernanceDraft.dueAt !== currentDueInput;
+                                    const governancePending = followUpGovernanceMutation.isPending
+                                        && followUpGovernanceBookingId === booking.id;
                                     return (
                                         <div
                                             key={booking.id}
                                             className="p-3 border border-border/60 rounded-lg hover:bg-muted/60"
                                             data-testid="calendar-booking-card"
                                         >
-                                        <div className="flex justify-between items-start mb-1">
-                                            <span className="font-medium text-sm">
-                                                {new Date(booking.start_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-                                                {" - "}
-                                                {new Date(booking.end_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-                                            </span>
-                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${getBookingStatusColor(booking.status)}`}>
-                                                {getBookingStatusLabel(booking.status)}
-                                            </span>
-                                        </div>
-                                        <div className="text-sm text-muted-foreground">
-                                            {booking.specialist_name}
-                                        </div>
-                                        {booking.customer_name && (
-                                            <div className="text-sm">
-                                                {booking.customer_name}
-                                                {booking.customer_phone && (
-                                                    <span className="text-muted-foreground"> • {booking.customer_phone}</span>
-                                                )}
-                                            </div>
-                                        )}
-                                        {booking.service_type && (
-                                            <div className="text-xs text-muted-foreground mt-1">
-                                                {booking.service_type}
-                                            </div>
-                                        )}
-                                        {attentionLabel && (
-                                            <div className="mt-2">
-                                                <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
-                                                    {attentionLabel}
+                                            <div className="flex justify-between items-start mb-1">
+                                                <span className="font-medium text-sm">
+                                                    {new Date(booking.start_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                                                    {" - "}
+                                                    {new Date(booking.end_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                                                </span>
+                                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${getBookingStatusColor(booking.status)}`}>
+                                                    {getBookingStatusLabel(booking.status)}
                                                 </span>
                                             </div>
-                                        )}
-                                        {booking.case_id && (
-                                            <div className="mt-2 flex items-center gap-2">
-                                                <Link
-                                                    href={buildCaseHref(booking.case_id)}
-                                                    className="rounded border border-border/60 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-background"
-                                                    data-testid="calendar-booking-open-case"
-                                                >
-                                                    Открыть чат заявки
-                                                </Link>
-                                                {focusedCaseId && booking.case_id === focusedCaseId && (
-                                                    <span className="rounded bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-                                                        Текущая заявка
+                                            <div className="text-sm text-muted-foreground">
+                                                {booking.specialist_name}
+                                            </div>
+                                            {booking.customer_name && (
+                                                <div className="text-sm">
+                                                    {booking.customer_name}
+                                                    {booking.customer_phone && (
+                                                        <span className="text-muted-foreground"> • {booking.customer_phone}</span>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {booking.service_type && (
+                                                <div className="text-xs text-muted-foreground mt-1">
+                                                    {booking.service_type}
+                                                </div>
+                                            )}
+                                            {attentionLabel && (
+                                                <div className="mt-2">
+                                                    <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
+                                                        {attentionLabel}
                                                     </span>
-                                                )}
-                                            </div>
-                                        )}
-                                        {canWriteCalendar && getVisitActionOptions(booking.status).length > 0 && (
-                                            <div className="mt-3 flex flex-wrap gap-2">
-                                                {getVisitActionOptions(booking.status).map((action) => {
-                                                    const isPending = statusMutation.isPending && statusUpdateBookingId === booking.id;
-                                                    return (
-                                                        <button
-                                                            key={`${booking.id}-${action.status}`}
-                                                            type="button"
-                                                            onClick={() => statusMutation.mutate({ bookingId: booking.id, status: action.status })}
-                                                            disabled={isPending}
-                                                            className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
-                                                        >
-                                                            {isPending ? "Обновляем..." : action.label}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                        {canWriteCalendar && booking.status.toUpperCase() === "NO_SHOW" && (
-                                            <div className="mt-2 flex flex-wrap gap-2">
-                                                {booking.no_show_followup_done ? (
-                                                    <>
-                                                        <span className="px-2.5 py-1.5 rounded-md bg-green-100 text-green-800 text-xs font-medium">
-                                                            {booking.no_show_followup_result === "rebooked"
-                                                                ? "После неявки: перезаписан"
-                                                                : "После неявки: связались"}
+                                                </div>
+                                            )}
+                                            {isNoShow && (
+                                                <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                                                    <span className="rounded bg-muted px-2 py-0.5 font-semibold text-foreground/80">
+                                                        Owner: {followUpOwnerLabel}
+                                                    </span>
+                                                    <span className={`rounded px-2 py-0.5 font-semibold ${booking.follow_up_overdue ? "bg-red-100 text-red-900" : "bg-slate-100 text-slate-700"}`}>
+                                                        {followUpDueLabel ? `Due: ${followUpDueLabel}` : "Due не задан"}
+                                                    </span>
+                                                    {booking.follow_up_overdue && !booking.no_show_followup_done && (
+                                                        <span className="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-900">
+                                                            Просрочено
                                                         </span>
-                                                        {booking.no_show_followup_rebooked_appointment_id && (
-                                                            <span className="px-2.5 py-1.5 rounded-md bg-muted text-muted-foreground text-xs font-medium">
-                                                                Новая запись: {booking.no_show_followup_rebooked_appointment_id.slice(0, 8)}
+                                                    )}
+                                                </div>
+                                            )}
+                                            {booking.case_id && (
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    <Link
+                                                        href={buildCaseHref(booking.case_id)}
+                                                        className="rounded border border-border/60 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-background"
+                                                        data-testid="calendar-booking-open-case"
+                                                    >
+                                                        Открыть чат заявки
+                                                    </Link>
+                                                    {focusedCaseId && booking.case_id === focusedCaseId && (
+                                                        <span className="rounded bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                                                            Текущая заявка
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {canWriteCalendar && getVisitActionOptions(booking.status).length > 0 && (
+                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                    {getVisitActionOptions(booking.status).map((action) => {
+                                                        const isPending = statusMutation.isPending && statusUpdateBookingId === booking.id;
+                                                        return (
+                                                            <button
+                                                                key={`${booking.id}-${action.status}`}
+                                                                type="button"
+                                                                onClick={() => statusMutation.mutate({ bookingId: booking.id, status: action.status })}
+                                                                disabled={isPending}
+                                                                className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                            >
+                                                                {isPending ? "Обновляем..." : action.label}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                            {canWriteCalendar && isNoShow && (
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    {booking.no_show_followup_done ? (
+                                                        <>
+                                                            <span className="px-2.5 py-1.5 rounded-md bg-green-100 text-green-800 text-xs font-medium">
+                                                                {booking.no_show_followup_result === "rebooked"
+                                                                    ? "После неявки: перезаписан"
+                                                                    : "После неявки: связались"}
+                                                            </span>
+                                                            {booking.no_show_followup_rebooked_appointment_id && (
+                                                                <span className="px-2.5 py-1.5 rounded-md bg-muted text-muted-foreground text-xs font-medium">
+                                                                    Новая запись: {booking.no_show_followup_rebooked_appointment_id.slice(0, 8)}
+                                                                </span>
+                                                            )}
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    followUpMutation.mutate({
+                                                                        bookingId: booking.id,
+                                                                        result: "contacted",
+                                                                    })
+                                                                }
+                                                                disabled={followUpMutation.isPending && followUpBookingId === booking.id}
+                                                                className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                            >
+                                                                {followUpMutation.isPending && followUpBookingId === booking.id
+                                                                    ? "Фиксируем..."
+                                                                    : "Связались"}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    followUpMutation.mutate({
+                                                                        bookingId: booking.id,
+                                                                        result: "rebooked",
+                                                                    })
+                                                                }
+                                                                disabled={followUpMutation.isPending && followUpBookingId === booking.id}
+                                                                className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                            >
+                                                                Перезаписали
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {canManageFollowUpGovernance && isNoShow && !booking.no_show_followup_done && (
+                                                <div className="mt-3 rounded-lg border border-border/60 bg-background/80 p-3" data-testid="calendar-follow-up-governance-card">
+                                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                            Follow-up governance
+                                                        </p>
+                                                        {booking.follow_up_overdue && (
+                                                            <span className="rounded bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-900">
+                                                                overdue
                                                             </span>
                                                         )}
-                                                    </>
-                                                ) : (
-                                                    <>
+                                                    </div>
+                                                    <div className="grid gap-2 sm:grid-cols-2">
+                                                        <label className="space-y-1">
+                                                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                                Owner
+                                                            </span>
+                                                            <select
+                                                                value={followUpGovernanceDraft.ownerAgentId}
+                                                                onChange={(event) => setFollowUpGovernanceDraft(booking.id, { ownerAgentId: event.target.value })}
+                                                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                                disabled={governancePending}
+                                                                data-testid="calendar-follow-up-governance-owner"
+                                                            >
+                                                                <option value="">Без владельца</option>
+                                                                {followUpOwnerOptions.map((agent) => (
+                                                                    <option key={agent.id} value={agent.id}>
+                                                                        {agent.name}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        </label>
+                                                        <label className="space-y-1">
+                                                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                                Due
+                                                            </span>
+                                                            <input
+                                                                type="datetime-local"
+                                                                value={followUpGovernanceDraft.dueAt}
+                                                                onChange={(event) => setFollowUpGovernanceDraft(booking.id, { dueAt: event.target.value })}
+                                                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                                disabled={governancePending}
+                                                                data-testid="calendar-follow-up-governance-due"
+                                                            />
+                                                        </label>
+                                                    </div>
+                                                    <div className="mt-3 flex flex-wrap items-center gap-2">
                                                         <button
                                                             type="button"
-                                                            onClick={() =>
-                                                                followUpMutation.mutate({
-                                                                    bookingId: booking.id,
-                                                                    result: "contacted",
-                                                                })
-                                                            }
-                                                            disabled={followUpMutation.isPending && followUpBookingId === booking.id}
-                                                            className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                            onClick={() => setFollowUpGovernanceDraft(booking.id, { ownerAgentId: meData?.agent?.id ?? followUpGovernanceDraft.ownerAgentId })}
+                                                            className="rounded border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
+                                                            disabled={governancePending}
                                                         >
-                                                            {followUpMutation.isPending && followUpBookingId === booking.id
-                                                                ? "Фиксируем..."
-                                                                : "Связались"}
+                                                            Назначить мне
                                                         </button>
                                                         <button
                                                             type="button"
-                                                            onClick={() =>
-                                                                followUpMutation.mutate({
-                                                                    bookingId: booking.id,
-                                                                    result: "rebooked",
-                                                                })
-                                                            }
-                                                            disabled={followUpMutation.isPending && followUpBookingId === booking.id}
-                                                            className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                            onClick={() => followUpGovernanceMutation.mutate({
+                                                                bookingId: booking.id,
+                                                                ownerAgentId: followUpGovernanceDraft.ownerAgentId,
+                                                                dueAt: followUpGovernanceDraft.dueAt,
+                                                            })}
+                                                            className="rounded border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary disabled:opacity-50"
+                                                            disabled={!followUpGovernanceDirty || governancePending}
+                                                            data-testid="calendar-follow-up-governance-save"
                                                         >
-                                                            Перезаписали
+                                                            {governancePending ? "Сохраняем..." : "Сохранить governance"}
                                                         </button>
-                                                    </>
-                                                )}
-                                            </div>
-                                        )}
+                                                        {followUpGovernanceDirty && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setFollowUpGovernanceDrafts((current) => {
+                                                                        const next = { ...current };
+                                                                        delete next[booking.id];
+                                                                        return next;
+                                                                    });
+                                                                }}
+                                                                className="rounded border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                                                disabled={governancePending}
+                                                            >
+                                                                Сбросить
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 })}

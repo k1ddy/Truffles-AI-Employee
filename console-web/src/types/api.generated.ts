@@ -2571,6 +2571,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/calendar/bookings/{booking_id}/follow-up-governance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update Booking Follow Up Governance
+         * @description Update no-show follow-up owner/due governance for a booking.
+         */
+        post: operations["update_booking_follow_up_governance_console_v1_calendar_bookings__booking_id__follow_up_governance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/calendar/google/connect": {
         parameters: {
             query?: never;
@@ -2706,6 +2726,13 @@ export interface components {
             /** Case Id */
             case_id?: string | null;
         };
+        /** BookingFollowUpGovernanceRequest */
+        BookingFollowUpGovernanceRequest: {
+            /** Owner Agent Id */
+            owner_agent_id?: string | null;
+            /** Due At */
+            due_at?: string | null;
+        };
         /** BookingNoShowFollowUpRequest */
         BookingNoShowFollowUpRequest: {
             /**
@@ -2752,6 +2779,17 @@ export interface components {
             no_show_followup_closed_by?: string | null;
             /** No Show Followup Rebooked Appointment Id */
             no_show_followup_rebooked_appointment_id?: string | null;
+            /** Follow Up Owner Id */
+            follow_up_owner_id?: string | null;
+            /** Follow Up Owner Name */
+            follow_up_owner_name?: string | null;
+            /** Follow Up Due At */
+            follow_up_due_at?: string | null;
+            /**
+             * Follow Up Overdue
+             * @default false
+             */
+            follow_up_overdue: boolean;
             /** Google Event Id */
             google_event_id?: string | null;
             /** Conversation Id */
@@ -4389,7 +4427,7 @@ export interface components {
             /** Agent Id */
             agent_id?: string | null;
             /** Policy */
-            policy?: "least_open_cases" | null;
+            policy?: ("least_open_cases" | "follow_up_sla_balance") | null;
             /** Minutes */
             minutes?: number | null;
             /** Reason */
@@ -4456,15 +4494,15 @@ export interface components {
              */
             mode: "manual" | "policy";
             /** Policy */
-            policy?: "least_open_cases" | null;
+            policy?: ("least_open_cases" | "follow_up_sla_balance") | null;
         };
         /** ConsoleCaseRoutingDecision */
         ConsoleCaseRoutingDecision: {
             /**
              * Policy
-             * @constant
+             * @enum {string}
              */
-            policy: "least_open_cases";
+            policy: "least_open_cases" | "follow_up_sla_balance";
             /**
              * Recommended Agent Id
              * Format: uuid
@@ -4492,6 +4530,27 @@ export interface components {
             reason_code: string;
             /** Reason Summary */
             reason_summary: string;
+            /**
+             * Recommended Score
+             * @default 0
+             */
+            recommended_score: number;
+            /** Current Score */
+            current_score?: number | null;
+            /**
+             * Score Breakdown
+             * @default []
+             */
+            score_breakdown: components["schemas"]["ConsoleCaseRoutingScoreFactor"][];
+        };
+        /** ConsoleCaseRoutingScoreFactor */
+        ConsoleCaseRoutingScoreFactor: {
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
         };
         /** ConsoleCaseSnoozeRequest */
         ConsoleCaseSnoozeRequest: {
@@ -9828,7 +9887,9 @@ export interface operations {
     };
     list_case_assignees_console_v1_cases__case_id__assignees_get: {
         parameters: {
-            query?: never;
+            query?: {
+                policy?: ("least_open_cases" | "follow_up_sla_balance") | null;
+            };
             header?: never;
             path: {
                 case_id: string;
@@ -16853,6 +16914,8 @@ export interface operations {
                 case_id?: string | null;
                 lane?: "attention" | "all";
                 needs_action?: boolean | null;
+                follow_up_owner_id?: string | null;
+                follow_up_overdue?: boolean | null;
                 date_from?: string | null;
                 date_to?: string | null;
                 status?: string | null;
@@ -16998,6 +17061,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["BookingNoShowFollowUpRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_booking_follow_up_governance_console_v1_calendar_bookings__booking_id__follow_up_governance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                booking_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingFollowUpGovernanceRequest"];
             };
         };
         responses: {

@@ -146,6 +146,7 @@ from app.schemas.console import (
     ConsoleCaseListResponse,
     ConsoleCaseReassignRequest,
     ConsoleCaseRoutingDecision,
+    ConsoleCaseRoutingPolicyType,
     ConsoleCaseSnoozeRequest,
     ConsoleClient,
     ConsoleClientCreateRequest,
@@ -460,6 +461,20 @@ from app.services.console_branch_changes import (
 )
 from app.services.console_branch_changes import (
     snapshot_branch_for_change as _snapshot_branch_for_change,
+)
+from app.services.console_case_routing import (
+    CASE_ROUTING_POLICY_DEFAULT,
+    CaseRoutingBookingContext,
+    CaseRoutingSignalContext,
+)
+from app.services.console_case_routing import (
+    adjust_case_routing_loads as _adjust_case_routing_loads_service,
+)
+from app.services.console_case_routing import (
+    build_case_routing_decision as _build_case_routing_decision_service,
+)
+from app.services.console_case_routing import (
+    normalize_case_routing_policy as _normalize_case_routing_policy_service,
 )
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
 from app.services.console_control_tower_program import (
@@ -863,7 +878,7 @@ _CASE_DUE_SOON_MINUTES = 15
 _CASE_ASSIGNABLE_ROLES = {"owner", "admin", "manager"}
 _CASE_SNOOZE_DEFAULT_REASON = "case_snooze"
 _CASE_BULK_MAX_ITEMS = 50
-_CASE_ROUTING_POLICY_DEFAULT = "least_open_cases"
+_CASE_ROUTING_POLICY_DEFAULT = CASE_ROUTING_POLICY_DEFAULT
 _CASE_SNOOZE_META_KEYS = (
     "snoozed_until",
     "snoozed_at",
@@ -6200,19 +6215,13 @@ def _map_case_assignee_loads(
 
 
 def _normalize_case_routing_policy(policy: Optional[str]) -> str:
-    normalized = (policy or _CASE_ROUTING_POLICY_DEFAULT).strip().lower()
-    if normalized != _CASE_ROUTING_POLICY_DEFAULT:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported routing policy")
-    return normalized
-
-
-def _resolve_assignee_load(
-    option: ConsoleCaseAssigneeOption,
-    load_overrides: Optional[dict[UUID, int]] = None,
-) -> int:
-    if load_overrides is None:
-        return int(option.open_case_count or 0)
-    return int(load_overrides.get(option.agent_id, option.open_case_count or 0))
+    try:
+        return _normalize_case_routing_policy_service(
+            policy,
+            default=_CASE_ROUTING_POLICY_DEFAULT,
+        )
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported routing policy") from exc
 
 
 def _build_case_routing_decision(
@@ -6221,70 +6230,16 @@ def _build_case_routing_decision(
     current_assignee_id: Optional[str],
     policy: str,
     load_overrides: Optional[dict[UUID, int]] = None,
+    booking_context: Optional[CaseRoutingBookingContext] = None,
+    signal_context: Optional[CaseRoutingSignalContext] = None,
 ) -> tuple[Optional[ConsoleCaseRoutingDecision], Optional[ConsoleCaseAssigneeOption]]:
-    if not assignee_options:
-        return None, None
-
-    current_option = next(
-        (
-            option
-            for option in assignee_options
-            if current_assignee_id and str(option.agent_id) == current_assignee_id
-        ),
-        None,
-    )
-    recommended_option = min(
-        assignee_options,
-        key=lambda option: (
-            _resolve_assignee_load(option, load_overrides),
-            0 if current_assignee_id and str(option.agent_id) == current_assignee_id else 1,
-            option.agent_name.lower(),
-            str(option.agent_id),
-        ),
-    )
-    recommended_load = _resolve_assignee_load(recommended_option, load_overrides)
-    current_load = _resolve_assignee_load(current_option, load_overrides) if current_option else None
-    will_reassign = not current_assignee_id or str(recommended_option.agent_id) != current_assignee_id
-
-    if not current_assignee_id:
-        reason_code = "unassigned_case"
-        reason_summary = (
-            f"Назначить {recommended_option.agent_name}: меньше всего открытых заявок "
-            f"({recommended_load}) в доступной очереди."
-        )
-    elif current_option is None:
-        reason_code = "current_owner_unavailable"
-        reason_summary = (
-            f"Назначить {recommended_option.agent_name}: текущий владелец недоступен для этой очереди, "
-            f"у выбранного {recommended_load} в работе."
-        )
-    elif not will_reassign:
-        reason_code = "current_owner_kept"
-        reason_summary = (
-            f"Текущий владелец {recommended_option.agent_name} уже соответствует политике: "
-            f"{recommended_load} в работе."
-        )
-    else:
-        reason_code = "least_open_cases"
-        reason_summary = (
-            f"Назначить {recommended_option.agent_name}: {recommended_load} в работе "
-            f"вместо {current_option.agent_name} · {current_load or 0}."
-        )
-
-    return (
-        ConsoleCaseRoutingDecision(
-            policy=policy,
-            recommended_agent_id=recommended_option.agent_id,
-            recommended_agent_name=recommended_option.agent_name,
-            recommended_open_case_count=recommended_load,
-            current_agent_id=current_option.agent_id if current_option else None,
-            current_agent_name=current_option.agent_name if current_option else None,
-            current_open_case_count=current_load,
-            will_reassign=will_reassign,
-            reason_code=reason_code,
-            reason_summary=reason_summary,
-        ),
-        recommended_option,
+    return _build_case_routing_decision_service(
+        assignee_options=assignee_options,
+        current_assignee_id=current_assignee_id,
+        policy=policy,
+        load_overrides=load_overrides,
+        booking_context=booking_context,
+        signal_context=signal_context,
     )
 
 
@@ -6294,19 +6249,227 @@ def _adjust_case_routing_loads(
     previous_assignee_id: Optional[str],
     next_assignee_id: str,
 ) -> None:
-    if previous_assignee_id:
-        try:
-            previous_uuid = UUID(previous_assignee_id)
-        except (TypeError, ValueError):
-            previous_uuid = None
-        if previous_uuid and previous_uuid in load_overrides:
-            load_overrides[previous_uuid] = max(0, int(load_overrides.get(previous_uuid, 0)) - 1)
+    _adjust_case_routing_loads_service(
+        load_overrides,
+        previous_assignee_id=previous_assignee_id,
+        next_assignee_id=next_assignee_id,
+    )
 
-    try:
-        next_uuid = UUID(next_assignee_id)
-    except (TypeError, ValueError):
-        return
-    load_overrides[next_uuid] = int(load_overrides.get(next_uuid, 0)) + 1
+
+def _build_case_routing_signal_context(
+    *,
+    queue_signals: dict[str, object | None],
+) -> CaseRoutingSignalContext:
+    return CaseRoutingSignalContext(
+        sla_status=str(queue_signals.get("sla_status") or "ok"),
+        sla_action_state=(
+            str(queue_signals.get("sla_action_state"))
+            if queue_signals.get("sla_action_state") is not None
+            else None
+        ),
+        sla_overdue_minutes=(
+            int(queue_signals["sla_overdue_minutes"])
+            if queue_signals.get("sla_overdue_minutes") is not None
+            else None
+        ),
+    )
+
+
+def _load_single_case_routing_signal_context(
+    db: Session,
+    *,
+    client_id: UUID,
+    handover: Handover,
+    conversation: Conversation,
+    now_utc: Optional[datetime] = None,
+) -> CaseRoutingSignalContext:
+    case_health = _fetch_case_health(db, conversation)
+    human_lock_snapshot = _build_case_human_lock_snapshot(
+        db,
+        client_id=client_id,
+        conversation=conversation,
+    )
+    queue_signals = _build_case_queue_signals(
+        created_at=handover.created_at,
+        status=handover.status,
+        needs_reply=bool(case_health.get("needs_reply")),
+        has_delivery_error=bool(case_health.get("has_delivery_error")),
+        has_pending_outbox=bool(case_health.get("has_pending_outbox")),
+        human_lock_active=bool(human_lock_snapshot.get("human_lock_active")),
+        human_lock_reason=human_lock_snapshot.get("human_lock_reason"),
+        last_inbound_at=case_health.get("last_inbound_at"),
+        last_outbound_at=case_health.get("last_outbound_at"),
+        first_response_at=handover.first_response_at,
+        handover_meta=handover.meta,
+        now_utc=now_utc,
+    )
+    return _build_case_routing_signal_context(queue_signals=queue_signals)
+
+
+def _load_case_routing_signal_contexts(
+    db: Session,
+    *,
+    handovers: list[Handover],
+    conversations_by_id: dict[UUID, Conversation],
+    now_utc: Optional[datetime] = None,
+) -> dict[UUID, CaseRoutingSignalContext]:
+    conversation_ids = [
+        handover.conversation_id
+        for handover in handovers
+        if handover.conversation_id in conversations_by_id
+    ]
+    if not conversation_ids:
+        return {}
+
+    inbound_rows = (
+        db.query(
+            Message.conversation_id,
+            func.max(Message.created_at).label("last_inbound_at"),
+        )
+        .filter(
+            Message.conversation_id.in_(conversation_ids),
+            Message.role == "user",
+        )
+        .group_by(Message.conversation_id)
+        .all()
+    )
+    outbound_rows = (
+        db.query(
+            Message.conversation_id,
+            func.max(Message.created_at).label("last_outbound_at"),
+        )
+        .filter(
+            Message.conversation_id.in_(conversation_ids),
+            Message.role.in_(["assistant", "manager", "system"]),
+        )
+        .group_by(Message.conversation_id)
+        .all()
+    )
+    outbox_rows = (
+        db.query(
+            OutboxMessage.conversation_id.label("conversation_id"),
+            func.sum(
+                case(
+                    (OutboxMessage.status.in_(["PENDING", "PROCESSING"]), 1),
+                    else_=0,
+                )
+            ).label("pending_count"),
+            func.sum(
+                case(
+                    (OutboxMessage.status == "FAILED", 1),
+                    else_=0,
+                )
+            ).label("failed_count"),
+        )
+        .filter(OutboxMessage.conversation_id.in_(conversation_ids))
+        .group_by(OutboxMessage.conversation_id)
+        .all()
+    )
+    inbound_by_conversation = {
+        row.conversation_id: row.last_inbound_at
+        for row in inbound_rows
+    }
+    outbound_by_conversation = {
+        row.conversation_id: row.last_outbound_at
+        for row in outbound_rows
+    }
+    outbox_by_conversation = {
+        row.conversation_id: (
+            int(row.pending_count or 0),
+            int(row.failed_count or 0),
+        )
+        for row in outbox_rows
+    }
+    effective_now = now_utc or datetime.now(timezone.utc)
+    contexts: dict[UUID, CaseRoutingSignalContext] = {}
+    for handover in handovers:
+        conversation = conversations_by_id.get(handover.conversation_id)
+        if conversation is None:
+            continue
+        last_inbound_at = inbound_by_conversation.get(conversation.id)
+        last_outbound_at = outbound_by_conversation.get(conversation.id)
+        pending_count, failed_count = outbox_by_conversation.get(conversation.id, (0, 0))
+        queue_signals = _build_case_queue_signals(
+            created_at=handover.created_at,
+            status=handover.status,
+            needs_reply=bool(
+                last_inbound_at and (not last_outbound_at or last_inbound_at > last_outbound_at)
+            ),
+            has_delivery_error=bool(failed_count > 0),
+            has_pending_outbox=bool(pending_count > 0),
+            human_lock_active=False,
+            last_inbound_at=last_inbound_at,
+            last_outbound_at=last_outbound_at,
+            first_response_at=handover.first_response_at,
+            handover_meta=handover.meta,
+            now_utc=effective_now,
+        )
+        contexts[handover.id] = _build_case_routing_signal_context(
+            queue_signals=queue_signals,
+        )
+    return contexts
+
+
+def _load_case_booking_routing_contexts(
+    db: Session,
+    *,
+    case_ids: list[UUID],
+    now_utc: Optional[datetime] = None,
+) -> dict[UUID, CaseRoutingBookingContext]:
+    if not case_ids:
+        return {}
+
+    bookings = (
+        db.query(Appointment)
+        .filter(
+            Appointment.case_id.in_(case_ids),
+            Appointment.status == "NO_SHOW",
+        )
+        .all()
+    )
+    if not bookings:
+        return {}
+
+    booking_ids = [booking.id for booking in bookings]
+    followup_rows = (
+        db.query(AppointmentAudit.appointment_id)
+        .filter(
+            AppointmentAudit.appointment_id.in_(booking_ids),
+            AppointmentAudit.action == "no_show_followup",
+        )
+        .distinct()
+        .all()
+    )
+    followup_done_ids = {row.appointment_id for row in followup_rows}
+    effective_now = now_utc or datetime.now(timezone.utc)
+    selected_by_case: dict[UUID, tuple[tuple[object, ...], CaseRoutingBookingContext]] = {}
+
+    for booking in bookings:
+        if booking.case_id is None or booking.id in followup_done_ids:
+            continue
+        due_at = _coerce_utc_datetime(booking.follow_up_due_at) if booking.follow_up_due_at else None
+        overdue = bool(due_at and due_at < effective_now)
+        context = CaseRoutingBookingContext(
+            appointment_id=booking.id,
+            follow_up_owner_id=booking.follow_up_owner_id,
+            follow_up_due_at=due_at,
+            follow_up_overdue=overdue,
+        )
+        priority = (
+            0 if overdue else 1,
+            0 if due_at is not None else 1,
+            due_at or datetime.max.replace(tzinfo=timezone.utc),
+            -int(_coerce_utc_datetime(booking.updated_at).timestamp()) if booking.updated_at else 0,
+            str(booking.id),
+        )
+        current = selected_by_case.get(booking.case_id)
+        if current is None or priority < current[0]:
+            selected_by_case[booking.case_id] = (priority, context)
+
+    return {
+        case_id: context
+        for case_id, (_priority, context) in selected_by_case.items()
+    }
 
 
 def _execute_case_reassign(
@@ -12060,6 +12223,18 @@ async def bulk_case_action(
             .all()
         ) if conversation_ids else []
         conversations_by_id = {conversation.id: conversation for conversation in conversations}
+        routing_signal_contexts: dict[UUID, CaseRoutingSignalContext] = {}
+        booking_routing_contexts: dict[UUID, CaseRoutingBookingContext] = {}
+        if action == "route":
+            routing_signal_contexts = _load_case_routing_signal_contexts(
+                db,
+                handovers=handovers,
+                conversations_by_id=conversations_by_id,
+            )
+            booking_routing_contexts = _load_case_booking_routing_contexts(
+                db,
+                case_ids=case_ids,
+            )
 
         assignee_cache: dict[UUID | None, list[ConsoleCaseAssigneeOption]] = {}
         policy_load_cache: dict[UUID | None, dict[UUID, int]] = {}
@@ -12149,6 +12324,8 @@ async def bulk_case_action(
                             current_assignee_id=current_assignee_id,
                             policy=routing_policy or _CASE_ROUTING_POLICY_DEFAULT,
                             load_overrides=policy_load_cache[branch_id],
+                            booking_context=booking_routing_contexts.get(case_id),
+                            signal_context=routing_signal_contexts.get(case_id),
                         )
                         if target_option is None or routing is None:
                             skipped_count += 1
@@ -12392,6 +12569,7 @@ async def list_queue_case_assignees(
 async def list_case_assignees(
     case_id: UUID,
     request: Request,
+    policy: Optional[ConsoleCaseRoutingPolicyType] = Query(None),
     db: Session = Depends(get_db),
 ) -> ConsoleCaseAssigneeListResponse:
     context = get_console_context(request, db)
@@ -12409,10 +12587,23 @@ async def list_case_assignees(
         branch_id=conversation.branch_id,
         current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
     )
+    routing_policy = _normalize_case_routing_policy(policy)
+    signal_context = _load_single_case_routing_signal_context(
+        db,
+        client_id=context.client.id,
+        handover=case,
+        conversation=conversation,
+    )
+    booking_context = _load_case_booking_routing_contexts(
+        db,
+        case_ids=[case.id],
+    ).get(case.id)
     routing, _recommended_option = _build_case_routing_decision(
         assignee_options=items,
         current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
-        policy=_CASE_ROUTING_POLICY_DEFAULT,
+        policy=routing_policy,
+        booking_context=booking_context,
+        signal_context=signal_context,
     )
     return ConsoleCaseAssigneeListResponse(items=items, routing=routing)
 
@@ -12475,10 +12666,22 @@ async def reassign_case(
         )
         routing: Optional[ConsoleCaseRoutingDecision] = None
         if mode == "policy":
+            signal_context = _load_single_case_routing_signal_context(
+                db,
+                client_id=context.client.id,
+                handover=case,
+                conversation=conversation,
+            )
+            booking_context = _load_case_booking_routing_contexts(
+                db,
+                case_ids=[case.id],
+            ).get(case.id)
             routing, target_option = _build_case_routing_decision(
                 assignee_options=assignee_options,
                 current_assignee_id=str(case.assigned_to) if case.assigned_to else None,
                 policy=policy or _CASE_ROUTING_POLICY_DEFAULT,
+                booking_context=booking_context,
+                signal_context=signal_context,
             )
             if target_option is None:
                 raise ConsoleAPIError(404, "NOT_FOUND", "Assignee not found")

@@ -88,6 +88,35 @@ def test_normalize_cases_queue_state_rejects_invalid_sort() -> None:
     assert exc_info.value.code == "INVALID_PARAM"
 
 
+def test_normalize_calendar_queue_state_accepts_history_follow_up_filters() -> None:
+    context = _mock_context(role="owner")
+    owner_agent_id = uuid4()
+
+    normalized = queue_state_service.normalize_queue_state_payload(
+        context,
+        surface="calendar",
+        query_state={
+            "selected_date": "2026-03-07",
+            "queue_mode": "history",
+            "queue_lane": "attention",
+            "status_filter": "no_show",
+            "query": "  no show  ",
+            "follow_up_owner_id": str(owner_agent_id),
+            "follow_up_overdue_only": True,
+        },
+    )
+
+    assert normalized == {
+        "selected_date": "2026-03-07",
+        "queue_mode": "history",
+        "queue_lane": "all",
+        "status_filter": "no_show",
+        "query": "no show",
+        "follow_up_owner_id": str(owner_agent_id),
+        "follow_up_overdue_only": True,
+    }
+
+
 @pytest.mark.asyncio
 async def test_put_current_queue_state_returns_normalized_cases_payload(monkeypatch) -> None:
     branch_id = uuid4()
@@ -149,6 +178,70 @@ async def test_put_current_queue_state_returns_normalized_cases_payload(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_put_current_queue_state_returns_normalized_calendar_payload(monkeypatch) -> None:
+    context = _mock_context(role="owner")
+    case_id = uuid4()
+    conversation_id = uuid4()
+    owner_agent_id = uuid4()
+    body = ConsoleQueueStateCurrentRequest(
+        surface="calendar",
+        case_id=str(case_id),
+        conversation_id=str(conversation_id),
+        query_state={
+            "selected_date": "2026-03-07",
+            "queue_mode": "history",
+            "queue_lane": "attention",
+            "status_filter": "no_show",
+            "query": "  follow up  ",
+            "follow_up_owner_id": str(owner_agent_id),
+            "follow_up_overdue_only": True,
+        },
+    )
+    saved_at = datetime.now(timezone.utc)
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    captured = {}
+
+    def _fake_upsert(db, *, client_id, agent_id, scope, version, query_state):
+        captured["scope"] = scope
+        captured["query_state"] = query_state
+        return SimpleNamespace(
+            selected_branch_id=scope.selected_branch_id,
+            case_id=scope.case_id,
+            conversation_id=scope.conversation_id,
+            version=version,
+            query_state=query_state,
+            updated_at=saved_at,
+        )
+
+    monkeypatch.setattr(console_router, "_upsert_current_queue_state_record", _fake_upsert)
+
+    response = await console_router.put_current_queue_state(
+        body=body,
+        request=Mock(),
+        db=Mock(),
+    )
+
+    assert captured["scope"].surface == "calendar"
+    assert captured["scope"].case_id == case_id
+    assert captured["scope"].conversation_id == conversation_id
+    assert captured["query_state"] == {
+        "selected_date": "2026-03-07",
+        "queue_mode": "history",
+        "queue_lane": "all",
+        "status_filter": "no_show",
+        "query": "follow up",
+        "follow_up_owner_id": str(owner_agent_id),
+        "follow_up_overdue_only": True,
+    }
+    assert response.query_state["queue_mode"] == "history"
+    assert response.query_state["follow_up_owner_id"] == str(owner_agent_id)
+    assert response.query_state["follow_up_overdue_only"] is True
+
+
+@pytest.mark.asyncio
 async def test_get_current_queue_state_uses_calendar_scope_and_permission(monkeypatch) -> None:
     context = _mock_context(role="viewer")
     case_id = uuid4()
@@ -178,9 +271,12 @@ async def test_get_current_queue_state_uses_calendar_scope_and_permission(monkey
             version=1,
             query_state={
                 "selected_date": "2026-03-07",
+                "queue_mode": "history",
                 "queue_lane": "attention",
                 "status_filter": "no_show",
                 "query": "almaty",
+                "follow_up_owner_id": str(uuid4()),
+                "follow_up_overdue_only": True,
             },
             updated_at=saved_at,
         )
@@ -203,6 +299,8 @@ async def test_get_current_queue_state_uses_calendar_scope_and_permission(monkey
     assert f"conversation:{conversation_id}" in captured["scope_key"]
     assert response.found is True
     assert response.query_state["status_filter"] == "no_show"
+    assert response.query_state["queue_mode"] == "history"
+    assert response.query_state["follow_up_overdue_only"] is True
 
 
 @pytest.mark.asyncio

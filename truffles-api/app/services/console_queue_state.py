@@ -16,6 +16,7 @@ _CASE_MODE_SCOPE_VALUES = {"open", "resolved", "all"}
 _CASE_BASE_VIEW_VALUES = {"all_open", "needs_reply", "waiting_client", "snoozed", "delivery"}
 _CASE_OWNER_SCOPE_VALUES = {"all", "mine", "unassigned", "agent"}
 _CASE_SORT_VALUES = {"activity", "created_at", "sla", "resolved_at"}
+_CALENDAR_QUEUE_MODE_VALUES = {"ops", "history"}
 _CALENDAR_QUEUE_LANE_VALUES = {"attention", "all"}
 _CALENDAR_STATUS_FILTER_VALUES = {"all", "scheduled", "completed", "no_show", "cancelled"}
 
@@ -206,22 +207,39 @@ def _normalize_cases_queue_state(context: ConsoleAuthContext, payload: dict[str,
 
 
 def _normalize_calendar_queue_state(payload: dict[str, Any]) -> dict[str, Any]:
-    queue_lane = str(payload.get("queue_lane") or "attention").strip().lower()
+    queue_mode = str(payload.get("queue_mode") or "ops").strip().lower()
+    if queue_mode not in _CALENDAR_QUEUE_MODE_VALUES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "query_state.queue_mode is invalid")
+
+    queue_lane_default = "all" if queue_mode == "history" else "attention"
+    queue_lane = str(payload.get("queue_lane") or queue_lane_default).strip().lower()
     if queue_lane not in _CALENDAR_QUEUE_LANE_VALUES:
         raise ConsoleAPIError(400, "INVALID_PARAM", "query_state.queue_lane is invalid")
+    if queue_mode == "history":
+        queue_lane = "all"
 
     status_filter = str(payload.get("status_filter") or "all").strip().lower()
     if status_filter not in _CALENDAR_STATUS_FILTER_VALUES:
         raise ConsoleAPIError(400, "INVALID_PARAM", "query_state.status_filter is invalid")
+    follow_up_owner_id = _normalize_uuid_like(
+        payload.get("follow_up_owner_id"),
+        field_name="query_state.follow_up_owner_id",
+    )
 
     return {
         "selected_date": _normalize_optional_date(
             payload.get("selected_date"),
             field_name="query_state.selected_date",
         ),
+        "queue_mode": queue_mode,
         "queue_lane": queue_lane,
         "status_filter": status_filter,
         "query": _normalize_optional_text(payload.get("query")),
+        "follow_up_owner_id": str(follow_up_owner_id) if follow_up_owner_id else None,
+        "follow_up_overdue_only": _normalize_bool(
+            payload.get("follow_up_overdue_only"),
+            field_name="query_state.follow_up_overdue_only",
+        ),
     }
 
 

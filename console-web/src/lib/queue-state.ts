@@ -5,7 +5,7 @@ import {
     normalizeOwnerScopeForRole,
     normalizeStoredSortBy,
 } from "@/lib/inbox-case-filters";
-import type { BookingQueueLane, BookingStatusFilter } from "@/lib/calendar-bookings";
+import type { BookingQueueLane, BookingQueueMode, BookingStatusFilter } from "@/lib/calendar-bookings";
 import {
     normalizeInboxCaseModeScope,
     normalizeInboxOwnerScope,
@@ -57,9 +57,12 @@ export interface CasesQueueStateSnapshot {
 
 export interface CalendarQueueStateSnapshot {
     selectedDate: string;
+    queueMode: BookingQueueMode;
     queueLane: BookingQueueLane;
     queueStatusFilter: BookingStatusFilter;
     queueSearch: string;
+    followUpOwnerId: string;
+    followUpOverdueOnly: boolean;
 }
 
 const CASE_QUEUE_URL_PARAM_KEYS = [
@@ -86,9 +89,12 @@ const CALENDAR_QUEUE_URL_PARAM_KEYS = [
     "date",
     "date_from",
     "date_to",
+    "mode",
     "lane",
     "status",
     "q",
+    "follow_up_owner_id",
+    "follow_up_overdue",
 ] as const;
 
 function trimToUndefined(value: string | null | undefined): string | undefined {
@@ -133,6 +139,10 @@ function normalizeCalendarLane(value: unknown, fallback: BookingQueueLane): Book
         return value;
     }
     return fallback;
+}
+
+function normalizeCalendarQueueMode(value: unknown): BookingQueueMode {
+    return value === "history" ? "history" : "ops";
 }
 
 function normalizeCalendarStatusFilter(value: unknown): BookingStatusFilter {
@@ -493,9 +503,11 @@ export function readCalendarQueueStateFromServer(
     record: QueueStateRecord | null | undefined,
     {
         defaultSelectedDate,
+        defaultQueueMode,
         defaultQueueLane,
     }: {
         defaultSelectedDate: string;
+        defaultQueueMode: BookingQueueMode;
         defaultQueueLane: BookingQueueLane;
     },
 ): CalendarQueueStateSnapshot | null {
@@ -503,11 +515,17 @@ export function readCalendarQueueStateFromServer(
         return null;
     }
     const queryState = record.query_state as Record<string, unknown>;
+    const queueMode = normalizeCalendarQueueMode(queryState.queue_mode ?? defaultQueueMode);
     return {
         selectedDate: trimToUndefined(queryState.selected_date as string | undefined) ?? defaultSelectedDate,
-        queueLane: normalizeCalendarLane(queryState.queue_lane, defaultQueueLane),
+        queueMode,
+        queueLane: queueMode === "history"
+            ? "all"
+            : normalizeCalendarLane(queryState.queue_lane, defaultQueueLane),
         queueStatusFilter: normalizeCalendarStatusFilter(queryState.status_filter),
         queueSearch: trimToUndefined(queryState.query as string | undefined) ?? "",
+        followUpOwnerId: trimToUndefined(queryState.follow_up_owner_id as string | undefined) ?? "",
+        followUpOverdueOnly: Boolean(queryState.follow_up_overdue_only),
     };
 }
 
@@ -515,6 +533,7 @@ export function readCalendarQueueStateFromSavedView(
     savedView: QueueStateSavedViewLike | null | undefined,
     options: {
         defaultSelectedDate: string;
+        defaultQueueMode: BookingQueueMode;
         defaultQueueLane: BookingQueueLane;
     },
 ): CalendarQueueStateSnapshot | null {
@@ -535,13 +554,15 @@ export function readCalendarQueueStateFromUrl(
     searchParams: SearchParamsLike,
     {
         defaultSelectedDate,
+        defaultQueueMode,
         defaultQueueLane,
     }: {
         defaultSelectedDate: string;
+        defaultQueueMode: BookingQueueMode;
         defaultQueueLane: BookingQueueLane;
     },
 ): CalendarQueueStateSnapshot | null {
-    const hasRelevantParams = ["date", "date_from", "date_to", "lane", "status", "q"].some(
+    const hasRelevantParams = ["date", "date_from", "date_to", "mode", "lane", "status", "q", "follow_up_owner_id", "follow_up_overdue"].some(
         (key) => searchParams.get(key) != null,
     );
     if (!hasRelevantParams) {
@@ -551,20 +572,29 @@ export function readCalendarQueueStateFromUrl(
     const dateFrom = trimToUndefined(searchParams.get("date_from"));
     const dateTo = trimToUndefined(searchParams.get("date_to"));
     const selectedDate = explicitDate ?? (dateFrom && dateFrom === dateTo ? dateFrom : undefined) ?? defaultSelectedDate;
+    const queueMode = normalizeCalendarQueueMode(searchParams.get("mode") ?? defaultQueueMode);
     return {
         selectedDate,
-        queueLane: normalizeCalendarLane(searchParams.get("lane"), defaultQueueLane),
+        queueMode,
+        queueLane: queueMode === "history"
+            ? "all"
+            : normalizeCalendarLane(searchParams.get("lane"), defaultQueueLane),
         queueStatusFilter: normalizeCalendarStatusFilter(searchParams.get("status")),
         queueSearch: trimToUndefined(searchParams.get("q")) ?? "",
+        followUpOwnerId: trimToUndefined(searchParams.get("follow_up_owner_id")) ?? "",
+        followUpOverdueOnly: parseBooleanParam(searchParams.get("follow_up_overdue")),
     };
 }
 
 export function buildCalendarQueueStatePayload(snapshot: CalendarQueueStateSnapshot): Record<string, unknown> {
     return {
         selected_date: snapshot.selectedDate || null,
-        queue_lane: snapshot.queueLane,
+        queue_mode: snapshot.queueMode,
+        queue_lane: snapshot.queueMode === "history" ? "all" : snapshot.queueLane,
         status_filter: snapshot.queueStatusFilter,
         query: snapshot.queueSearch.trim() || null,
+        follow_up_owner_id: snapshot.followUpOwnerId || null,
+        follow_up_overdue_only: snapshot.followUpOverdueOnly,
     };
 }
 
@@ -586,8 +616,12 @@ export function buildCalendarQueueUrlParams(
     if (snapshot.selectedDate && snapshot.selectedDate !== defaultSelectedDate) {
         params.set("date", snapshot.selectedDate);
     }
-    if (snapshot.queueLane !== defaultQueueLane) {
-        params.set("lane", snapshot.queueLane);
+    if (snapshot.queueMode !== "ops") {
+        params.set("mode", snapshot.queueMode);
+    }
+    const effectiveQueueLane = snapshot.queueMode === "history" ? "all" : snapshot.queueLane;
+    if (effectiveQueueLane !== defaultQueueLane) {
+        params.set("lane", effectiveQueueLane);
     }
     if (snapshot.queueStatusFilter !== "all") {
         params.set("status", snapshot.queueStatusFilter);
@@ -595,6 +629,12 @@ export function buildCalendarQueueUrlParams(
     const query = snapshot.queueSearch.trim();
     if (query) {
         params.set("q", query);
+    }
+    if (snapshot.followUpOwnerId) {
+        params.set("follow_up_owner_id", snapshot.followUpOwnerId);
+    }
+    if (snapshot.followUpOverdueOnly) {
+        params.set("follow_up_overdue", "1");
     }
     return params;
 }

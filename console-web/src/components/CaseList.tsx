@@ -11,8 +11,10 @@ import { getCaseBusinessStatusBadge, getCaseSlaIndicator } from "@/utils/labels"
 import {
     casesApi,
     canAccessConsole,
+    DEFAULT_CASE_ROUTING_POLICY,
     type CaseAssigneeOption,
     type CaseBulkActionResponse,
+    type CaseRoutingPolicy,
     type ConsoleRole,
     type QueueSavedView,
     queueStateApi,
@@ -194,6 +196,16 @@ const SAVED_VIEW_TARGET_ROLES: ConsoleRole[] = [
     "specialist",
     "viewer",
 ];
+
+const CASE_ROUTING_POLICY_LABELS: Record<CaseRoutingPolicy, string> = {
+    follow_up_sla_balance: "Follow-up + SLA баланс",
+    least_open_cases: "Меньше всего открытых заявок",
+};
+
+const CASE_ROUTING_POLICY_HINTS: Record<CaseRoutingPolicy, string> = {
+    follow_up_sla_balance: "Сохраняет continuity по no-show follow-up и жёстче учитывает нагрузку, если у заявки уже появился SLA-риск.",
+    least_open_cases: "Распределяет только по текущему числу открытых заявок и сохраняет владельца при равной нагрузке.",
+};
 
 function caseNoun(count: number) {
     if (count === 1) {
@@ -603,6 +615,7 @@ export default function CaseList({
     const [documentVisible, setDocumentVisible] = useState(true);
     const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
     const [bulkActionMode, setBulkActionMode] = useState<BulkActionMode>(null);
+    const [bulkRoutingPolicy, setBulkRoutingPolicy] = useState<CaseRoutingPolicy>(DEFAULT_CASE_ROUTING_POLICY);
     const [bulkAssigneeId, setBulkAssigneeId] = useState("");
     const [bulkSnoozeMinutes, setBulkSnoozeMinutes] = useState(60);
     const [bulkSnoozeReason, setBulkSnoozeReason] = useState("");
@@ -1577,7 +1590,7 @@ export default function CaseList({
                 const response = await casesApi.bulkAction({
                     action: "route",
                     case_ids: selectedCaseIds,
-                    policy: "least_open_cases",
+                    policy: bulkRoutingPolicy,
                 });
                 return response.data;
             }
@@ -1610,6 +1623,7 @@ export default function CaseList({
             setBulkSummary(summary);
             setSelectedCaseIds(remainingIds);
             setBulkActionMode(remainingIds.length > 0 ? bulkActionMode : null);
+            setBulkRoutingPolicy(DEFAULT_CASE_ROUTING_POLICY);
             setBulkAssigneeId("");
             if (response.processed_count > 0) {
                 resetPagination();
@@ -1647,12 +1661,16 @@ export default function CaseList({
             return;
         }
         setBulkActionMode(null);
+        setBulkRoutingPolicy(DEFAULT_CASE_ROUTING_POLICY);
         setBulkAssigneeId("");
     }, [selectedCaseIds.length]);
 
     useEffect(() => {
         if (bulkActionMode !== "reassign") {
             setBulkAssigneeId("");
+        }
+        if (bulkActionMode !== "route") {
+            setBulkRoutingPolicy(DEFAULT_CASE_ROUTING_POLICY);
         }
     }, [bulkActionMode]);
 
@@ -1785,6 +1803,7 @@ export default function CaseList({
         setSelectedCaseIds([]);
         setBulkSummary(null);
         setBulkActionMode(null);
+        setBulkRoutingPolicy(DEFAULT_CASE_ROUTING_POLICY);
         setBulkAssigneeId("");
     };
 
@@ -2706,11 +2725,21 @@ export default function CaseList({
                                         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-900/70">
                                             Политика
                                         </p>
-                                        <p className="mt-1 text-sm font-semibold text-emerald-950">
-                                            Меньше всего открытых заявок
-                                        </p>
-                                        <p className="mt-1 text-xs text-emerald-900/80">
-                                            Сервер сам распределит выборку внутри одного филиала и сохранит текущего владельца, если нагрузка уже минимальная.
+                                        <select
+                                            value={bulkRoutingPolicy}
+                                            onChange={(event) => setBulkRoutingPolicy(event.target.value as CaseRoutingPolicy)}
+                                            disabled={bulkActionMutation.isPending}
+                                            className="mt-2 w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold text-emerald-950 disabled:opacity-50"
+                                            data-testid="cases-bulk-route-policy-select"
+                                        >
+                                            {Object.entries(CASE_ROUTING_POLICY_LABELS).map(([value, label]) => (
+                                                <option key={value} value={value}>
+                                                    {label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="mt-2 text-xs text-emerald-900/80">
+                                            {CASE_ROUTING_POLICY_HINTS[bulkRoutingPolicy]}
                                         </p>
                                     </div>
                                     <div className="flex flex-wrap justify-end gap-2">

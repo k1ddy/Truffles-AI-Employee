@@ -1156,7 +1156,13 @@ class ConsoleCaseActionSync(BaseModel):
     client_notify: Optional[ConsoleSyncStatus] = None
 
 
-ConsoleCaseRoutingPolicyType = Literal["least_open_cases"]
+ConsoleCaseRoutingPolicyType = Literal["least_open_cases", "follow_up_sla_balance"]
+
+
+class ConsoleCaseRoutingScoreFactor(BaseModel):
+    code: str
+    label: str
+    value: int
 
 
 class ConsoleCaseRoutingDecision(BaseModel):
@@ -1170,6 +1176,9 @@ class ConsoleCaseRoutingDecision(BaseModel):
     will_reassign: bool = True
     reason_code: str
     reason_summary: str
+    recommended_score: int = 0
+    current_score: Optional[int] = None
+    score_breakdown: list[ConsoleCaseRoutingScoreFactor] = []
 
 
 class ConsoleCaseActionResponse(BaseModel):

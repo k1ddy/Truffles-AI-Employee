@@ -7,6 +7,10 @@ import pytest
 
 from app.routers import console as console_router
 from app.schemas.console import ConsoleCaseAssigneeOption
+from app.services.console_case_routing import (
+    CaseRoutingBookingContext,
+    CaseRoutingSignalContext,
+)
 from app.services.console_errors import ConsoleAPIError
 
 
@@ -263,6 +267,53 @@ def test_build_case_routing_decision_keeps_current_owner_on_tie() -> None:
     assert decision.reason_code == "current_owner_kept"
 
 
+def test_build_case_routing_decision_prefers_follow_up_owner_when_no_show_is_overdue() -> None:
+    current_agent_id = uuid4()
+    follow_up_owner_id = uuid4()
+
+    decision, target_option = console_router._build_case_routing_decision(
+        assignee_options=[
+            ConsoleCaseAssigneeOption(
+                agent_id=current_agent_id,
+                agent_name="Current Manager",
+                role="manager",
+                is_current=True,
+                open_case_count=1,
+            ),
+            ConsoleCaseAssigneeOption(
+                agent_id=follow_up_owner_id,
+                agent_name="Follow-up Manager",
+                role="manager",
+                is_current=False,
+                open_case_count=5,
+            ),
+        ],
+        current_assignee_id=str(current_agent_id),
+        policy="follow_up_sla_balance",
+        booking_context=CaseRoutingBookingContext(
+            appointment_id=uuid4(),
+            follow_up_owner_id=follow_up_owner_id,
+            follow_up_due_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            follow_up_overdue=True,
+        ),
+        signal_context=CaseRoutingSignalContext(
+            sla_status="warning",
+            sla_action_state="reply_due",
+            sla_overdue_minutes=None,
+        ),
+    )
+
+    assert target_option is not None
+    assert decision is not None
+    assert target_option.agent_id == follow_up_owner_id
+    assert decision.recommended_agent_id == follow_up_owner_id
+    assert decision.reason_code == "follow_up_owner_overdue"
+    assert decision.current_score is not None
+    assert decision.recommended_score > decision.current_score
+    assert any(item.code == "follow_up_owner" for item in decision.score_breakdown)
+    assert any(item.code == "follow_up_overdue" for item in decision.score_breakdown)
+
+
 def test_adjust_case_routing_loads_rebalances_counts() -> None:
     current_agent_id = uuid4()
     next_agent_id = uuid4()
@@ -279,6 +330,15 @@ def test_adjust_case_routing_loads_rebalances_counts() -> None:
 
     assert load_map[current_agent_id] == 2
     assert load_map[next_agent_id] == 2
+
+
+def test_normalize_case_routing_policy_accepts_follow_up_sla_balance() -> None:
+    assert console_router._normalize_case_routing_policy("follow_up_sla_balance") == "follow_up_sla_balance"
+
+
+def test_normalize_case_routing_policy_rejects_unknown_value() -> None:
+    with pytest.raises(ConsoleAPIError):
+        console_router._normalize_case_routing_policy("skills_presence")
 
 
 @pytest.mark.parametrize(
@@ -775,7 +835,8 @@ async def test_reopen_case_skips_external_sync_side_effects(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reassign_case_policy_uses_server_routing(monkeypatch):
+@pytest.mark.parametrize("policy", ["least_open_cases", "follow_up_sla_balance"])
+async def test_reassign_case_policy_uses_server_routing(monkeypatch, policy):
     branch_id = uuid4()
     actor_id = uuid4()
     current_agent_id = uuid4()
@@ -836,6 +897,16 @@ async def test_reassign_case_policy_uses_server_routing(monkeypatch):
     )
     monkeypatch.setattr(console_router, "_require_case_operator_access", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "_list_case_assignee_options", lambda *args, **kwargs: options)
+    monkeypatch.setattr(
+        console_router,
+        "_load_single_case_routing_signal_context",
+        lambda *args, **kwargs: CaseRoutingSignalContext(),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_load_case_booking_routing_contexts",
+        lambda *args, **kwargs: {},
+    )
     monkeypatch.setattr(console_router, "state_manager_reassign", fake_reassign)
     monkeypatch.setattr(
         console_router,
@@ -845,7 +916,7 @@ async def test_reassign_case_policy_uses_server_routing(monkeypatch):
 
     response = await console_router.reassign_case(
         case.id,
-        SimpleNamespace(agent_id=None, mode="policy", policy="least_open_cases"),
+        SimpleNamespace(agent_id=None, mode="policy", policy=policy),
         request=Mock(),
         db=db,
     )
@@ -854,7 +925,10 @@ async def test_reassign_case_policy_uses_server_routing(monkeypatch):
     assert response.case.assigned_to_id == str(recommended_agent_id)
     assert response.case.assigned_to_name == "Manager Two"
     assert response.routing is not None
-    assert response.routing.policy == "least_open_cases"
+    assert response.routing.policy == policy
     assert response.routing.recommended_agent_id == recommended_agent_id
-    assert response.routing.reason_code == "least_open_cases"
+    if policy == "least_open_cases":
+        assert response.routing.reason_code == "least_open_cases"
+    else:
+        assert response.routing.reason_code == "follow_up_sla_balance"
     assert "case_routed_policy" in audit_events

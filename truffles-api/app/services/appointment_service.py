@@ -506,6 +506,8 @@ class SchedulingService:
         status_filters: Optional[List[str]] = None,
         lane: Optional[str] = None,
         needs_action: Optional[bool] = None,
+        follow_up_owner_id: Optional[UUID] = None,
+        follow_up_overdue: Optional[bool] = None,
         cursor_start_at: Optional[datetime] = None,
         cursor_id: Optional[UUID] = None,
         limit: int = 50,
@@ -535,9 +537,13 @@ class SchedulingService:
             AppointmentAudit.appointment_id == Appointment.id,
             AppointmentAudit.action == "no_show_followup",
         ).exists()
+        pending_no_show_followup_expr = and_(
+            Appointment.status == "NO_SHOW",
+            ~followup_exists,
+        )
         needs_action_expr = or_(
             Appointment.status.in_(["PENDING_CONFIRMATION", "RESCHEDULE_REQUESTED", "HOLD"]),
-            and_(Appointment.status == "NO_SHOW", ~followup_exists),
+            pending_no_show_followup_expr,
         )
 
         if lane == "attention":
@@ -547,6 +553,30 @@ class SchedulingService:
             query = query.filter(needs_action_expr)
         elif needs_action is False:
             query = query.filter(~needs_action_expr)
+
+        if follow_up_owner_id:
+            query = query.filter(
+                pending_no_show_followup_expr,
+                Appointment.follow_up_owner_id == follow_up_owner_id,
+            )
+
+        if follow_up_overdue is not None:
+            now = datetime.now(timezone.utc)
+            overdue_expr = and_(
+                pending_no_show_followup_expr,
+                Appointment.follow_up_due_at.is_not(None),
+                Appointment.follow_up_due_at < now,
+            )
+            if follow_up_overdue:
+                query = query.filter(overdue_expr)
+            else:
+                query = query.filter(
+                    pending_no_show_followup_expr,
+                    or_(
+                        Appointment.follow_up_due_at.is_(None),
+                        Appointment.follow_up_due_at >= now,
+                    ),
+                )
 
         if cursor_start_at:
             if cursor_id:

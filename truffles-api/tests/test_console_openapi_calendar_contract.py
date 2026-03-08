@@ -54,6 +54,7 @@ def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
         "/calendar/bookings/{booking_id}/cancel": {"post"},
         "/calendar/bookings/{booking_id}/status": {"post"},
         "/calendar/bookings/{booking_id}/no-show-followup": {"post"},
+        "/calendar/bookings/{booking_id}/follow-up-governance": {"post"},
         "/calendar/google/connect": {"get"},
         "/calendar/google/callback": {"get"},
         "/calendar/google/status": {"get"},
@@ -82,6 +83,7 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
         ("BookingCreate",),
         ("BookingStatusUpdateRequest",),
         ("BookingNoShowFollowUpRequest",),
+        ("BookingFollowUpGovernanceRequest",),
         ("BookingResponse",),
         ("BookingCaseEffect",),
         ("BookingActionResponse",),
@@ -128,6 +130,14 @@ def test_booking_response_contract_exposes_no_show_followup_flag() -> None:
     assert _has_string_type(properties.get("no_show_followup_closed_by") or {})
     assert "no_show_followup_rebooked_appointment_id" in properties
     assert _has_string_type(properties.get("no_show_followup_rebooked_appointment_id") or {})
+    assert "follow_up_owner_id" in properties
+    assert _has_string_type(properties.get("follow_up_owner_id") or {})
+    assert "follow_up_owner_name" in properties
+    assert _has_string_type(properties.get("follow_up_owner_name") or {})
+    assert "follow_up_due_at" in properties
+    assert _has_string_type(properties.get("follow_up_due_at") or {})
+    assert "follow_up_overdue" in properties
+    assert (properties.get("follow_up_overdue") or {}).get("type") == "boolean"
     assert "conversation_id" in properties
     assert _has_string_type(properties.get("conversation_id") or {})
     assert "case_id" in properties
@@ -168,7 +178,23 @@ def test_calendar_bookings_list_contract_exposes_conversation_filter() -> None:
     assert any((param or {}).get("name") == "case_id" for param in params)
     assert any((param or {}).get("name") == "lane" for param in params)
     assert any((param or {}).get("name") == "needs_action" for param in params)
+    assert any((param or {}).get("name") == "follow_up_owner_id" for param in params)
+    assert any((param or {}).get("name") == "follow_up_overdue" for param in params)
     assert any((param or {}).get("name") == "cursor" for param in params)
+
+
+def test_booking_follow_up_governance_contract_exposes_request_body() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+    path_item = _find_path(paths, "/calendar/bookings/{booking_id}/follow-up-governance") or {}
+    post_op = path_item.get("post") or {}
+
+    request_schema = (
+        (((post_op.get("requestBody") or {}).get("content") or {}).get("application/json") or {})
+        .get("schema")
+        or {}
+    )
+    assert (request_schema.get("$ref") or "").endswith("/BookingFollowUpGovernanceRequest")
 
 
 def test_queue_state_current_contract_exposes_surface_and_scope_params() -> None:
@@ -344,6 +370,10 @@ def test_console_case_action_paths_expose_wave6_single_case_actions() -> None:
     assert _find_path(paths, "/cases/{case_id}/reopen") is not None
     assert "post" in ((_find_path(paths, "/cases/{case_id}/reopen") or {}).keys())
 
+    assignees_get = ((_find_path(paths, "/cases/{case_id}/assignees") or {}).get("get") or {})
+    assignees_params = assignees_get.get("parameters") or []
+    assert any((param or {}).get("name") == "policy" for param in assignees_params)
+
 
 def test_console_cases_list_contract_exposes_queue_view_param() -> None:
     spec = _load_console_contract()
@@ -383,10 +413,12 @@ def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> No
     assert "agent_id" in bulk_request_props
     assert _has_string_type(bulk_request_props.get("agent_id") or {})
     assert "policy" in bulk_request_props
-    assert (bulk_request_props.get("policy") or {}).get("anyOf") == [
-        {"const": "least_open_cases"},
-        {"type": "null"},
+    bulk_policy_any_of = (bulk_request_props.get("policy") or {}).get("anyOf") or []
+    assert bulk_policy_any_of[0].get("enum") == [
+        "least_open_cases",
+        "follow_up_sla_balance",
     ]
+    assert bulk_policy_any_of[1] == {"type": "null"}
     assert "minutes" in bulk_request_props
     assert _has_integer_type(bulk_request_props.get("minutes") or {})
     assert "reason" in bulk_request_props
@@ -421,24 +453,39 @@ def test_console_case_action_schemas_expose_wave6_requests_and_assignees() -> No
     assert "items" in assignee_list_props
     assert "routing" in assignee_list_props
 
+    score_factor_schema = schemas.get("ConsoleCaseRoutingScoreFactor") or {}
+    score_factor_props = score_factor_schema.get("properties") or {}
+    assert _has_string_type(score_factor_props.get("code") or {})
+    assert _has_string_type(score_factor_props.get("label") or {})
+    assert _has_integer_type(score_factor_props.get("value") or {})
+
     routing_schema = schemas.get("ConsoleCaseRoutingDecision") or {}
     routing_props = routing_schema.get("properties") or {}
-    assert (routing_props.get("policy") or {}).get("const") == "least_open_cases"
+    assert (routing_props.get("policy") or {}).get("enum") == [
+        "least_open_cases",
+        "follow_up_sla_balance",
+    ]
     assert _has_string_type(routing_props.get("recommended_agent_id") or {})
     assert _has_string_type(routing_props.get("recommended_agent_name") or {})
     assert _has_integer_type(routing_props.get("recommended_open_case_count") or {})
     assert (routing_props.get("will_reassign") or {}).get("type") == "boolean"
     assert _has_string_type(routing_props.get("reason_code") or {})
     assert _has_string_type(routing_props.get("reason_summary") or {})
+    assert _has_integer_type(routing_props.get("recommended_score") or {})
+    assert _has_integer_type(routing_props.get("current_score") or {})
+    score_breakdown_schema = (routing_props.get("score_breakdown") or {}).get("items") or {}
+    assert score_breakdown_schema.get("$ref") or score_breakdown_schema.get("anyOf")
 
     reassign_schema = schemas.get("ConsoleCaseReassignRequest") or {}
     reassign_props = reassign_schema.get("properties") or {}
     assert _has_string_type(reassign_props.get("agent_id") or {})
     assert (reassign_props.get("mode") or {}).get("enum") == ["manual", "policy"]
-    assert (reassign_props.get("policy") or {}).get("anyOf") == [
-        {"const": "least_open_cases"},
-        {"type": "null"},
+    reassign_policy_any_of = (reassign_props.get("policy") or {}).get("anyOf") or []
+    assert reassign_policy_any_of[0].get("enum") == [
+        "least_open_cases",
+        "follow_up_sla_balance",
     ]
+    assert reassign_policy_any_of[1] == {"type": "null"}
 
     action_response_schema = schemas.get("ConsoleCaseActionResponse") or {}
     assert "routing" in (action_response_schema.get("properties") or {})

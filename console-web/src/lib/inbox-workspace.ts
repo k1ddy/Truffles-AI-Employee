@@ -1,7 +1,7 @@
 "use client";
 
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
-import type { BookingQueueLane, BookingStatusFilter } from "@/lib/calendar-bookings";
+import type { BookingQueueLane, BookingQueueMode, BookingStatusFilter } from "@/lib/calendar-bookings";
 
 const WORKSPACE_TTL_MS = 24 * 60 * 60 * 1000;
 const CASE_LIST_KEY_PREFIX = "console:inbox:case-list:v5:";
@@ -97,9 +97,12 @@ export function normalizeInboxOwnerScope(raw: unknown): InboxOwnerScope {
 
 export interface CalendarWorkspacePrefs {
     selectedDate: string;
+    queueMode?: BookingQueueMode;
     queueLane: BookingQueueLane;
     queueStatusFilter: BookingStatusFilter;
     queueSearch?: string;
+    followUpOwnerId?: string;
+    followUpOverdueOnly?: boolean;
 }
 
 type StoredValue<T> = {
