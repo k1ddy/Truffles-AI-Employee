@@ -2,11 +2,11 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave35-a1.md
-- branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
+- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave31-a1.md
+- branch: feat/2026-03-08-inbox-calendar-ux-reconstruction-wave31-recheck-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
-- base_ref: origin/main
-- scope: Закрыть `Wave35` operator workflow/layout proof: покрыть saved views, team presets, share URLs, follow-up governance, routing-profile restrictions и medium-width layout assertions на rebuilt Inbox/Calendar surfaces.
+- base_ref: feat/2026-03-08-inbox-calendar-ux-reconstruction-wave35-a1
+- scope: Завершить `Wave31` re-check after Wave35 closure: открыть separate `PR #954`, затем зафиксировать go/no-go по routing v2 и оставить Wave31 в explicit hold при отсутствии новых server-owned capability inputs.
 - done:
   - Wave32 docs-only audit started and canonized:
     - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md` and artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-08-inbox-calendar-ux-logic-audit-a1.md`;
@@ -512,4 +512,9 @@
   - Separate PRs opened for the bounded decomposition prerequisites:
     - `PR #952` — Wave33 Inbox first-screen decomposition
     - `PR #953` — Wave34 Calendar first-screen decomposition (stacked on Wave33)
-- last_updated: 2026-03-08T12:52:49+05:00
+    - `PR #954` — Wave35 operator proof (stacked on Wave34)
+  - Wave31 re-check completed as explicit no-go:
+    - current routing truth still stops at Wave29/Wave30 server-owned inputs: access eligibility, open-case load, booking follow-up continuity, SLA-sensitive scoring, and routing profiles;
+    - `ConsoleCaseRoutingPolicyType` still exposes only `least_open_cases` and `follow_up_sla_balance`, while unknown `skills_presence` stays rejected by tests;
+    - there is still no server-owned assignee skills matrix, presence heartbeat, or shift/schedule model, so routing v2 remains on hold until a future TP proves new inputs.
+- last_updated: 2026-03-08T13:33:47+05:00
