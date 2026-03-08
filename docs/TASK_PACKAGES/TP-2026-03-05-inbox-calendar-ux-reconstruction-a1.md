@@ -214,8 +214,9 @@
 | Wave27 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md` | Split allowed: `Part A single-view read contract`, `Part B URL sync + copy-link UX` | Добавить shareable queue URLs для `Заявки` и `Записи` через explicit queue params + optional `view_id`, без opaque blobs и без richer routing. | Done locally; `PR #948` updated |
 | Wave28 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave28-a1.md` | Split allowed: `Part A follow-up governance contract`, `Part B history mode + queue UX rollout` | Поднять `Записи` до supervisor-grade governance: explicit `follow-up owner`, `due`, and `history/archive` mode before richer routing. | Done locally; `PR #948` updated |
 | Wave29 | `TP-2026-03-08-inbox-calendar-ux-reconstruction-wave29-a1.md` | Split allowed: `Part A backend scoring contract`, `Part B explicit policy selectors in current routing surfaces` | Реализовать richer routing v1 as an opt-in explainable policy `follow_up_sla_balance` over explicit booking follow-up continuity and SLA-sensitive load, without silently replacing `least_open_cases`. | Done (merged) |
-| Wave30 | `TP-2026-03-08-inbox-calendar-ux-reconstruction-wave30-a1.md` | Split allowed: `Part A backend routing-profile contract`, `Part B Team/reassign UI rollout` | Ввести server-owned assignee routing profiles (`available/paused/follow_up_only` + optional capacity) before any skill/presence-aware routing or routing v2. | Done locally |
-| Wave31 | `TP-2026-03-08-inbox-calendar-ux-reconstruction-wave31-a1.md` | Planning/decomposition gate only; no code until activation | Решить, нужен ли вообще следующий routing layer после Wave30, и если да — открыть только bounded routing v2 на реальных server-owned capability inputs. | Planned |
+| Wave30 | `TP-2026-03-08-inbox-calendar-ux-reconstruction-wave30-a1.md` | Split allowed: `Part A backend routing-profile contract`, `Part B Team/reassign UI rollout` | Ввести server-owned assignee routing profiles (`available/paused/follow_up_only` + optional capacity) before any skill/presence-aware routing or routing v2. | Done (merged via `PR #950`) |
+| Wave31 | `TP-2026-03-08-inbox-calendar-ux-reconstruction-wave31-a1.md` | Planning/decomposition gate only; no code until activation | Решить, нужен ли вообще следующий routing layer после Wave30, и если да — открыть только bounded routing v2 на реальных server-owned capability inputs. | Superseded by owner-prioritized Wave32 UX/logic audit |
+| Wave32 | `TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md` | Docs-only audit block; no product code until closure | Провести полный deep audit по `Заявки` и `Записи`: визуальный шум, action hierarchy, logic leakage, real operator coverage, and next execution order for surface decomposition. | In progress |
 
 ## Wave-by-wave closure contract (mandatory)
 1. `Wave5` closes only when SLA перестает быть абстрактным и становится action-driven на сервере и в ключевых UI surface.
@@ -238,6 +239,7 @@
 18. `Wave20` closes only when `Заявки` first-screen clearly separates `Открытые / Закрытые / Все`, and archive/history access no longer depends on hidden advanced controls.
 19. `Wave21` closes only when bot-origin semantics, case lifecycle, and booking lifecycle form one coherent operator story with no contradictory surface states.
 20. `Wave22` closes only when manager/admin matrix + live evidence prove that forbidden states are excluded and the new semantic model is stable.
+21. `Wave32` closes only when the remaining operator defect is explicitly reframed as surface architecture + workflow proof debt, and the next execution order is decomposition-first rather than more feature accretion.
 
 ## Post-closeout maturity sequence (mandatory)
 1. `Wave24 Queue State Canon`: make inbox/calendar queue state server-owned and reproducible before any naming/sharing layer is added.
@@ -246,7 +248,8 @@
 4. `Bookings supervisor-grade governance`: add follow-up owner/due/history semantics to `Записи` before using them as routing signals.
 5. `Wave29 richer routing v1`: add opt-in explainable scoring over explicit booking governance and SLA-sensitive load without silent default replacement.
 6. `Wave30 routing profiles`: add server-owned assignee routing status/capacity/manual restriction signals before any skill/presence discussion.
-7. `Routing v2 / capability modeling`: only after Wave30 proves useful should the team consider assignee capability/presence inputs or limited auto-apply.
+7. `Wave32 UX/logic audit`: before any routing v2, prove what is now wrong in the operator surfaces and lock the decomposition/testing order.
+8. `Routing v2 / capability modeling`: only after Wave32-35 close the operator debt should the team consider assignee capability/presence inputs or limited auto-apply.
 
 ## TP/PR linkage rules (mandatory)
 - Если wave не помещается в один PR, split обязан быть зафиксирован прямо в wave TP до начала part-реализации.
@@ -300,14 +303,14 @@
 - If calendar follow-up ownership/history is skipped, future routing will optimize against an incomplete operational model.
 
 ## Residual architecture debt (mandatory)
-- `Current residuals accepted in this block`: the original reconstruction remains closed, and after Wave24-30 the remaining maturity debt is real skill/presence-aware routing or a future richer-routing v2, not another queue-state/view/governance fix.
-- `Why not in this block`: this master refresh only records the correct post-closeout sequence; it does not reopen product/runtime delivery.
-- `Risk if deferred`: the team may slip back into ad-hoc spot fixes or start routing/saved-view work on top of fragmented local state.
-- `Linked follow-up Task Package(s)`: `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave23-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave25-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave26-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave28-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave29-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave30-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave31-a1.md`.
-- `Expiry/trigger to stop deferral`: any future inbox/calendar maturity work must either execute `Wave24` or explicitly supersede it with a new owner-approved TP that preserves the same queue-state-first invariant.
+- `Current residuals accepted in this block`: after Wave24-30 the dominant remaining debt is operator surface architecture and workflow proof, not queue-state correctness. Routing v2 remains deferred.
+- `Why not in this block`: the master package records the owner-approved priority change after Wave30 merge; implementation belongs to Wave33-35 follow-ups.
+- `Risk if deferred`: the team will keep stacking features on noisy surfaces and backend-green/frontend-fragile workflows.
+- `Linked follow-up Task Package(s)`: `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave23-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave25-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave26-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave28-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave29-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave30-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave31-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md`.
+- `Expiry/trigger to stop deferral`: any new Inbox/Calendar feature or routing discussion after Wave30 must either map to Wave32 follow-ups or explicitly supersede this decomposition-first contract.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: keep the next routing block bounded: either prove real server-owned capability inputs and open a limited routing v2, or explicitly stop at Wave30.
-- `First deterministic check command`: `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "Wave30|Wave31|routing v2|capability" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave30-a1.md docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave31-a1.md`
-- `Blocked-by conditions`: any regression in Wave24-30 queue-state/saved-view/share-URL/booking-governance/routing-profile contracts, or any proposal that invents missing skill/presence signals without server ownership, blocks the block immediately.
+- `Next block objective`: execute Wave33 Inbox surface decomposition and Wave35 operator-proof preparation before reopening any routing-v2 discussion.
+- `First deterministic check command`: `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "Wave32|Wave33|UX-34|UX-35|UX-36" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md docs/CONSOLE_AUDIT/UX_BACKLOG.md docs/CONSOLE_AUDIT/artifacts/2026-03-08-inbox-calendar-ux-logic-audit-a1.md`
+- `Blocked-by conditions`: any regression in Wave24-30 contracts, any attempt to add more inline surface complexity, or any proposal that skips workflow/layout proof blocks immediately.
 - `Owner role for closure`: Brain / Top Architect.

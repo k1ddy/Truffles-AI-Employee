@@ -2,12 +2,17 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave30-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Реализовать Wave30 server-owned assignee routing profiles поверх Wave29 explainable routing: добавить admin-managed routing status/capacity/manual restrictions без fake skills/presence и встроить их в текущие reassignment surfaces и Team governance.
+- scope: Провести глубокий UX/logic audit по `Заявки` и `Записи`: зафиксировать root causes визуального шума и action-overload после Wave24-30, проверить реальное operator coverage и открыть правильный execution order на surface decomposition вместо новых spot-фич.
 - done:
+  - Wave32 docs-only audit started and canonized:
+    - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md` and artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-08-inbox-calendar-ux-logic-audit-a1.md`;
+    - recorded root causes for the remaining operator defect: `CaseList` and `calendar/page.tsx` are now interaction-architecture bottlenecks, not missing-server-truth gaps;
+    - confirmed strong backend contract coverage (`103 passed`) but incomplete frontend workflow/layout proof (`4 passed / 1 failed` on targeted Playwright lane, isolated local server `http://localhost:3101`);
+    - opened backlog items `UX-34`, `UX-35`, and `UX-36` so the next valid blocks are inbox surface decomposition, calendar surface decomposition, and operator proof lanes rather than routing v2.
   - Wave30 implementation completed locally:
     - backend adds `console_routing_profiles` model + migration + service, explicit admin list/upsert/delete API, and deterministic precedence `branch override -> client profile -> default`;
     - assignee options now expose routing-profile facts (`routing_status`, source, capacity, eligibility, block reason), and both routing policies plus manual reassignment honor paused/capacity/follow-up-only constraints without hiding the current owner;

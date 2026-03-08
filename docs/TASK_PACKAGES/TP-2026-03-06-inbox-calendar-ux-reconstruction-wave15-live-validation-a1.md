@@ -9,6 +9,11 @@
 ## Название/цель
 Подтвердить на live backend без mocks, что операторский feedback contract после Wave15 больше не показывает raw technical errors и не искажает результат действий `Вернуть в работу` и одного sync-bearing действия.
 
+## Closure status
+- Closed on `2026-03-07` by explicit live evidence gathered during Wave22 live-proof closeout.
+- The live no-mocks mutation lane passed on safe demo case `2e2de879-e4be-405e-83f6-c11dd95cad65`.
+- The earlier user-provided case `01fdf4ed-ccdd-4752-9592-f44ee2614458` remains documented as accessible but unsuitable evidence because its hydrated live state was `В работе` and no reopen control was visible.
+
 ## Canon refs
 - `AGENTS.md`
 - `STATE.md`
@@ -27,7 +32,7 @@
 - Wave15 is required first; live validation is not valid against pre-Wave15 UX.
 - Previous live lanes could not safely prove mutation paths without an explicit case/scenario.
 - This TP exists to prevent false `pass` and to keep real-backend evidence separate from deterministic mock proof.
-- Current blocker (fact, 2026-03-06): `INSPECT_CASE_LIVE_CASE_ID` is still unset in the live E2E environment, so the new dedicated mutation test skips with a precise reason and the generic live lane only reaches no-case fallback evidence.
+- Final resolution (fact, 2026-03-07): explicit live mutation evidence now exists through the Wave22 live-proof lane, so this validation gate is satisfied and no longer blocked on `INSPECT_CASE_LIVE_CASE_ID`.
 
 ## One web search (mandatory before implementation)
 - **Query (exact):** `site:support.zendesk.com Defining SLA policies due soon overdue paused`
