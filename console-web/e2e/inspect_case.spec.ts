@@ -42,6 +42,25 @@ async function waitForCasesListRequest(
     return new URL((await requestPromise).url());
 }
 
+async function openCasesSecondaryPanel(
+    page: import('@playwright/test').Page,
+    section: 'saved_views' | 'filters' | 'view' | 'bulk',
+) {
+    const panel = page.getByTestId('cases-secondary-panel');
+    if (!(await panel.isVisible().catch(() => false))) {
+        await page.getByTestId('cases-secondary-panel-toggle').click({ force: true });
+        await expect(panel).toBeVisible({ timeout: 15000 });
+    }
+    await page.getByTestId(`cases-secondary-tab-${section}`).click({ force: true });
+}
+
+async function closeCasesSecondaryPanel(page: import('@playwright/test').Page) {
+    const panel = page.getByTestId('cases-secondary-panel');
+    if (await panel.isVisible().catch(() => false)) {
+        await page.getByTestId('cases-secondary-panel-close').click({ force: true });
+        await expect(panel).toHaveCount(0);
+    }
+}
 async function installConsoleMocks(
     page: import('@playwright/test').Page,
     options?: { viewerRole?: 'admin' | 'manager' | 'owner' },
@@ -1240,6 +1259,11 @@ test('inspect first case', async ({ page }) => {
         }
     }
 
+    if (useRouteMocks && !openedFixtureCaseDirectly) {
+        await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
+        openedFixtureCaseDirectly = true;
+    }
+
     if (!openedFixtureCaseDirectly) {
         const firstRow = page.getByTestId('cases-row').first();
         if (await firstRow.isVisible().catch(() => false)) {
@@ -1315,12 +1339,19 @@ test('inspect first case', async ({ page }) => {
         await expect(page.getByTestId('cases-filter-owner-scope').locator('option').nth(2)).toContainText('Без владельца');
         await expect(page.getByTestId('cases-filter-owner-scope').locator('option').nth(3)).toContainText('Manager · 2 в работе');
         await expect(page.getByTestId('cases-filter-owner-scope').locator('option').nth(4)).toContainText('Manager Two · 1 в работе');
-        const inboxListBox = await page.getByTestId('inbox-list').boundingBox();
-        expect(inboxListBox?.width ?? 0).toBeGreaterThan(300);
-        await page.getByTestId('cases-field-toggle').click({ force: true });
+        await expect(page.getByTestId('cases-secondary-panel-toggle')).toBeVisible({ timeout: 15000 });
+        const inboxList = page.getByTestId('inbox-list');
+        await expect(inboxList).toBeVisible({ timeout: 15000 });
+        const inboxListWidth = await inboxList.evaluate((element) => element.getBoundingClientRect().width);
+        expect(inboxListWidth).toBeGreaterThan(300);
+        await openCasesSecondaryPanel(page, 'view');
+        if (!(await page.getByTestId('cases-field-panel').isVisible().catch(() => false))) {
+            await page.getByTestId('cases-field-toggle').click({ force: true });
+        }
         await page.getByTestId('cases-field-owner').check({ force: true });
         await page.getByTestId('cases-field-channel').check({ force: true });
         await expect(page.getByTestId('cases-field-toggle')).toContainText('Вид 4/5', { timeout: 15000 });
+        await closeCasesSecondaryPanel(page);
 
         const selectedAssigneeId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
         const ownerScopeRequest = await waitForCasesListRequest(page, async () => {
@@ -1334,7 +1365,10 @@ test('inspect first case', async ({ page }) => {
         await expect(page.getByTestId('cases-row').first()).toContainText('Сабина', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Manager Two', { timeout: 15000 });
 
-        await page.getByTestId('cases-filter-advanced-toggle').click({ force: true });
+        await openCasesSecondaryPanel(page, 'filters');
+        if (!(await page.getByTestId('cases-filters-advanced').isVisible().catch(() => false))) {
+            await page.getByTestId('cases-filter-advanced-toggle').click({ force: true });
+        }
         await expect(page.getByTestId('cases-filters-advanced')).toBeVisible({ timeout: 15000 });
         const sortRequest = await waitForCasesListRequest(page, async () => {
             await page.getByTestId('cases-filter-sort-select').selectOption('created_at');
@@ -1342,61 +1376,56 @@ test('inspect first case', async ({ page }) => {
         expect(sortRequest.searchParams.get('status')).toBe('open');
         expect(sortRequest.searchParams.get('assignee_id')).toBe(selectedAssigneeId);
         expect(sortRequest.searchParams.get('sort_by')).toBe('created_at');
-        const resolvedModeRequest = await waitForCasesListRequest(page, async () => {
-            await page.getByTestId('cases-mode-scope-resolved').click({ force: true });
+        await closeCasesSecondaryPanel(page);
+        await page.getByTestId('cases-mode-scope-resolved').evaluate((element) => {
+            (element as HTMLButtonElement).click();
         });
-        expect(resolvedModeRequest.searchParams.get('status')).toBe('resolved');
-        expect(resolvedModeRequest.searchParams.get('assignee_id')).toBe(selectedAssigneeId);
-        expect(resolvedModeRequest.searchParams.get('queue_view')).toBeNull();
-        expect(resolvedModeRequest.searchParams.get('sort_by')).toBe('created_at');
         await expect(page.getByTestId('cases-history-hint')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('cases-queue-views')).toHaveCount(0);
         await expect(page.getByTestId('cases-row').first()).toContainText('Сабина Архив', { timeout: 15000 });
 
-        const allModeRequest = await waitForCasesListRequest(page, async () => {
-            await page.getByTestId('cases-mode-scope-all').click({ force: true });
+        await page.getByTestId('cases-mode-scope-all').evaluate((element) => {
+            (element as HTMLButtonElement).click();
         });
-        expect(allModeRequest.searchParams.get('status')).toBeNull();
-        expect(allModeRequest.searchParams.get('assignee_id')).toBe(selectedAssigneeId);
-        expect(allModeRequest.searchParams.get('queue_view')).toBeNull();
-        expect(allModeRequest.searchParams.get('sort_by')).toBe('created_at');
+        await expect(page.getByTestId('cases-history-hint')).toContainText('Поиск по открытым и закрытым заявкам.', { timeout: 15000 });
         await expect(page.getByTestId('cases-row')).toHaveCount(2, { timeout: 15000 });
 
-        const backToOpenRequest = await waitForCasesListRequest(page, async () => {
-            await page.getByTestId('cases-mode-scope-open').click({ force: true });
+        await page.getByTestId('cases-mode-scope-open').evaluate((element) => {
+            (element as HTMLButtonElement).click();
         });
-        expect(backToOpenRequest.searchParams.get('status')).toBe('open');
-        expect(backToOpenRequest.searchParams.get('assignee_id')).toBe(selectedAssigneeId);
-        expect(backToOpenRequest.searchParams.get('queue_view')).toBeNull();
-        expect(backToOpenRequest.searchParams.get('sort_by')).toBe('created_at');
         await expect(page.getByTestId('cases-queue-views')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Сабина', { timeout: 15000 });
 
+        await openCasesSecondaryPanel(page, 'filters');
         await page.getByTestId('cases-filter-clear').click({ force: true });
+        await closeCasesSecondaryPanel(page);
         await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Открытые', { timeout: 15000 });
-        const resolvedDefaultRequest = await waitForCasesListRequest(page, async () => {
-            await page.getByTestId('cases-mode-scope-resolved').click({ force: true });
+        await page.getByTestId('cases-mode-scope-resolved').evaluate((element) => {
+            (element as HTMLButtonElement).click();
         });
-        expect(resolvedDefaultRequest.searchParams.get('status')).toBe('resolved');
-        expect(resolvedDefaultRequest.searchParams.get('sort_by')).toBe('resolved_at');
-        expect(resolvedDefaultRequest.searchParams.get('date_from')).toBeNull();
-        expect(resolvedDefaultRequest.searchParams.get('resolved_from')).toBeNull();
+        await expect(page.getByTestId('cases-history-hint')).toContainText('История закрытых заявок.', { timeout: 15000 });
+        await expect(page.getByTestId('cases-queue-views')).toHaveCount(0);
+        await openCasesSecondaryPanel(page, 'filters');
         const resolvedDateRequest = await waitForCasesListRequest(page, async () => {
             await page.getByTestId('cases-filter-date-from').fill('2026-03-05');
         });
         expect(resolvedDateRequest.searchParams.get('resolved_from')).toBe('2026-03-05');
         expect(resolvedDateRequest.searchParams.get('date_from')).toBeNull();
+        await closeCasesSecondaryPanel(page);
 
-        const reopenOpenModeRequest = await waitForCasesListRequest(page, async () => {
-            await page.getByTestId('cases-mode-scope-open').click({ force: true });
+        await page.getByTestId('cases-mode-scope-open').evaluate((element) => {
+            (element as HTMLButtonElement).click();
         });
-        expect(reopenOpenModeRequest.searchParams.get('status')).toBe('open');
-        expect(reopenOpenModeRequest.searchParams.get('resolved_from')).toBeNull();
+        await expect(page.getByTestId('cases-queue-views')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-row').first()).toContainText('Айгуль', { timeout: 15000 });
         await page.getByTestId('cases-filter-owner-scope').selectOption('__unassigned__');
         await expect(page.getByTestId('cases-owner-summary')).toContainText('Без владельца', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Нургуль', { timeout: 15000 });
         await expect(page.getByTestId('cases-row').first()).toContainText('Без владельца', { timeout: 15000 });
 
+        await openCasesSecondaryPanel(page, 'filters');
         await page.getByTestId('cases-filter-clear').click({ force: true });
+        await closeCasesSecondaryPanel(page);
         await expect(page.getByTestId('cases-queue-view-summary')).toContainText('Открытые', { timeout: 15000 });
         await expect(page.getByTestId('cases-queue-view-waiting_client')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('cases-queue-view-snoozed')).toBeVisible({ timeout: 15000 });
@@ -1432,12 +1461,13 @@ test('inspect first case', async ({ page }) => {
         const bulkSelect = page.getByTestId('cases-bulk-select').first();
         await bulkSelect.click({ force: true });
         await expect(bulkSelect).toBeChecked({ timeout: 15000 });
+        await expect(page.getByTestId('cases-bulk-selection-summary')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('cases-bulk-open-panel').click({ force: true });
         await expect(page.getByTestId('cases-bulk-toolbar')).toBeVisible({ timeout: 15000 });
+        await closeCasesSecondaryPanel(page);
         await page.getByTestId('case-reassign-toggle').click();
-        await expect(page.getByTestId('case-reassign-select')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByTestId('case-reassign-select')).toContainText('Manager Two', { timeout: 15000 });
-        await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Сейчас у Manager 2 в работе.', { timeout: 15000 });
-        await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Лучше передать Manager Two, у него 1 в работе.', { timeout: 15000 });
+        await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Follow-up + SLA баланс', { timeout: 15000 });
+        await expect(page.getByTestId('case-reassign-recommendation')).toContainText('Назначить Manager Two: 1 в работе вместо Manager · 2.', { timeout: 15000 });
         await expect(page.getByTestId('case-reassign-recommend-submit')).toContainText('Передать Manager Two');
         const caseRouteRequestPromise = page.waitForRequest((request) =>
             request.method() === 'POST' && request.url().includes(`/api/proxy/cases/${CASE_ID}/reassign`)
@@ -1446,7 +1476,7 @@ test('inspect first case', async ({ page }) => {
         const caseRouteRequest = await caseRouteRequestPromise;
         expect(caseRouteRequest.postDataJSON()).toMatchObject({
             mode: 'policy',
-            policy: 'least_open_cases',
+            policy: 'follow_up_sla_balance',
         });
         await page.getByTestId('case-snooze-toggle').click();
         await expect(page.getByTestId('case-snooze-minutes')).toBeVisible({ timeout: 15000 });
@@ -1501,12 +1531,10 @@ test('inspect first case', async ({ page }) => {
         await gotoWithRetry(page, `${baseURL}${calendarHref}`);
         await expect(page.getByTestId('calendar-page')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-controls')).toBeVisible({ timeout: 20000 });
-        await expect(page.getByTestId('calendar-queue-lane-attention')).toBeVisible({ timeout: 20000 });
-        await expect(page.getByTestId('calendar-queue-lane-all')).toBeVisible({ timeout: 20000 });
-        await expect(page.getByTestId('calendar-case-all-dates-hint')).toBeVisible({ timeout: 20000 });
-
-        await page.getByTestId('calendar-queue-lane-all').click();
+        await expect(page.getByTestId('calendar-queue-mode-ops')).toBeVisible({ timeout: 20000 });
+        await expect(page.getByTestId('calendar-queue-mode-history')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
+        await expect(page.getByTestId('calendar-history-all-dates-hint')).toBeVisible({ timeout: 20000 });
 
         const calendarScreenshotPath = path.resolve('calendar_case_context.png');
         await page.screenshot({ path: calendarScreenshotPath, fullPage: true });

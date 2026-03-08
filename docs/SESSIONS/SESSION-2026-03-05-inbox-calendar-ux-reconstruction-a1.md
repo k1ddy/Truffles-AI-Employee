@@ -2,11 +2,11 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave33-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Провести глубокий UX/logic audit по `Заявки` и `Записи`: зафиксировать root causes визуального шума и action-overload после Wave24-30, проверить реальное operator coverage и открыть правильный execution order на surface decomposition вместо новых spot-фич.
+- scope: Выполнить `Wave33` Inbox surface decomposition: убрать saved views/share, advanced filters, view prefs и bulk-form surfaces с первого экрана `Заявки`, оставить только triage controls, затем переподтвердить targeted operator workflow lane.
 - done:
   - Wave32 docs-only audit started and canonized:
     - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md` and artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-08-inbox-calendar-ux-logic-audit-a1.md`;
@@ -480,4 +480,13 @@
   - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line` (`3 passed`)
   - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
   - `gh pr create --base main --head feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 --title \"fix(console): harden operator action feedback\" ...` (`PR #937`)
-- last_updated: 2026-03-07T20:18:38+05:00
+  - Wave33 Inbox decomposition completed locally:
+    - created and activated `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave33-a1.md` as the bounded follow-up to the Wave32 audit;
+    - rebuilt `console-web/src/components/CaseList.tsx` so the first screen keeps only `cases-mode-scopes`, `cases-queue-views`, `cases-filter-search`, `cases-filter-owner-scope`, and `cases-refresh`, while saved views/share, advanced filters, view settings, and bulk forms now live in a secondary right-side panel;
+    - updated `console-web/e2e/inspect_case.spec.ts` to drive the new secondary surfaces and current routing/calendar semantics instead of stale inline controls and stale routing-policy/calendar-history expectations;
+    - local evidence:
+      - `cd console-web && npm run lint -- --file src/components/CaseList.tsx --file src/components/InboxView.tsx --file e2e/inspect_case.spec.ts --file e2e/smoke.spec.ts` (`pass`)
+      - `cd console-web && npm run build` (`pass`)
+      - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "inspect first case|manager history modes hide queue views and keep owner scope role-gated|manage and apply action macro|action feedback hides raw sync reason codes and keeps reopen internal-only|booking no-show reopens resolved case and preserves case-booking semantics"` (`5 passed`)
+      - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+- last_updated: 2026-03-08T11:20:34+05:00
