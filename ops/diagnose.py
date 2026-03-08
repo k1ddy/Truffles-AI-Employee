@@ -804,6 +804,26 @@ LLM_QUALITY_PROGRESS_SKIP_TAGS = {
     "tool",
 }
 LLM_QUALITY_FAILURE_LIMIT = 50
+LLM_QUALITY_FAILURE_FAMILY_LIMIT = 10
+LLM_QUALITY_FAILURE_FAMILY_SAMPLE_LIMIT = 3
+LLM_QUALITY_OPEN_WORLD_REQUIRED_LANGUAGE_PROFILES = (
+    "ru",
+    "kk",
+    "mixed",
+    "mixed_translit",
+)
+LLM_QUALITY_OPEN_WORLD_REQUIRED_SURFACE_NOISE_PROFILES = (
+    "clean",
+    "typo",
+)
+LLM_QUALITY_OPEN_WORLD_REQUIRED_SEMANTIC_VARIATION_PROFILES = (
+    "canonical",
+    "synonym",
+)
+LLM_QUALITY_OPEN_WORLD_REQUIRED_SLOT_FORMAT_PROFILES = (
+    "canonical",
+    "variant",
+)
 LLM_QUALITY_THRESHOLDS = {
     "reply_rate": 0.9,
     "strict_pass_rate": 0.95,
@@ -814,11 +834,21 @@ LLM_QUALITY_THRESHOLDS = {
     "degraded_fallback_rate": 0.05,
     "booking_slot_progress_rate": 0.25,
     "handoff_correct_rate": 0.9,
+    "fact_without_evidence_rate": 0.0,
+    "irrelevant_fact_rate": 0.0,
+    "booking_commit_without_required_contact": 0.0,
+    "semantic_override_rate": 0.0,
+    "stale_state_leak_rate": 0.0,
 }
 LLM_QUALITY_THRESHOLD_DIRECTIONS = {
     "hard_fail_rate": "max",
     "unknown_state_rate": "max",
     "degraded_fallback_rate": "max",
+    "fact_without_evidence_rate": "max",
+    "irrelevant_fact_rate": "max",
+    "booking_commit_without_required_contact": "max",
+    "semantic_override_rate": "max",
+    "stale_state_leak_rate": "max",
 }
 LLM_QUALITY_REGRESSION_KEYS = (
     "reply_rate",
@@ -830,6 +860,11 @@ LLM_QUALITY_REGRESSION_KEYS = (
     "degraded_fallback_rate",
     "booking_slot_progress_rate",
     "handoff_correct_rate",
+    "fact_without_evidence_rate",
+    "irrelevant_fact_rate",
+    "booking_commit_without_required_contact",
+    "semantic_override_rate",
+    "stale_state_leak_rate",
 )
 LLM_QUALITY_BLOCKING_REASONS = (
     "calendar_tool_contract_miss",
@@ -837,10 +872,15 @@ LLM_QUALITY_BLOCKING_REASONS = (
     "slot_date_resolution_miss",
     "slot_availability_contradiction",
     "fabricated_conflict_time",
+    "booking_transition_evidence_missing",
     "booking_prompt_leak",
     "stale_prompt_date_mismatch",
     "mix_info_booking",
     "stale_booking_carryover",
+    "fact_without_evidence",
+    "irrelevant_fact",
+    "booking_commit_without_required_contact",
+    "stale_state_leak",
     "timeout_degrade_booking_generic",
     "run_completion_gap",
     "trace_response_mismatch",
@@ -1027,6 +1067,8 @@ LLM_QUALITY_REASON_LABELS = {
     "unknown_state": "conversation.state missing or not in known states",
     "expected_state_mismatch": "conversation.state does not match scenario expectation",
     "expected_action_mismatch": "decision_meta.action does not match scenario expectation",
+    "expected_meta_mismatch": "decision_meta does not match scenario meta expectation",
+    "expected_trace_miss": "decision_trace does not satisfy scenario trace expectation",
     "expected_reply_type_mismatch": "expected_reply_type does not match scenario expectation",
     "expected_reply_mismatch": "reply expectation does not match scenario expectation",
     "expected_info_section_miss": "expected info_sections missing in meta/trace",
@@ -1046,10 +1088,17 @@ LLM_QUALITY_REASON_LABELS = {
     "slot_date_resolution_miss": "relative/explicit date signal did not resolve into calendar slot query",
     "slot_availability_contradiction": "slot availability claim contradicts provided slot list",
     "fabricated_conflict_time": "booking conflict mentions time not requested by user",
+    "booking_transition_evidence_missing": "calendar.book_slot success missing transition-owner evidence (profile/phone continuity)",
     "booking_prompt_leak": "booking prompt fragment leaked into FACT/info response",
     "stale_prompt_date_mismatch": "follow-up prompt reused stale datetime hint and diverged from booking context",
     "mix_info_booking": "reply mixes info/FACT answer with booking collection prompt in one turn",
     "stale_booking_carryover": "stale booking carryover phrase leaked into FACT/info response",
+    "canonical_projection_evidence_missing": "service carryover used without canonical projection evidence in meta/trace",
+    "resolved_referent_trace_missing": "semantic referent follow-up missing resolved referent trace/meta evidence",
+    "fact_without_evidence": "FACT-like reply rendered without valid evidence linkage in meta/trace",
+    "irrelevant_fact": "FACT-like reply is irrelevant to the requested info contract",
+    "booking_commit_without_required_contact": "calendar.book_slot success observed without proven name+phone contact minimum",
+    "stale_state_leak": "stale booking/session state leaked into the current turn contract",
     "timeout_degrade_booking_generic": "timeout-degrade returned generic clarify in booking context",
     "run_completion_gap": "run stopped before all scenario turns were executed",
     "lock_fingerprint_unchanged_after_non_canonical": "lock rerun uses unchanged fingerprint after non-canonical previous lock",
@@ -1088,6 +1137,8 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "unknown_state": "canon",
     "expected_state_mismatch": "expectation",
     "expected_action_mismatch": "expectation",
+    "expected_meta_mismatch": "expectation",
+    "expected_trace_miss": "expectation",
     "expected_reply_type_mismatch": "expectation",
     "expected_reply_mismatch": "expectation",
     "expected_info_section_miss": "expectation",
@@ -1107,10 +1158,17 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "slot_date_resolution_miss": "expectation",
     "slot_availability_contradiction": "expectation",
     "fabricated_conflict_time": "expectation",
+    "booking_transition_evidence_missing": "code",
     "booking_prompt_leak": "expectation",
     "stale_prompt_date_mismatch": "expectation",
     "mix_info_booking": "expectation",
     "stale_booking_carryover": "expectation",
+    "canonical_projection_evidence_missing": "canon",
+    "resolved_referent_trace_missing": "canon",
+    "fact_without_evidence": "code",
+    "irrelevant_fact": "expectation",
+    "booking_commit_without_required_contact": "code",
+    "stale_state_leak": "code",
     "timeout_degrade_booking_generic": "expectation",
     "run_completion_gap": "canon",
     "trace_response_mismatch": "canon",
@@ -1151,6 +1209,8 @@ LLM_QUALITY_HARD_FAIL_REASONS = {
     "outbox_delivery_timeout",
     "false_booking_confirmation",
     "calendar_tool_contract_miss",
+    "booking_transition_evidence_missing",
+    "canonical_projection_evidence_missing",
     "unexpected_bot_reply_manager",
     "handover_missing",
 }
@@ -2779,6 +2839,191 @@ def _llm_quality_load_pack_context(client_slug: str):
         "paths": {"truth": truth_path, "consult_playbook": playbook_path},
     }
 
+def _llm_quality_dedupe_strings(values):
+    normalized = []
+    seen = set()
+    for value in values or []:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        token = text.casefold()
+        if token in seen:
+            continue
+        seen.add(token)
+        normalized.append(text)
+    return normalized
+
+def _llm_quality_extract_service_names_from_truth(truth):
+    if not isinstance(truth, dict):
+        return []
+    catalog = truth.get("services_catalog")
+    raw_services = []
+    if isinstance(catalog, dict):
+        services = catalog.get("services")
+        if isinstance(services, list):
+            raw_services.extend(services)
+        suggestions = catalog.get("suggestions")
+        if isinstance(suggestions, list):
+            raw_services.extend(suggestions)
+    elif isinstance(catalog, list):
+        raw_services.extend(catalog)
+    names = []
+    for item in raw_services:
+        if isinstance(item, dict):
+            names.append(item.get("name"))
+        else:
+            names.append(item)
+    return _llm_quality_dedupe_strings(names)
+
+def _llm_quality_extract_specialist_names_from_truth(truth):
+    if not isinstance(truth, dict):
+        return []
+    masters_catalog = truth.get("masters_catalog")
+    if not isinstance(masters_catalog, dict):
+        return []
+    specialists = masters_catalog.get("specialists")
+    if not isinstance(specialists, list):
+        return []
+    names = []
+    for item in specialists:
+        if isinstance(item, dict):
+            names.append(item.get("name"))
+        else:
+            names.append(item)
+    return _llm_quality_dedupe_strings(names)
+
+def _llm_quality_extract_pack_languages(truth):
+    if not isinstance(truth, dict):
+        return []
+    salon = truth.get("salon")
+    if not isinstance(salon, dict):
+        return []
+    communication = salon.get("communication")
+    if not isinstance(communication, dict):
+        return []
+    languages = communication.get("languages")
+    if not isinstance(languages, list):
+        return []
+    return _llm_quality_dedupe_strings(languages)
+
+def _llm_quality_merge_json_like(base, overlay):
+    if isinstance(base, dict) and isinstance(overlay, dict):
+        merged = dict(base)
+        for key, value in overlay.items():
+            if key in merged:
+                merged[key] = _llm_quality_merge_json_like(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+    if isinstance(base, list) and isinstance(overlay, list):
+        return _llm_quality_dedupe_strings(list(base) + list(overlay))
+    return overlay if overlay is not None else base
+
+def _llm_quality_fetch_latest_capability_payload(
+    db_user,
+    *,
+    client_id,
+    scope,
+    branch_id=None,
+):
+    if not client_id:
+        return None, None
+    safe_client_id = _escape_sql_literal(client_id)
+    safe_scope = _escape_sql_literal(scope)
+    branch_filter = "AND branch_id IS NULL "
+    if branch_id:
+        safe_branch_id = _escape_sql_literal(branch_id)
+        branch_filter = f"AND branch_id = '{safe_branch_id}' "
+    query = (
+        "SELECT payload_json::text "
+        "FROM client_capabilities "
+        f"WHERE client_id = '{safe_client_id}' "
+        f"AND scope = '{safe_scope}' "
+        "AND status = 'active' "
+        f"{branch_filter}"
+        "ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST "
+        "LIMIT 1;"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return None, None
+    try:
+        payload = json.loads(row)
+    except Exception as exc:
+        return None, f"capability_json_error:{exc}"
+    return payload if isinstance(payload, dict) else None, None
+
+def _llm_quality_compact_capability_payload(payload):
+    if not isinstance(payload, dict):
+        return {}
+    compact = {}
+    for key in ("domain_slug", "allowed_fact_scopes", "handoff_policy"):
+        if payload.get(key) is not None:
+            compact[key] = payload.get(key)
+    for key in ("channels", "providers", "features", "tools"):
+        value = payload.get(key)
+        if isinstance(value, dict) and value:
+            compact[key] = value
+    return compact
+
+def _llm_quality_build_scenario_context(
+    *,
+    db_user,
+    client_slug,
+    branch_slug,
+    client_meta,
+    pack_context,
+):
+    truth = pack_context.get("truth") if isinstance(pack_context, dict) else None
+    salon = truth.get("salon") if isinstance(truth, dict) and isinstance(truth.get("salon"), dict) else {}
+    business = {}
+    if isinstance(salon, dict):
+        if salon.get("name"):
+            business["display_name"] = salon.get("name")
+        if salon.get("services_summary"):
+            business["summary"] = salon.get("services_summary")
+        if salon.get("city"):
+            business["city"] = salon.get("city")
+        languages = _llm_quality_extract_pack_languages(truth)
+        if languages:
+            business["languages"] = languages
+
+    client_payload, client_error = _llm_quality_fetch_latest_capability_payload(
+        db_user,
+        client_id=(client_meta or {}).get("client_id"),
+        scope="client",
+        branch_id=None,
+    )
+    branch_payload, branch_error = _llm_quality_fetch_latest_capability_payload(
+        db_user,
+        client_id=(client_meta or {}).get("client_id"),
+        scope="branch",
+        branch_id=(client_meta or {}).get("branch_id"),
+    )
+    merged_capabilities = _llm_quality_merge_json_like(client_payload or {}, branch_payload or {})
+    context = {
+        "client_slug": client_slug,
+        "branch_slug": branch_slug or (client_meta or {}).get("branch_slug"),
+        "services": _llm_quality_extract_service_names_from_truth(truth),
+        "specialists": _llm_quality_extract_specialist_names_from_truth(truth),
+        "capabilities": _llm_quality_compact_capability_payload(merged_capabilities),
+    }
+    if business:
+        context["business"] = business
+    errors = {}
+    pack_errors = (pack_context or {}).get("errors")
+    if pack_errors:
+        errors["pack"] = pack_errors
+    if client_error:
+        errors["client_capabilities"] = client_error
+    if branch_error:
+        errors["branch_capabilities"] = branch_error
+    if errors:
+        context["errors"] = errors
+    return context
+
 def _llm_quality_compact_services_catalog(catalog, *, include_price: bool):
     if not isinstance(catalog, dict):
         return None
@@ -3268,6 +3513,352 @@ def _llm_quality_has_stale_booking_carryover(
     return True
 
 
+def _llm_quality_has_missing_canonical_service_projection(
+    *,
+    meta: dict | None,
+    trace_entries: list[dict] | None,
+) -> bool:
+    def _has_projection_fields(payload: dict | None) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        projection_source = payload.get("projection_source")
+        canonical_state_owner = payload.get("canonical_state_owner")
+        return bool(
+            isinstance(projection_source, str)
+            and projection_source.strip()
+            and isinstance(canonical_state_owner, str)
+            and canonical_state_owner.strip()
+        )
+
+    carryover_used = False
+    normalized_source = _llm_quality_normalize_tool_token(
+        (meta or {}).get("service_query_source") if isinstance(meta, dict) else None
+    )
+    if normalized_source in {"context", "carryover", "legacy_service_carryover"}:
+        carryover_used = True
+    if not carryover_used and isinstance(trace_entries, list):
+        for entry in trace_entries:
+            if not isinstance(entry, dict):
+                continue
+            if (
+                _llm_quality_normalize_tool_token(entry.get("stage")) == "service_carryover"
+                and _llm_quality_normalize_tool_token(entry.get("decision")) == "used"
+            ):
+                carryover_used = True
+                break
+    if not carryover_used:
+        return False
+    if _has_projection_fields(meta if isinstance(meta, dict) else None):
+        return False
+    if isinstance(trace_entries, list):
+        for entry in trace_entries:
+            if not isinstance(entry, dict):
+                continue
+            if (
+                _llm_quality_normalize_tool_token(entry.get("stage")) == "service_carryover"
+                and _llm_quality_normalize_tool_token(entry.get("decision")) == "used"
+                and _has_projection_fields(entry)
+            ):
+                return False
+    return True
+
+
+def _llm_quality_has_missing_resolved_referent_trace(
+    *,
+    meta: dict | None,
+    trace_entries: list[dict] | None,
+) -> bool:
+    def _normalize_token(value) -> str | None:
+        token = _llm_quality_normalize_tool_token(value)
+        if token:
+            return token
+        if isinstance(value, str) and value.strip():
+            return value.strip().casefold()
+        return None
+
+    if not isinstance(meta, dict):
+        return False
+
+    llm_policy_meta = meta.get("llm_policy_core") if isinstance(meta.get("llm_policy_core"), dict) else {}
+    subject_kind = _normalize_token(meta.get("subject_kind")) or _normalize_token(
+        llm_policy_meta.get("subject_kind")
+    )
+    resolution_mode = _normalize_token(meta.get("resolution_mode")) or _normalize_token(
+        llm_policy_meta.get("resolution_mode")
+    )
+    if subject_kind != "service" or resolution_mode != "referent_followup":
+        return False
+
+    capability_resolution_mode = _normalize_token(meta.get("capability_resolution_mode")) or _normalize_token(
+        llm_policy_meta.get("capability_resolution_mode")
+    )
+    referent_resolution_decision = _normalize_token(
+        meta.get("referent_resolution_decision")
+    ) or _normalize_token((llm_policy_meta.get("referent_resolution") or {}).get("decision"))
+    resolved_referent = meta.get("resolved_referent")
+    if not isinstance(resolved_referent, str) or not resolved_referent.strip():
+        resolved_referent = (llm_policy_meta.get("referent_resolution") or {}).get(
+            "resolved_referent"
+        )
+    referent_source = meta.get("referent_source")
+    if not isinstance(referent_source, str) or not referent_source.strip():
+        referent_source = (llm_policy_meta.get("referent_resolution") or {}).get("referent_source")
+    if (
+        isinstance(resolved_referent, str)
+        and resolved_referent.strip()
+        and isinstance(referent_source, str)
+        and referent_source.strip()
+        and isinstance(capability_resolution_mode, str)
+        and capability_resolution_mode.strip()
+    ):
+        return False
+    if (
+        referent_resolution_decision == "missing"
+        and capability_resolution_mode == "clarify_missing_subject"
+    ):
+        return False
+    if not isinstance(trace_entries, list):
+        return True
+    for entry in trace_entries:
+        if not isinstance(entry, dict):
+            continue
+        if _normalize_token(entry.get("stage")) != "referent_resolver":
+            continue
+        if _normalize_token(entry.get("subject_kind")) != "service":
+            continue
+        trace_decision = _normalize_token(entry.get("decision"))
+        trace_resolution_mode = _normalize_token(entry.get("capability_resolution_mode"))
+        trace_resolved_referent = entry.get("resolved_referent")
+        trace_referent_source = entry.get("referent_source")
+        if (
+            trace_decision == "resolved"
+            and isinstance(trace_resolved_referent, str)
+            and trace_resolved_referent.strip()
+            and isinstance(trace_referent_source, str)
+            and trace_referent_source.strip()
+            and isinstance(trace_resolution_mode, str)
+            and trace_resolution_mode.strip()
+        ):
+            return False
+        if trace_decision == "missing" and trace_resolution_mode == "clarify_missing_subject":
+            return False
+    return True
+
+
+def _llm_quality_collect_fact_evidence_refs(meta: dict | None) -> list[str]:
+    if not isinstance(meta, dict):
+        return []
+
+    refs: list[str] = []
+
+    def _append_tokens(value) -> None:
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            if not isinstance(item, str):
+                continue
+            token = item.strip()
+            if not token or token in refs:
+                continue
+            refs.append(token)
+
+    for key in (
+        "fact_evidence_refs",
+        "fact_refs",
+        "pack_refs",
+        "info_sections",
+        "consult_topic",
+        "consult_topic_id",
+        "service_query",
+        "price_item",
+        "duration_item",
+    ):
+        _append_tokens(meta.get(key))
+
+    tool_args = meta.get("tool_args")
+    if isinstance(tool_args, dict):
+        for key in (
+            "info_refs",
+            "consult_refs",
+            "info_ref",
+            "consult_ref",
+            "service_query",
+            "price_item",
+            "duration_item",
+        ):
+            _append_tokens(tool_args.get(key))
+
+    return refs
+
+
+def _llm_quality_is_fact_like_reply(meta: dict | None) -> bool:
+    if not isinstance(meta, dict):
+        return False
+    action_value = _llm_quality_normalize_tool_token(meta.get("action"))
+    if action_value != "reply":
+        return False
+    intent_value = _llm_quality_effective_intent(meta)
+    source_value = _llm_quality_normalize_tool_token(meta.get("source"))
+    tool_action_value = _llm_quality_normalize_tool_token(meta.get("tool_action"))
+    tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+    if intent_value in {
+        "service_clarify",
+        "duration_or_price_clarify",
+        "info_clarify",
+    }:
+        return False
+    if source_value == "fact_guard" or intent_value == "fact_guard":
+        return False
+    if intent_value in LLM_QUALITY_CALENDAR_INTENTS or tool_action_value in LLM_QUALITY_CALENDAR_INTENTS:
+        return False
+    if tool_decision_value in {
+        "missing_slot",
+        "specialist_missing",
+        "provider_unavailable",
+        "contract_invalid",
+    }:
+        return False
+
+    if _llm_quality_collect_fact_evidence_refs(meta):
+        return True
+    if isinstance(meta.get("fact_source"), str) and meta.get("fact_source").strip():
+        return True
+    if any(
+        isinstance(meta.get(key), str) and meta.get(key).strip()
+        for key in ("service_query", "price_item", "duration_item", "consult_topic")
+    ):
+        return True
+    if isinstance(meta.get("info_sections"), list) and any(
+        isinstance(item, str) and item.strip() for item in meta.get("info_sections")
+    ):
+        return True
+    if intent_value in {
+        "catalog.service_query",
+        "catalog.location",
+        "catalog.hours",
+        "catalog.parking",
+        "catalog.promotions",
+        "hours",
+        "location",
+        "parking",
+        "pricing",
+        "duration",
+        "master",
+        "promotions",
+        "contact",
+        "info",
+    }:
+        return True
+    return source_value in {"truth_gate", "policy_pack", "tool_registry", "llm_policy_core", "policy_core_guard"}
+
+
+def _llm_quality_has_fact_without_evidence(meta: dict | None) -> bool:
+    if not _llm_quality_is_fact_like_reply(meta):
+        return False
+    if not isinstance(meta, dict):
+        return False
+    if bool(meta.get("fact_guard")):
+        return False
+    return not bool(_llm_quality_collect_fact_evidence_refs(meta))
+
+
+def _llm_quality_has_booking_commit_without_required_contact(
+    *,
+    meta: dict | None,
+    conv_meta,
+    tool_signals,
+) -> bool:
+    if not isinstance(meta, dict):
+        return False
+    intent_value = _llm_quality_effective_intent(meta)
+    tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+    if intent_value != "calendar.book_slot" or tool_decision_value != "ok":
+        return False
+    appointment_id = meta.get("appointment_id")
+    signal_map = tool_signals if isinstance(tool_signals, dict) else {}
+    calendar_signal = signal_map.get("calendar")
+    calendar_outcome = ""
+    if isinstance(calendar_signal, dict):
+        calendar_outcome = _llm_quality_normalize_tool_token(calendar_signal.get("outcome"))
+    if not appointment_id and calendar_outcome != "success":
+        return False
+
+    tool_args = meta.get("tool_args") if isinstance(meta.get("tool_args"), dict) else {}
+    slot_state = meta.get("slots") if isinstance(meta.get("slots"), dict) else {}
+    context = conv_meta.get("context") if isinstance(conv_meta, dict) else None
+    booking_state = context.get("booking") if isinstance(context, dict) else None
+    booking_state = booking_state if isinstance(booking_state, dict) else {}
+    profile_sync = meta.get("profile_sync") if isinstance(meta.get("profile_sync"), dict) else {}
+
+    def _has_text(*values) -> bool:
+        return any(isinstance(value, str) and value.strip() for value in values)
+
+    customer_name_source = _llm_quality_normalize_tool_token(meta.get("customer_name_source"))
+    name_present = _has_text(
+        tool_args.get("customer_name"),
+        slot_state.get("name"),
+        booking_state.get("name"),
+    ) or bool(profile_sync.get("name_synced")) or customer_name_source in {
+        "tool_args",
+        "user_profile",
+        "existing",
+    }
+
+    customer_phone_source = _llm_quality_normalize_tool_token(meta.get("customer_phone_source"))
+    phone_present = bool(profile_sync.get("phone_available"))
+    if not phone_present:
+        phone_present = any(
+            _normalize_phone_digits(value)
+            for value in (
+                tool_args.get("customer_phone"),
+                slot_state.get("phone"),
+                booking_state.get("phone"),
+                booking_state.get("customer_phone"),
+            )
+        )
+    if not phone_present:
+        phone_present = customer_phone_source in {"tool_args", "user_profile", "remote_jid", "existing"}
+    if not phone_present:
+        user_phone_source = _llm_quality_normalize_tool_token(meta.get("user_phone_source_for_tool"))
+        phone_present = user_phone_source in {"tool_args", "user_profile", "remote_jid", "existing"}
+
+    return not (name_present and phone_present)
+
+
+def _llm_quality_has_irrelevant_fact(*, meta: dict | None, reasons: list[str]) -> bool:
+    if not _llm_quality_is_fact_like_reply(meta):
+        return False
+    reason_set = {
+        str(reason).strip()
+        for reason in (reasons or [])
+        if isinstance(reason, str) and reason.strip()
+    }
+    return bool(
+        {
+            "expected_info_section_miss",
+            "info_section_miss",
+            "booking_prompt_leak",
+            "mix_info_booking",
+        }
+        & reason_set
+    )
+
+
+def _llm_quality_has_stale_state_leak(reasons: list[str]) -> bool:
+    reason_set = {
+        str(reason).strip()
+        for reason in (reasons or [])
+        if isinstance(reason, str) and reason.strip()
+    }
+    return bool(
+        {
+            "stale_prompt_date_mismatch",
+            "stale_booking_carryover",
+            "canonical_projection_evidence_missing",
+        }
+        & reason_set
+    )
+
+
 def _llm_quality_is_time_like_token(value: str | None) -> bool:
     return _llm_quality_normalize_time_token(value) is not None
 
@@ -3279,8 +3870,21 @@ def _llm_quality_is_weak_oracle_expectation(expectations: dict | None) -> bool:
     has_info_sections = bool(expectations.get("info_sections"))
     has_reply_type = bool(expectations.get("reply_type"))
     has_state = bool(expectations.get("state"))
+    has_meta = bool(expectations.get("meta"))
+    has_meta_any = bool(expectations.get("meta_any"))
+    has_meta_contains = bool(expectations.get("meta_contains"))
+    has_trace = bool(expectations.get("trace_contains"))
     # `expected_reply=true/false` alone is not a strong oracle contract.
-    return not (has_action or has_info_sections or has_reply_type or has_state)
+    return not (
+        has_action
+        or has_info_sections
+        or has_reply_type
+        or has_state
+        or has_meta
+        or has_meta_any
+        or has_meta_contains
+        or has_trace
+    )
 
 
 def _llm_quality_has_timeout_degrade_booking_generic(
@@ -3867,7 +4471,117 @@ def _llm_quality_sanitize_expect_info_sections_by_tags(tag_set, info_sections):
     return []
 
 
+def _llm_quality_normalize_expect_mapping(value):
+    if not isinstance(value, dict):
+        return {}
+    normalized = {}
+    for raw_key, raw_value in value.items():
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            continue
+        key = raw_key.strip()
+        if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
+            normalized[key] = raw_value
+            continue
+        if isinstance(raw_value, list):
+            cleaned = [
+                item
+                for item in raw_value
+                if isinstance(item, (str, int, float, bool)) or item is None
+            ]
+            if cleaned:
+                normalized[key] = cleaned
+    return normalized
+
+
+def _llm_quality_normalize_expect_contains_mapping(value):
+    if not isinstance(value, dict):
+        return {}
+    normalized = {}
+    for raw_key, raw_value in value.items():
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            continue
+        key = raw_key.strip()
+        values = raw_value if isinstance(raw_value, list) else [raw_value]
+        cleaned = [
+            item
+            for item in values
+            if isinstance(item, (str, int, float, bool)) or item is None
+        ]
+        if cleaned:
+            normalized[key] = cleaned
+    return normalized
+
+
+def _llm_quality_normalize_expect_trace_contains(value):
+    if not isinstance(value, list):
+        return []
+    normalized = []
+    for item in value:
+        mapping = _llm_quality_normalize_expect_mapping(item)
+        if mapping:
+            normalized.append(mapping)
+    return normalized
+
+
 def _llm_quality_extract_expectations(turn):
+    def _normalize_mapping(value):
+        helper = globals().get("_llm_quality_normalize_expect_mapping")
+        if callable(helper):
+            return helper(value)
+        if not isinstance(value, dict):
+            return {}
+        normalized = {}
+        for raw_key, raw_value in value.items():
+            if not isinstance(raw_key, str) or not raw_key.strip():
+                continue
+            key = raw_key.strip()
+            if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
+                normalized[key] = raw_value
+                continue
+            if isinstance(raw_value, list):
+                cleaned = [
+                    item
+                    for item in raw_value
+                    if isinstance(item, (str, int, float, bool)) or item is None
+                ]
+                if cleaned:
+                    normalized[key] = cleaned
+        return normalized
+
+    def _normalize_contains_mapping(value):
+        helper = globals().get("_llm_quality_normalize_expect_contains_mapping")
+        if callable(helper):
+            return helper(value)
+        if not isinstance(value, dict):
+            return {}
+        normalized = {}
+        for raw_key, raw_value in value.items():
+            if not isinstance(raw_key, str) or not raw_key.strip():
+                continue
+            key = raw_key.strip()
+            values = raw_value if isinstance(raw_value, list) else [raw_value]
+            cleaned = [
+                item
+                for item in values
+                if isinstance(item, (str, int, float, bool)) or item is None
+            ]
+            if cleaned:
+                normalized[key] = cleaned
+        return normalized
+
+    def _normalize_trace_contains(value):
+        helper = globals().get("_llm_quality_normalize_expect_trace_contains")
+        if callable(helper):
+            return helper(value)
+        if not isinstance(value, list):
+            return []
+        normalized = []
+        for item in value:
+            mapping = _normalize_mapping(item)
+            if mapping:
+                normalized.append(mapping)
+        return normalized
+
     expect = turn.get("expect")
     if not isinstance(expect, dict):
         return {}
@@ -3947,6 +4661,10 @@ def _llm_quality_extract_expectations(turn):
             allow_booking_stall = None
     if not isinstance(allow_booking_stall, bool):
         allow_booking_stall = False
+    meta = _normalize_mapping(expect.get("meta"))
+    meta_any = _normalize_contains_mapping(expect.get("meta_any"))
+    meta_contains = _normalize_contains_mapping(expect.get("meta_contains"))
+    trace_contains = _normalize_trace_contains(expect.get("trace_contains"))
     return {
         "action": action,
         "info_sections": [section.lower() for section in info_sections],
@@ -3954,7 +4672,63 @@ def _llm_quality_extract_expectations(turn):
         "state": state or None,
         "expected_reply": expected_reply,
         "allow_booking_stall": allow_booking_stall,
+        "meta": meta,
+        "meta_any": meta_any,
+        "meta_contains": meta_contains,
+        "trace_contains": trace_contains,
     }
+
+
+def _llm_quality_entry_matches_expected(entry, expected):
+    if not isinstance(entry, dict) or not isinstance(expected, dict):
+        return False
+    for key, value in expected.items():
+        if key.endswith("_any"):
+            actual = entry.get(key[:-4])
+            if not isinstance(value, list) or actual not in value:
+                return False
+            continue
+        if isinstance(value, list):
+            actual = entry.get(key)
+            if not isinstance(actual, list):
+                return False
+            for item in value:
+                if item not in actual:
+                    return False
+            continue
+        if not _llm_quality_value_matches(value, entry.get(key)):
+            return False
+    return True
+
+
+def _llm_quality_meta_matches_expected(meta, expected, expected_any, expected_contains):
+    if not isinstance(meta, dict):
+        return False
+    for key, value in (expected or {}).items():
+        if not _llm_quality_value_matches(value, meta.get(key)):
+            return False
+    for key, values in (expected_any or {}).items():
+        if not isinstance(values, list) or meta.get(key) not in values:
+            return False
+    for key, values in (expected_contains or {}).items():
+        actual = meta.get(key)
+        if not isinstance(values, list) or not isinstance(actual, list):
+            return False
+        for item in values:
+            if item not in actual:
+                return False
+    return True
+
+
+def _llm_quality_trace_has_expected_entries(trace_entries, expected_items):
+    if not expected_items:
+        return True
+    if not isinstance(trace_entries, list):
+        return False
+    for expected in expected_items:
+        if not any(_llm_quality_entry_matches_expected(entry, expected) for entry in trace_entries):
+            return False
+    return True
 
 def _llm_quality_token_to_info_tags(token):
     tags = set()
@@ -4306,18 +5080,23 @@ def _llm_quality_calendar_outcome_from_meta(
     blocked_reason,
     tool_decision,
 ):
-    if blocked_reason:
-        return "failure"
     status_token = _llm_quality_normalize_tool_token(appointment_status)
     decision_token = _llm_quality_normalize_tool_token(tool_decision)
+    blocked_token = _llm_quality_normalize_tool_token(blocked_reason)
     if appointment_id or status_token in LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS:
+        return "success"
+    if decision_token in LLM_QUALITY_CALENDAR_SUCCESS_DECISIONS:
         return "success"
     if decision_token in LLM_QUALITY_CALENDAR_FAILURE_DECISIONS:
         return "failure"
-    if decision_token in LLM_QUALITY_CALENDAR_SUCCESS_DECISIONS:
-        return "success"
+    # `booking_blocked_reason` may describe booking-flow arbitration and
+    # should not override explicit calendar tool outcomes (e.g. not_found).
+    if blocked_token in {"provider_unavailable", "branch_missing", "tool_unavailable"}:
+        return "failure"
     if decision_token:
         return "pending"
+    if blocked_token:
+        return "failure"
     return "pending"
 
 
@@ -4546,6 +5325,151 @@ def _llm_quality_has_catalog_service_choice_info_fallback(
         _llm_quality_normalize_tool_token(meta.get("expected_reply_type")),
     }
     return "service_choice" in expected_tokens
+
+
+def _llm_quality_has_master_query_missing_subject_info_fallback(
+    *,
+    meta,
+    trace_entries,
+    expected_reply_type,
+    actual_expected_reply_type,
+):
+    if not isinstance(meta, dict):
+        return False
+
+    expected_tokens = {
+        _llm_quality_normalize_tool_token(expected_reply_type),
+        _llm_quality_normalize_tool_token(actual_expected_reply_type),
+        _llm_quality_normalize_tool_token(meta.get("expected_reply_type")),
+    }
+    if "service_choice" not in expected_tokens:
+        return False
+
+    intent_value = _llm_quality_effective_intent(meta)
+    if intent_value != "service_clarify":
+        return False
+
+    llm_policy_meta = meta.get("llm_policy_core")
+    if not isinstance(llm_policy_meta, dict):
+        return False
+    payload = llm_policy_meta.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+
+    policy_intent = _llm_quality_normalize_tool_token(llm_policy_meta.get("intent")) or _llm_quality_normalize_tool_token(
+        payload.get("intent")
+    )
+    if policy_intent != "master_query":
+        return False
+
+    subject_kind = _llm_quality_normalize_tool_token(meta.get("subject_kind")) or _llm_quality_normalize_tool_token(
+        llm_policy_meta.get("subject_kind")
+    ) or _llm_quality_normalize_tool_token(payload.get("subject_kind"))
+    resolution_mode = _llm_quality_normalize_tool_token(
+        meta.get("resolution_mode")
+    ) or _llm_quality_normalize_tool_token(llm_policy_meta.get("resolution_mode")) or _llm_quality_normalize_tool_token(
+        payload.get("resolution_mode")
+    )
+    next_question = _llm_quality_normalize_tool_token(
+        llm_policy_meta.get("next_question")
+    ) or _llm_quality_normalize_tool_token(payload.get("next_question"))
+    open_questions = {
+        _llm_quality_normalize_tool_token(item)
+        for item in (llm_policy_meta.get("open_questions") or payload.get("open_questions") or [])
+        if _llm_quality_normalize_tool_token(item)
+    }
+    if subject_kind != "specialist" or resolution_mode != "clarify_missing_subject":
+        return False
+    if next_question != "service" and "service" not in open_questions:
+        return False
+
+    if not isinstance(trace_entries, list):
+        return False
+    saw_policy_trace = False
+    saw_question_trace = False
+    for entry in trace_entries:
+        if not isinstance(entry, dict):
+            continue
+        stage_value = _llm_quality_normalize_tool_token(entry.get("stage"))
+        if stage_value == "llm_policy_core":
+            trace_intent = _llm_quality_normalize_tool_token(entry.get("intent"))
+            trace_subject_kind = _llm_quality_normalize_tool_token(entry.get("subject_kind"))
+            trace_resolution_mode = _llm_quality_normalize_tool_token(entry.get("resolution_mode"))
+            trace_next_question = _llm_quality_normalize_tool_token(entry.get("next_question"))
+            if (
+                trace_intent == "master_query"
+                and trace_subject_kind == "specialist"
+                and trace_resolution_mode == "clarify_missing_subject"
+                and trace_next_question == "service"
+            ):
+                saw_policy_trace = True
+        if stage_value == "question_contract":
+            if _llm_quality_normalize_tool_token(entry.get("missing_slot")) == "service":
+                saw_question_trace = True
+    return saw_policy_trace and saw_question_trace
+
+
+def _llm_quality_has_pricing_service_clarify_info_fallback(
+    *,
+    meta,
+    trace_entries,
+    expected_reply_type,
+    actual_expected_reply_type,
+):
+    if not isinstance(meta, dict):
+        return False
+
+    expected_tokens = {
+        _llm_quality_normalize_tool_token(expected_reply_type),
+        _llm_quality_normalize_tool_token(actual_expected_reply_type),
+        _llm_quality_normalize_tool_token(meta.get("expected_reply_type")),
+    }
+    if "service_choice" not in expected_tokens:
+        return False
+
+    intent_value = _llm_quality_effective_intent(meta)
+    if intent_value != "service_clarify":
+        return False
+
+    llm_policy_meta = meta.get("llm_policy_core")
+    if not isinstance(llm_policy_meta, dict):
+        return False
+    payload = llm_policy_meta.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+
+    capability = _llm_quality_normalize_tool_token(
+        meta.get("capability")
+    ) or _llm_quality_normalize_tool_token(
+        llm_policy_meta.get("capability")
+    ) or _llm_quality_normalize_tool_token(payload.get("capability"))
+    if capability != "pricing":
+        return False
+
+    if not isinstance(trace_entries, list):
+        return False
+    saw_interrupt_trace = False
+    saw_question_trace = False
+    for entry in trace_entries:
+        if not isinstance(entry, dict):
+            continue
+        stage_value = _llm_quality_normalize_tool_token(entry.get("stage"))
+        if stage_value == "policy_interrupt_contract":
+            trace_reason_code = _llm_quality_normalize_tool_token(entry.get("reason_code"))
+            trace_info_sections = {
+                _llm_quality_normalize_tool_token(item)
+                for item in (entry.get("info_sections") or [])
+                if _llm_quality_normalize_tool_token(item)
+            }
+            if (
+                trace_reason_code == "policy_collect_info_interrupt_owner"
+                and "pricing" in trace_info_sections
+            ):
+                saw_interrupt_trace = True
+        if stage_value == "question_contract":
+            if _llm_quality_normalize_tool_token(entry.get("missing_slot")) == "service":
+                saw_question_trace = True
+    return saw_interrupt_trace and saw_question_trace
 
 
 def _llm_quality_expected_response(state, meta):
@@ -4883,7 +5807,7 @@ def _llm_quality_scenario_timeout(args, *, count):
     return max(base_timeout, estimated_budget)
 
 
-def _llm_quality_generate_batch(args, *, count, seed):
+def _llm_quality_generate_batch(args, *, count, seed, scenario_context_path=None):
     scenario_timeout = _llm_quality_scenario_timeout(args, count=count)
     script_path = _llm_quality_dialog_script()
     cmd = [
@@ -4908,6 +5832,12 @@ def _llm_quality_generate_batch(args, *, count, seed):
         cmd += ["--coverage", str(args.scenario_coverage)]
     if args.include_media:
         cmd.append("--include-media")
+    if getattr(args, "client_slug", None):
+        cmd += ["--client-slug", str(args.client_slug)]
+    if getattr(args, "branch_slug", None):
+        cmd += ["--branch-slug", str(args.branch_slug)]
+    if scenario_context_path:
+        cmd += ["--scenario-context-file", str(scenario_context_path)]
     if seed is not None:
         cmd += ["--seed", str(seed)]
     if args.mode == "llm":
@@ -5050,6 +5980,167 @@ def _llm_quality_top_failure_turns(failures, *, limit=3, sample_limit=3):
             )
     ordered = sorted(rows.values(), key=lambda item: (-int(item.get("count") or 0), item.get("reason")))
     return ordered[:limit]
+
+
+def _llm_quality_failure_family_descriptor(reason, record):
+    reason_token = str(reason or "").strip()
+    category = LLM_QUALITY_REASON_TAXONOMY.get(reason_token, "unknown")
+    record = record if isinstance(record, dict) else {}
+    record_type = str(record.get("type") or "unknown").strip().lower() or "unknown"
+    trace_stage = str(record.get("last_trace_stage") or "").strip().lower() or None
+    action = str(record.get("action") or "").strip().lower() or None
+    state = (
+        str(
+            record.get("conversation_state")
+            or record.get("state_after")
+            or record.get("expected_state")
+            or ""
+        )
+        .strip()
+        .lower()
+        or None
+    )
+    family_tokens = [
+        f"reason:{reason_token}",
+        f"type:{record_type}",
+        f"category:{category}",
+    ]
+    label_tokens = [LLM_QUALITY_REASON_LABELS.get(reason_token, reason_token)]
+    if trace_stage:
+        family_tokens.append(f"stage:{trace_stage}")
+        label_tokens.append(f"stage={trace_stage}")
+    elif action:
+        family_tokens.append(f"action:{action}")
+        label_tokens.append(f"action={action}")
+    if state:
+        family_tokens.append(f"state:{state}")
+        label_tokens.append(f"state={state}")
+    family_id = "|".join(family_tokens)
+    return {
+        "family_id": family_id,
+        "reason": reason_token,
+        "category": category,
+        "record_type": record_type,
+        "trace_stage": trace_stage,
+        "action": action,
+        "state": state,
+        "label": "; ".join(label_tokens),
+    }
+
+
+def _llm_quality_failure_family_sample(record):
+    if not isinstance(record, dict):
+        return {}
+    return {
+        "message_id": record.get("message_id"),
+        "dialog_id": record.get("dialog_id"),
+        "dialog_index": record.get("dialog_index"),
+        "turn_index": record.get("turn_index"),
+        "conversation_id": record.get("conversation_id"),
+        "handover_id": record.get("handover_id"),
+    }
+
+
+def _llm_quality_record_failure_family(failure_families, reason, record):
+    if not isinstance(failure_families, dict):
+        return
+    descriptor = _llm_quality_failure_family_descriptor(reason, record)
+    family_id = descriptor.get("family_id")
+    if not family_id:
+        return
+    row = failure_families.setdefault(
+        family_id,
+        {
+            **descriptor,
+            "count": 0,
+            "sample_turns": [],
+        },
+    )
+    row["count"] = int(row.get("count") or 0) + 1
+    samples = row.setdefault("sample_turns", [])
+    sample = _llm_quality_failure_family_sample(record)
+    if sample and len(samples) < LLM_QUALITY_FAILURE_FAMILY_SAMPLE_LIMIT:
+        sample_key = json.dumps(sample, ensure_ascii=False, sort_keys=True)
+        existing = {
+            json.dumps(item, ensure_ascii=False, sort_keys=True)
+            for item in samples
+            if isinstance(item, dict)
+        }
+        if sample_key not in existing:
+            samples.append(sample)
+
+
+def _llm_quality_build_failure_family_report(failure_families, *, limit=None):
+    if not isinstance(failure_families, dict):
+        return {"family_count": 0, "top_families": [], "families": []}
+    rows = []
+    for family_id, payload in failure_families.items():
+        if not isinstance(payload, dict):
+            continue
+        row = dict(payload)
+        row["family_id"] = str(row.get("family_id") or family_id)
+        row["count"] = int(row.get("count") or 0)
+        row["next_step"] = _llm_quality_next_step_for_reason(row.get("reason"))
+        rows.append(row)
+    rows.sort(
+        key=lambda item: (
+            -int(item.get("count") or 0),
+            str(item.get("reason") or ""),
+            str(item.get("family_id") or ""),
+        )
+    )
+    top_limit = (
+        max(1, int(limit))
+        if isinstance(limit, int) and limit > 0
+        else LLM_QUALITY_FAILURE_FAMILY_LIMIT
+    )
+    return {
+        "family_count": len(rows),
+        "top_families": rows[:top_limit],
+        "families": rows,
+    }
+
+
+def _llm_quality_aggregate_failure_families(
+    aggregate,
+    families,
+    *,
+    client_slug,
+    branch_slug,
+    run_id,
+):
+    if not isinstance(aggregate, dict) or not isinstance(families, list):
+        return
+    row_ref = {
+        "client_slug": client_slug,
+        "branch_slug": branch_slug,
+        "run_id": run_id,
+    }
+    for family in families:
+        if not isinstance(family, dict):
+            continue
+        family_id = str(family.get("family_id") or "").strip()
+        if not family_id:
+            continue
+        entry = aggregate.setdefault(
+            family_id,
+            {
+                "family_id": family_id,
+                "reason": family.get("reason"),
+                "category": family.get("category"),
+                "record_type": family.get("record_type"),
+                "trace_stage": family.get("trace_stage"),
+                "action": family.get("action"),
+                "state": family.get("state"),
+                "label": family.get("label"),
+                "count": 0,
+                "rows": [],
+            },
+        )
+        entry["count"] = int(entry.get("count") or 0) + int(family.get("count") or 0)
+        rows = entry.setdefault("rows", [])
+        if row_ref not in rows:
+            rows.append(dict(row_ref))
 
 
 def _llm_quality_collect_override_reason_codes(meta):
@@ -5780,6 +6871,7 @@ def _llm_quality_build_run_economy_status(
     baseline_summary,
     reset_before_dialog,
     allow_no_code_delta,
+    allow_non_canonical_lock_retry=False,
     jid_mode=None,
     runtime_commit=None,
     judge_mode=None,
@@ -5811,6 +6903,34 @@ def _llm_quality_build_run_economy_status(
         str(previous_lock_payload.get("lock_fingerprint") or "").strip() or None
     )
     previous_lock_canonical = previous_lock_payload.get("canonical_valid")
+    previous_lock_stop_reason = (
+        str(previous_lock_payload.get("stop_reason") or "").strip().casefold() or None
+    )
+    previous_lock_stop_reason_process_allowlist = {
+        "in_progress",
+        "run_incomplete",
+        "early_failure",
+        "system_exit",
+        "keyboard_interrupt",
+        "invalid_preflight",
+        "invalid_runtime_fingerprint_preflight",
+        "invalid_webhook_secret_preflight",
+        "invalid_openai_preflight",
+        "invalid_scenario_contract_preflight",
+        "invalid_run_economy_preflight",
+        "invalid_quality_constant_preflight",
+        "invalid_workaround_register_preflight",
+        "stop_requested",
+        "signal_2",
+        "signal_15",
+    }
+    non_canonical_lock_retry_eligible = bool(
+        previous_lock_fingerprint_clean
+        and previous_lock_canonical is False
+        and previous_lock_stop_reason
+        and previous_lock_stop_reason in previous_lock_stop_reason_process_allowlist
+    )
+    non_canonical_lock_retry_applied = False
     previous_lock_run_id = str(previous_lock_payload.get("run_id") or "").strip() or None
     if mode == "off":
         return {
@@ -5836,7 +6956,11 @@ def _llm_quality_build_run_economy_status(
             ),
             "previous_lock_fingerprint": previous_lock_fingerprint_clean,
             "previous_lock_canonical": previous_lock_canonical,
+            "previous_lock_stop_reason": previous_lock_stop_reason,
             "previous_lock_run_id": previous_lock_run_id,
+            "allow_non_canonical_lock_retry": bool(allow_non_canonical_lock_retry),
+            "non_canonical_lock_retry_eligible": non_canonical_lock_retry_eligible,
+            "non_canonical_lock_retry_applied": False,
             "baseline_checked": bool(
                 isinstance(baseline_preflight, dict) and baseline_preflight.get("checked")
             ),
@@ -5988,7 +7112,12 @@ def _llm_quality_build_run_economy_status(
         and previous_lock_canonical is False
         and not allow_no_code_delta
     ):
-        reasons.append("lock_fingerprint_unchanged_after_non_canonical")
+        if bool(allow_non_canonical_lock_retry) and non_canonical_lock_retry_eligible:
+            non_canonical_lock_retry_applied = True
+        else:
+            reasons.append("lock_fingerprint_unchanged_after_non_canonical")
+            if bool(allow_non_canonical_lock_retry) and not non_canonical_lock_retry_eligible:
+                reasons.append("lock_retry_override_not_eligible")
     elif not non_doc_files and not allow_no_code_delta:
         reasons.append("full_run_without_code_delta")
 
@@ -6015,7 +7144,11 @@ def _llm_quality_build_run_economy_status(
         "previous_replay_fingerprint": previous_replay_fingerprint_clean,
         "previous_lock_fingerprint": previous_lock_fingerprint_clean,
         "previous_lock_canonical": previous_lock_canonical,
+        "previous_lock_stop_reason": previous_lock_stop_reason,
         "previous_lock_run_id": previous_lock_run_id,
+        "allow_non_canonical_lock_retry": bool(allow_non_canonical_lock_retry),
+        "non_canonical_lock_retry_eligible": non_canonical_lock_retry_eligible,
+        "non_canonical_lock_retry_applied": non_canonical_lock_retry_applied,
         "baseline_checked": baseline_checked,
         "baseline_canonical": baseline_canonical,
         "baseline_canonical_reason": baseline_canonical_reason,
@@ -6042,8 +7175,15 @@ def _llm_quality_build_quality_constant_status(
     allow_incomplete_run_artifacts,
     allow_judge_off,
     allow_no_code_delta,
+    allow_non_canonical_lock_retry=False,
     skip_outbox,
     update_baseline,
+    timeout_profile,
+    timeout,
+    poll_timeout,
+    trace_timeout,
+    max_post_llm_semantic_rewrite_rate=0.0,
+    max_keyword_override_rate=0.0,
 ):
     normalized_mode = str(mode or "off").strip().casefold()
     if normalized_mode not in {"off", "warn", "block"}:
@@ -6075,6 +7215,17 @@ def _llm_quality_build_quality_constant_status(
     required_coverage = ("booking", "info", "interrupt", "handoff")
     missing_coverage = [token for token in required_coverage if token not in coverage_token_set]
     judge_enabled = _llm_quality_is_judge_mode_enabled(judge_mode)
+    timeout_profile_value = (str(timeout_profile or "realistic").strip().casefold() or "realistic")
+    max_post_rewrite_value = None
+    max_keyword_override_value = None
+    try:
+        max_post_rewrite_value = float(max_post_llm_semantic_rewrite_rate)
+    except (TypeError, ValueError):
+        max_post_rewrite_value = None
+    try:
+        max_keyword_override_value = float(max_keyword_override_rate)
+    except (TypeError, ValueError):
+        max_keyword_override_value = None
     reasons = []
     is_replay = bool(scenarios_file)
 
@@ -6107,8 +7258,42 @@ def _llm_quality_build_quality_constant_status(
             reasons.append("acceptance_disallows_allow_judge_off")
         if bool(allow_no_code_delta):
             reasons.append("acceptance_disallows_allow_no_code_delta")
+        if bool(allow_non_canonical_lock_retry) and is_replay:
+            reasons.append("acceptance_non_canonical_lock_retry_requires_lock_mode")
         if bool(skip_outbox):
             reasons.append("acceptance_disallows_skip_outbox")
+        if timeout_profile_value != "realistic":
+            reasons.append("acceptance_requires_timeout_profile_realistic")
+        if max_post_rewrite_value is None:
+            reasons.append("acceptance_requires_max_post_llm_semantic_rewrite_rate")
+        elif max_post_rewrite_value > 0.0:
+            reasons.append("acceptance_requires_max_post_llm_semantic_rewrite_rate_zero")
+        if max_keyword_override_value is None:
+            reasons.append("acceptance_requires_max_keyword_override_rate")
+        elif max_keyword_override_value > 0.0:
+            reasons.append("acceptance_requires_max_keyword_override_rate_zero")
+        timeout_profiles = globals().get("LLM_QUALITY_TIMEOUT_PROFILES") or {}
+        realistic_profile = timeout_profiles.get("realistic") or {
+            "timeout": 30.0,
+            "poll_timeout": 25.0,
+            "trace_timeout": 25.0,
+        }
+        timeout_floor_fields = {
+            "timeout": timeout,
+            "poll_timeout": poll_timeout,
+            "trace_timeout": trace_timeout,
+        }
+        for field, provided_value in timeout_floor_fields.items():
+            min_value = realistic_profile.get(field)
+            if min_value is None or provided_value is None:
+                continue
+            try:
+                provided_numeric = float(provided_value)
+                min_numeric = float(min_value)
+            except (TypeError, ValueError):
+                continue
+            if provided_numeric < min_numeric:
+                reasons.append(f"acceptance_requires_{field}_gte_{min_numeric:g}")
     elif bool(update_baseline):
         reasons.append("dev_lane_disallows_update_baseline")
 
@@ -6126,6 +7311,10 @@ def _llm_quality_build_quality_constant_status(
         "required_coverage": list(required_coverage),
         "missing_coverage": missing_coverage,
         "judge_enabled": judge_enabled,
+        "timeout_profile": timeout_profile_value,
+        "allow_non_canonical_lock_retry": bool(allow_non_canonical_lock_retry),
+        "max_post_llm_semantic_rewrite_rate": max_post_rewrite_value,
+        "max_keyword_override_rate": max_keyword_override_value,
     }
 
 
@@ -6594,6 +7783,32 @@ def _llm_quality_sync_manual_audit_summary(
     quality_status["manual_audit_status"] = current_status
     quality_status["manual_audit_path"] = resolved_manual_audit_path
     quality_status["manual_audit_command"] = command
+
+    artifact_integrity = _llm_quality_collect_artifact_integrity(normalized_dir)
+    summary["artifact_integrity"] = artifact_integrity
+    quality_status["artifact_integrity_valid"] = bool(artifact_integrity.get("valid"))
+    quality_status["artifact_integrity_missing"] = list(artifact_integrity.get("missing") or [])
+
+    evidence_handoff = _llm_quality_collect_evidence_handoff_status(
+        output_dir=normalized_dir,
+        summary=summary,
+        artifact_integrity=artifact_integrity,
+    )
+    summary["evidence_handoff"] = evidence_handoff
+    quality_status["evidence_handoff_valid"] = bool(evidence_handoff.get("valid"))
+    quality_status["evidence_handoff_reasons"] = list(evidence_handoff.get("reasons") or [])
+
+    governance_closure = _llm_quality_build_governance_closure_status(
+        output_dir=normalized_dir,
+        summary=summary,
+    )
+    summary["governance_closure"] = governance_closure
+    quality_status["governance_closure_valid"] = bool(governance_closure.get("valid"))
+    quality_status["governance_closure_enforced"] = bool(governance_closure.get("enforced"))
+    quality_status["governance_closure_reasons"] = list(governance_closure.get("reasons") or [])
+    quality_status["governance_closure_evidence_paths"] = dict(
+        governance_closure.get("evidence_paths") or {}
+    )
     summary["quality_status"] = quality_status
 
     after = json.dumps(summary, ensure_ascii=False, sort_keys=True)
@@ -7640,20 +8855,25 @@ def _llm_quality_next_step_for_reason(reason):
         "slot_date_resolution_miss": "verify relative-date normalization and carryover into calendar.list_slots start_at/date",
         "slot_availability_contradiction": "align availability claim with rendered slot list from tool outcome",
         "fabricated_conflict_time": "ensure conflict text uses user-requested time only (no inferred/hallucinated clock)",
+        "booking_transition_evidence_missing": "ensure single transition-owner emits profile_sync + phone-source metadata on calendar.book_slot:ok",
         "booking_prompt_leak": "remove stale booking prompt append from FACT/info responses in booking interrupt flow",
         "stale_prompt_date_mismatch": "ensure follow-up prompt guard resets stale datetime and rewrites expected_reply reason deterministically",
         "mix_info_booking": "split info answer and booking prompt into separate turns; keep FACT reply booking-neutral",
         "stale_booking_carryover": "suppress booking sidecar append for info/promo FACT replies while preserving expected_reply state",
+        "canonical_projection_evidence_missing": "emit projection_source + canonical_state_owner whenever service carryover is projected into the turn",
+        "resolved_referent_trace_missing": "emit referent_resolver trace + meta with resolved_referent/referent_source and chosen capability_resolution_mode for semantic referent follow-ups",
         "timeout_degrade_booking_generic": "replace timeout generic clarify with booking-safe slot prompt when booking context is active",
         "run_economy_violation": "avoid full/replay spend without code delta + baseline; use lock/replay loop with reset-before-dialog",
         "run_completion_gap": "stop run as INVALID and rerun from lock scenarios until all expected turns are executed",
         "lock_fingerprint_unchanged_after_non_canonical": "apply root-cause fix that changes lock fingerprint (or explicit forensic override) before next lock",
         "trace_response_mismatch": "fail run as INVALID and inspect trace write path for missing inbound records",
-        "weak_oracle_turn": "add at least one explicit expectation per scenario turn (action/reply_type/info/state/reply)",
+        "weak_oracle_turn": "add at least one explicit expectation per scenario turn (action/reply_type/info/state/meta/trace/reply)",
         "incomplete_run_artifact": "discard incomplete run from baseline/comparison and regenerate with full summary+brief artifacts",
         "judge_fail": "review semantic mismatch in judge summary and convert to deterministic guard/test",
         "decision_meta_missing": "check early-return traces and meta write on this path",
         "decision_trace_missing": "verify trace retention for early returns and pending paths",
+        "expected_meta_mismatch": "align turn.expect.meta(_any/_contains) with canonical decision_meta contract for this outcome family",
+        "expected_trace_miss": "align turn.expect.trace_contains with the required runtime trace evidence for this outcome family",
         "expected_reply_type_mismatch": "compare expected_reply_type in context vs turn.expect.reply_type",
         "unknown_state": "inspect conversation.state transitions before/after handoff",
         "handover_missing": "check handoff row creation when state is manager_active",
@@ -7737,6 +8957,7 @@ def _llm_quality_write_brief(path, summary):
     counts = metrics.get("counts") or {}
     top_failures = (summary or {}).get("top_failures") or []
     top_failure_turns = (summary or {}).get("top_failure_turns") or []
+    failure_families = ((summary or {}).get("failure_families") or {}).get("top_families") or []
     hq1_bad_turn_count = int((summary or {}).get("hq1_bad_turn_count") or 0)
     hq1_class_counts = (summary or {}).get("hq1_class_counts") or {}
     hq1_nonzero = {k: v for k, v in hq1_class_counts.items() if int(v or 0) > 0}
@@ -7772,6 +8993,7 @@ def _llm_quality_write_brief(path, summary):
         f"- artifacts_valid: `{artifact_integrity.get('valid')}`",
         f"- governance_closure_valid: `{governance_closure.get('valid')}`",
         f"- governance_closure_reasons: `{governance_closure.get('reasons')}`",
+        f"- failure_families_path: `{summary.get('failure_families_path')}`",
     ]
     if scenario_source.get("path"):
         lines.append(f"- scenario_source_path: `{scenario_source.get('path')}`")
@@ -7803,6 +9025,19 @@ def _llm_quality_write_brief(path, summary):
             next_step = _llm_quality_next_step_for_reason(row.get("reason"))
             lines.append(
                 f"- `{row.get('reason')}` x{row.get('count')} ({row.get('category')}): {row.get('label')}; next: {next_step}."
+            )
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Failure Families"])
+    if failure_families:
+        for row in failure_families:
+            samples_blob = ",".join(
+                str((sample or {}).get("message_id") or (sample or {}).get("conversation_id") or "n/a")
+                for sample in (row.get("sample_turns") or [])
+                if isinstance(sample, dict)
+            ) or "n/a"
+            lines.append(
+                f"- `{row.get('family_id')}` x{row.get('count')} ({row.get('category')}): {row.get('label')}; samples: {samples_blob}; next: {row.get('next_step')}."
             )
     else:
         lines.append("- none")
@@ -8030,6 +9265,10 @@ def _llm_quality_build_command_from_args(
         getattr(args, "scenario_governance_registry", None),
     )
     add_bool("--allow-no-code-delta", getattr(args, "allow_no_code_delta", False))
+    add_bool(
+        "--allow-non-canonical-lock-retry",
+        getattr(args, "allow_non_canonical_lock_retry", False),
+    )
     add("--judge-mode", getattr(args, "judge_mode", None))
     add("--judge-sample", getattr(args, "judge_sample", None))
     add("--judge-model", getattr(args, "judge_model", None))
@@ -8141,15 +9380,16 @@ def _llm_quality_write_run_manifest(
         run_economy_status = summary.get("run_economy") if isinstance(summary.get("run_economy"), dict) else {}
     if not isinstance(runtime_preflight, dict):
         runtime_preflight = summary.get("runtime_preflight") if isinstance(summary.get("runtime_preflight"), dict) else {}
-    artifact_integrity = summary.get("artifact_integrity") if isinstance(summary.get("artifact_integrity"), dict) else _llm_quality_collect_artifact_integrity(output_dir)
-    evidence_handoff = (
-        summary.get("evidence_handoff")
-        if isinstance(summary.get("evidence_handoff"), dict)
-        else _llm_quality_collect_evidence_handoff_status(
-            output_dir=output_dir,
-            summary=summary,
-            artifact_integrity=artifact_integrity,
-        )
+    artifact_integrity = (
+        summary.get("artifact_integrity")
+        if isinstance(summary.get("artifact_integrity"), dict)
+        else _llm_quality_collect_artifact_integrity(output_dir)
+    )
+    # Recompute from filesystem to avoid stale summary snapshots after manual-audit sync.
+    evidence_handoff = _llm_quality_collect_evidence_handoff_status(
+        output_dir=output_dir,
+        summary=summary,
+        artifact_integrity=artifact_integrity,
     )
     mode, mode_source = _llm_quality_manifest_mode(args, run_id, run_economy_status)
     manual_audit = summary.get("manual_audit") if isinstance(summary.get("manual_audit"), dict) else {}
@@ -8361,14 +9601,12 @@ def _llm_quality_build_governance_closure_status(*, output_dir, summary=None):
         if isinstance(summary_payload.get("artifact_integrity"), dict)
         else _llm_quality_collect_artifact_integrity(normalized_dir)
     )
-    evidence_handoff = (
-        summary_payload.get("evidence_handoff")
-        if isinstance(summary_payload.get("evidence_handoff"), dict)
-        else _llm_quality_collect_evidence_handoff_status(
-            output_dir=normalized_dir,
-            summary=summary_payload,
-            artifact_integrity=artifact_integrity,
-        )
+    # Always recompute from filesystem so governance closure follows
+    # post-run manual-audit updates.
+    evidence_handoff = _llm_quality_collect_evidence_handoff_status(
+        output_dir=normalized_dir,
+        summary=summary_payload,
+        artifact_integrity=artifact_integrity,
     )
 
     gate_specs = (
@@ -10101,6 +11339,61 @@ def _llm_quality_compute_delta(current, baseline):
         return delta
     return None
 
+
+def _llm_quality_compute_invariant_metrics(*, failure_counts, stats, rewrite_governance):
+    failure_counts = failure_counts if isinstance(failure_counts, dict) else {}
+    stats = stats if isinstance(stats, dict) else {}
+    rewrite_governance = rewrite_governance if isinstance(rewrite_governance, dict) else {}
+
+    turns = max(int(stats.get("turns") or 0), 0)
+    policy_core_turns = max(
+        int(rewrite_governance.get("policy_core_turns") or 0) or turns,
+        1,
+    )
+
+    counts = {
+        "fact_without_evidence": int(failure_counts.get("fact_without_evidence") or 0),
+        "irrelevant_fact": int(failure_counts.get("irrelevant_fact") or 0),
+        "booking_commit_without_required_contact": int(
+            failure_counts.get("booking_commit_without_required_contact") or 0
+        ),
+        "semantic_override": int(rewrite_governance.get("rewrite_budget_turns") or 0),
+        "stale_state_leak": int(failure_counts.get("stale_state_leak") or 0),
+    }
+
+    rates = {
+        "fact_without_evidence_rate": round(
+            counts["fact_without_evidence"] / max(turns, 1),
+            4,
+        )
+        if turns
+        else None,
+        "irrelevant_fact_rate": round(
+            counts["irrelevant_fact"] / max(turns, 1),
+            4,
+        )
+        if turns
+        else None,
+        "booking_commit_without_required_contact": round(
+            counts["booking_commit_without_required_contact"] / max(turns, 1),
+            4,
+        )
+        if turns
+        else None,
+        "semantic_override_rate": round(
+            counts["semantic_override"] / max(policy_core_turns, 1),
+            4,
+        ),
+        "stale_state_leak_rate": round(
+            counts["stale_state_leak"] / max(turns, 1),
+            4,
+        )
+        if turns
+        else None,
+    }
+    return {"counts": counts, "rates": rates}
+
+
 def _llm_quality_check_thresholds(metrics):
     rates = (metrics or {}).get("rates") or {}
     values = {
@@ -10113,6 +11406,13 @@ def _llm_quality_check_thresholds(metrics):
         "degraded_fallback_rate": rates.get("degraded_fallback_rate"),
         "booking_slot_progress_rate": rates.get("booking_slot_progress_rate"),
         "handoff_correct_rate": rates.get("handoff_correct_rate"),
+        "fact_without_evidence_rate": rates.get("fact_without_evidence_rate"),
+        "irrelevant_fact_rate": rates.get("irrelevant_fact_rate"),
+        "booking_commit_without_required_contact": rates.get(
+            "booking_commit_without_required_contact"
+        ),
+        "semantic_override_rate": rates.get("semantic_override_rate"),
+        "stale_state_leak_rate": rates.get("stale_state_leak_rate"),
     }
     results = {}
     breaches = []
@@ -10303,6 +11603,10 @@ def _llm_quality_evaluate_turn(
     bot_response_inferred_duplicate_ack=False,
     meta_error=None,
     webhook_error=None,
+    expected_meta=None,
+    expected_meta_any=None,
+    expected_meta_contains=None,
+    expected_trace_contains=None,
 ):
     reasons = []
     meta_action = (meta or {}).get("action") if isinstance(meta, dict) else None
@@ -10384,6 +11688,22 @@ def _llm_quality_evaluate_turn(
         expected_reply_type=expected_reply_type,
         actual_expected_reply_type=actual_expected_reply_type,
     )
+    master_query_missing_subject_info_fallback = (
+        _llm_quality_has_master_query_missing_subject_info_fallback(
+            meta=meta,
+            trace_entries=trace_entries,
+            expected_reply_type=expected_reply_type,
+            actual_expected_reply_type=actual_expected_reply_type,
+        )
+    )
+    pricing_service_clarify_info_fallback = (
+        _llm_quality_has_pricing_service_clarify_info_fallback(
+            meta=meta,
+            trace_entries=trace_entries,
+            expected_reply_type=expected_reply_type,
+            actual_expected_reply_type=actual_expected_reply_type,
+        )
+    )
     if expected_info_sections:
         skip_expected_info_check = (
             state in {"pending", "manager_active"}
@@ -10402,8 +11722,27 @@ def _llm_quality_evaluate_turn(
                 expected_answered = True
             if not expected_answered and catalog_service_choice_info_fallback:
                 expected_answered = True
+            if not expected_answered and master_query_missing_subject_info_fallback:
+                expected_answered = True
+            if not expected_answered and pricing_service_clarify_info_fallback:
+                expected_answered = True
         if not expected_answered:
             reasons.append("expected_info_section_miss")
+    if (
+        (expected_meta or expected_meta_any or expected_meta_contains)
+        and not _llm_quality_meta_matches_expected(
+            meta,
+            expected_meta,
+            expected_meta_any,
+            expected_meta_contains,
+        )
+    ):
+        reasons.append("expected_meta_mismatch")
+    if expected_trace_contains and not _llm_quality_trace_has_expected_entries(
+        trace_entries,
+        expected_trace_contains,
+    ):
+        reasons.append("expected_trace_miss")
     if _llm_quality_is_unobserved_turn(
         expected_response=expected_response,
         outbox_text=outbox_text,
@@ -10464,6 +11803,8 @@ def _llm_quality_evaluate_turn(
         and state not in {"pending", "manager_active"}
         and not _llm_quality_has_general_consult_fallback(meta, trace_entries)
         and not catalog_service_choice_info_fallback
+        and not master_query_missing_subject_info_fallback
+        and not pricing_service_clarify_info_fallback
     ):
         reasons.append("info_section_miss")
     booking_stall_ignored = False
@@ -10577,6 +11918,39 @@ def _llm_quality_evaluate_turn(
             not requested_time_from_meta or claim_time != requested_time_from_meta
         ):
             reasons.append("fabricated_conflict_time")
+    if intent_value == "calendar.book_slot" and tool_decision_value == "ok":
+        transition_owner_value = _llm_quality_normalize_tool_token(
+            (meta or {}).get("transition_owner") if isinstance(meta, dict) else None
+        )
+        user_phone_source_for_tool = _llm_quality_normalize_tool_token(
+            (meta or {}).get("user_phone_source_for_tool") if isinstance(meta, dict) else None
+        )
+        profile_sync_meta = (meta or {}).get("profile_sync") if isinstance(meta, dict) else None
+        profile_sync_phone_source = _llm_quality_normalize_tool_token(
+            profile_sync_meta.get("phone_source") if isinstance(profile_sync_meta, dict) else None
+        )
+        profile_sync_phone_available = (
+            profile_sync_meta.get("phone_available")
+            if isinstance(profile_sync_meta, dict)
+            else None
+        )
+        missing_transition_evidence = bool(
+            transition_owner_value != "booking_profile_single_writer_v1"
+            or user_phone_source_for_tool
+            not in {"tool_args", "user_profile", "remote_jid", "missing"}
+            or not isinstance(profile_sync_meta, dict)
+            or profile_sync_phone_source
+            not in {"existing", "tool_args", "user_profile", "remote_jid", "missing"}
+            or not isinstance(profile_sync_phone_available, bool)
+        )
+        if missing_transition_evidence:
+            reasons.append("booking_transition_evidence_missing")
+        if _llm_quality_has_booking_commit_without_required_contact(
+            meta=meta if isinstance(meta, dict) else None,
+            conv_meta=conv_meta,
+            tool_signals=tool_signals,
+        ):
+            reasons.append("booking_commit_without_required_contact")
 
     if _llm_quality_has_booking_prompt_leak(meta=meta, outbox_text=outbox_text):
         reasons.append("booking_prompt_leak")
@@ -10589,6 +11963,25 @@ def _llm_quality_evaluate_turn(
         reasons.append("mix_info_booking")
     if _llm_quality_has_stale_booking_carryover(meta=meta, outbox_text=outbox_text):
         reasons.append("stale_booking_carryover")
+    if _llm_quality_has_missing_canonical_service_projection(
+        meta=meta if isinstance(meta, dict) else None,
+        trace_entries=trace_entries if isinstance(trace_entries, list) else None,
+    ):
+        reasons.append("canonical_projection_evidence_missing")
+    if _llm_quality_has_missing_resolved_referent_trace(
+        meta=meta if isinstance(meta, dict) else None,
+        trace_entries=trace_entries if isinstance(trace_entries, list) else None,
+    ):
+        reasons.append("resolved_referent_trace_missing")
+    if _llm_quality_has_fact_without_evidence(meta if isinstance(meta, dict) else None):
+        reasons.append("fact_without_evidence")
+    if _llm_quality_has_irrelevant_fact(
+        meta=meta if isinstance(meta, dict) else None,
+        reasons=reasons,
+    ):
+        reasons.append("irrelevant_fact")
+    if _llm_quality_has_stale_state_leak(reasons):
+        reasons.append("stale_state_leak")
     if _llm_quality_has_timeout_degrade_booking_generic(
         meta=meta,
         booking_active=booking_active,
@@ -11261,7 +12654,7 @@ def _parse_llm_quality_args(argv):
     )
     parser.add_argument(
         "--chain-step",
-        choices=["lock", "replay", "full"],
+        choices=["lock", "replay", "canary", "full"],
         default=None,
         help="Acceptance chain step token issued by quality_chain_controller.sh.",
     )
@@ -11300,7 +12693,7 @@ def _parse_llm_quality_args(argv):
     parser.add_argument(
         "--max-post-llm-semantic-rewrite-rate",
         type=float,
-        default=0.02,
+        default=0.0,
         help="Blocking budget for post-LLM semantic rewrites (fraction of policy-core turns).",
     )
     parser.add_argument(
@@ -11425,6 +12818,14 @@ def _parse_llm_quality_args(argv):
         help="Allow full run with doc-only/empty diff (debug-only override).",
     )
     parser.add_argument(
+        "--allow-non-canonical-lock-retry",
+        action="store_true",
+        help=(
+            "Allow lock rerun with unchanged fingerprint only when previous lock was non-canonical "
+            "due to process/preflight stop reason."
+        ),
+    )
+    parser.add_argument(
         "--judge-mode", choices=["off", "sample", "all", "critical"], default="off"
     )
     parser.add_argument("--judge-sample", type=float, default=0.1)
@@ -11541,6 +12942,14 @@ def _parse_llm_quality_gates_args(argv):
         help="Allow empty/doc-only diff for full-run run-economy check.",
     )
     parser.add_argument(
+        "--allow-non-canonical-lock-retry",
+        action="store_true",
+        help=(
+            "Allow lock rerun with unchanged fingerprint only when previous lock was non-canonical "
+            "due to process/preflight stop reason."
+        ),
+    )
+    parser.add_argument(
         "--quality-constant-gate",
         choices=["off", "warn", "block"],
         default=os.environ.get("LLM_QUALITY_CONSTANT_GATE", "block"),
@@ -11558,6 +12967,15 @@ def _parse_llm_quality_gates_args(argv):
         default="llm",
         help="Run mode token used by quality-constant gate.",
     )
+    parser.add_argument(
+        "--timeout-profile",
+        choices=sorted(LLM_QUALITY_TIMEOUT_PROFILES.keys()),
+        default=os.environ.get("LLM_QUALITY_TIMEOUT_PROFILE", "realistic"),
+        help="Timeout profile token used by quality-constant gate.",
+    )
+    parser.add_argument("--timeout", type=float, default=None)
+    parser.add_argument("--poll-timeout", type=float, default=None)
+    parser.add_argument("--trace-timeout", type=float, default=None)
     parser.add_argument("--count", type=int, default=10)
     parser.add_argument("--include-media", action="store_true")
     parser.add_argument("--scenario-coverage", default="booking,info,interrupt,handoff")
@@ -11598,7 +13016,7 @@ def _parse_llm_quality_gates_args(argv):
     )
     parser.add_argument("--output", default=None, help="Optional JSON output file path.")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
-    return parser.parse_args(argv)
+    return _llm_quality_apply_timeout_profile(parser.parse_args(argv))
 
 
 def _parse_llm_quality_matrix_args(argv):
@@ -11613,6 +13031,11 @@ def _parse_llm_quality_matrix_args(argv):
         "--client-slugs",
         required=True,
         help="Comma-separated client slugs, e.g. demo_salon,clinic_pack,spa_pack",
+    )
+    parser.add_argument(
+        "--branch-slugs",
+        default=None,
+        help="Comma-separated branch slugs aligned 1:1 with --client-slugs; use empty slot to skip a row.",
     )
     parser.add_argument(
         "--run-id-prefix",
@@ -11651,9 +13074,60 @@ def _parse_llm_quality_matrix_args(argv):
         ),
         help="Comma-separated slugs excluded from non-salon count.",
     )
+    parser.add_argument(
+        "--scenario-context-contract",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_MATRIX_SCENARIO_CONTEXT_CONTRACT", "block"),
+        help="Validate that each child row preserves client/branch scenario context and mentions in-context services.",
+    )
     args, llm_quality_args = parser.parse_known_args(argv)
     args.llm_quality_args = list(llm_quality_args or [])
     return args
+
+
+def _parse_llm_quality_open_world_closure_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py llm-quality-open-world-closure",
+        description=(
+            "Validate that P6 open-world proof has complete deterministic and LLM-stress "
+            "evidence before acceptance closure."
+        ),
+    )
+    parser.add_argument(
+        "--matrix-summary",
+        action="append",
+        required=True,
+        help="Path to llm-quality-matrix matrix_summary.json (repeatable).",
+    )
+    parser.add_argument(
+        "--deterministic-scenarios",
+        action="append",
+        required=True,
+        help="Path to deterministic/open-world scenarios.json evidence (repeatable).",
+    )
+    parser.add_argument(
+        "--required-language-profiles",
+        default=",".join(LLM_QUALITY_OPEN_WORLD_REQUIRED_LANGUAGE_PROFILES),
+        help="Comma-separated language profiles required for deterministic open-world proof.",
+    )
+    parser.add_argument(
+        "--required-surface-noise-profiles",
+        default=",".join(LLM_QUALITY_OPEN_WORLD_REQUIRED_SURFACE_NOISE_PROFILES),
+        help="Comma-separated surface-noise profiles required for deterministic open-world proof.",
+    )
+    parser.add_argument(
+        "--required-semantic-variation-profiles",
+        default=",".join(LLM_QUALITY_OPEN_WORLD_REQUIRED_SEMANTIC_VARIATION_PROFILES),
+        help="Comma-separated semantic-variation profiles required for deterministic open-world proof.",
+    )
+    parser.add_argument(
+        "--required-slot-format-profiles",
+        default=",".join(LLM_QUALITY_OPEN_WORLD_REQUIRED_SLOT_FORMAT_PROFILES),
+        help="Comma-separated slot-format profiles required for deterministic open-world proof.",
+    )
+    parser.add_argument("--output", default=None, help="Optional JSON output file path.")
+    parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+    return parser.parse_args(argv)
 
 
 def _parse_llm_quality_audit_args(argv):
@@ -12514,6 +13988,576 @@ def _llm_quality_normalize_matrix_client_slugs(value):
         seen_slugs.add(key)
         client_slugs.append(normalized)
     return client_slugs
+
+
+def _llm_quality_normalize_matrix_branch_slugs(value, *, expected_count):
+    if not isinstance(expected_count, int) or expected_count < 0:
+        expected_count = 0
+    if value is None:
+        return [None] * expected_count
+    raw = str(value)
+    if not raw.strip():
+        return [None] * expected_count
+    branch_slugs = [item.strip() or None for item in raw.split(",")]
+    if expected_count and len(branch_slugs) != expected_count:
+        raise ValueError(
+            f"expected {expected_count} branch slug entries, got {len(branch_slugs)}"
+        )
+    return branch_slugs
+
+
+def _llm_quality_collect_context_service_hits(dialogs, services):
+    normalized_services = [
+        str(service or "").strip()
+        for service in (services or [])
+        if str(service or "").strip()
+    ]
+    if not normalized_services:
+        return []
+    combined = " ".join(
+        str(turn.get("text") or "")
+        for dialog in (dialogs or [])
+        if isinstance(dialog, dict)
+        for turn in (dialog.get("turns") or [])
+        if isinstance(turn, dict)
+    ).casefold()
+    hits = []
+    for service in normalized_services:
+        if service.casefold() in combined and service not in hits:
+            hits.append(service)
+    return hits
+
+
+def _llm_quality_collect_scenario_profile_coverage(payload):
+    coverage = {
+        "language_profiles": set(),
+        "surface_noise_profiles": set(),
+        "semantic_variation_profiles": set(),
+        "slot_format_profiles": set(),
+        "dialog_count": 0,
+        "turn_count": 0,
+    }
+    if not isinstance(payload, dict):
+        return {
+            "language_profiles": [],
+            "surface_noise_profiles": [],
+            "semantic_variation_profiles": [],
+            "slot_format_profiles": [],
+            "dialog_count": 0,
+            "turn_count": 0,
+        }
+
+    field_map = (
+        ("language_profiles", "language_profile"),
+        ("surface_noise_profiles", "surface_noise_profile"),
+        ("semantic_variation_profiles", "semantic_variation_profile"),
+        ("slot_format_profiles", "slot_format_profile"),
+    )
+    for bucket, field_name in field_map:
+        value = str(payload.get(field_name) or "").strip()
+        if value:
+            coverage[bucket].add(value)
+
+    dialogs = payload.get("dialogs") if isinstance(payload.get("dialogs"), list) else []
+    for dialog in dialogs:
+        if not isinstance(dialog, dict):
+            continue
+        coverage["dialog_count"] += 1
+        for bucket, field_name in field_map:
+            value = str(dialog.get(field_name) or "").strip()
+            if value:
+                coverage[bucket].add(value)
+        turns = dialog.get("turns") if isinstance(dialog.get("turns"), list) else []
+        coverage["turn_count"] += sum(1 for turn in turns if isinstance(turn, dict))
+
+    return {
+        "language_profiles": sorted(coverage["language_profiles"]),
+        "surface_noise_profiles": sorted(coverage["surface_noise_profiles"]),
+        "semantic_variation_profiles": sorted(coverage["semantic_variation_profiles"]),
+        "slot_format_profiles": sorted(coverage["slot_format_profiles"]),
+        "dialog_count": coverage["dialog_count"],
+        "turn_count": coverage["turn_count"],
+    }
+
+
+def _llm_quality_build_open_world_profile_status(
+    *,
+    scenario_paths,
+    required_language_profiles=None,
+    required_surface_noise_profiles=None,
+    required_semantic_variation_profiles=None,
+    required_slot_format_profiles=None,
+):
+    normalized_paths = [
+        os.path.abspath(os.path.expanduser(str(path or "").strip()))
+        for path in (scenario_paths or [])
+        if str(path or "").strip()
+    ]
+    required_map = {
+        "language_profiles": list(
+            required_language_profiles or LLM_QUALITY_OPEN_WORLD_REQUIRED_LANGUAGE_PROFILES
+        ),
+        "surface_noise_profiles": list(
+            required_surface_noise_profiles
+            or LLM_QUALITY_OPEN_WORLD_REQUIRED_SURFACE_NOISE_PROFILES
+        ),
+        "semantic_variation_profiles": list(
+            required_semantic_variation_profiles
+            or LLM_QUALITY_OPEN_WORLD_REQUIRED_SEMANTIC_VARIATION_PROFILES
+        ),
+        "slot_format_profiles": list(
+            required_slot_format_profiles or LLM_QUALITY_OPEN_WORLD_REQUIRED_SLOT_FORMAT_PROFILES
+        ),
+    }
+    aggregate = {
+        "language_profiles": set(),
+        "surface_noise_profiles": set(),
+        "semantic_variation_profiles": set(),
+        "slot_format_profiles": set(),
+    }
+    checked_files = []
+    file_reports = []
+    reasons = []
+    total_dialog_count = 0
+    total_turn_count = 0
+
+    if not normalized_paths:
+        reasons.append("deterministic_scenarios_missing")
+
+    for path in normalized_paths:
+        if not os.path.exists(path):
+            reasons.append(f"deterministic_scenarios_missing:{path}")
+            continue
+        payload = _llm_quality_load_json_object(path)
+        if not isinstance(payload, dict):
+            reasons.append(f"deterministic_scenarios_invalid_json:{path}")
+            continue
+        coverage = _llm_quality_collect_scenario_profile_coverage(payload)
+        checked_files.append(path)
+        file_reports.append(
+            {
+                "path": path,
+                "dialog_count": coverage["dialog_count"],
+                "turn_count": coverage["turn_count"],
+                "language_profiles": coverage["language_profiles"],
+                "surface_noise_profiles": coverage["surface_noise_profiles"],
+                "semantic_variation_profiles": coverage["semantic_variation_profiles"],
+                "slot_format_profiles": coverage["slot_format_profiles"],
+            }
+        )
+        if coverage["dialog_count"] < 1:
+            reasons.append(f"deterministic_scenarios_empty:{path}")
+        total_dialog_count += int(coverage["dialog_count"] or 0)
+        total_turn_count += int(coverage["turn_count"] or 0)
+        for bucket in aggregate:
+            aggregate[bucket].update(coverage.get(bucket) or [])
+
+    aggregate_sorted = {bucket: sorted(values) for bucket, values in aggregate.items()}
+    for bucket, required_values in required_map.items():
+        missing = [
+            value for value in required_values if value not in aggregate_sorted.get(bucket, [])
+        ]
+        if missing:
+            reasons.append(f"{bucket}_missing:{','.join(missing)}")
+
+    reasons = list(dict.fromkeys(str(item) for item in reasons if str(item).strip()))
+    return {
+        "valid": not reasons,
+        "reasons": reasons,
+        "checked_files": checked_files,
+        "file_reports": file_reports,
+        "required_profiles": required_map,
+        "observed_profiles": aggregate_sorted,
+        "dialog_count": total_dialog_count,
+        "turn_count": total_turn_count,
+    }
+
+
+def _llm_quality_build_p6_acceptance_closure_status(
+    *,
+    matrix_summary_paths,
+    deterministic_scenario_paths,
+    required_language_profiles=None,
+    required_surface_noise_profiles=None,
+    required_semantic_variation_profiles=None,
+    required_slot_format_profiles=None,
+):
+    profile_status = _llm_quality_build_open_world_profile_status(
+        scenario_paths=deterministic_scenario_paths,
+        required_language_profiles=required_language_profiles,
+        required_surface_noise_profiles=required_surface_noise_profiles,
+        required_semantic_variation_profiles=required_semantic_variation_profiles,
+        required_slot_format_profiles=required_slot_format_profiles,
+    )
+    normalized_matrix_paths = [
+        os.path.abspath(os.path.expanduser(str(path or "").strip()))
+        for path in (matrix_summary_paths or [])
+        if str(path or "").strip()
+    ]
+    reasons = list(profile_status.get("reasons") or [])
+    matrix_reports = []
+    distinct_clients = set()
+    distinct_branches = set()
+    distinct_run_ids = set()
+    distinct_seeds = set()
+    total_rows = 0
+
+    if not normalized_matrix_paths:
+        reasons.append("matrix_summary_missing")
+
+    for path in normalized_matrix_paths:
+        report = {
+            "path": path,
+            "valid": True,
+            "reasons": [],
+            "row_count": 0,
+            "failure_family_count": None,
+            "all_ok": None,
+            "cross_domain_required": None,
+            "cross_domain_valid": None,
+            "row_reports": [],
+        }
+        if not os.path.exists(path):
+            report["valid"] = False
+            report["reasons"].append("matrix_summary_missing")
+            reasons.append(f"matrix_summary_missing:{path}")
+            matrix_reports.append(report)
+            continue
+        payload = _llm_quality_load_json_object(path)
+        if not isinstance(payload, dict):
+            report["valid"] = False
+            report["reasons"].append("matrix_summary_invalid_json")
+            reasons.append(f"matrix_summary_invalid_json:{path}")
+            matrix_reports.append(report)
+            continue
+
+        report["all_ok"] = payload.get("all_ok")
+        if payload.get("all_ok") is not True:
+            report["valid"] = False
+            report["reasons"].append("matrix_all_ok_false")
+            reasons.append(f"matrix_all_ok_false:{path}")
+
+        cross_domain = (
+            payload.get("cross_domain_contract")
+            if isinstance(payload.get("cross_domain_contract"), dict)
+            else {}
+        )
+        report["cross_domain_required"] = cross_domain.get("required")
+        report["cross_domain_valid"] = cross_domain.get("valid")
+        if cross_domain.get("required") is not True:
+            report["valid"] = False
+            report["reasons"].append("matrix_cross_domain_not_required")
+            reasons.append(f"matrix_cross_domain_not_required:{path}")
+        if cross_domain.get("valid") is not True:
+            report["valid"] = False
+            report["reasons"].append("matrix_cross_domain_invalid")
+            reasons.append(f"matrix_cross_domain_invalid:{path}")
+
+        failure_families = (
+            payload.get("failure_families")
+            if isinstance(payload.get("failure_families"), dict)
+            else {}
+        )
+        family_count = failure_families.get("family_count")
+        report["failure_family_count"] = family_count
+        if family_count is None:
+            report["valid"] = False
+            report["reasons"].append("matrix_failure_families_missing")
+            reasons.append(f"matrix_failure_families_missing:{path}")
+        elif int(family_count or 0) > 0:
+            report["valid"] = False
+            report["reasons"].append("matrix_failure_families_present")
+            reasons.append(f"matrix_failure_families_present:{path}:{int(family_count or 0)}")
+
+        rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
+        report["row_count"] = len(rows)
+        if not rows:
+            report["valid"] = False
+            report["reasons"].append("matrix_rows_missing")
+            reasons.append(f"matrix_rows_missing:{path}")
+
+        for row in rows:
+            if not isinstance(row, dict):
+                report["valid"] = False
+                report["reasons"].append("matrix_row_invalid")
+                reasons.append(f"matrix_row_invalid:{path}")
+                continue
+            total_rows += 1
+            client_slug = str(row.get("client_slug") or "").strip() or None
+            branch_slug = str(row.get("branch_slug") or "").strip() or None
+            run_id = str(row.get("run_id") or "").strip() or None
+            if client_slug:
+                distinct_clients.add(client_slug)
+            if branch_slug:
+                distinct_branches.add(branch_slug)
+            if run_id:
+                distinct_run_ids.add(run_id)
+            row_summary = {
+                "client_slug": client_slug,
+                "branch_slug": branch_slug,
+                "run_id": run_id,
+                "status": row.get("status"),
+                "infra_valid": row.get("infra_valid"),
+                "semantic_valid": row.get("semantic_valid"),
+                "scenario_context_valid": row.get("scenario_context_valid"),
+                "summary": row.get("summary"),
+                "valid": True,
+                "reasons": [],
+                "judge_enabled": None,
+                "threshold_breaches": [],
+                "blocking_reason_count": None,
+                "run_integrity_valid": None,
+                "quality_lane_effective": None,
+            }
+            row_key = run_id or client_slug or path
+            if row.get("status") != "ok":
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_status_not_ok")
+                reasons.append(f"matrix_row_status_not_ok:{row_key}")
+            if row.get("infra_valid") is not True:
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_infra_invalid")
+                reasons.append(f"matrix_row_infra_invalid:{row_key}")
+            if row.get("semantic_valid") is not True:
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_semantic_invalid")
+                reasons.append(f"matrix_row_semantic_invalid:{row_key}")
+            if row.get("scenario_context_valid") is not True:
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_scenario_context_invalid")
+                reasons.append(f"matrix_row_scenario_context_invalid:{row_key}")
+
+            summary_path = os.path.abspath(
+                os.path.expanduser(str(row.get("summary") or "").strip())
+            ) if str(row.get("summary") or "").strip() else None
+            if not summary_path or not os.path.exists(summary_path):
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_summary_missing")
+                reasons.append(f"matrix_row_summary_missing:{row_key}")
+                report["row_reports"].append(row_summary)
+                continue
+
+            child_summary = _llm_quality_load_json_object(summary_path)
+            if not isinstance(child_summary, dict):
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_summary_invalid_json")
+                reasons.append(f"matrix_row_summary_invalid_json:{row_key}")
+                report["row_reports"].append(row_summary)
+                continue
+
+            config = child_summary.get("config") if isinstance(child_summary.get("config"), dict) else {}
+            seed = config.get("seed")
+            if seed is not None:
+                distinct_seeds.add(str(seed))
+            judge = child_summary.get("judge") if isinstance(child_summary.get("judge"), dict) else {}
+            quality_status = (
+                child_summary.get("quality_status")
+                if isinstance(child_summary.get("quality_status"), dict)
+                else {}
+            )
+            thresholds = (
+                child_summary.get("thresholds")
+                if isinstance(child_summary.get("thresholds"), dict)
+                else {}
+            )
+            metrics = child_summary.get("metrics") if isinstance(child_summary.get("metrics"), dict) else {}
+            metric_rates = metrics.get("rates") if isinstance(metrics.get("rates"), dict) else {}
+            threshold_breaches = quality_status.get("threshold_breaches")
+            if not isinstance(threshold_breaches, list):
+                threshold_breaches = thresholds.get("breaches") if isinstance(thresholds.get("breaches"), list) else []
+            row_summary["threshold_breaches"] = list(threshold_breaches or [])
+            row_summary["blocking_reason_count"] = quality_status.get("blocking_reason_count")
+            row_summary["judge_enabled"] = judge.get("enabled")
+            row_summary["run_integrity_valid"] = (
+                quality_status.get("run_integrity_valid")
+                if quality_status.get("run_integrity_valid") is not None
+                else ((child_summary.get("run_integrity") or {}).get("valid"))
+            )
+            row_summary["quality_lane_effective"] = (
+                (child_summary.get("quality_constant") or {}).get("lane_effective")
+                if isinstance(child_summary.get("quality_constant"), dict)
+                else None
+            )
+            if judge.get("enabled") is not True:
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_judge_disabled")
+                reasons.append(f"matrix_row_judge_disabled:{row_key}")
+            if row_summary["run_integrity_valid"] is not True:
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_run_integrity_invalid")
+                reasons.append(f"matrix_row_run_integrity_invalid:{row_key}")
+            blocking_reason_count = row_summary["blocking_reason_count"]
+            if blocking_reason_count is None:
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_blocking_reason_count_missing")
+                reasons.append(f"matrix_row_blocking_reason_count_missing:{row_key}")
+            elif int(blocking_reason_count or 0) > 0:
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_blocking_reasons_present")
+                reasons.append(
+                    f"matrix_row_blocking_reasons_present:{row_key}:{int(blocking_reason_count or 0)}"
+                )
+            if row_summary["threshold_breaches"]:
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_threshold_breaches_present")
+                reasons.append(
+                    "matrix_row_threshold_breaches_present:"
+                    f"{row_key}:{','.join(str(item) for item in row_summary['threshold_breaches'])}"
+                )
+
+            missing_invariants = []
+            for invariant_key in (
+                "fact_without_evidence_rate",
+                "irrelevant_fact_rate",
+                "booking_commit_without_required_contact",
+                "semantic_override_rate",
+                "stale_state_leak_rate",
+            ):
+                value = quality_status.get(invariant_key)
+                if value is None:
+                    value = metric_rates.get(invariant_key)
+                if value is None:
+                    missing_invariants.append(invariant_key)
+            if missing_invariants:
+                row_summary["valid"] = False
+                row_summary["reasons"].append("row_invariants_missing")
+                reasons.append(
+                    "matrix_row_invariants_missing:"
+                    f"{row_key}:{','.join(missing_invariants)}"
+                )
+
+            report["row_reports"].append(row_summary)
+
+        matrix_reports.append(report)
+
+    if len(distinct_clients) < 2:
+        reasons.append(f"matrix_distinct_clients_lt_2:{len(distinct_clients)}")
+    if not distinct_branches:
+        reasons.append("matrix_branch_context_missing")
+    if not distinct_seeds:
+        reasons.append("matrix_seed_evidence_missing")
+
+    reasons = list(dict.fromkeys(str(item) for item in reasons if str(item).strip()))
+    return {
+        "valid": not reasons,
+        "enforced": True,
+        "reasons": reasons,
+        "profile_status": profile_status,
+        "matrix": {
+            "matrix_summary_paths": normalized_matrix_paths,
+            "matrix_summary_count": len(normalized_matrix_paths),
+            "row_count": total_rows,
+            "distinct_clients": sorted(distinct_clients),
+            "distinct_branches": sorted(distinct_branches),
+            "distinct_run_ids": sorted(distinct_run_ids),
+            "distinct_seeds": sorted(distinct_seeds),
+            "reports": matrix_reports,
+        },
+        "evidence_paths": {
+            "matrix_summaries": normalized_matrix_paths,
+            "deterministic_scenarios": list(profile_status.get("checked_files") or []),
+        },
+    }
+
+
+def _llm_quality_build_scenario_context_contract_status(
+    *,
+    mode,
+    scenarios_path,
+    expected_client_slug,
+    expected_branch_slug=None,
+):
+    mode_token = str(mode or "off").strip().lower()
+    if mode_token not in {"off", "warn", "block"}:
+        mode_token = "off"
+    required = mode_token == "block"
+    enforced = mode_token in {"warn", "block"}
+    if not enforced:
+        return {
+            "mode": mode_token,
+            "required": required,
+            "enforced": enforced,
+            "applicable": False,
+            "valid": True,
+            "reasons": [],
+        }
+    resolved_path = os.path.abspath(os.path.expanduser(str(scenarios_path or "")))
+    if not resolved_path or not os.path.exists(resolved_path):
+        return {
+            "mode": mode_token,
+            "required": required,
+            "enforced": enforced,
+            "applicable": True,
+            "valid": False,
+            "reasons": ["scenarios_missing"],
+            "scenarios_path": resolved_path or None,
+        }
+    try:
+        with open(resolved_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception as exc:
+        return {
+            "mode": mode_token,
+            "required": required,
+            "enforced": enforced,
+            "applicable": True,
+            "valid": False,
+            "reasons": [f"scenarios_parse_error:{exc}"],
+            "scenarios_path": resolved_path,
+        }
+    source = payload.get("source") if isinstance(payload, dict) else {}
+    if not isinstance(source, dict):
+        source = {}
+    generated = source.get("type") == "generated"
+    context = payload.get("scenario_context") if isinstance(payload, dict) else None
+    context_file = payload.get("scenario_context_file") if isinstance(payload, dict) else None
+    if not generated or not isinstance(context, dict):
+        return {
+            "mode": mode_token,
+            "required": required,
+            "enforced": enforced,
+            "applicable": generated,
+            "valid": not generated,
+            "reasons": ["scenario_context_missing"] if generated else [],
+            "scenarios_path": resolved_path,
+            "source_type": source.get("type"),
+        }
+    reasons = []
+    if str(context.get("client_slug") or "").strip() != str(expected_client_slug or "").strip():
+        reasons.append("scenario_context_client_slug_mismatch")
+    expected_branch = str(expected_branch_slug or "").strip() or None
+    actual_branch = str(context.get("branch_slug") or "").strip() or None
+    if expected_branch != actual_branch:
+        reasons.append("scenario_context_branch_slug_mismatch")
+    if context_file and not os.path.exists(str(context_file)):
+        reasons.append("scenario_context_file_missing")
+    services = context.get("services") if isinstance(context.get("services"), list) else []
+    service_hits = _llm_quality_collect_context_service_hits(
+        payload.get("dialogs") if isinstance(payload, dict) else [],
+        services,
+    )
+    if services and not service_hits:
+        reasons.append("scenario_context_service_alignment_missing")
+    capabilities = context.get("capabilities") if isinstance(context.get("capabilities"), dict) else {}
+    tools = capabilities.get("tools") if isinstance(capabilities.get("tools"), dict) else {}
+    return {
+        "mode": mode_token,
+        "required": required,
+        "enforced": enforced,
+        "applicable": True,
+        "valid": not reasons,
+        "reasons": reasons,
+        "scenarios_path": resolved_path,
+        "source_type": source.get("type"),
+        "client_slug": context.get("client_slug"),
+        "branch_slug": actual_branch,
+        "service_count": len(services),
+        "service_hits": service_hits,
+        "domain_slug": capabilities.get("domain_slug"),
+        "tool_allow": tools.get("allow") or [],
+        "tool_deny": tools.get("deny") or [],
+        "scenario_context_file": context_file,
+    }
 
 
 def _llm_quality_build_cross_domain_matrix_contract_status(
@@ -14532,8 +16576,15 @@ def _run_llm_quality(args):
         allow_incomplete_run_artifacts=bool(args.allow_incomplete_run_artifacts),
         allow_judge_off=bool(args.allow_judge_off),
         allow_no_code_delta=bool(args.allow_no_code_delta),
+        allow_non_canonical_lock_retry=bool(args.allow_non_canonical_lock_retry),
         skip_outbox=bool(args.skip_outbox),
         update_baseline=bool(args.update_baseline),
+        timeout_profile=args.timeout_profile,
+        timeout=args.timeout,
+        poll_timeout=args.poll_timeout,
+        trace_timeout=args.trace_timeout,
+        max_post_llm_semantic_rewrite_rate=args.max_post_llm_semantic_rewrite_rate,
+        max_keyword_override_rate=args.max_keyword_override_rate,
     )
     chain_controller_status = _llm_quality_build_chain_controller_gate_status(
         args=args,
@@ -15045,6 +17096,58 @@ def _run_llm_quality(args):
             timeout=args.judge_timeout,
         )
 
+    pack_context = _llm_quality_load_pack_context(client_slug)
+    scenario_context = {}
+    scenario_context_path = None
+    if args.mode == "llm" and not args.scenarios_file:
+        scenario_context = _llm_quality_build_scenario_context(
+            db_user=db_user,
+            client_slug=client_slug,
+            branch_slug=requested_branch_slug,
+            client_meta=client_meta,
+            pack_context=pack_context,
+        )
+        scenario_context_path = os.path.join(output_dir, "scenario_context.json")
+        with open(scenario_context_path, "w", encoding="utf-8") as handle:
+            json.dump(scenario_context, handle, ensure_ascii=False, indent=2)
+        scenario_capabilities = (
+            scenario_context.get("capabilities")
+            if isinstance(scenario_context.get("capabilities"), dict)
+            else {}
+        )
+        scenario_tools = (
+            scenario_capabilities.get("tools")
+            if isinstance(scenario_capabilities.get("tools"), dict)
+            else {}
+        )
+        scenario_business = (
+            scenario_context.get("business")
+            if isinstance(scenario_context.get("business"), dict)
+            else {}
+        )
+        print(
+            json.dumps(
+                {
+                    "stage": "llm_quality_scenario_context_preflight",
+                    "client_slug": scenario_context.get("client_slug"),
+                    "requested_branch_slug": requested_branch_slug,
+                    "resolved_branch_slug": scenario_context.get("branch_slug"),
+                    "business_display_name": scenario_business.get("display_name"),
+                    "languages": scenario_business.get("languages") or [],
+                    "service_count": len(scenario_context.get("services") or []),
+                    "specialist_count": len(scenario_context.get("specialists") or []),
+                    "domain_slug": scenario_capabilities.get("domain_slug"),
+                    "tool_allow": scenario_tools.get("allow") or [],
+                    "tool_deny": scenario_tools.get("deny") or [],
+                    "allowed_fact_scopes": scenario_capabilities.get("allowed_fact_scopes") or [],
+                    "handoff_policy": scenario_capabilities.get("handoff_policy"),
+                    "path": scenario_context_path,
+                    "errors": scenario_context.get("errors") or {},
+                },
+                ensure_ascii=False,
+            )
+        )
+
     dialogs = []
     warnings = {}
     scenario_source = {"type": "generated", "path": None}
@@ -15078,7 +17181,10 @@ def _run_llm_quality(args):
             retries = 0
             while True:
                 batch_dialogs, batch_warnings, error = _llm_quality_generate_batch(
-                    args, count=batch_count, seed=batch_seed
+                    args,
+                    count=batch_count,
+                    seed=batch_seed,
+                    scenario_context_path=scenario_context_path,
                 )
                 if not error and batch_dialogs:
                     break
@@ -15204,6 +17310,7 @@ def _run_llm_quality(args):
         baseline_summary=args.baseline_summary,
         reset_before_dialog=bool(args.reset_before_dialog),
         allow_no_code_delta=bool(args.allow_no_code_delta),
+        allow_non_canonical_lock_retry=bool(args.allow_non_canonical_lock_retry),
         jid_mode=jid_mode_effective,
         runtime_commit=runtime_preflight.get("runtime_commit"),
         judge_mode=judge_mode,
@@ -15260,6 +17367,7 @@ def _run_llm_quality(args):
                 "reasons": quality_constant_status.get("reasons"),
                 "lane_requested": quality_constant_status.get("lane_requested"),
                 "lane_effective": quality_constant_status.get("lane_effective"),
+                "timeout_profile": quality_constant_status.get("timeout_profile"),
                 "missing_coverage": quality_constant_status.get("missing_coverage"),
             },
             ensure_ascii=False,
@@ -15311,6 +17419,8 @@ def _run_llm_quality(args):
         "count": len(dialogs),
         "turn_range": [args.min_turns, args.max_turns],
         "source": scenario_source,
+        "scenario_context_file": scenario_context_path,
+        "scenario_context": scenario_context or None,
         "warnings": warnings,
         "dialogs": dialogs,
     }
@@ -15492,7 +17602,6 @@ def _run_llm_quality(args):
         "reasons": {},
         "skips": {},
     }
-    pack_context = _llm_quality_load_pack_context(client_slug)
     judge_stats["pack"] = {
         "truth_loaded": bool(pack_context.get("truth")),
         "consult_playbook_loaded": bool(pack_context.get("consult_playbook")),
@@ -15501,6 +17610,7 @@ def _run_llm_quality(args):
     }
     failures = []
     failure_counts = {}
+    failure_families = {}
     taxonomy_counts = {key: 0 for key in LLM_QUALITY_TAXONOMY_CATEGORIES}
     taxonomy_by_reason = {}
     tool_hook_state = {}
@@ -15537,6 +17647,7 @@ def _run_llm_quality(args):
         taxonomy_map = {}
         for reason in reasons:
             failure_counts[reason] = failure_counts.get(reason, 0) + 1
+            _llm_quality_record_failure_family(failure_families, reason, record)
             category = LLM_QUALITY_REASON_TAXONOMY.get(reason, "unknown")
             taxonomy_counts[category] = taxonomy_counts.get(category, 0) + 1
             taxonomy_by_reason[reason] = taxonomy_by_reason.get(reason, 0) + 1
@@ -15618,6 +17729,8 @@ def _run_llm_quality(args):
             judge_stats = state_payload.get("judge_stats")
         if isinstance(state_payload.get("failure_counts"), dict):
             failure_counts = state_payload.get("failure_counts")
+        if isinstance(state_payload.get("failure_families"), dict):
+            failure_families = state_payload.get("failure_families")
         if isinstance(state_payload.get("taxonomy_counts"), dict):
             taxonomy_counts = state_payload.get("taxonomy_counts")
         if isinstance(state_payload.get("taxonomy_by_reason"), dict):
@@ -16162,6 +18275,7 @@ def _run_llm_quality(args):
                 "judge_stats": judge_stats,
                 "failures": failures,
                 "failure_counts": failure_counts,
+                "failure_families": failure_families,
                 "taxonomy_counts": taxonomy_counts,
                 "taxonomy_by_reason": taxonomy_by_reason,
                 "tool_hook_state": tool_hook_state,
@@ -16774,6 +18888,10 @@ def _run_llm_quality(args):
                 expected_state = expectations.get("state")
                 expected_reply = expectations.get("expected_reply")
                 allow_booking_stall = expectations.get("allow_booking_stall", False)
+                expected_meta = expectations.get("meta") or {}
+                expected_meta_any = expectations.get("meta_any") or {}
+                expected_meta_contains = expectations.get("meta_contains") or {}
+                expected_trace_contains = expectations.get("trace_contains") or []
                 info_tags = [tag for tag in turn_tags if tag in LLM_QUALITY_INFO_TAGS]
                 if not info_tags:
                     info_tags = sorted(_llm_quality_infer_info_tags(text))
@@ -16917,6 +19035,10 @@ def _run_llm_quality(args):
                         bot_response_inferred_duplicate_ack=bot_response_inferred_duplicate_ack,
                         meta_error=meta_error,
                         webhook_error=response_error,
+                        expected_meta=expected_meta,
+                        expected_meta_any=expected_meta_any,
+                        expected_meta_contains=expected_meta_contains,
+                        expected_trace_contains=expected_trace_contains,
                     )
                 if evaluation_reasons:
                     stats["turns_failed"] += 1
@@ -17621,6 +19743,13 @@ def _run_llm_quality(args):
     ]
     metrics["rates"]["keyword_override_rate"] = rewrite_governance["keyword_override_rate"]
     metrics["rates"]["rewrite_reason_coverage"] = rewrite_governance["rewrite_reason_coverage"]
+    invariant_metrics = _llm_quality_compute_invariant_metrics(
+        failure_counts=failure_counts,
+        stats=stats,
+        rewrite_governance=rewrite_governance,
+    )
+    metrics["invariants"] = invariant_metrics["counts"]
+    metrics["rates"].update(invariant_metrics["rates"])
     lexicon_regex_delta_gate = _llm_quality_build_lexicon_regex_delta_status(
         mode=args.lexicon_regex_delta_gate,
         repo_root=_llm_quality_repo_root(),
@@ -17851,6 +19980,10 @@ def _run_llm_quality(args):
     semantic_status = {"valid": not semantic_reasons, "reasons": semantic_reasons}
     top_failures = _llm_quality_top_failure_reasons(failure_counts, limit=3)
     top_failure_turns = _llm_quality_top_failure_turns(failures, limit=3, sample_limit=3)
+    failure_family_report = _llm_quality_build_failure_family_report(failure_families)
+    failure_families_path = os.path.join(output_dir, "failure_families.json")
+    with open(failure_families_path, "w", encoding="utf-8") as handle:
+        json.dump(failure_family_report, handle, ensure_ascii=False, indent=2)
     safe_config = {
         "mode": args.mode,
         "dry_run": bool(args.dry_run),
@@ -17907,6 +20040,7 @@ def _run_llm_quality(args):
         "workaround_register_base_ref": args.workaround_register_base_ref,
         "workaround_register_path": workaround_register_status.get("register_path"),
         "allow_no_code_delta": bool(args.allow_no_code_delta),
+        "allow_non_canonical_lock_retry": bool(args.allow_non_canonical_lock_retry),
         "judge_mode": judge_mode,
         "judge_required": judge_required,
         "llm_api_key_source": llm_api_key_source,
@@ -17944,6 +20078,8 @@ def _run_llm_quality(args):
         "baseline_canonical_reason": baseline_canonical_reason,
         "delta": delta,
         "failure_counts": failure_counts,
+        "failure_families_path": failure_families_path,
+        "failure_families": failure_family_report,
         "hq1_bad_turn_count": hq1_bad_turn_count,
         "hq1_class_counts": hq1_class_counts,
         "unobserved_turn_count": int(failure_counts.get("unobserved_turn") or 0),
@@ -18010,7 +20146,19 @@ def _run_llm_quality(args):
             ),
             "blocking_reason_count": blocking_reason_count,
             "blocking_reasons": blocking_reasons.get("reasons", {}),
+            "failure_family_count": failure_family_report.get("family_count"),
+            "threshold_breaches": threshold_breaches,
             "process_blocking_counts": process_blocking_counts,
+            "invariant_counts": metrics.get("invariants", {}),
+            "fact_without_evidence_rate": metrics.get("rates", {}).get(
+                "fact_without_evidence_rate"
+            ),
+            "irrelevant_fact_rate": metrics.get("rates", {}).get("irrelevant_fact_rate"),
+            "booking_commit_without_required_contact": metrics.get("rates", {}).get(
+                "booking_commit_without_required_contact"
+            ),
+            "semantic_override_rate": metrics.get("rates", {}).get("semantic_override_rate"),
+            "stale_state_leak_rate": metrics.get("rates", {}).get("stale_state_leak_rate"),
             "hq1_bad_turn_count": hq1_bad_turn_count,
             "hq1_class_counts": hq1_class_counts,
             "unobserved_turn_count": int(failure_counts.get("unobserved_turn") or 0),
@@ -18442,6 +20590,7 @@ def _run_llm_quality_gates(args):
         baseline_summary=args.baseline_summary,
         reset_before_dialog=bool(args.reset_before_dialog),
         allow_no_code_delta=bool(args.allow_no_code_delta),
+        allow_non_canonical_lock_retry=bool(args.allow_non_canonical_lock_retry),
         jid_mode=args.jid_mode,
         runtime_commit=args.runtime_commit,
         judge_mode=args.judge_mode,
@@ -18475,8 +20624,17 @@ def _run_llm_quality_gates(args):
         allow_incomplete_run_artifacts=bool(args.allow_incomplete_run_artifacts),
         allow_judge_off=bool(args.allow_judge_off),
         allow_no_code_delta=bool(args.allow_no_code_delta),
+        allow_non_canonical_lock_retry=bool(args.allow_non_canonical_lock_retry),
         skip_outbox=bool(args.skip_outbox),
         update_baseline=bool(args.update_baseline),
+        timeout_profile=getattr(args, "timeout_profile", None),
+        timeout=getattr(args, "timeout", None),
+        poll_timeout=getattr(args, "poll_timeout", None),
+        trace_timeout=getattr(args, "trace_timeout", None),
+        max_post_llm_semantic_rewrite_rate=getattr(
+            args, "max_post_llm_semantic_rewrite_rate", 0.0
+        ),
+        max_keyword_override_rate=getattr(args, "max_keyword_override_rate", 0.0),
     )
 
     workaround_changed, workaround_scan_warnings = _collect_changed_files(
@@ -18539,6 +20697,13 @@ def _run_llm_quality_matrix(args):
     )
     if not client_slugs:
         raise SystemExit("llm-quality-matrix: provide at least one --client-slugs value")
+    try:
+        branch_slugs = _llm_quality_normalize_matrix_branch_slugs(
+            getattr(args, "branch_slugs", None),
+            expected_count=len(client_slugs),
+        )
+    except ValueError as exc:
+        raise SystemExit(f"llm-quality-matrix: invalid --branch-slugs ({exc})") from exc
     cross_domain_contract = _llm_quality_build_cross_domain_matrix_contract_status(
         mode=getattr(args, "cross_domain_contract", "off"),
         client_slugs=client_slugs,
@@ -18575,7 +20740,7 @@ def _run_llm_quality_matrix(args):
     forwarded_args = list(getattr(args, "llm_quality_args", []) or [])
     if forwarded_args and forwarded_args[0] == "--":
         forwarded_args = forwarded_args[1:]
-    forbidden_flags = ("--client-slug", "--run-id", "--output-dir")
+    forbidden_flags = ("--client-slug", "--branch-slug", "--run-id", "--output-dir")
     for token in forwarded_args:
         if token in forbidden_flags:
             raise SystemExit(
@@ -18597,7 +20762,9 @@ def _run_llm_quality_matrix(args):
     )
 
     matrix_rows = []
+    matrix_failure_families = {}
     for index, client_slug in enumerate(client_slugs, start=1):
+        branch_slug = branch_slugs[index - 1] if index - 1 < len(branch_slugs) else None
         child_run_id = f"{run_id_prefix}-{index:02d}-{client_slug}"
         child_output_dir = os.path.join(output_dir, child_run_id)
         child_argv = [
@@ -18607,11 +20774,14 @@ def _run_llm_quality_matrix(args):
             child_run_id,
             "--output-dir",
             child_output_dir,
-            *forwarded_args,
         ]
+        if branch_slug:
+            child_argv += ["--branch-slug", branch_slug]
+        child_argv += forwarded_args
         started_at = datetime.now(timezone.utc)
         row = {
             "client_slug": client_slug,
+            "branch_slug": branch_slug,
             "run_id": child_run_id,
             "output_dir": child_output_dir,
             "started_at": started_at.isoformat(),
@@ -18626,6 +20796,11 @@ def _run_llm_quality_matrix(args):
             "strict_pass_rate": None,
             "degraded_fallback_rate": None,
             "missing_bot_reply": None,
+            "scenario_context_valid": None,
+            "scenario_context_reasons": [],
+            "scenario_context_service_hits": [],
+            "scenario_context_service_count": None,
+            "scenario_context_domain_slug": None,
         }
         try:
             child_args = _parse_llm_quality_args(child_argv)
@@ -18667,10 +20842,46 @@ def _run_llm_quality_matrix(args):
                     counts = metrics.get("counts")
                     if isinstance(counts, dict):
                         row["missing_bot_reply"] = counts.get("turns_missing_response")
+                family_payload = (
+                    summary_payload.get("failure_families")
+                    if isinstance(summary_payload, dict)
+                    else None
+                )
+                if isinstance(family_payload, dict):
+                    _llm_quality_aggregate_failure_families(
+                        matrix_failure_families,
+                        family_payload.get("families") or [],
+                        client_slug=client_slug,
+                        branch_slug=branch_slug,
+                        run_id=child_run_id,
+                    )
             except Exception as exc:
                 row["status"] = "failed"
                 row["exit_code"] = row["exit_code"] or 1
                 row["error"] = f"summary_parse_error:{exc}"
+        context_contract = _llm_quality_build_scenario_context_contract_status(
+            mode=getattr(args, "scenario_context_contract", "off"),
+            scenarios_path=os.path.join(child_output_dir, "scenarios.json"),
+            expected_client_slug=client_slug,
+            expected_branch_slug=branch_slug,
+        )
+        row["scenario_context_valid"] = context_contract.get("valid")
+        row["scenario_context_reasons"] = context_contract.get("reasons") or []
+        row["scenario_context_service_hits"] = context_contract.get("service_hits") or []
+        row["scenario_context_service_count"] = context_contract.get("service_count")
+        row["scenario_context_domain_slug"] = context_contract.get("domain_slug")
+        if (
+            context_contract.get("required")
+            and context_contract.get("applicable")
+            and not context_contract.get("valid", True)
+        ):
+            row["status"] = "failed"
+            row["exit_code"] = row["exit_code"] or 1
+            row["error"] = (
+                row["error"]
+                or "scenario_context_contract:"
+                + ",".join(context_contract.get("reasons") or ["unknown"])
+            )
         row["finished_at"] = datetime.now(timezone.utc).isoformat()
         matrix_rows.append(row)
         print(
@@ -18678,6 +20889,7 @@ def _run_llm_quality_matrix(args):
                 {
                     "stage": "llm_quality_matrix_child",
                     "client_slug": row["client_slug"],
+                    "branch_slug": row["branch_slug"],
                     "run_id": row["run_id"],
                     "status": row["status"],
                     "exit_code": row["exit_code"],
@@ -18685,6 +20897,9 @@ def _run_llm_quality_matrix(args):
                     "strict_pass_rate": row["strict_pass_rate"],
                     "degraded_fallback_rate": row["degraded_fallback_rate"],
                     "missing_bot_reply": row["missing_bot_reply"],
+                    "scenario_context_valid": row["scenario_context_valid"],
+                    "scenario_context_reasons": row["scenario_context_reasons"],
+                    "scenario_context_service_hits": row["scenario_context_service_hits"],
                 },
                 ensure_ascii=False,
             )
@@ -18693,12 +20908,18 @@ def _run_llm_quality_matrix(args):
             break
 
     all_ok = all(row.get("status") == "ok" for row in matrix_rows)
+    matrix_failure_family_report = _llm_quality_build_failure_family_report(
+        matrix_failure_families
+    )
     matrix_summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "run_id_prefix": run_id_prefix,
         "output_dir": output_dir,
         "client_slugs": client_slugs,
+        "branch_slugs": branch_slugs,
         "cross_domain_contract": cross_domain_contract,
+        "scenario_context_contract_mode": getattr(args, "scenario_context_contract", "off"),
+        "failure_families": matrix_failure_family_report,
         "all_ok": all_ok,
         "rows": matrix_rows,
         "forwarded_args": forwarded_args,
@@ -18715,12 +20936,54 @@ def _run_llm_quality_matrix(args):
                 "summary": matrix_summary_path,
                 "all_ok": all_ok,
                 "rows": len(matrix_rows),
+                "failure_family_count": matrix_failure_family_report.get("family_count"),
             },
             ensure_ascii=False,
         )
     )
     if not all_ok:
         raise SystemExit("llm-quality-matrix: one or more child runs failed")
+
+
+def _run_llm_quality_open_world_closure(args):
+    status = _llm_quality_build_p6_acceptance_closure_status(
+        matrix_summary_paths=getattr(args, "matrix_summary", None),
+        deterministic_scenario_paths=getattr(args, "deterministic_scenarios", None),
+        required_language_profiles=_parse_csv_values(
+            getattr(args, "required_language_profiles", None)
+        ),
+        required_surface_noise_profiles=_parse_csv_values(
+            getattr(args, "required_surface_noise_profiles", None)
+        ),
+        required_semantic_variation_profiles=_parse_csv_values(
+            getattr(args, "required_semantic_variation_profiles", None)
+        ),
+        required_slot_format_profiles=_parse_csv_values(
+            getattr(args, "required_slot_format_profiles", None)
+        ),
+    )
+    payload = {
+        "command": "llm-quality-open-world-closure",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "valid": status.get("valid"),
+        "enforced": status.get("enforced"),
+        "reasons": list(status.get("reasons") or []),
+        "checks": {
+            "profiles": status.get("profile_status"),
+            "matrix": status.get("matrix"),
+        },
+        "evidence_paths": status.get("evidence_paths"),
+    }
+    output = json.dumps(payload, ensure_ascii=False, indent=2 if args.pretty else None)
+    if isinstance(args.output, str) and args.output.strip():
+        output_path = os.path.abspath(os.path.expanduser(args.output))
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write(output + "\n")
+    print(output)
+    return 0 if status.get("valid") else 2
 
 
 def _run_webhook_fuzz(args):
@@ -25659,6 +27922,12 @@ if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-gates":
 if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-matrix":
     _run_llm_quality_matrix(_parse_llm_quality_matrix_args(sys.argv[2:]))
     raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-open-world-closure":
+    raise SystemExit(
+        _run_llm_quality_open_world_closure(
+            _parse_llm_quality_open_world_closure_args(sys.argv[2:])
+        )
+    )
 if len(sys.argv) > 1 and sys.argv[1] == "send-text":
     _run_send_text(_parse_send_text_args(sys.argv[2:]))
     raise SystemExit(0)

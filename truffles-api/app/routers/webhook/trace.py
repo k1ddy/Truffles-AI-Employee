@@ -29,6 +29,7 @@ DECISION_TRACE_CRITICAL_STAGES = {
     "fast_intent",
     "info_class",
     "knowledge_safe_mode",
+    "llm_first_firebreak",
     "llm_policy_core",
     "llm_policy_plan_delta",
     "multi_truth",

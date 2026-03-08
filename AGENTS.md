@@ -81,6 +81,9 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - **Budget Interpretation Gate:** бюджет влияет только на порядок и частоту запусков (cadence), но не на качество критериев, не на контракт продукта и не на целевую архитектуру.
 - **Anti Test-Fitting Gate:** запрещено добавлять/усиливать `must_include` как основной oracle без эквивалентных контрактных проверок в `decision_meta/decision_trace`.
 - **Demo-Neutral Gate:** demo-pack (`demo_salon`) используется только как канарейка; runtime-core остаётся pack-agnostic.
+- **Open-World Proof Gate:** claim про `business-agnostic`/`multilingual` robustness допустим только если есть оба слоя evidence: `deterministic metamorphic expansion` и `LLM stress synthesis` как минимум на нескольких `pack/capability` envelope; surface-mutation генератор сам по себе не закрывает proof.
+- **Open-World Closure Artifact Gate:** финальное закрытие `P6` допускается только при machine-readable closure evidence от `python3 ops/diagnose.py llm-quality-open-world-closure ...`; narrative summary без closure artifact = `BLOCKED`.
+- **Failure Family Gate:** дорогие quality-run handoff/acceptance решения должны опираться на `failure families` (invariant/root-cause clusters), а не только на список отдельных bad turns.
 - **Lexicon/Regex Delta Gate:** расширение словарей/regex допустимо только вместе с изменением резолвера и контрактных тестов.
 - **Semantic Ownership Gate:** post-hoc semantic rewrite вне whitelist reason-codes считается нарушением контракта.
 - **Boundary Determinism Gate:** детерминированные ветки не подменяют semantic-owner решение; они только валидируют/блокируют/деградируют контрактно.

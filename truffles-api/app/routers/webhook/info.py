@@ -7,6 +7,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable
 
+from app.routers.webhook.runtime_primitives import (
+    BOOKING_CTA_SERVICE_INTENTS,
+    INFO_ANCHOR_GROUPS,
+    INFO_INTENT_PRIORITY_GENERIC,
+    INFO_INTENT_PRIORITY_SERVICE,
+    INFO_INTENTS,
+    QUESTION_WORD_PREFIXES,
+    SESSION_MEMORY_SHORT_TOKENS,
+)
 from app.schemas.webhook import WebhookResponse
 from app.services.expected_reply_contract import (
     should_override_truth_gate_off_topic_contract,
@@ -70,17 +79,13 @@ if TYPE_CHECKING:
 def _is_short_reply(message_text: str | None) -> bool:
     if not message_text:
         return False
-    from . import _legacy as legacy
-
-    return _is_short_reply_impl(message_text, max_tokens=legacy.SESSION_MEMORY_SHORT_TOKENS)
+    return _is_short_reply_impl(message_text, max_tokens=SESSION_MEMORY_SHORT_TOKENS)
 
 
 def _detect_info_anchor_hits(tokens: list[str]) -> dict[str, int]:
-    from . import _legacy as legacy
-
     hits: dict[str, int] = {}
-    for intent in legacy.INFO_INTENTS:
-        groups = legacy.INFO_ANCHOR_GROUPS.get(intent)
+    for intent in INFO_INTENTS:
+        groups = INFO_ANCHOR_GROUPS.get(intent)
         if not groups:
             continue
         count = _count_anchor_hits(tokens, groups)
@@ -94,10 +99,11 @@ def _detect_info_class_intents(
     *,
     intent_decomp_set: set[str],
     client_slug: str | None = None,
+    service_query: str | None = None,
 ) -> tuple[set[str], dict[str, Any]]:
     from . import _legacy as legacy
 
-    intents = {intent for intent in intent_decomp_set if intent in legacy.INFO_INTENTS}
+    intents = {intent for intent in intent_decomp_set if intent in INFO_INTENTS}
     meta: dict[str, Any] = {}
     normalized = legacy.normalize_for_matching(message_text) if message_text else ""
     if not normalized:
@@ -108,7 +114,7 @@ def _detect_info_class_intents(
     anchor_intents = {intent for intent, count in anchor_hits.items() if count > 0}
     question_like = "?" in (message_text or "")
     if not question_like and tokens:
-        question_like = _tokens_have_prefixes(tokens, legacy.QUESTION_WORD_PREFIXES)
+        question_like = _tokens_have_prefixes(tokens, QUESTION_WORD_PREFIXES)
     short_query = 0 < len(tokens) <= 4
 
     parking_signal = _has_parking_signal(normalized, client_slug=client_slug)
@@ -189,6 +195,7 @@ def _detect_info_class_intents(
     master_resolution = resolve_master_intent(
         message_text=message_text,
         client_slug=client_slug,
+        service_query=service_query,
         force_master_intent=False,
     )
     master_signal = bool(master_resolution.explicit)
@@ -222,10 +229,10 @@ def _detect_info_class_intents(
         intents.add("master")
     question_type = None
     try:
-        question_type = legacy.semantic_question_type(message_text, include_kinds=legacy.INFO_INTENTS)
+        question_type = legacy.semantic_question_type(message_text, include_kinds=INFO_INTENTS)
     except Exception:
         question_type = None
-    if question_type and question_type.kind in legacy.INFO_INTENTS:
+    if question_type and question_type.kind in INFO_INTENTS:
         intents.add(question_type.kind)
         meta["question_type"] = question_type.kind
         meta["question_type_score"] = question_type.score
@@ -990,10 +997,19 @@ def _handle_info_flow(
         and legacy._looks_like_hours_followup(message_text)
         and not explicit_service_signal
     )
+    explicit_info_signal = bool(
+        isinstance(info_signals, dict)
+        and any(
+            bool(info_signals.get(key))
+            for key in ("parking", "pricing", "duration", "contact", "guest", "location", "hours", "master")
+        )
+    )
     force_parking_followup = bool(
         carryover_has_parking
         and normalized_followup
-        and _signal_any_match(normalized_followup, client_slug, "parking_keywords")
+        and not explicit_service_signal
+        and not explicit_info_signal
+        and legacy._looks_like_carryover_followup(message_text)
     )
     base_info_override = False
     if isinstance(info_signals, dict):
@@ -1032,9 +1048,9 @@ def _handle_info_flow(
             info_class_intents_for_reply.add("hours")
 
         priority = (
-            legacy.INFO_INTENT_PRIORITY_SERVICE
+            INFO_INTENT_PRIORITY_SERVICE
             if info_service_query
-            else legacy.INFO_INTENT_PRIORITY_GENERIC
+            else INFO_INTENT_PRIORITY_GENERIC
         )
         answer_intents: list[str] = []
         for intent_name in priority:
@@ -1353,7 +1369,7 @@ def _handle_info_flow(
         composer_meta = None
         if (
             service_decision.action == "reply"
-            and service_decision.intent in legacy.BOOKING_CTA_SERVICE_INTENTS
+            and service_decision.intent in BOOKING_CTA_SERVICE_INTENTS
         ):
             bot_response, composer_meta = legacy._compose_fact_response(
                 bot_response,
@@ -1478,7 +1494,7 @@ def _handle_info_flow(
             else {}
         )
         info_carryover_intents: list[str] = []
-        if service_decision.intent in legacy.INFO_INTENTS:
+        if service_decision.intent in INFO_INTENTS:
             info_carryover_intents.append(service_decision.intent)
         if service_decision.intent == "service_clarify":
             question_type = decision_meta.get("question_type")
@@ -1664,7 +1680,7 @@ def _handle_truth_gate_fallback(
                 return guard_response
         bot_response = decision.response
         if decision.action == "reply":
-            cta_intents = set(legacy.INFO_INTENTS) | set(legacy.BOOKING_CTA_SERVICE_INTENTS) | {
+            cta_intents = set(INFO_INTENTS) | set(BOOKING_CTA_SERVICE_INTENTS) | {
                 "location_directions",
                 "location_signage",
                 "parking",
@@ -1817,7 +1833,7 @@ def _handle_truth_gate_fallback(
                 and class_carryover.get("class") == "info_bundle"
                 and isinstance(carryover_sections, list)
                 and carryover_sections
-                and 0 < len(tokens) <= legacy.SESSION_MEMORY_SHORT_TOKENS
+                and 0 < len(tokens) <= SESSION_MEMORY_SHORT_TOKENS
                 and "?" not in (message_text or "")
                 and not any(ch.isdigit() for ch in (message_text or ""))
                 and not get_pack_service_hint(message_text or "", client_slug=client_slug)
@@ -1932,7 +1948,7 @@ def _handle_truth_gate_fallback(
                 legacy._update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
         decision_meta = decision.meta if isinstance(getattr(decision, "meta", None), dict) else {}
         info_carryover_intents: list[str] = []
-        if decision.intent in legacy.INFO_INTENTS:
+        if decision.intent in INFO_INTENTS:
             info_carryover_intents.append(decision.intent)
         if decision.intent in {"parking", "guest_policy"}:
             info_carryover_intents.append(decision.intent)

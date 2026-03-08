@@ -42,6 +42,10 @@ LLM-quality start here (mandatory for new agents)
    - `canonical`: continue to chain `next_command`.
    - `incomplete`: resume same `run-id` (`--resume --output-dir ...`), do not start new run-id.
    - `invalid` or `failed`: stop expensive lane, return to deterministic + micro fail-fast loop (`L1/L2`), then re-enter acceptance through gates.
+6. Budget-stop recovery gate
+   - if an expensive `dev/acceptance` lane was stopped for budget while the active diff still contains patch-fitting or case-specific heuristic additions, the next action is not another expensive run
+   - mandatory order is: diff audit -> release-lane cleanup -> targeted deterministic checks -> one fresh expensive run
+   - for the current program, that recovery lane is `demo_salon` only; `multi-pack` or `P6` work does not unblock `demo_salon lock/replay`
 
 Tool map (quick reference)
 | Tool | Main use | Never use for |
@@ -121,6 +125,9 @@ python3 scripts/booking_dialog_scenarios.py \
   --min-turns 10 \
   --max-turns 15 \
   --coverage booking,info,interrupt \
+  --language-profile mixed \
+  --semantic-variation-profile synonym \
+  --slot-format-profile variant \
   --include-media \
   --media-mode text \
   --output /tmp/booking_dialog_scenarios.json
@@ -131,6 +138,9 @@ LLM mode (optional)
 OPENAI_API_KEY=... \
 python3 scripts/booking_dialog_scenarios.py \
   --mode llm \
+  --client-slug clinic_pack \
+  --branch-slug downtown \
+  --scenario-context-file /tmp/scenario_context.json \
   --count 3 \
   --min-turns 10 \
   --max-turns 15 \
@@ -146,12 +156,17 @@ Scenario patterns included
 - Master preference switch + alternative time.
 - RU/KZ mixed booking questions.
 - Multi-service booking request + duration interrupt.
+- Optional deterministic `--language-profile ru|kk|mixed|mixed_translit` projects the same scenario contract into different language/script surfaces without opening LLM mode.
+- Optional deterministic `--semantic-variation-profile canonical|synonym` adds meaning-preserving paraphrase families on top of the same tag/expect contract.
+- Optional deterministic `--slot-format-profile canonical|variant` rewrites time/phone/date surface layouts while preserving the same slot expectations.
 
 Notes
 - Generator outputs client turns only (consultant replies are produced by live system).
-- Each turn includes `expect` (action/info_sections/reply_type/state/expected_reply) for rule-based evaluation.
+- Each turn includes `expect` with required base keys `action/info_sections/reply_type/state/expected_reply`.
+- `expect.meta`, `expect.meta_any`, `expect.meta_contains`, and `expect.trace_contains` are the structured extension for capability-bearing turns when action/reply_type alone is still ambiguous.
 - Use `--coverage booking,info,interrupt,handoff` to force escalation coverage.
 - `media-mode payload` uses placeholder URLs; update for real media tests.
+- For LLM mode, prefer passing `--client-slug` and `--scenario-context-file`; `ops/diagnose.py llm-quality` now writes `scenario_context.json` and passes it into the generator automatically.
 - Calendar sync outbox may fail if OAuth tokens are placeholders. Fix: set `GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI` on API, complete OAuth via `/console/v1/calendar/google/connect` (callback `/api/calendar/callback`).
 
 ---
@@ -449,6 +464,7 @@ Advanced stress matrix (human + agent guide)
    - One runtime (`--base-url`) for all compared runs.
    - Stable knobs: `--count`, `--min-turns`, `--max-turns`, `--scenario-coverage`, `--include-media`.
    - Always `--reset-before-dialog`.
+   - For multi-pack LLM synthesis use `python3 ops/diagnose.py llm-quality-matrix --client-slugs ... --branch-slugs ... --scenario-context-contract block -- --mode llm ...`.
 2. Collect baseline per branch:
    - At least `count >= 5` before using comparisons for decisions.
 3. Generate stress per seed:
@@ -460,6 +476,7 @@ Advanced stress matrix (human + agent guide)
 5. Enforce gates:
    - Hard stop: `webhook_errors`, `infra_errors`.
    - Quality targets: `decision_meta_coverage=1.0`, `unknown_state_rate<=0.02`, track pass-rate and info mismatch trend.
+   - Context targets: each matrix row must preserve `scenario_context`, match requested `client_slug/branch_slug`, and mention at least one in-context service.
 6. Triage failures into 3 bins:
    - `code`: pipeline/routing/trace/meta bugs.
    - `data`: pack/content gaps (`info_section_miss` with correct routing).
@@ -468,7 +485,23 @@ Advanced stress matrix (human + agent guide)
    - One repeatable failure -> one fix -> one regression test.
    - Re-run only affected seed replay first, then full branch matrix.
 8. Evidence bundle for handoff:
-   - `summary.json`, `responses.jsonl`, `trace_bundle.jsonl`, `brief.md`, `matrix-report.tsv`, and exact replay command.
+   - `summary.json`, `responses.jsonl`, `trace_bundle.jsonl`, `brief.md`, `failure_families.json`, `matrix-report.tsv`, and exact replay command.
+
+P6 open-world closure gate
+1. Purpose
+   - `P6` closes only after one machine-readable artifact proves that deterministic expansion, multi-pack LLM stress, invariant gates, and failure-family reporting are all green together.
+2. Required evidence bundle
+   - at least one `llm-quality-matrix` `matrix_summary.json` with `cross_domain_contract.required=true`, `cross_domain_contract.valid=true`, `all_ok=true`
+   - deterministic `scenarios.json` evidence that covers `ru`, `kk`, `mixed`, `mixed_translit`, plus `clean/typo`, `canonical/synonym`, and `canonical/variant`
+   - child summaries referenced by the matrix must keep `judge.enabled=true`, `run_integrity_valid=true`, zero `threshold_breaches`, zero unresolved `failure_families`
+3. Canonical closure command
+   - `python3 ops/diagnose.py llm-quality-open-world-closure --matrix-summary /tmp/booking_quality/<matrix-run>/matrix_summary.json --deterministic-scenarios /tmp/booking_quality/<seed-ru>/scenarios.json --deterministic-scenarios /tmp/booking_quality/<seed-kk>/scenarios.json --deterministic-scenarios /tmp/booking_quality/<seed-mixed>/scenarios.json --deterministic-scenarios /tmp/booking_quality/<seed-translit>/scenarios.json --output /tmp/booking_quality/p6-open-world-closure.json --pretty`
+4. Interpretation
+   - exit `0` means the proof bundle is complete enough for `Top Architect + Brain` to close `P6`
+   - exit `2` means `P6` stays `BLOCKED`; use returned `reasons` instead of narrative judgement
+5. Heavy-stress policy
+   - The heaviest acceptance stresses (`lock/replay/canary/full`) run only on `demo_salon`.
+   - Multi-pack evidence for `P6` is collected via `dev/forensic` `llm-quality-matrix`, not acceptance lane runs.
 
 Detailed operator workflow (future agents + humans)
 1. Pre-run checklist (must pass before first command)
@@ -521,7 +554,18 @@ Guarded llm-quality quickstart (single entrypoint)
    - `scripts/llm_quality_guarded.sh` is the canonical runner wrapper.
    - It is semi-automatic: it runs checks and blocks bad launches, and for `quality-lane=acceptance` it now delegates step control to `scripts/quality_chain_controller.sh`.
    - Direct acceptance run via `python3 ops/diagnose.py llm-quality ...` is blocked unless chain token args are present.
-2. Lock run (acceptance envelope)
+2. Readiness-first workflow (required before acceptance lock)
+   - `lock/replay/canary/full` is the promotion chain, not the primary debugging loop.
+   - Before `acceptance lock`, first close readiness on the current runtime:
+     - mandatory deterministic suites green,
+     - no stale `manual_audit_pending` runs,
+     - one current `L1` JUnit evidence pack,
+     - one current `dev/forensic` `L2` summary with `infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`,
+     - `PG checklist` assembled from that `L1/L2` evidence,
+     - runtime contract quirks resolved up front (for example local allowlist constraints when using `--jid-mode unique`).
+   - If readiness is red, status is `BLOCKED`; do not brute-force another acceptance run just to learn the same thing.
+   - Direct `python3 ops/diagnose.py llm-quality ...` remains allowed only for `dev/forensic` readiness evidence and never counts as acceptance evidence.
+3. Lock run (acceptance envelope)
    - Prepare `PG0..PG6` checklist JSON (example path: `/tmp/booking_quality/pg_checklist-<id>.json`).
    - Required schema (minimum):
      ```json
@@ -560,19 +604,19 @@ Guarded llm-quality quickstart (single entrypoint)
    - `l2_evidence.summary_path` is mandatory and fail-closed validated (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`, `quality_lane_effective != acceptance`).
    - `evidence_freshness_hours` (default `24`) fail-closes stale L1/L2 evidence.
    - `scripts/llm_quality_guarded.sh --mode lock --run-id booking-lock-<id> --pg-checklist /tmp/booking_quality/pg_checklist-<id>.json -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds`
-3. Replay run (same scenarios + baseline)
+4. Replay run (same scenarios + baseline)
    - `scripts/llm_quality_guarded.sh --mode replay --run-id booking-replay-<id> -- --base-url <url> --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-<id>/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --max-failures 20`
-4. Canary run (stage C, promotion gate)
+5. Canary run (stage C, promotion gate)
    - `scripts/llm_quality_guarded.sh --mode canary --run-id booking-canary-<id> -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json`
-5. Full run (same acceptance lane)
+6. Full run (same acceptance lane)
    - `scripts/llm_quality_guarded.sh --mode full --run-id booking-full-<id> -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json`
-6. Mandatory post-run audit
+7. Mandatory post-run audit
    - `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/<run-id> --status done --strict-artifacts`
    - For conflict runs, include explicit arbitration:
      `--oracle-judge-alignment conflicted --oracle-winner contract --oracle-resolution-summary "<contract evidence wins>"`
-7. Resume one interrupted run
+8. Resume one interrupted run
    - `scripts/llm_quality_guarded.sh --mode <lock|replay|canary|full> --run-id <same-run-id> -- --base-url <url> --client-slug demo_salon --resume --output-dir /tmp/booking_quality/<run-id> ...`
-8. Why a run can be blocked by guard
+9. Why a run can be blocked by guard
    - Previous run in same mode is `incomplete/invalid/failed`.
    - Previous run has `manual_audit != done`.
    - Forensic SLA invalid (`manual_audit` missing analyst/timestamp/root-cause/next-step/oracle arbitration contract).
@@ -581,10 +625,10 @@ Guarded llm-quality quickstart (single entrypoint)
    - Duplicate fingerprint or reused run-id.
    - Chain-controller preflight failed (step-order/run_id-mode mismatch/resume-only/token mismatch).
    - Acceptance `lock` missing/failed `--pg-checklist` (`PG0..PG6`).
-9. Allowed override (for stale historical index only)
+10. Allowed override (for stale historical index only)
    - Use `--allow-pending-previous` only to bypass old unrelated mode blockers.
    - Do not use it to bypass current run failures; fix root cause first.
-10. Chain controller status / lifecycle
+11. Chain controller status / lifecycle
    - Status: `scripts/quality_chain_controller.sh status --chain-id <id>`
    - Manual abort: `scripts/quality_chain_controller.sh abort --chain-id <id> --reason root_cause_required`
    - Manual rollback: `scripts/quality_chain_controller.sh rollback --chain-id <id> --reason canary_no_go`
@@ -602,7 +646,7 @@ Evaluation contract (state-aware)
 - `decision_meta` and `decision_trace` are required per inbound turn.
 - `evaluation.ok` is legacy compatibility; use `evaluation.strict_ok` + `strict_pass_rate` for real quality gate.
 - Hard-fail reasons (`missing_bot_reply`, `outbox_delivery_failed`, `outbox_delivery_timeout`, `false_booking_confirmation`, `calendar_tool_contract_miss`, meta/trace/state contract breaks) must never be treated as OK.
-- If `turn.expect` is present, it overrides heuristic matching for action/info_sections/reply_type/state.
+- If `turn.expect` is present, it overrides heuristic matching for action/info_sections/reply_type/state and may add explicit `decision_meta` / `decision_trace` assertions.
 - Known states: `bot_active`, `pending`, `manager_active`; anything else is `unknown_state`.
 - `manager_active`/`pending` mean no bot reply expected; replies here are flagged.
 - `manager_active` requires a handover row; missing handover is a failure.
@@ -610,10 +654,22 @@ Evaluation contract (state-aware)
 - Info requests must match `info_sections`/intents (price/location/hours/promo/duration/parking/master).
 - Info matching is current-turn scoped (pipeline window); stale historical trace must not satisfy current info request.
 - Booking-active turns should show slot progress; stalls are flagged.
+- When `expected_reply` / requested-slot continuity is active, evaluator and oracle must distinguish pending-question interaction acts instead of compressing them into generic collect noise:
+  - `fill_requested_slot`
+  - `ask_about_requested_slot`
+  - `slot_constraint`
+  - `slot_compare`
+  - `mixed_fill_plus_question`
 - `booking_slot_stall` checks only slot-relevant turns (service/time/date/no-tag), not generic booking noise.
+- `booking_slot_stall` is valid only when there is neither real slot progress nor explicit `decision_meta` / `decision_trace` evidence that the turn was handled as one of the pending-question interaction acts while preserving the resume contract for the active slot.
 - If response text claims booking confirmation, evaluator requires appointment/calendar evidence; otherwise `false_booking_confirmation`.
 - If appointment/calendar path is active without successful calendar outcome, evaluator reports `calendar_tool_contract_miss`.
 - Booking `expected_reply_type` is limited to `service_choice`/`time`/`name` (phone/confirm are not expected_reply_type).
+- Capability-bearing turns should prefer structured oracle fields over phrase checks:
+  - use `expect.meta.expected_reply_type=service_choice` when the canonical outcome is service clarify;
+  - use `expect.meta.expected_reply_type=time` when the service is already grounded and the canonical outcome is datetime collect;
+  - use `expect.trace_contains` for referent/canonical-state evidence (`question_contract`, `consult_return`, `referent_resolver`) instead of `must_include` wording.
+- Surface-mutation families (`paraphrase`, `translit`, `typo`, `format`) preserve the existing ontology; if a guarded run surfaces a new interaction-act class, docs/runbook/taxonomy must be updated before the next expensive closure attempt.
 
 Reason codes (summary.failures / failure_counts)
 - decision_meta_missing
@@ -621,6 +677,8 @@ Reason codes (summary.failures / failure_counts)
 - unknown_state
 - expected_state_mismatch
 - expected_action_mismatch
+- expected_meta_mismatch
+- expected_trace_miss
 - expected_reply_type_mismatch
 - expected_reply_mismatch
 - expected_info_section_miss

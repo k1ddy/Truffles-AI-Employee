@@ -34,6 +34,37 @@ def test_validate_llm_policy_core_output_valid():
     assert contract.entity_refs and contract.entity_refs[0].get("entity_id") == "svc:manicure"
 
 
+def test_validate_llm_policy_core_output_accepts_semantic_envelope_fields():
+    payload = {
+        "intent": "hours",
+        "action": "fact",
+        "tool_action": "info",
+        "tool_args": {},
+        "pack_refs": ["hours"],
+        "slots": {"service": "маникюр"},
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "confidence": 0.84,
+        "entity_refs": [{"entity_id": "svc:manicure", "entity_type": "service"}],
+        "subject_kind": "service",
+        "capability": "hours",
+        "temporal_scope": "weekend",
+        "resolution_mode": "referent_followup",
+        "resolver_id": "llm_policy_core",
+        "resolver_version": "v1",
+    }
+
+    contract, error = validate_llm_policy_core_output(payload)
+
+    assert error is None
+    assert contract is not None
+    assert contract.subject_kind == "service"
+    assert contract.capability == "hours"
+    assert contract.temporal_scope == "weekend"
+    assert contract.resolution_mode == "referent_followup"
+
+
 def test_validate_llm_policy_core_output_invalid():
     payload = {"action": "", "tool_action": "info", "slots": {}, "confidence": 1.2}
 
@@ -200,6 +231,17 @@ def test_derive_policy_info_refs_accepts_slot_style_hours_hint():
     )
 
     assert "hours" in refs
+
+
+def test_derive_policy_info_refs_accepts_capability_fallback_without_explicit_text():
+    refs = decision_router._derive_policy_info_refs(
+        policy_intent="other",
+        policy_capability="pricing",
+        message_text="А на новый день как это работает?",
+        client_slug="demo_salon",
+    )
+
+    assert "pricing" in refs
 
 
 def test_should_collect_service_for_info_only_when_service_dependent():

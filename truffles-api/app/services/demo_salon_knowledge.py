@@ -88,6 +88,7 @@ class SemanticQuestionType:
 
 FACT_META_KEYS = (
     "fact_source",
+    "fact_refs",
     "fact_intents",
     "service_query",
     "service_query_source",
@@ -208,6 +209,28 @@ def _build_fact_meta(
         info_sections = inferred_sections
     if info_sections is not None:
         combined["info_sections"] = [item for item in info_sections if isinstance(item, str)]
+    fact_refs: list[str] = []
+    existing_refs = combined.get("fact_refs")
+    if isinstance(existing_refs, list):
+        for item in existing_refs:
+            if isinstance(item, str):
+                cleaned = item.strip()
+                if cleaned and cleaned not in fact_refs:
+                    fact_refs.append(cleaned)
+    for source in (
+        combined.get("info_sections") if isinstance(combined.get("info_sections"), list) else None,
+        merged_intents,
+    ):
+        if not isinstance(source, list):
+            continue
+        for item in source:
+            if not isinstance(item, str):
+                continue
+            cleaned = item.strip()
+            if cleaned and cleaned not in fact_refs:
+                fact_refs.append(cleaned)
+    if fact_refs:
+        combined["fact_refs"] = fact_refs
     combined["fact_source"] = fact_source
     combined["fact_intents"] = _normalize_fact_intents(
         merged_intents,

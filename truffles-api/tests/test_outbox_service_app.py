@@ -39,6 +39,8 @@ def test_outbox_service_token_required(client, monkeypatch):
 
 def test_outbox_service_processes(client, monkeypatch):
     monkeypatch.setenv("OUTBOX_SERVICE_ENABLED", "1")
+    monkeypatch.setenv("OUTBOX_COALESCE_SECONDS", "8")
+    monkeypatch.setenv("OUTBOX_MAX_WAIT_SECONDS", "10")
     monkeypatch.delenv("OUTBOX_SERVICE_TOKEN", raising=False)
 
     db = Mock()

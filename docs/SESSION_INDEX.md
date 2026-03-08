@@ -4,10 +4,11 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-03-05-uvc-closure-review16-a705 | active | feat/2026-03-05-uvc-closure-review16-a705 | /home/zhan/worktrees/2026-03-05-uvc-closure-review16-a705 | docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review16-a705.md | 2026-03-05T19:25:00+05:00 |
 | 2026-03-05-inbox-calendar-ux-reconstruction-a1 | active | feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1 | /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 | docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md | 2026-03-08T10:03:13+05:00 |
 | 2026-03-04-runtime-hygiene-gate-a1 | active | rr-runtime-hygiene-20260304-a1 | /home/zhan/worktrees/rr-runtime-hygiene-20260304-a1 | docs/TASK_PACKAGES/TP-2026-01-30-agents-sync.md | 2026-03-04 |
 | 2026-03-03-uvc-ux-stage2-a705 | done | feat/2026-03-03-uvc-ux-stage2-a705 | /home/zhan/worktrees/2026-03-03-uvc-ux-stage2-a705 | docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-stage2-language-hints-a705.md | 2026-03-03 |
-| 2026-03-02-uvc-ux-stage1-pr-a705 | active | feat/2026-03-02-uvc-ux-stage1-pr-a705 | /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705 | docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave20-a705.md | 2026-03-05T18:58:00+05:00 |
+| 2026-03-02-uvc-ux-stage1-pr-a705 | active | feat/2026-03-02-uvc-ux-stage1-pr-a705 | /home/zhan/worktrees/2026-03-02-uvc-ux-stage1-pr-a705 | docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave20-a705.md | 2026-03-05 |
 | 2026-03-02-uvc-ux-convergence-a705 | done | feat/2026-03-02-uvc-ux-convergence-a705 | /home/zhan/worktrees/2026-03-02-uvc-ux-convergence-a705 | docs/TASK_PACKAGES/TP-2026-03-02-uvc-ux-convergence-a705.md | 2026-03-02 |
 | 2026-03-02-ucpv1-phase13-slice3-a703 | done | feat/2026-03-02-ucpv1-phase13-slice3-a703 | /home/zhan/worktrees/2026-03-02-ucpv1-phase13-slice3-a703 | docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md | 2026-03-02 |
 | 2026-03-02-ucpv1-phase13-slice2-a702 | done | feat/2026-03-02-ucpv1-phase13-slice2-a702 | /home/zhan/worktrees/2026-03-02-ucpv1-phase13-slice2-a702 | docs/TASK_PACKAGES/TP-2026-02-22-universal-control-plane-v1-phase13-a500.md | 2026-03-02 |
@@ -64,7 +65,7 @@
 | 2026-02-19-onboarding-any-niche-step123-a131 | done | feat/2026-02-19-onboarding-any-niche-step123-a131 | /home/zhan/worktrees/2026-02-19-onboarding-any-niche-step123-a131 | docs/TASK_PACKAGES/TP-2026-02-19-onboarding-reference-branch-normalization-step3-a131.md | 2026-02-19 |
 | 2026-02-19-onboarding-any-niche-acceptance-a131 | done | feat/2026-02-19-onboarding-any-niche-acceptance-a131 | /home/zhan/worktrees/2026-02-19-onboarding-any-niche-acceptance-a131 | docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-acceptance-a131.md | 2026-02-19 |
 | 2026-02-19-marketing-postmerge-livecheck-a140 | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-19-marketing-postmerge-livecheck-a140.md | 2026-02-19 |
-| 2026-02-19-llm-first-firebreak-a1 | active | fix/llm-first-firebreak-2026-02-19 | /home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19 | docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md | 2026-03-03T16:05:00+05:00 |
+| 2026-02-19-llm-first-firebreak-a1 | active | fix/llm-first-firebreak-2026-02-19 | /home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19 | docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md | 2026-03-08T11:45:00+05:00 |
 | 2026-02-19-console-context-banner-dedupe-a130 | active | feat/2026-02-19-console-context-banner-dedupe-a130 | /home/zhan/worktrees/2026-02-19-console-context-banner-dedupe-a130 | docs/TASK_PACKAGES/TP-2026-02-19-console-context-banner-dedupe-a130.md | 2026-02-19 |
 | 2026-02-19-booking-routing-transition-a120 | done | feat/2026-02-19-booking-routing-transition-a120 | /home/zhan/worktrees/2026-02-19-booking-routing-transition-a120 | docs/TASK_PACKAGES/TP-2026-02-19-booking-routing-transition-a120.md | 2026-02-19 |
 | 2026-02-19-booking-name-progression-a120 | active | feat/2026-02-19-booking-name-progression-a120 | /home/zhan/worktrees/2026-02-19-booking-name-progression-a120 | docs/TASK_PACKAGES/TP-2026-02-19-booking-name-progression-a120.md | 2026-02-19 |
@@ -364,4 +365,3 @@
 | 2026-01-27-consultant-canon-a2 | active | feat/2026-01-27-consultant-canon-a2 | /home/zhan/worktrees/2026-01-27-consultant-canon-a2 | docs/TASK_PACKAGES/TP-2026-01-27-consultant-canon-alignment.md | 2026-01-29 |
 | 2026-01-27-console-ux-selection | done | feat/console-ux-selection | /home/zhan/worktrees/console-ux-selection | docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md | 2026-01-28 |
 | 2026-01-27-admin-login-verify-a2 | done | feat/2026-01-27-admin-login-verify-a2 | /home/zhan/worktrees/2026-01-27-admin-login-verify-a2 | docs/TASK_PACKAGES/TP-2026-01-27-admin-login-verify.md | 2026-01-27 |
-| 2026-03-05-uvc-closure-review16-a705 | active | feat/2026-03-05-uvc-closure-review16-a705 | /home/zhan/worktrees/2026-03-05-uvc-closure-review16-a705 | docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review16-a705.md | 2026-03-05T19:25:00+05:00 |

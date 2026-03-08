@@ -4,12 +4,16 @@ from unittest.mock import Mock, patch
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 from app.models.appointment import Appointment
 from app.models.branch import Branch
 from app.models.service import Service
 from app.schemas.capabilities import CapabilitiesPayload
-from app.services import demo_salon_knowledge, tool_registry_service
+from app.services import booking_transition_owner, demo_salon_knowledge, tool_registry_service
+from app.services.appointment_service import AppointmentConflictError, SchedulingService
 from app.services.capabilities_runtime import RuntimeCapabilities, set_runtime_capabilities
 
 pytest.importorskip("dateparser")
@@ -593,7 +597,11 @@ def test_tool_registry_book_slot_conflict_verification_mentions_confirmation_fai
         result = tool_registry_service.execute_tool_action(
             db,
             tool_action="calendar.book_slot",
-            tool_args={"start_at": "2026-02-20T18:30:00+05:00"},
+            tool_args={
+                "start_at": "2026-02-20T18:30:00+05:00",
+                "customer_name": "Марина",
+                "customer_phone": "+77010000000",
+            },
             conversation_id=uuid4(),
             branch_id=branch.id,
             client_slug="demo_salon",
@@ -638,7 +646,11 @@ def test_tool_registry_book_slot_conflict_returns_requested_time_alternatives():
         result = tool_registry_service.execute_tool_action(
             db,
             tool_action="calendar.book_slot",
-            tool_args={"start_at": "2026-02-20T16:00:00+05:00"},
+            tool_args={
+                "start_at": "2026-02-20T16:00:00+05:00",
+                "customer_name": "Марина",
+                "customer_phone": "+77010000000",
+            },
             conversation_id=uuid4(),
             branch_id=branch.id,
             client_slug="demo_salon",
@@ -687,6 +699,297 @@ def test_tool_registry_reschedule_not_found_echoes_requested_time():
     assert result.decision_meta.get("requested_time") == "15:00"
 
 
+def test_reschedule_booking_commit_false_flushes_without_commit():
+    db = Mock()
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        conversation_id=uuid4(),
+        status="CONFIRMED",
+        version=3,
+        start_at=datetime(2026, 2, 20, 10, 0, tzinfo=timezone.utc),
+        end_at=datetime(2026, 2, 20, 11, 0, tzinfo=timezone.utc),
+        updated_at=None,
+    )
+    new_start = datetime(2026, 2, 21, 10, 0, tzinfo=timezone.utc)
+    new_end = datetime(2026, 2, 21, 11, 0, tzinfo=timezone.utc)
+
+    updated, error = tool_registry_service._reschedule_booking(
+        db,
+        appointment=appointment,
+        start_at=new_start,
+        end_at=new_end,
+        commit=False,
+    )
+
+    assert error is None
+    assert updated is appointment
+    assert appointment.status == "RESCHEDULE_REQUESTED"
+    assert appointment.start_at == new_start
+    assert appointment.end_at == new_end
+    db.flush.assert_called_once()
+    db.commit.assert_not_called()
+
+
+def test_cancel_booking_commit_false_flushes_without_commit():
+    db = Mock()
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        conversation_id=uuid4(),
+        status="CONFIRMED",
+        version=5,
+        updated_at=None,
+    )
+
+    updated, error = tool_registry_service._cancel_booking(
+        db,
+        appointment=appointment,
+        reason="не смогу прийти",
+        commit=False,
+    )
+
+    assert error is None
+    assert updated is appointment
+    assert appointment.status == "CANCELLED"
+    db.flush.assert_called_once()
+    db.commit.assert_not_called()
+
+
+def test_tool_registry_reschedule_uses_single_write_boundary():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        conversation_id=uuid4(),
+        status="RESCHEDULE_REQUESTED",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "_get_booking",
+        return_value=(appointment, None),
+    ), patch.object(
+        tool_registry_service,
+        "_reschedule_booking",
+        return_value=(appointment, None),
+    ) as reschedule_mock, patch.object(
+        tool_registry_service,
+        "enqueue_appointment_sync",
+        return_value=(True, None),
+    ) as enqueue_mock, patch.object(
+        tool_registry_service,
+        "mark_pending_reminders_failed",
+        return_value=[],
+    ) as cancel_reminders_mock, patch.object(
+        tool_registry_service,
+        "schedule_default_reminders",
+        return_value=[],
+    ) as schedule_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.reschedule",
+            tool_args={
+                "appointment_id": str(appointment.id),
+                "start_at": "2026-02-21T10:00:00",
+                "end_at": "2026-02-21T11:00:00",
+            },
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("write_boundary") == tool_registry_service.BOOKING_MUTATION_WRITE_BOUNDARY
+    _, reschedule_kwargs = reschedule_mock.call_args
+    assert reschedule_kwargs["commit"] is False
+    _, enqueue_kwargs = enqueue_mock.call_args
+    assert enqueue_kwargs["commit"] is False
+    _, cancel_kwargs = cancel_reminders_mock.call_args
+    assert cancel_kwargs["commit"] is False
+    _, schedule_kwargs = schedule_mock.call_args
+    assert schedule_kwargs["commit"] is False
+    db.commit.assert_not_called()
+
+
+def test_tool_registry_reschedule_rolls_back_when_sync_enqueue_fails():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        conversation_id=uuid4(),
+        status="RESCHEDULE_REQUESTED",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "_get_booking",
+        return_value=(appointment, None),
+    ), patch.object(
+        tool_registry_service,
+        "_reschedule_booking",
+        return_value=(appointment, None),
+    ) as reschedule_mock, patch.object(
+        tool_registry_service,
+        "enqueue_appointment_sync",
+        return_value=(False, "connection_missing"),
+    ) as enqueue_mock, patch.object(
+        tool_registry_service,
+        "mark_pending_reminders_failed",
+    ) as cancel_reminders_mock, patch.object(
+        tool_registry_service,
+        "schedule_default_reminders",
+    ) as schedule_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.reschedule",
+            tool_args={
+                "appointment_id": str(appointment.id),
+                "start_at": "2026-02-21T10:00:00",
+                "end_at": "2026-02-21T11:00:00",
+            },
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "provider_unavailable"
+    assert result.decision_meta.get("provider_reason") == "connection_missing"
+    assert result.decision_meta.get("write_boundary") == tool_registry_service.BOOKING_MUTATION_WRITE_BOUNDARY
+    _, reschedule_kwargs = reschedule_mock.call_args
+    assert reschedule_kwargs["commit"] is False
+    _, enqueue_kwargs = enqueue_mock.call_args
+    assert enqueue_kwargs["commit"] is False
+    cancel_reminders_mock.assert_not_called()
+    schedule_mock.assert_not_called()
+    db.rollback.assert_called_once()
+
+
+def test_tool_registry_cancel_uses_single_write_boundary():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        conversation_id=uuid4(),
+        status="CANCELLED",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "_get_booking",
+        return_value=(appointment, None),
+    ), patch.object(
+        tool_registry_service,
+        "_cancel_booking",
+        return_value=(appointment, None),
+    ) as cancel_mock, patch.object(
+        tool_registry_service,
+        "enqueue_appointment_sync",
+        return_value=(True, None),
+    ) as enqueue_mock, patch.object(
+        tool_registry_service,
+        "mark_pending_reminders_failed",
+        return_value=[],
+    ) as cancel_reminders_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.cancel",
+            tool_args={
+                "appointment_id": str(appointment.id),
+                "reason": "не смогу прийти",
+            },
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("write_boundary") == tool_registry_service.BOOKING_MUTATION_WRITE_BOUNDARY
+    _, cancel_kwargs = cancel_mock.call_args
+    assert cancel_kwargs["commit"] is False
+    _, enqueue_kwargs = enqueue_mock.call_args
+    assert enqueue_kwargs["commit"] is False
+    _, cancel_reminders_kwargs = cancel_reminders_mock.call_args
+    assert cancel_reminders_kwargs["commit"] is False
+    db.commit.assert_not_called()
+
+
+def test_tool_registry_cancel_rolls_back_when_sync_enqueue_fails():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        conversation_id=uuid4(),
+        status="CANCELLED",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "_get_booking",
+        return_value=(appointment, None),
+    ), patch.object(
+        tool_registry_service,
+        "_cancel_booking",
+        return_value=(appointment, None),
+    ) as cancel_mock, patch.object(
+        tool_registry_service,
+        "enqueue_appointment_sync",
+        return_value=(False, "connection_missing"),
+    ) as enqueue_mock, patch.object(
+        tool_registry_service,
+        "mark_pending_reminders_failed",
+    ) as cancel_reminders_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.cancel",
+            tool_args={
+                "appointment_id": str(appointment.id),
+                "reason": "не смогу прийти",
+            },
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "provider_unavailable"
+    assert result.decision_meta.get("provider_reason") == "connection_missing"
+    assert result.decision_meta.get("write_boundary") == tool_registry_service.BOOKING_MUTATION_WRITE_BOUNDARY
+    _, cancel_kwargs = cancel_mock.call_args
+    assert cancel_kwargs["commit"] is False
+    _, enqueue_kwargs = enqueue_mock.call_args
+    assert enqueue_kwargs["commit"] is False
+    cancel_reminders_mock.assert_not_called()
+    db.rollback.assert_called_once()
+
+
 def test_tool_registry_book_slot_allows_missing_specialist_when_not_explicit():
     db = Mock()
     branch = SimpleNamespace(
@@ -710,7 +1013,7 @@ def test_tool_registry_book_slot_allows_missing_specialist_when_not_explicit():
         "_book_slot",
         return_value=(appointment, None),
     ) as book_slot_mock, patch.object(
-        tool_registry_service, "enqueue_appointment_sync", return_value=None
+        tool_registry_service, "enqueue_appointment_sync", return_value=(True, None)
     ), patch.object(
         tool_registry_service, "schedule_default_reminders", return_value=[]
     ):
@@ -733,6 +1036,390 @@ def test_tool_registry_book_slot_allows_missing_specialist_when_not_explicit():
     assert result.decision_meta.get("specialist_selection") == "none_available"
     _, kwargs = book_slot_mock.call_args
     assert kwargs["specialist_id"] is None
+
+
+def test_tool_registry_book_slot_uses_remote_jid_phone_fallback():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    specialist = SimpleNamespace(id=uuid4(), name="Алия")
+    appointment = SimpleNamespace(id=uuid4(), specialist_id=specialist.id, status="PENDING_CONFIRMATION")
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=True, reason=None),
+    ), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_for_booking",
+        return_value=(specialist, "service_default", None),
+    ), patch.object(
+        tool_registry_service,
+        "_book_slot",
+        return_value=(appointment, None),
+    ) as book_slot_mock, patch.object(
+        tool_registry_service, "enqueue_appointment_sync", return_value=(True, None)
+    ), patch.object(
+        tool_registry_service, "schedule_default_reminders", return_value=[]
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={"start_at": "2026-02-12T13:00:00"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            user_name="Лена",
+            user_phone=None,
+            user_remote_jid="77015550123@s.whatsapp.net",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("customer_name_source") == "user_profile"
+    assert result.decision_meta.get("customer_phone_source") == "remote_jid"
+    _, kwargs = book_slot_mock.call_args
+    assert kwargs["customer_phone"] == "77015550123"
+
+
+def test_resolve_booking_contact_minimum_reports_missing_phone():
+    result = booking_transition_owner.resolve_booking_contact_minimum(
+        customer_name="Лена",
+        customer_phone=None,
+        user_name=None,
+        user_phone=None,
+        user_remote_jid=None,
+    )
+
+    assert result.ready is False
+    assert result.name == "Лена"
+    assert result.name_source == booking_transition_owner.NAME_SOURCE_TOOL_ARGS
+    assert result.phone is None
+    assert result.phone_source == booking_transition_owner.PHONE_SOURCE_MISSING
+    assert result.missing_fields == ("phone",)
+
+
+def test_resolve_booking_contact_minimum_preserves_user_profile_name_and_remote_jid_phone_source():
+    result = booking_transition_owner.resolve_booking_contact_minimum(
+        customer_name=None,
+        customer_phone=None,
+        user_name="Айгуль",
+        user_phone="99961433752",
+        user_phone_source=booking_transition_owner.PHONE_SOURCE_REMOTE_JID,
+        user_remote_jid="99961433752@s.whatsapp.net",
+    )
+
+    assert result.ready is True
+    assert result.name == "Айгуль"
+    assert result.name_source == booking_transition_owner.NAME_SOURCE_USER_PROFILE
+    assert result.phone == "99961433752"
+    assert result.phone_source == booking_transition_owner.PHONE_SOURCE_REMOTE_JID
+    assert result.missing_fields == ()
+
+
+def test_tool_registry_book_slot_blocks_commit_without_contact_minimum():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    specialist = SimpleNamespace(id=uuid4(), name="Алия")
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=True, reason=None),
+    ), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_for_booking",
+        return_value=(specialist, "service_default", None),
+    ), patch.object(
+        tool_registry_service,
+        "_book_slot",
+        return_value=(None, None),
+    ) as book_slot_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={
+                "start_at": "2026-02-12T13:00:00",
+                "customer_name": "Лена",
+            },
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            user_name=None,
+            user_phone=None,
+            user_remote_jid=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "missing_contact_phone"
+    assert result.expected_reply_type == tool_registry_service.EXPECTED_REPLY_PHONE
+    assert result.response_text == tool_registry_service.MSG_BOOKING_ASK_PHONE
+    assert result.decision_meta.get("tool_decision") == "contact_minimum_missing"
+    assert result.decision_meta.get("missing_slot") == "phone"
+    book_slot_mock.assert_not_called()
+
+
+def test_tool_registry_book_slot_create_path_uses_single_write_boundary():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    specialist = SimpleNamespace(id=uuid4(), name="Алия")
+    appointment = SimpleNamespace(id=uuid4(), specialist_id=specialist.id, status="PENDING_CONFIRMATION")
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=True, reason=None),
+    ), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_for_booking",
+        return_value=(specialist, "service_default", None),
+    ), patch.object(
+        tool_registry_service,
+        "_book_slot",
+        return_value=(appointment, None),
+    ) as book_slot_mock, patch.object(
+        tool_registry_service, "enqueue_appointment_sync", return_value=(True, None)
+    ) as enqueue_mock, patch.object(
+        tool_registry_service, "schedule_default_reminders", return_value=[]
+    ) as reminders_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={
+                "start_at": "2026-02-12T13:00:00",
+                "customer_name": "Лена",
+                "customer_phone": "+77011112233",
+            },
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            user_name=None,
+            user_phone=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("write_boundary") == tool_registry_service.BOOKING_CREATE_WRITE_BOUNDARY
+    _, book_kwargs = book_slot_mock.call_args
+    assert book_kwargs["commit"] is False
+    _, enqueue_kwargs = enqueue_mock.call_args
+    assert enqueue_kwargs["commit"] is False
+    _, reminder_kwargs = reminders_mock.call_args
+    assert reminder_kwargs["commit"] is False
+    db.commit.assert_not_called()
+
+
+def test_tool_registry_book_slot_rolls_back_when_sync_enqueue_fails():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    specialist = SimpleNamespace(id=uuid4(), name="Алия")
+    appointment = SimpleNamespace(id=uuid4(), specialist_id=specialist.id, status="PENDING_CONFIRMATION")
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=True, reason=None),
+    ), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_for_booking",
+        return_value=(specialist, "service_default", None),
+    ), patch.object(
+        tool_registry_service,
+        "_book_slot",
+        return_value=(appointment, None),
+    ) as book_slot_mock, patch.object(
+        tool_registry_service,
+        "enqueue_appointment_sync",
+        return_value=(False, "connection_missing"),
+    ) as enqueue_mock, patch.object(
+        tool_registry_service,
+        "schedule_default_reminders",
+    ) as reminders_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={
+                "start_at": "2026-02-12T13:00:00",
+                "customer_name": "Лена",
+                "customer_phone": "+77011112233",
+            },
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            user_name=None,
+            user_phone=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "provider_unavailable"
+    assert result.decision_meta.get("provider_reason") == "connection_missing"
+    assert result.decision_meta.get("write_boundary") == tool_registry_service.BOOKING_CREATE_WRITE_BOUNDARY
+    db.rollback.assert_called_once()
+    _, book_kwargs = book_slot_mock.call_args
+    assert book_kwargs["commit"] is False
+    _, enqueue_kwargs = enqueue_mock.call_args
+    assert enqueue_kwargs["commit"] is False
+    reminders_mock.assert_not_called()
+
+
+def test_create_appointment_commit_false_does_not_rollback_inside_service():
+    db = Mock()
+    service = SchedulingService(db)
+    branch_id = uuid4()
+    client_id = uuid4()
+    start_at = datetime(2026, 2, 12, 10, 0, tzinfo=timezone.utc)
+    end_at = start_at + timedelta(minutes=45)
+    db.flush.side_effect = IntegrityError("insert", {}, RuntimeError("conflict"))
+
+    with patch.object(service, "_get_branch", return_value=SimpleNamespace(booking_settings={})):
+        with pytest.raises(AppointmentConflictError):
+            service.create_appointment(
+                client_id=client_id,
+                branch_id=branch_id,
+                specialist_id=None,
+                start_at=start_at,
+                end_at=end_at,
+                customer_name="Лена",
+                customer_phone="77011112233",
+                service_type=None,
+                commit=False,
+            )
+
+    db.rollback.assert_not_called()
+
+
+def test_booking_create_write_boundary_rolls_back_only_inner_write_on_real_session():
+    engine = create_engine("sqlite:///:memory:")
+    SessionLocal = sessionmaker(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(text("create table booking_boundary_probe (id integer primary key, name text)"))
+
+    session = SessionLocal()
+    try:
+        session.execute(text("insert into booking_boundary_probe(name) values ('outer')"))
+
+        def _operation():
+            session.execute(text("insert into booking_boundary_probe(name) values ('inner')"))
+            raise tool_registry_service.BookingCreateBoundaryError(
+                stage="calendar_sync",
+                error_code="connection_missing",
+            )
+
+        with pytest.raises(tool_registry_service.BookingCreateBoundaryError):
+            tool_registry_service._run_booking_create_write_boundary(session, _operation)
+
+        session.execute(text("insert into booking_boundary_probe(name) values ('after')"))
+        session.commit()
+
+        rows = session.execute(
+            text("select name from booking_boundary_probe order by id")
+        ).scalars().all()
+    finally:
+        session.close()
+        engine.dispose()
+
+    assert rows == ["outer", "after"]
+
+
+def test_booking_transition_owner_merges_slots_and_sets_appointment_id():
+    now = datetime(2026, 2, 12, 8, 0, tzinfo=timezone.utc)
+    result = booking_transition_owner.apply_tool_transition_owner(
+        existing_booking_state={
+            "active": True,
+            "service": "Маникюр",
+            "datetime": "2026-02-12 10:00",
+        },
+        policy_slot_state={"name": "Лена"},
+        tool_args={"start_at": "2026-02-12T13:00:00"},
+        tool_action="calendar.book_slot",
+        policy_intent="booking",
+        policy_goal="booking",
+        booking_wants_flow=True,
+        appointment_id="apt-transition-1",
+        now=now,
+        slot_order=booking_router.BOOKING_SLOT_ORDER,
+    )
+
+    assert result.booking_state_applied is True
+    assert result.owner == "booking_profile_single_writer_v1"
+    assert result.booking_state.get("appointment_id") == "apt-transition-1"
+    assert result.booking_state.get("service") == "Маникюр"
+    assert result.booking_state.get("datetime") == "2026-02-12T13:00:00"
+    assert result.booking_state.get("name") == "Лена"
+    assert result.booking_has_service is True
+    assert result.booking_has_datetime is True
+    assert result.booking_has_name is True
+
+
+def test_booking_transition_owner_clears_datetime_on_book_slot_conflict():
+    now = datetime(2026, 2, 12, 8, 0, tzinfo=timezone.utc)
+    result = booking_transition_owner.apply_tool_transition_owner(
+        existing_booking_state={
+            "active": True,
+            "service": "Стрижка",
+            "datetime": "2026-02-12T18:30:00",
+            "name": "Айгуль",
+        },
+        policy_slot_state={"service": "Стрижка"},
+        tool_args={"start_at": "2026-02-12T18:30:00"},
+        tool_action="calendar.book_slot",
+        tool_decision="conflict",
+        policy_intent="booking",
+        policy_goal="booking",
+        booking_wants_flow=True,
+        appointment_id=None,
+        now=now,
+        slot_order=booking_router.BOOKING_SLOT_ORDER,
+    )
+
+    assert result.booking_state.get("service") == "Стрижка"
+    assert result.booking_state.get("name") == "Айгуль"
+    assert "datetime" not in result.booking_state
+    assert "datetime" not in result.merged_slots
+    assert result.booking_has_datetime is False
+
+
+def test_booking_transition_owner_syncs_profile_from_remote_jid():
+    user = SimpleNamespace(name=None, phone=None)
+
+    sync = booking_transition_owner.sync_user_profile_from_booking_args(
+        user=user,
+        tool_args={"customer_name": "Лена"},
+        remote_jid="77015550123@s.whatsapp.net",
+    )
+
+    assert sync.get("applied") is True
+    assert sync.get("name_synced") is True
+    assert sync.get("phone_synced") is True
+    assert sync.get("phone_source") == "remote_jid"
+    assert sync.get("phone_available") is True
+    assert user.name == "Лена"
+    assert user.phone == "77015550123"
 
 
 def test_tool_registry_book_slot_time_only_uses_runtime_relative_base():
@@ -760,7 +1447,7 @@ def test_tool_registry_book_slot_time_only_uses_runtime_relative_base():
         "_book_slot",
         return_value=(appointment, None),
     ) as book_slot_mock, patch.object(
-        tool_registry_service, "enqueue_appointment_sync", return_value=None
+        tool_registry_service, "enqueue_appointment_sync", return_value=(True, None)
     ), patch.object(
         tool_registry_service, "schedule_default_reminders", return_value=[]
     ):
@@ -1005,7 +1692,7 @@ def test_tool_registry_book_slot_allows_sync_missing_provider_health():
         "_book_slot",
         return_value=(appointment, None),
     ), patch.object(
-        tool_registry_service, "enqueue_appointment_sync", return_value=None
+        tool_registry_service, "enqueue_appointment_sync", return_value=(True, None)
     ), patch.object(
         tool_registry_service, "schedule_default_reminders", return_value=[]
     ):
@@ -1057,7 +1744,7 @@ def test_tool_registry_book_slot_pending_status_uses_non_confirming_reply_templa
         "_book_slot",
         return_value=(appointment, None),
     ), patch.object(
-        tool_registry_service, "enqueue_appointment_sync", return_value=None
+        tool_registry_service, "enqueue_appointment_sync", return_value=(True, None)
     ), patch.object(
         tool_registry_service, "schedule_default_reminders", return_value=[]
     ):
@@ -1069,6 +1756,8 @@ def test_tool_registry_book_slot_pending_status_uses_non_confirming_reply_templa
             branch_id=branch.id,
             client_slug="demo_salon",
             service_query="Маникюр",
+            user_name="Лена",
+            user_phone="+77011112233",
         )
 
     assert result.handled is True

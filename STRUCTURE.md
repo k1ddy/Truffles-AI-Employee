@@ -98,6 +98,7 @@
 | `truffles-api/app/services/pack_query_backend_service.py` | Distributed pack-query backend adapter contract (runtime_local/shadow/primary) | Backend |
 | `truffles-api/app/services/info_signal_service.py` | Info/lexicon signal helpers (routing-neutral) | Backend |
 | `truffles-api/app/services/booking_signal_service.py` | Booking/date/time signal helpers (manifest-backed regex/tokens + lexicon) | Backend |
+| `truffles-api/app/services/booking_transition_owner.py` | Single-writer booking/profile transition owner (`tool outcome -> state/profile`) | Backend |
 | `truffles-api/app/services/signal_manifest_service.py` | Signal manifest runtime compiler/loader (schema validation + signature cache + version meta) | Backend |
 | `truffles-api/app/services/appointment_reminder_service.py` | Appointment reminder/follow-up jobs + outbox enqueue | Backend |
 | `truffles-api/app/services/metrics_daily_service.py` | Daily metrics snapshot (metrics_daily) | Backend |
@@ -332,6 +333,14 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-program-closeout-steady-loop-a705.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-e2f-firebreak-semantic-contract-closure-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-e2e-firebreak-canonical-lock-replay-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-05-e2d-acceptance-process-unblock-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-04-e2c-canonical-replay-canary-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-04-e2b-lexicon-resolver-hardening-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-04-e2a-interrupt-arbitration-owner-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-03-e1-llm-first-firebreak-action-router-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-wave7-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-tech-debt-decomposition-final-review3-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-04-uvc-ux-dedup-intent-map-a705.md`

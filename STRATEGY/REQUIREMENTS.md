@@ -52,7 +52,12 @@
 - [ ] **Policy‑gates:** скидки и способы оплаты разрешены только при явных правилах в client_pack; иначе — эскалация.
 - [ ] OOD никогда не отвечает “полезно”, только мягко возвращает в домен.
 - [ ] LLM принимает решение (action/slots/next_question) и формулирует ответ; safety‑слой валидирует hard‑LAW/policy и контракт tools/packs, а также блокирует недопустимые действия.
+- [ ] **LLM-first firebreak:** при активном policy-core deterministic router не может финализировать semantic outcomes (`out_of_domain`, `escalate`, `rejection`) до policy-core; deterministic слой в этом режиме ограничен boundary-защитой (LAW/policy/schema/capability/idempotency) и операционными статусами.
+- [ ] **Firebreak observability contract:** при включенном `LLM_POLICY_CORE_LLM_FIRST_FIREBREAK` каждый inbound должен сохранять в persisted `decision_meta` признак `llm_first_firebreak_enabled`, а для сработавших блокировок также `llm_first_firebreak_applied=true` + `llm_first_firebreak_reasons`; для applied-cases обязателен trace-stage `llm_first_firebreak`.
 - [ ] **Hybrid LLM‑plan:** LLM возвращает план (outcome/tool_action/tool_args/pack_refs/language/confidence/goal); валидатор подтверждает pack_refs и инструменты; валидный tool_action выполняется, при нарушении контракта/политики → COLLECT/clarify или HANDOFF по правилам.
+- [ ] **Booking/info interrupt contract:** при активной записи информационный запрос (`pricing|duration|hours|location|master|contact`) обязан завершаться `FACT/COLLECT` по info-контракту с `info_sections`; booking-подсказка в этом же turn допустима только как явный follow-up sidecar по контракту.
+- [ ] **Expected-reply single owner contract:** если tool-contract вернул `clear_expected_reply=true`, этот turn не имеет права повторно выставлять `expected_reply_type` downstream-эвристиками без явного whitelist reason-code.
+- [ ] **Pending-question interaction contract:** при активном `expected_reply` / requested slot runtime обязан различать как минимум `fill_requested_slot`, `ask_about_requested_slot`, `slot_constraint`, `slot_compare`, `mixed_fill_plus_question`; эти акты не имеют права схлопываться в generic `booking_prompt` без явного `decision_trace/decision_meta` owner и resume-контракта.
 
 ### Точность фактов
 - [ ] Факты только из Client Pack / tools (адрес, цены, услуги, правила).
@@ -85,6 +90,7 @@
 - [ ] **Semantic resolver:** смысл и RU/KZ/mixed устойчивость через семантику/порог, ключевые слова — только fallback.
 - [ ] **Info‑bundle инвариант:** “где/когда/парковка/гости/ранний приход” всегда даёт единый факт‑ответ (адрес+часы+нужные секции).
 - [ ] **Info‑bundle carryover:** класс `info_bundle` сохраняется; follow‑up “по времени/по часам” остаётся в `hours`, без `duration`, если услуга не названа.
+- [ ] **Interrupt lexicon robustness:** фразы класса “по цене/о цене”, “к специалисту”, “выбрать мастера” и эквивалентные RU/KK/mixed формы должны стабильно попадать в `pricing/master` info-классы независимо от активного booking-контекста.
 - [ ] **Base‑80 батарея:** 80% входящих классов (по объёму) покрыты 5–6‑ходовыми комбинациями и 10–20 перефразами на класс; 100% pass обязателен для статуса “устойчивый хост”.
 - [ ] **Router SLA (P0):** fallback_rate < 10%, timeout_rate < 2%, с alert‑флагом в trace/meta.
 
@@ -92,6 +98,8 @@
 - [ ] decision_trace/decision_meta на каждый user‑message.
 - [ ] Единый log/trace контракт: message_id/outbox_id/trace_id + timing.stages в decision_meta; Tempo traces доступны.
 - [ ] Метрики + регресс‑кейсы + smoke‑check перед релизом.
+- [ ] **Acceptance timeout guard:** release/acceptance quality-run выполняется только с безопасным профилем (`timeout_profile=realistic`); заниженные `timeout/poll_timeout/trace_timeout` блокируются fail-closed до старта прогона.
+- [ ] **Policy-core chaos evidence gate:** acceptance/closure по core-поведению учитывает только quality evidence с `LLM_POLICY_CORE_ENABLED=1`; deterministic/chaos прогоны с policy-core disabled допустимы лишь как debug и не закрывают релизный статус.
 - [ ] Никакого container drift — деплой только из образа/коммита.
 
 ---

@@ -312,6 +312,7 @@ def test_schedule_inbound_syncs_enqueues_when_stale(monkeypatch):
         return Mock()
 
     db.query.side_effect = _query
+    monkeypatch.setenv("CALENDAR_SYNC_INBOUND_ENABLED", "1")
     monkeypatch.setenv("CALENDAR_SYNC_STALE_SECONDS", "600")
     monkeypatch.setenv("CALENDAR_SYNC_INBOUND_INTERVAL_SECONDS", "300")
 

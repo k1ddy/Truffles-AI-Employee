@@ -91,6 +91,37 @@ def test_merge_expectations_applies_override_fields():
     assert "master" in (expect.get("info_sections") or [])
 
 
+def test_merge_expectations_preserves_structured_oracle_fields():
+    expect = _merge_expectations(
+        ["booking"],
+        {
+            "meta": {
+                "action": "booking_prompt",
+                "source": "booking",
+                "expected_reply_type": "time",
+            },
+            "meta_any": {
+                "source": ["booking", "llm_policy_core"],
+            },
+            "meta_contains": {
+                "info_sections": ["hours"],
+            },
+            "trace_contains": [
+                {
+                    "stage": "question_contract",
+                    "decision": "set",
+                    "expected_reply_type": "time",
+                }
+            ],
+        },
+    )
+
+    assert expect["meta"]["expected_reply_type"] == "time"
+    assert expect["meta_any"]["source"] == ["booking", "llm_policy_core"]
+    assert expect["meta_contains"]["info_sections"] == ["hours"]
+    assert expect["trace_contains"][0]["stage"] == "question_contract"
+
+
 def test_merge_expectations_sanitizes_handoff_override_without_handoff_tags():
     expect = _merge_expectations(
         ["confirm"],
@@ -123,6 +154,31 @@ def test_merge_expectations_assigns_default_state_for_weak_tags():
     expect = _merge_expectations(["noise"], None)
 
     assert expect["state"] == "bot_active"
+
+
+def test_sanitize_llm_turns_rewrites_master_tag_without_master_cues():
+    ctx = _module._build_context(random.Random(17))
+    turns = [{"kind": "text", "text": "Что вы можете предложить?", "tags": ["master"], "expect": {}}]
+
+    sanitized = _module._sanitize_llm_turns(turns, ctx, random.Random(17))
+
+    assert len(sanitized) == 1
+    text = str(sanitized[0].get("text") or "").lower()
+    assert "мастер" in text or "специалист" in text
+    info_sections = (sanitized[0].get("expect") or {}).get("info_sections") or []
+    assert "master" in info_sections
+    assert "specialist" in info_sections
+
+
+def test_sanitize_llm_turns_keeps_master_tag_with_master_cues():
+    ctx = _module._build_context(random.Random(19))
+    source = f"Можно к мастеру {ctx['master']}?"
+    turns = [{"kind": "text", "text": source, "tags": ["master"], "expect": {}}]
+
+    sanitized = _module._sanitize_llm_turns(turns, ctx, random.Random(19))
+
+    assert len(sanitized) == 1
+    assert sanitized[0]["text"] == source
 
 
 def test_generate_llm_dialogs_retries_after_json_error(monkeypatch):
@@ -163,7 +219,11 @@ def test_generate_llm_dialogs_retries_after_json_error(monkeypatch):
 
     monkeypatch.setattr(_module, "_call_openai", _fake_openai)
     monkeypatch.setattr(_module, "_parse_llm_json", _fake_parse)
-    monkeypatch.setattr(_module, "_infer_context_from_dialog", lambda _dialog, _rng: {"service": "Стрижка"})
+    monkeypatch.setattr(
+        _module,
+        "_infer_context_from_dialog",
+        lambda _dialog, _rng, scenario_context=None: {"service": "Стрижка"},
+    )
     monkeypatch.setattr(
         _module,
         "_ensure_required_tags",
@@ -251,6 +311,318 @@ def test_required_llm_tags_include_handoff_for_handoff_coverage():
     assert "handoff" in required
 
 
+def test_apply_language_profile_kk_preserves_expect_and_tags():
+    ctx = _module._build_context(random.Random(5))
+    turns = [
+        _module._format_turn(
+            {"text": "{greet}, хочу записаться на {service}.", "tags": ["booking"]},
+            ctx,
+        ),
+        _module._format_turn({"text": "Меня зовут {name}.", "tags": ["name"]}, ctx),
+        _module._format_turn({"text": "Да, подтверждаю.", "tags": ["confirm"]}, ctx),
+    ]
+
+    mutated = _module._apply_language_profile(
+        turns,
+        ctx,
+        language_profile="kk",
+        rng=random.Random(5),
+    )
+
+    assert mutated[0]["tags"] == turns[0]["tags"]
+    assert mutated[1]["expect"] == turns[1]["expect"]
+    assert "керек" in mutated[0]["text"].lower()
+    assert "атым" in mutated[1]["text"].lower()
+    assert "растаймын" in mutated[2]["text"].lower()
+
+
+def test_apply_language_profile_mixed_is_seed_stable_and_keeps_ru_kk_surface():
+    ctx = _module._build_context(random.Random(7))
+    turns = [
+        _module._format_turn(
+            {"text": "{greet}, хочу записаться на {service}.", "tags": ["booking"]},
+            ctx,
+        ),
+        _module._format_turn({"text": "Меня зовут {name}.", "tags": ["name"]}, ctx),
+        _module._format_turn({"text": "Телефон {phone}.", "tags": ["phone"]}, ctx),
+        _module._format_turn({"text": "Да, подтверждаю.", "tags": ["confirm"]}, ctx),
+    ]
+
+    first = _module._apply_language_profile(
+        turns,
+        ctx,
+        language_profile="mixed",
+        rng=random.Random(11),
+    )
+    second = _module._apply_language_profile(
+        turns,
+        ctx,
+        language_profile="mixed",
+        rng=random.Random(11),
+    )
+
+    assert [turn["text"] for turn in first] == [turn["text"] for turn in second]
+    joined = " ".join(turn["text"].lower() for turn in first)
+    assert any(token in joined for token in ("керек", "атым", "растаймын", "сөйлесуге"))
+    assert any(token in joined for token in ("хочу", "телефон", "подтверждаю", "номер"))
+
+
+def test_generate_template_dialog_reports_language_profile_metadata():
+    dialog = _module._generate_template_dialog(
+        random.Random(13),
+        template=_module.SCENARIOS[0],
+        min_turns=10,
+        max_turns=10,
+        include_media=False,
+        media_mode="text",
+        media_kind="photo",
+        language_profile="kk",
+        semantic_variation_profile="canonical",
+        slot_format_profile="canonical",
+        surface_noise_profile="clean",
+    )
+
+    assert dialog["language_profile"] == "kk"
+    assert dialog["metamorphic_family"] == "kk_surface"
+    assert dialog["turns"]
+
+
+def test_apply_slot_format_variation_preserves_expect_and_tags():
+    ctx = _module._build_context(random.Random(51))
+    turns = [
+        _module._format_turn(
+            {
+                "text": "{greet}, хочу записаться на {service} {day} {time_range}.",
+                "tags": ["booking"],
+            },
+            ctx,
+        ),
+        _module._format_turn({"text": "Можно {time_exact}?", "tags": ["time"]}, ctx),
+        _module._format_turn({"text": "Телефон {phone}.", "tags": ["phone"]}, ctx),
+    ]
+
+    mutated = _module._apply_slot_format_variation(
+        turns,
+        ctx,
+        slot_format_profile="variant",
+        language_profile="ru",
+    )
+
+    joined = " ".join(turn["text"].lower() for turn in mutated)
+    assert any(token in joined for token in ("на пятницу", "на субботу", "на воскресенье", "на завтра", "в выходные"))
+    assert any(token in joined for token in ("после 18:00", "после 19:00", "ближе к вечеру", "примерно к 17.30", "к "))
+    assert any(token in joined for token in ("8 (",))
+    assert mutated[0]["tags"] == turns[0]["tags"]
+    assert mutated[1]["expect"] == turns[1]["expect"]
+
+
+def test_apply_slot_format_variation_updates_transliterated_surface():
+    ctx = _module._build_context(random.Random(53))
+    turns = [
+        _module._format_turn(
+            {
+                "text": "{greet}, хочу записаться на {service} {day} {time_range}.",
+                "tags": ["booking"],
+            },
+            ctx,
+        ),
+        _module._format_turn({"text": "Можно {time_exact}?", "tags": ["time"]}, ctx),
+        _module._format_turn({"text": "Телефон {phone}.", "tags": ["phone"]}, ctx),
+    ]
+    translit_turns = _module._apply_language_profile(
+        turns,
+        ctx,
+        language_profile="mixed_translit",
+        rng=random.Random(59),
+    )
+
+    mutated = _module._apply_slot_format_variation(
+        translit_turns,
+        ctx,
+        slot_format_profile="variant",
+        language_profile="mixed_translit",
+    )
+
+    joined = " ".join(turn["text"].lower() for turn in mutated)
+    assert any(token in joined for token in ("na pyatnitsu", "na subbotu", "na zavtra", "v vyhodnye"))
+    assert any(token in joined for token in ("18:00", "19:00", "17.30", "8 ("))
+    assert mutated[0]["tags"] == translit_turns[0]["tags"]
+
+
+def test_apply_semantic_variation_synonym_preserves_expect_and_tags():
+    ctx = _module._build_context(random.Random(31))
+    turns = [
+        _module._format_turn(
+            {"text": "{greet}, хочу записаться на {service}.", "tags": ["booking"]},
+            ctx,
+        ),
+        _module._format_turn({"text": "Телефон {phone}.", "tags": ["phone"]}, ctx),
+        _module._format_turn({"text": "Да, подтверждаю.", "tags": ["confirm"]}, ctx),
+    ]
+
+    mutated = _module._apply_semantic_variation(
+        turns,
+        ctx,
+        semantic_variation_profile="synonym",
+        language_profile="ru",
+        rng=random.Random(37),
+    )
+
+    joined = " ".join(turn["text"].lower() for turn in mutated)
+    assert any(token in joined for token in ("хочу к вам", "мой контакт", "все устраивает"))
+    assert mutated[0]["tags"] == turns[0]["tags"]
+    assert mutated[1]["expect"] == turns[1]["expect"]
+
+
+def test_apply_semantic_variation_synonym_mixed_translit_is_seed_stable():
+    ctx = _module._build_context(random.Random(41))
+    turns = [
+        _module._format_turn(
+            {"text": "{greet}, хочу записаться на {service}.", "tags": ["booking"]},
+            ctx,
+        ),
+        _module._format_turn({"text": "Телефон {phone}.", "tags": ["phone"]}, ctx),
+        _module._format_turn({"text": "Да, подтверждаю.", "tags": ["confirm"]}, ctx),
+    ]
+
+    first = _module._apply_semantic_variation(
+        turns,
+        ctx,
+        semantic_variation_profile="synonym",
+        language_profile="mixed_translit",
+        rng=random.Random(43),
+    )
+    second = _module._apply_semantic_variation(
+        turns,
+        ctx,
+        semantic_variation_profile="synonym",
+        language_profile="mixed_translit",
+        rng=random.Random(43),
+    )
+
+    assert [turn["text"] for turn in first] == [turn["text"] for turn in second]
+    joined = " ".join(turn["text"] for turn in first)
+    assert any(token in joined for token in ("hochu", "kontakt", "tandaidy", "managerge"))
+    assert first[0]["tags"] == turns[0]["tags"]
+
+
+def test_apply_language_profile_mixed_translit_emits_latin_script_seed_stably():
+    ctx = _module._build_context(random.Random(17))
+    turns = [
+        _module._format_turn(
+            {"text": "{greet}, хочу записаться на {service}.", "tags": ["booking"]},
+            ctx,
+        ),
+        _module._format_turn({"text": "Меня зовут {name}.", "tags": ["name"]}, ctx),
+        _module._format_turn({"text": "Телефон {phone}.", "tags": ["phone"]}, ctx),
+        _module._format_turn({"text": "Да, подтверждаю.", "tags": ["confirm"]}, ctx),
+    ]
+
+    first = _module._apply_language_profile(
+        turns,
+        ctx,
+        language_profile="mixed_translit",
+        rng=random.Random(19),
+    )
+    second = _module._apply_language_profile(
+        turns,
+        ctx,
+        language_profile="mixed_translit",
+        rng=random.Random(19),
+    )
+
+    assert [turn["text"] for turn in first] == [turn["text"] for turn in second]
+    joined = " ".join(turn["text"] for turn in first)
+    assert any(token in joined for token in ("kerek", "nomer", "ratyn", "podtverzhdayu", "Menin"))
+    assert any(char.isalpha() and "A" <= char <= "z" for char in joined)
+    assert first[0]["tags"] == turns[0]["tags"]
+    assert first[1]["expect"] == turns[1]["expect"]
+
+
+def test_apply_surface_noise_typo_preserves_expect_and_tags():
+    ctx = _module._build_context(random.Random(21))
+    turns = [
+        _module._format_turn(
+            {"text": "{greet}, хочу записаться на {service}.", "tags": ["booking"]},
+            ctx,
+        ),
+        _module._format_turn({"text": "Телефон {phone}.", "tags": ["phone"]}, ctx),
+        _module._format_turn({"text": "Да, подтверждаю.", "tags": ["confirm"]}, ctx),
+    ]
+
+    mutated = _module._apply_surface_noise(
+        turns,
+        ctx,
+        surface_noise_profile="typo",
+        rng=random.Random(23),
+    )
+
+    joined = " ".join(turn["text"].lower() for turn in mutated)
+    assert any(token in joined for token in ("хачу", "телифон", "потверждаю"))
+    assert mutated[0]["tags"] == turns[0]["tags"]
+    assert mutated[1]["expect"] == turns[1]["expect"]
+
+
+def test_generate_template_dialog_reports_surface_noise_metadata():
+    dialog = _module._generate_template_dialog(
+        random.Random(29),
+        template=_module.SCENARIOS[1],
+        min_turns=10,
+        max_turns=10,
+        include_media=False,
+        media_mode="text",
+        media_kind="photo",
+        language_profile="ru",
+        semantic_variation_profile="canonical",
+        slot_format_profile="canonical",
+        surface_noise_profile="typo",
+    )
+
+    assert dialog["surface_noise_profile"] == "typo"
+    assert dialog["surface_mutation_family"] == "typo_surface"
+    assert dialog["turns"]
+
+
+def test_generate_template_dialog_reports_slot_format_metadata():
+    dialog = _module._generate_template_dialog(
+        random.Random(61),
+        template=_module.SCENARIOS[0],
+        min_turns=10,
+        max_turns=10,
+        include_media=False,
+        media_mode="text",
+        media_kind="photo",
+        language_profile="ru",
+        semantic_variation_profile="canonical",
+        slot_format_profile="variant",
+        surface_noise_profile="clean",
+    )
+
+    assert dialog["slot_format_profile"] == "variant"
+    assert dialog["slot_format_family"] == "slot_format_variant"
+    assert dialog["turns"]
+
+
+def test_generate_template_dialog_reports_semantic_variation_metadata():
+    dialog = _module._generate_template_dialog(
+        random.Random(47),
+        template=_module.SCENARIOS[2],
+        min_turns=10,
+        max_turns=10,
+        include_media=False,
+        media_mode="text",
+        media_kind="photo",
+        language_profile="ru",
+        semantic_variation_profile="synonym",
+        slot_format_profile="canonical",
+        surface_noise_profile="clean",
+    )
+
+    assert dialog["semantic_variation_profile"] == "synonym"
+    assert dialog["semantic_mutation_family"] == "synonym_surface"
+    assert dialog["turns"]
+
+
 def test_ensure_required_tags_adds_handoff_for_handoff_coverage():
     ctx = _module._build_context(random.Random(23))
     turns = [
@@ -305,3 +677,66 @@ def test_call_openai_classifies_quota_error(monkeypatch):
     message = str(exc_info.value)
     assert "openai_rate_or_quota_limited" in message
     assert "insufficient_quota" in message
+
+
+def test_resolve_scenario_context_loads_pack_truth_for_non_salon_pack():
+    context = _module._resolve_scenario_context(
+        client_slug="dental_pack",
+        branch_slug="downtown",
+        scenario_context_file=None,
+    )
+
+    assert context["client_slug"] == "dental_pack"
+    assert context["branch_slug"] == "downtown"
+    assert "Профессиональная чистка зубов" in (context.get("services") or [])
+    assert context.get("business", {}).get("summary") == "Стоматология: лечение, гигиена, профилактика."
+
+
+def test_build_context_prefers_explicit_scenario_context_services_and_specialists():
+    context = {
+        "services": ["Консультация терапевта"],
+        "specialists": ["Данияр"],
+    }
+
+    ctx = _module._build_context(random.Random(73), scenario_context=context)
+
+    assert ctx["service"] == "Консультация терапевта"
+    assert ctx["master"] == "Данияр"
+    assert "Консультация терапевта" in ctx["interrupt_price"]
+
+
+def test_build_llm_generation_prompt_uses_context_contract_and_avoids_salon_default():
+    scenario_context = {
+        "client_slug": "clinic_pack",
+        "branch_slug": "branch-a",
+        "business": {
+            "display_name": "MedCare",
+            "summary": "Диагностика и базовые обследования.",
+            "languages": ["ru", "kk"],
+        },
+        "services": ["УЗИ брюшной полости", "ЭКГ"],
+        "specialists": ["Др. Айгерим"],
+        "capabilities": {
+            "domain_slug": "clinic",
+            "tools": {"allow": ["calendar.*"], "deny": ["consult.*"]},
+            "allowed_fact_scopes": ["info.*"],
+            "handoff_policy": "manager_request_only",
+        },
+    }
+
+    prompt = _module._build_llm_generation_prompt(
+        batch_count=2,
+        min_turns=10,
+        max_turns=15,
+        coverage=["booking", "info"],
+        media_mode="text",
+        media_kind="photo",
+        seed=42,
+        scenario_context=scenario_context,
+    )
+
+    assert "Beauty salon domain, Russian language" not in prompt
+    assert "client_slug=clinic_pack" in prompt
+    assert "known_services=УЗИ брюшной полости, ЭКГ" in prompt
+    assert "domain_slug=clinic" in prompt
+    assert "tool_allow=calendar.*" in prompt

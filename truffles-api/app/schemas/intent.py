@@ -111,6 +111,43 @@ _MASTER_QUERY_INTENT_ALIASES = {"master": "master_query"}
 _MASTER_QUERY_FACT_TOOL_ACTIONS = {"info", "catalog.service_query"}
 _MASTER_QUERY_COLLECT_TOOL_ACTIONS = {"collect", "catalog.service_query"}
 
+SEMANTIC_SUBJECT_KIND_VALUES = {
+    "service",
+    "specialist",
+    "branch",
+    "booking",
+    "general",
+}
+SEMANTIC_CAPABILITY_VALUES = {
+    "pricing",
+    "duration",
+    "location",
+    "hours",
+    "promotions",
+    "bookability",
+    "live_availability",
+    "booking_manage",
+    "consultation",
+    "portfolio",
+    "other",
+}
+SEMANTIC_TEMPORAL_SCOPE_VALUES = {
+    "none",
+    "specific_time",
+    "day",
+    "weekday",
+    "weekend",
+    "date_range",
+}
+SEMANTIC_RESOLUTION_MODE_VALUES = {
+    "direct",
+    "referent_followup",
+    "clarify_missing_subject",
+    "clarify_missing_time",
+    "policy_fact",
+    "live_calendar",
+}
+
 
 def _is_supported_number_value(value: Any) -> bool:
     if isinstance(value, bool):
@@ -224,6 +261,21 @@ def _normalize_optional_string(value: Any, *, field: str) -> str | None:
         raise ValueError(f"{field}_invalid")
     cleaned = value.strip()
     return cleaned or None
+
+
+def _normalize_optional_semantic_token(
+    value: Any,
+    *,
+    field: str,
+    allowed: set[str],
+) -> str | None:
+    cleaned = _normalize_optional_string(value, field=field)
+    if cleaned is None:
+        return None
+    token = cleaned.casefold()
+    if token not in allowed:
+        raise ValueError(f"{field}_invalid")
+    return token
 
 
 def _normalize_master_service_value(value: Any) -> str | None:
@@ -421,6 +473,10 @@ class LlmPolicyCoreOutput(BaseModel):
     reason: str | None = None
     goal: str | None = None
     entity_refs: list[dict[str, Any]] = Field(default_factory=list)
+    subject_kind: str | None = None
+    capability: str | None = None
+    temporal_scope: str | None = None
+    resolution_mode: str | None = None
     resolver_id: str | None = None
     resolver_version: str | None = None
 
@@ -468,6 +524,42 @@ class LlmPolicyCoreOutput(BaseModel):
     @classmethod
     def _validate_entity_refs(cls, value: Any) -> list[dict[str, Any]]:
         return _normalize_entity_refs(value)
+
+    @field_validator("subject_kind", mode="before")
+    @classmethod
+    def _validate_subject_kind(cls, value: Any) -> str | None:
+        return _normalize_optional_semantic_token(
+            value,
+            field="subject_kind",
+            allowed=SEMANTIC_SUBJECT_KIND_VALUES,
+        )
+
+    @field_validator("capability", mode="before")
+    @classmethod
+    def _validate_capability(cls, value: Any) -> str | None:
+        return _normalize_optional_semantic_token(
+            value,
+            field="capability",
+            allowed=SEMANTIC_CAPABILITY_VALUES,
+        )
+
+    @field_validator("temporal_scope", mode="before")
+    @classmethod
+    def _validate_temporal_scope(cls, value: Any) -> str | None:
+        return _normalize_optional_semantic_token(
+            value,
+            field="temporal_scope",
+            allowed=SEMANTIC_TEMPORAL_SCOPE_VALUES,
+        )
+
+    @field_validator("resolution_mode", mode="before")
+    @classmethod
+    def _validate_resolution_mode(cls, value: Any) -> str | None:
+        return _normalize_optional_semantic_token(
+            value,
+            field="resolution_mode",
+            allowed=SEMANTIC_RESOLUTION_MODE_VALUES,
+        )
 
     @field_validator("needs_manager", mode="before")
     @classmethod

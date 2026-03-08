@@ -8,6 +8,7 @@ EXPECTED_REPLY_ALLOWED_TYPES = {
     "service_choice",
     "time",
     "name",
+    "phone",
     "intent_choice",
 }
 

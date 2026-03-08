@@ -1,5 +1,6 @@
 from app.services.expected_reply_contract import (
     EXPECTED_REPLY_NAME,
+    EXPECTED_REPLY_PHONE,
     EXPECTED_REPLY_SERVICE,
     EXPECTED_REPLY_TIME,
     expected_reply_slot_key,
@@ -20,6 +21,7 @@ from app.services.expected_reply_contract import (
 
 def test_normalize_expected_reply_type_filters_unknown_values():
     assert normalize_expected_reply_type(" service_choice ") == EXPECTED_REPLY_SERVICE
+    assert normalize_expected_reply_type(" phone ") == EXPECTED_REPLY_PHONE
     assert normalize_expected_reply_type("unknown") is None
     assert normalize_expected_reply_type(None) is None
 
@@ -99,6 +101,24 @@ def test_tool_contract_list_slots_prefers_time_when_service_known():
     assert decision.requires_handoff is False
 
 
+def test_tool_contract_list_slots_specialist_missing_requests_name():
+    decision = resolve_tool_expected_reply_contract(
+        tool_action="calendar.list_slots",
+        tool_decision="specialist_missing",
+        current_expected_reply_type=None,
+        memory_expected_reply_type=None,
+        booking_has_service=True,
+        booking_has_datetime=False,
+        booking_has_name=False,
+        booking_active=True,
+    )
+
+    assert decision is not None
+    assert decision.expected_reply_type == EXPECTED_REPLY_NAME
+    assert decision.reason == "calendar_list_slots_specialist_followup"
+    assert decision.requires_handoff is False
+
+
 def test_tool_contract_book_slot_conflict_requires_time_followup():
     decision = resolve_tool_expected_reply_contract(
         tool_action="calendar.book_slot",
@@ -172,6 +192,7 @@ def test_expected_reply_slot_key_maps_supported_types():
     assert expected_reply_slot_key(EXPECTED_REPLY_SERVICE) == "service"
     assert expected_reply_slot_key(EXPECTED_REPLY_TIME) == "datetime"
     assert expected_reply_slot_key(EXPECTED_REPLY_NAME) == "name"
+    assert expected_reply_slot_key(EXPECTED_REPLY_PHONE) == "phone"
     assert expected_reply_slot_key("unknown") is None
 
 
@@ -226,6 +247,10 @@ def test_truth_gate_expected_reply_prompt_contract_maps_prompt_keys():
     )
     assert truth_gate_expected_reply_prompt_contract(EXPECTED_REPLY_TIME) == (
         "booking_ask_datetime",
+        "booking_followup",
+    )
+    assert truth_gate_expected_reply_prompt_contract(EXPECTED_REPLY_PHONE) == (
+        "booking_ask_phone",
         "booking_followup",
     )
     assert truth_gate_expected_reply_prompt_contract("unknown") == (None, None)

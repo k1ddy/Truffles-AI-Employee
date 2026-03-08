@@ -12,6 +12,7 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message, User
+from app.routers.webhook.runtime_primitives import MSG_BOOKING_CTA
 from app.routers.webhook.trace import (
     _attach_llm_cache_flag,
     _record_decision_trace,
@@ -20,6 +21,8 @@ from app.routers.webhook.trace import (
     _update_message_signal_snapshot,
 )
 from app.schemas.webhook import WebhookResponse
+from app.services.pack_runtime_service import _normalize_text
+from app.services.state_machine import ConversationState
 
 
 def _maybe_append_booking_cta(
@@ -36,9 +39,7 @@ def _maybe_append_booking_cta(
         has_followup=has_followup,
     ):
         return bot_response
-    from . import _legacy as legacy
-
-    return f"{bot_response}\n\n{legacy.MSG_BOOKING_CTA}"
+    return f"{bot_response}\n\n{MSG_BOOKING_CTA}"
 
 
 def _collect_response_items(value: Any) -> list[str]:
@@ -112,13 +113,11 @@ def _should_append_booking_cta(
 ) -> bool:
     if not bot_response:
         return False
-    from . import _legacy as legacy
-
-    if conversation_state != legacy.ConversationState.BOT_ACTIVE.value:
+    if conversation_state != ConversationState.BOT_ACTIVE.value:
         return False
     if not allow_booking_flow or has_followup:
         return False
-    normalized = legacy._normalize_text(bot_response)
+    normalized = _normalize_text(bot_response)
     if not normalized or "запис" in normalized:
         return False
     return True
@@ -180,9 +179,7 @@ def _compose_fact_response(
     ):
         next_step = _select_response_variant(next_steps, seed, offset=7)
         if not next_step:
-            from . import _legacy as legacy
-
-            next_step = legacy.MSG_BOOKING_CTA
+            next_step = MSG_BOOKING_CTA
         if next_step:
             parts.append(next_step)
 
@@ -197,10 +194,8 @@ def _compose_fact_response(
 def _apply_quiet_hours_notice(text: str, notice: str | None) -> str:
     if not text or not notice:
         return text
-    from . import _legacy as legacy
-
-    normalized_text = legacy._normalize_text(text)
-    normalized_notice = legacy._normalize_text(notice)
+    normalized_text = _normalize_text(text)
+    normalized_notice = _normalize_text(notice)
     if normalized_notice and normalized_notice in normalized_text:
         return text
     if "салон закрыт" in normalized_text:
@@ -211,10 +206,8 @@ def _apply_quiet_hours_notice(text: str, notice: str | None) -> str:
 def _apply_evening_greeting(text: str, greeting: str | None) -> str:
     if not text or not greeting:
         return text
-    from . import _legacy as legacy
-
-    normalized_text = legacy._normalize_text(text)
-    normalized_greeting = legacy._normalize_text(greeting)
+    normalized_text = _normalize_text(text)
+    normalized_greeting = _normalize_text(greeting)
     if normalized_greeting and normalized_greeting in normalized_text:
         return text
     return f"{greeting}\n\n{text}"
@@ -1886,6 +1879,60 @@ def _handle_consult_flow(
         if booking_followup:
             consult_meta["booking_followup"] = True
         bot_response = legacy._append_followup(bot_response, booking_followup)
+        cta_will_append = _should_append_booking_cta(
+            bot_response,
+            conversation_state=conversation.state,
+            allow_booking_flow=routing["allow_booking_flow"],
+            has_followup=bool(booking_followup or intent_queue_followup),
+        )
+        if (
+            cta_will_append
+            and not booking_goal_locked
+            and str(consult_decision.intent or "").strip().casefold() == "consult_reply"
+            and expected_reply_type
+            not in {
+                legacy.EXPECTED_REPLY_SERVICE,
+                legacy.EXPECTED_REPLY_TIME,
+                legacy.EXPECTED_REPLY_NAME,
+            }
+        ):
+            service_hint = (
+                legacy._extract_service_hint(message_text, client_slug)
+                if isinstance(message_text, str) and message_text.strip()
+                else None
+            )
+            if isinstance(service_hint, str) and service_hint.strip():
+                context = legacy._get_conversation_context(conversation)
+                context = legacy._set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=context,
+                    expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                    reason="consult_booking_cta",
+                    now=now,
+                )
+                consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+                consult_meta["expected_reply_reason"] = "consult_booking_cta"
+                consult_meta["consult_booking_cta_expected_reply"] = True
+                legacy._record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "consult_flow",
+                        "decision": "booking_cta_expected_reply",
+                        "expected_reply_type": legacy.EXPECTED_REPLY_SERVICE,
+                        "expected_reply_reason": "consult_booking_cta",
+                        "service_hint": service_hint.strip(),
+                    },
+                )
+                if saved_message:
+                    legacy._update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "consult_booking_cta_expected_reply": True,
+                            "expected_reply_type": legacy.EXPECTED_REPLY_SERVICE,
+                            "expected_reply_reason": "consult_booking_cta",
+                        },
+                    )
         bot_response = _maybe_append_booking_cta(
             bot_response,
             conversation_state=conversation.state,
