@@ -2,11 +2,11 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave33-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave34-a1.md
 - branch: feat/2026-03-05-inbox-calendar-ux-reconstruction-wave4-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Выполнить `Wave33` Inbox surface decomposition: убрать saved views/share, advanced filters, view prefs и bulk-form surfaces с первого экрана `Заявки`, оставить только triage controls, затем переподтвердить targeted operator workflow lane.
+- scope: Выполнить `Wave34` Calendar surface decomposition: отделить queue triage `Записи` от filters, saved views/share, booking governance/actions и scheduling, затем переподтвердить calendar-linked operator workflow lane.
 - done:
   - Wave32 docs-only audit started and canonized:
     - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md` and artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-08-inbox-calendar-ux-logic-audit-a1.md`;
@@ -489,4 +489,12 @@
       - `cd console-web && npm run build` (`pass`)
       - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "inspect first case|manager history modes hide queue views and keep owner scope role-gated|manage and apply action macro|action feedback hides raw sync reason codes and keeps reopen internal-only|booking no-show reopens resolved case and preserves case-booking semantics"` (`5 passed`)
       - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
-- last_updated: 2026-03-08T11:20:34+05:00
+  - Wave34 Calendar decomposition completed locally:
+    - created and activated `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave34-a1.md` as the bounded follow-up to the Wave32/Wave33 audit chain;
+    - rebuilt `console-web/src/app/calendar/page.tsx` so the first screen keeps queue triage and summary only, while filters, saved views/share, scheduling, and booking governance/actions now live in explicit secondary panels/sheets;
+    - updated `console-web/e2e/inspect_case.spec.ts` to open the new calendar secondary surfaces and added a dedicated mock-lane proof that booking actions + follow-up governance are isolated from the first screen;
+    - local evidence:
+      - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+      - `cd console-web && npm run build` (`pass`)
+      - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "inspect first case|manager history modes hide queue views and keep owner scope role-gated|booking no-show reopens resolved case and preserves case-booking semantics|calendar secondary panels isolate filters and booking actions"` (`4 passed`)
+- last_updated: 2026-03-08T11:54:26+05:00
