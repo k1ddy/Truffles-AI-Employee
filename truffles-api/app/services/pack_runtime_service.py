@@ -92,6 +92,7 @@ _MASTER_INTENT_RESOLVER_ID = "pack.master_intent"
 _MASTER_INTENT_RESOLVER_VERSION = "2026-02-27"
 _MASTER_QUERY_DIRECT_TERMS_KEY = "master_query_direct_terms"
 _MASTER_QUERY_PERSON_TERMS_KEY = "master_query_person_terms"
+_MASTER_QUERY_RELATION_TERMS_KEY = "master_query_relation_terms"
 _MASTER_QUERY_ACTION_TERMS_KEY = "master_query_action_terms"
 _MASTER_QUERY_EXPERIENCE_TERMS_KEY = "master_query_experience_terms"
 _MASTER_QUERY_MISSING_SERVICE_REPLY = (
@@ -115,6 +116,19 @@ _PACK_QUERY_FALLBACK_PRESENCE_REPLY = "Da, usluga {service} dostupna."
 _PACK_QUERY_FALLBACK_NOT_FOUND_REPLY = (
     "V spiske uslug net takoi pozicii. Mogu predlozhit: {suggestions}."
 )
+_SEMANTIC_SUBJECT_REFERENT_KEY = {
+    "service": "service",
+    "specialist": "master",
+    "booking": "booking_ref",
+    "branch": "branch",
+}
+_CAPABILITY_INFO_REF_MAP = {
+    "pricing": ["pricing"],
+    "duration": ["duration"],
+    "location": ["location"],
+    "hours": ["hours"],
+    "promotions": ["promotions"],
+}
 
 
 @dataclass(frozen=True)
@@ -798,6 +812,81 @@ def _master_signal_terms(client_slug: str | None, key: str) -> list[str]:
     return _coerce_text_list(get_signal_lexicon_list(client_slug, key))
 
 
+def _has_token_follow_relation(
+    normalized_message: str,
+    *,
+    anchor_text: str,
+    follower_terms: list[str],
+) -> bool:
+    message_tokens = [token for token in normalized_message.split() if token]
+    anchor_tokens = [token for token in _normalize_text(anchor_text).split() if token]
+    if not message_tokens or not anchor_tokens or not follower_terms:
+        return False
+    follower_token_set = {
+        token
+        for term in follower_terms
+        for token in [_normalize_text(term)]
+        if token
+    }
+    if not follower_token_set:
+        return False
+    anchor_length = len(anchor_tokens)
+    last_start = len(message_tokens) - anchor_length
+    for start in range(last_start + 1):
+        if message_tokens[start : start + anchor_length] != anchor_tokens:
+            continue
+        follower_index = start + anchor_length
+        if follower_index < len(message_tokens) and message_tokens[follower_index] in follower_token_set:
+            return True
+    return False
+
+
+def _has_master_person_service_relation(
+    normalized_message: str,
+    *,
+    client_slug: str | None,
+    person_hit: str | None,
+) -> bool:
+    if not normalized_message or not person_hit:
+        return False
+    candidate = person_hit.strip()
+    if not candidate:
+        return False
+    relation_terms = _master_signal_terms(client_slug, _MASTER_QUERY_RELATION_TERMS_KEY)
+    return _has_token_follow_relation(
+        normalized_message,
+        anchor_text=candidate,
+        follower_terms=relation_terms,
+    )
+
+
+def _first_master_name_hit(normalized_message: str, *, client_slug: str | None) -> str | None:
+    if not normalized_message:
+        return None
+    truth = load_yaml_truth(client_slug)
+    catalog = _load_master_catalog(truth if isinstance(truth, dict) else {})
+    for profile in _extract_master_profiles(catalog):
+        name = _normalize_optional_text(profile.get("name"))
+        if not name:
+            continue
+        name_token = _normalize_text(name)
+        if name_token and name_token in normalized_message:
+            return name
+    return None
+
+
+def _is_question_like_master_query(
+    message_text: str | None,
+    *,
+    client_slug: str | None,
+) -> bool:
+    if not isinstance(message_text, str) or not message_text.strip():
+        return False
+    if "?" in message_text:
+        return True
+    return bool(semantic_question_type(message_text, client_slug=client_slug))
+
+
 def resolve_master_intent(
     *,
     message_text: str | None,
@@ -817,6 +906,23 @@ def resolve_master_intent(
     action_hit = _first_signal_hit(normalized_message, action_terms)
     experience_hit = _first_signal_hit(normalized_message, experience_terms)
 
+    resolved_service_query, service_query_source = _resolve_master_service_query(
+        message_text=message_text,
+        client_slug=client_slug,
+        service_query=service_query,
+        intent_decomp=intent_decomp,
+    )
+    person_service_relation = _has_master_person_service_relation(
+        normalized_message,
+        client_slug=client_slug,
+        person_hit=person_hit,
+    )
+    master_name_hit = _first_master_name_hit(normalized_message, client_slug=client_slug)
+    question_like = _is_question_like_master_query(
+        message_text,
+        client_slug=client_slug,
+    )
+
     explicit = bool(force_master_intent)
     reason: str | None = "forced_master_intent" if force_master_intent else None
     matched_signals: list[str] = []
@@ -828,6 +934,8 @@ def resolve_master_intent(
         matched_signals.append(action_hit)
     if experience_hit:
         matched_signals.append(experience_hit)
+    if master_name_hit:
+        matched_signals.append(master_name_hit)
 
     if not explicit:
         if direct_hit:
@@ -836,13 +944,13 @@ def resolve_master_intent(
         elif person_hit and (action_hit or experience_hit):
             explicit = True
             reason = "person_action_signal"
+        elif person_hit and master_name_hit and question_like and resolved_service_query:
+            explicit = True
+            reason = "person_named_question_signal"
+        elif person_service_relation and resolved_service_query:
+            explicit = True
+            reason = "person_service_signal"
 
-    resolved_service_query, service_query_source = _resolve_master_service_query(
-        message_text=message_text,
-        client_slug=client_slug,
-        service_query=service_query,
-        intent_decomp=intent_decomp,
-    )
     return MasterIntentResolution(
         explicit=explicit,
         service_query=resolved_service_query,
@@ -1417,6 +1525,75 @@ def ensure_resolver_meta(
     return payload
 
 
+def build_capability_question_contract(
+    *,
+    subject_kind: str | None,
+    capability: str | None,
+    temporal_scope: str | None,
+    requested_resolution_mode: str | None = None,
+) -> dict[str, Any]:
+    subject_token = _normalize_scope_token(subject_kind)
+    capability_token = _normalize_scope_token(capability)
+    temporal_scope_token = _normalize_scope_token(temporal_scope) or "none"
+    requested_mode_token = _normalize_scope_token(requested_resolution_mode)
+    referent_key = _SEMANTIC_SUBJECT_REFERENT_KEY.get(subject_token)
+    contract: dict[str, Any] = {
+        "subject_kind": subject_token,
+        "capability": capability_token,
+        "temporal_scope": temporal_scope_token,
+        "requested_resolution_mode": requested_mode_token,
+        "contract_resolution_mode": requested_mode_token or "direct",
+        "tool_action": None,
+        "info_refs": [],
+        "referent_key": referent_key,
+        "prefers_referent": bool(referent_key and requested_mode_token == "referent_followup"),
+        "requires_referent": False,
+        "requires_temporal_scope": False,
+    }
+    if not capability_token:
+        return contract
+
+    info_refs = _CAPABILITY_INFO_REF_MAP.get(capability_token)
+    if info_refs:
+        contract["contract_resolution_mode"] = "policy_fact"
+        contract["tool_action"] = "info"
+        contract["info_refs"] = list(info_refs)
+        contract["requires_referent"] = bool(
+            capability_token in {"pricing", "duration"} and subject_token == "service"
+        )
+        return contract
+
+    if capability_token == "consultation":
+        contract["contract_resolution_mode"] = "policy_fact"
+        contract["tool_action"] = "consult"
+        return contract
+
+    if capability_token == "portfolio":
+        contract["contract_resolution_mode"] = "policy_fact"
+        contract["tool_action"] = "catalog.portfolio"
+        contract["requires_referent"] = bool(subject_token == "service")
+        return contract
+
+    if capability_token in {"bookability", "live_availability"}:
+        contract["contract_resolution_mode"] = "live_calendar"
+        contract["tool_action"] = "calendar.list_slots"
+        contract["requires_referent"] = bool(subject_token == "service")
+        contract["requires_temporal_scope"] = temporal_scope_token == "none"
+        return contract
+
+    if capability_token == "booking_manage":
+        if subject_token == "booking":
+            contract["contract_resolution_mode"] = "live_calendar"
+            contract["tool_action"] = "calendar.get_booking"
+            contract["requires_referent"] = True
+        else:
+            contract["contract_resolution_mode"] = "handoff"
+            contract["tool_action"] = "handoff"
+        return contract
+
+    return contract
+
+
 def enrich_pack_decision(
     decision: PackDecision | None,
     *,
@@ -1713,6 +1890,7 @@ __all__ = [
     "_normalize_text",
     "build_evening_greeting",
     "build_info_combined_reply",
+    "build_capability_question_contract",
     "build_master_reply_from_pack",
     "build_quiet_hours_notice",
     "compose_multi_truth_reply",

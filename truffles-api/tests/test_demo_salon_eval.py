@@ -437,6 +437,8 @@ def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
     real_store = webhook_router._maybe_store_service_carryover
     real_get = webhook_router._get_service_carryover
     carryover_payload: dict | None = None
+    projection_source = "canonical_dialog_state"
+    canonical_state_owner = "context_manager.dialog_state.v1"
 
     def _wrapped(**kwargs):
         events.append(kwargs)
@@ -459,6 +461,8 @@ def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
                 "message_count": message_count,
                 "ttl": webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES,
                 "remaining": webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES,
+                "projection_source": projection_source,
+                "canonical_state_owner": canonical_state_owner,
             }
             context = webhook_router._get_conversation_context(conversation)
             context_manager = webhook_router._get_context_manager(context)
@@ -480,6 +484,8 @@ def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
                     "service_query_source": service_meta.get("service_query_source"),
                     "service_query_score": service_meta.get("service_query_score"),
                     "ttl": webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES,
+                    "projection_source": projection_source,
+                    "canonical_state_owner": canonical_state_owner,
                     "reason": kwargs.get("reason"),
                 },
             )
@@ -496,6 +502,8 @@ def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
                     "service_query_source": service_meta.get("service_query_source"),
                     "service_query_score": service_meta.get("service_query_score"),
                     "ttl": webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES,
+                    "projection_source": projection_source,
+                    "canonical_state_owner": canonical_state_owner,
                     "reason": kwargs.get("reason"),
                     "recorded_at": datetime.now(timezone.utc).isoformat(),
                 }
@@ -508,14 +516,16 @@ def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
 
     def _get_carryover(manager: dict, *, message_count: int) -> dict | None:
         if carryover_payload:
-            return {
-                "service_query": carryover_payload.get("service_query"),
-                "service_query_source": carryover_payload.get("service_query_source"),
-                "service_query_score": carryover_payload.get("service_query_score"),
-                "age": max(1, message_count - int(carryover_payload.get("message_count") or 0)),
-                "ttl": carryover_payload.get("ttl"),
-                "remaining": carryover_payload.get("remaining"),
-            }
+                return {
+                    "service_query": carryover_payload.get("service_query"),
+                    "service_query_source": carryover_payload.get("service_query_source"),
+                    "service_query_score": carryover_payload.get("service_query_score"),
+                    "age": max(1, message_count - int(carryover_payload.get("message_count") or 0)),
+                    "ttl": carryover_payload.get("ttl"),
+                    "remaining": carryover_payload.get("remaining"),
+                    "projection_source": carryover_payload.get("projection_source"),
+                    "canonical_state_owner": carryover_payload.get("canonical_state_owner"),
+                }
         payload = manager.get(webhook_router.SERVICE_CARRYOVER_KEY) if isinstance(manager, dict) else None
         if isinstance(payload, dict):
             service_query = payload.get("service_query")
@@ -527,12 +537,67 @@ def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
                     "age": 1,
                     "ttl": payload.get("ttl", webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES),
                     "remaining": payload.get("ttl", webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES),
+                    "projection_source": payload.get("projection_source"),
+                    "canonical_state_owner": payload.get("canonical_state_owner"),
                 }
         return real_get(manager, message_count=message_count)
 
     get_patch = patch("app.routers.webhook._legacy._get_service_carryover", side_effect=_get_carryover)
 
     return [maybe_patch, get_patch], events
+
+
+def test_demo_salon_eval_records_canonical_service_projection():
+    conversation = SimpleNamespace(
+        context={"context_manager": {"message_count": 4}},
+        service_carryover_events=[],
+    )
+    carryover_patches, events = _build_service_carryover_patch()
+
+    with ExitStack() as stack:
+        for patcher in carryover_patches:
+            stack.enter_context(patcher)
+        webhook_router._legacy._maybe_store_service_carryover(
+            conversation=conversation,
+            service_meta={
+                "service_query": "маникюр",
+                "service_query_source": "semantic_match",
+                "service_query_score": 0.7,
+            },
+            intent="pricing",
+            message_count=4,
+            reason="demo_eval_test",
+        )
+        context = webhook_router._get_conversation_context(conversation)
+        context_manager = webhook_router._get_context_manager(context)
+        carryover = webhook_router._legacy._get_service_carryover(
+            context_manager,
+            message_count=5,
+        )
+
+    assert len(events) == 1
+    legacy_payload = context_manager.get(webhook_router.SERVICE_CARRYOVER_KEY)
+    assert legacy_payload.get("projection_source") == "canonical_dialog_state"
+    assert legacy_payload.get("canonical_state_owner") == "context_manager.dialog_state.v1"
+    canonical_state = context_manager.get("canonical_dialog_state")
+    assert canonical_state.get("owner_id") == "context_manager.dialog_state.v1"
+    assert canonical_state.get("current_referents", {}).get("service", {}).get("value") == "маникюр"
+    assert carryover.get("projection_source") == "canonical_dialog_state"
+    assert carryover.get("canonical_state_owner") == "context_manager.dialog_state.v1"
+
+    trace = _get_decision_trace(conversation)
+    service_trace = next(
+        (
+            entry
+            for entry in reversed(trace)
+            if entry.get("stage") == "service_carryover"
+            and entry.get("decision") == "set"
+        ),
+        None,
+    )
+    assert service_trace is not None
+    assert service_trace.get("projection_source") == "canonical_dialog_state"
+    assert service_trace.get("canonical_state_owner") == "context_manager.dialog_state.v1"
 
 
 def _fake_intent_decomp(text: str, **_kwargs) -> dict:
@@ -1410,6 +1475,137 @@ def test_booking_flow_info_interrupt_parking_colloquial_phrase():
     )
 
 
+def test_info_carryover_preserves_parking_for_short_followup():
+    case_id = "CA05_INFO_CARRYOVER_PARKING_FOLLOWUP"
+    response, conversation, saved_message = _run_webhook_conversation(
+        ["Адрес напишите", "Парковка у вас бесплатная?", "Сколько обычно мест?"],
+        case_id,
+        None,
+    )
+    assert "парков" in response.lower(), f"{case_id}: response lost parking context"
+
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    sections = meta.get("info_sections")
+    assert isinstance(sections, list) and "parking" in sections, (
+        f"{case_id}: missing parking section; meta={meta}"
+    )
+
+    trace = _get_decision_trace(conversation)
+    carryover_trace = next(
+        (entry for entry in reversed(trace) if entry.get("stage") == "class_carryover"),
+        None,
+    )
+    assert carryover_trace is not None, f"{case_id}: missing class_carryover trace"
+    carryover_intents = carryover_trace.get("intents")
+    assert isinstance(carryover_intents, list) and "parking" in carryover_intents, (
+        f"{case_id}: carryover lost parking intent"
+    )
+
+
+def test_consult_followup_generic_booking_request_keeps_service_prompt():
+    case_id = "CA05_CONSULT_BOOKING_REQUEST_SERVICE_PROMPT"
+    eval_data = yaml.safe_load(EVAL_PATH.read_text(encoding="utf-8"))
+    case = next(
+        item
+        for item in eval_data.get("eval_cases", [])
+        if item.get("id") == "E568"
+    )
+    turns = _normalize_turns(case.get("turns"), case_id)
+    responses, conversation, _saved_message = _run_webhook_conversation_turns(
+        [turn["user"] for turn in turns],
+        case_id,
+        None,
+    )
+    response = responses[-1] if responses else ""
+    meta = _saved_message.message_metadata.get("decision_meta", {}) if _saved_message else {}
+
+    assert meta.get("action") == "booking_prompt", f"{case_id}: action mismatch; meta={meta}"
+    assert meta.get("source") == "booking", f"{case_id}: source mismatch; meta={meta}"
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE, (
+        f"{case_id}: expected_reply_type mismatch; meta={meta}"
+    )
+    assert "нет такой позиции" not in response.lower(), (
+        f"{case_id}: service_not_found leaked; response={response}"
+    )
+
+    trace = _get_decision_trace(conversation)
+    consult_return_trace = next(
+        (
+            entry
+            for entry in reversed(trace)
+            if entry.get("stage") == "consult_return"
+            and entry.get("decision") == "attached"
+        ),
+        None,
+    )
+    assert consult_return_trace is not None, f"{case_id}: missing consult_return trace"
+    question_contract_trace = next(
+        (
+            entry
+            for entry in reversed(trace)
+            if entry.get("stage") == "question_contract"
+            and entry.get("decision") == "set"
+        ),
+        None,
+    )
+    assert question_contract_trace is not None, f"{case_id}: missing question_contract trace"
+    assert question_contract_trace.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
+
+
+def test_weekend_booking_oracle_freezes_known_vs_missing_service_contract():
+    eval_data = yaml.safe_load(EVAL_PATH.read_text(encoding="utf-8"))
+
+    known_service_case = next(
+        item
+        for item in eval_data.get("eval_cases", [])
+        if item.get("id") == "SCN5-03"
+    )
+    response, conversation, saved_message = _run_webhook_case(
+        known_service_case.get("user", ""),
+        "CA05_WEEKEND_SERVICE_KNOWN",
+        None,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {}) if saved_message else {}
+    assert meta.get("action") == "booking_prompt", f"SCN5-03: action mismatch; meta={meta}"
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME, (
+        f"SCN5-03: expected_reply_type mismatch; meta={meta}; response={response}"
+    )
+    trace = _get_decision_trace(conversation)
+    assert _trace_has_entry(
+        trace,
+        {
+            "stage": "question_contract",
+            "decision": "set",
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+        },
+    ), "SCN5-03: missing time question_contract trace"
+
+    missing_service_case = next(
+        item
+        for item in eval_data.get("eval_cases", [])
+        if item.get("id") == "SCN4-07"
+    )
+    response, conversation, saved_message = _run_webhook_case(
+        missing_service_case.get("user", ""),
+        "CA05_WEEKEND_SERVICE_MISSING",
+        None,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {}) if saved_message else {}
+    assert meta.get("action") == "booking_prompt", f"SCN4-07: action mismatch; meta={meta}"
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE, (
+        f"SCN4-07: expected_reply_type mismatch; meta={meta}; response={response}"
+    )
+    trace = _get_decision_trace(conversation)
+    assert _trace_has_entry(
+        trace,
+        {
+            "stage": "question_contract",
+            "decision": "set",
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_SERVICE,
+        },
+    ), "SCN4-07: missing service question_contract trace"
+
+
 def test_booking_flow_interrupt_after_price_duration_sequence():
     prefix = [
         "Здравствуйте! Я хочу записаться на стрижку.",
@@ -2038,6 +2234,13 @@ def _assert_semantic_expected_response(
     if expected_action and expected_action != "off_topic":
         if not isinstance(response, str) or not response.strip():
             raise AssertionError(f"{case_id}: empty response for expected action '{expected_action}'")
+    _assert_meta_expected(
+        meta,
+        case_id,
+        expected.get("meta"),
+        expected.get("meta_any"),
+        expected.get("meta_contains"),
+    )
 
 
 def _extract_tiers(case: dict) -> list[str]:
@@ -2170,6 +2373,11 @@ def test_demo_salon_eval_cases():
         response = (decision.response if decision else "") or ""
         local_time = case.get("local_time")
         must_include = case_expected.get("must_include") or []
+        requires_meta_assertion = bool(
+            case_expected.get("meta")
+            or case_expected.get("meta_any")
+            or case_expected.get("meta_contains")
+        )
         wants_cta = (not core_eval_mode) and any(
             isinstance(item, str) and "Хотите записаться" in item for item in must_include
         )
@@ -2212,6 +2420,14 @@ def test_demo_salon_eval_cases():
                         )
                     else:
                         _assert_expected_response(response, expected_payload, case_id)
+                        meta = saved_message.message_metadata.get("decision_meta", {}) if saved_message else {}
+                        _assert_meta_expected(
+                            meta,
+                            case_id,
+                            expected_payload.get("meta"),
+                            expected_payload.get("meta_any"),
+                            expected_payload.get("meta_contains"),
+                        )
                     _collect_trace_expectations(case_expected, trace_expectations)
         else:
             if messages:
@@ -2222,7 +2438,7 @@ def test_demo_salon_eval_cases():
                     intent_decomp_fn=eval_intent_decomp_fn,
                     service_hint_fn=eval_service_hint_fn,
                 )
-            elif local_time or wants_cta or not decision or is_consult_case:
+            elif local_time or wants_cta or not decision or is_consult_case or requires_meta_assertion:
                 response, conversation, saved_message = _run_webhook_case(
                     user_text,
                     case_id,
@@ -2249,6 +2465,14 @@ def test_demo_salon_eval_cases():
                     )
                 else:
                     _assert_expected_response(response, expected_payload, case_id)
+                    meta = saved_message.message_metadata.get("decision_meta", {}) if saved_message else {}
+                    _assert_meta_expected(
+                        meta,
+                        case_id,
+                        expected_payload.get("meta"),
+                        expected_payload.get("meta_any"),
+                        expected_payload.get("meta_contains"),
+                    )
                 _collect_trace_expectations(case_expected, trace_expectations)
 
         if trace_expectations:

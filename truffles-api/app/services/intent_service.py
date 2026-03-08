@@ -367,67 +367,6 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
     schema = {
         "type": "object",
         "additionalProperties": False,
-        "allOf": [
-            {
-                "if": {
-                    "properties": {
-                        "intent": {
-                            "enum": ["master_query", "master"],
-                        },
-                    },
-                    "required": ["intent"],
-                },
-                "then": {
-                    "anyOf": [
-                        {
-                            "properties": {
-                                "slots": {
-                                    "type": "object",
-                                    "properties": {
-                                        "service": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                        },
-                                    },
-                                    "required": ["service"],
-                                },
-                            },
-                        },
-                        {
-                            "properties": {
-                                "tool_args": {
-                                    "type": "object",
-                                    "properties": {
-                                        "service_query": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                        },
-                                    },
-                                    "required": ["service_query"],
-                                },
-                            },
-                        },
-                        {
-                            "properties": {
-                                "action": {"const": "collect"},
-                                "next_question": {"const": "service"},
-                            },
-                            "required": ["action", "next_question"],
-                        },
-                        {
-                            "properties": {
-                                "action": {"const": "collect"},
-                                "open_questions": {
-                                    "type": "array",
-                                    "contains": {"const": "service"},
-                                },
-                            },
-                            "required": ["action", "open_questions"],
-                        },
-                    ],
-                },
-            }
-        ],
         "required": [
             "intent",
             "action",
@@ -467,6 +406,10 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
                     ]
                 },
             },
+            "subject_kind": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "capability": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "temporal_scope": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "resolution_mode": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "resolver_id": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "resolver_version": {"anyOf": [{"type": "string"}, {"type": "null"}]},
         },
@@ -475,6 +418,8 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
         "type": "json_schema",
         "json_schema": {
             "name": "llm_policy_core_output",
+            # Keep provider schema transport-compatible; semantic conditional rules such as
+            # master_query service requirements are enforced later by validate_llm_policy_core_output().
             # tool_args/slots are intentionally open-ended and validated later by contract validators.
             # strict=False keeps schema guidance without forcing hard-fail on dynamic nested objects.
             "strict": False,
@@ -1148,7 +1093,7 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
     expected_reply_type = profile.get("expected_reply_type")
     if isinstance(expected_reply_type, str) and expected_reply_type.strip():
         expected_reply_type = expected_reply_type.strip().casefold()
-        if expected_reply_type in {"service_choice", "time", "name"}:
+        if expected_reply_type in {"service_choice", "time", "name", "phone"}:
             normalized["expected_reply_type"] = expected_reply_type
     active_slots = profile.get("active_slots")
     if isinstance(active_slots, list):
@@ -1214,6 +1159,78 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
             seen_items.add(fingerprint)
         if cleaned_items:
             normalized["retrieved_items"] = cleaned_items
+    current_referents = profile.get("current_referents")
+    if isinstance(current_referents, dict):
+        cleaned_referents: dict[str, str] = {}
+        for key in ("service", "specialist", "branch", "booking_ref"):
+            value = current_referents.get(key)
+            if isinstance(value, str) and value.strip():
+                cleaned_referents[key] = " ".join(value.split())[
+                    :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+                ]
+        if cleaned_referents:
+            normalized["current_referents"] = cleaned_referents
+    pending_question_contract = profile.get("pending_question_contract")
+    if isinstance(pending_question_contract, dict):
+        cleaned_pending: dict[str, Any] = {}
+        slot = pending_question_contract.get("slot")
+        if isinstance(slot, str) and slot.strip():
+            slot_token = slot.strip().casefold()
+            if slot_token in {"service", "datetime", "name", "phone"}:
+                cleaned_pending["slot"] = slot_token
+        pending_expected_reply_type = pending_question_contract.get("expected_reply_type")
+        if (
+            isinstance(pending_expected_reply_type, str)
+            and pending_expected_reply_type.strip()
+        ):
+            expected_token = pending_expected_reply_type.strip().casefold()
+            if expected_token in {"service_choice", "time", "name", "phone"}:
+                cleaned_pending["expected_reply_type"] = expected_token
+        reason = pending_question_contract.get("reason")
+        if isinstance(reason, str) and reason.strip():
+            cleaned_pending["reason"] = " ".join(reason.split())[
+                :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+            ]
+        value = pending_question_contract.get("value")
+        if isinstance(value, str) and value.strip():
+            cleaned_pending["value"] = " ".join(value.split())[
+                :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+            ]
+        if cleaned_pending:
+            normalized["pending_question_contract"] = cleaned_pending
+    consult_state = profile.get("consult_state")
+    if isinstance(consult_state, dict):
+        cleaned_consult_state: dict[str, Any] = {}
+        active = consult_state.get("active")
+        if isinstance(active, bool):
+            cleaned_consult_state["active"] = active
+        topic = consult_state.get("topic")
+        if isinstance(topic, str) and topic.strip():
+            cleaned_consult_state["topic"] = " ".join(topic.split())[
+                :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+            ]
+        question = consult_state.get("question")
+        if isinstance(question, str) and question.strip():
+            cleaned_consult_state["question"] = " ".join(question.split())[
+                :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+            ]
+        questions = consult_state.get("questions")
+        if isinstance(questions, list):
+            cleaned_questions: list[str] = []
+            for raw_question in questions:
+                if len(cleaned_questions) >= POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS:
+                    break
+                if not isinstance(raw_question, str):
+                    continue
+                normalized_question = " ".join(raw_question.split())
+                if normalized_question:
+                    cleaned_questions.append(
+                        normalized_question[:POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS]
+                    )
+            if cleaned_questions:
+                cleaned_consult_state["questions"] = cleaned_questions
+        if cleaned_consult_state:
+            normalized["consult_state"] = cleaned_consult_state
     return normalized or None
 
 
@@ -1338,13 +1355,32 @@ If missing required args, set outcome=collect and list open_questions accordingl
 POLICY_CORE_PROMPT_FALLBACK = """# LLM Policy Core Prompt
 Return JSON only (no markdown). Required fields: intent, action, tool_action, slots, confidence.
 Optional fields: tool_args, pack_refs, slots, next_question, open_questions, needs_manager,
-risk_signals, language, reason, goal.
+risk_signals, language, reason, goal, entity_refs, subject_kind, capability, temporal_scope,
+resolution_mode, resolver_id, resolver_version.
 Use tool_action and pack_refs only from the allowed lists provided in the input.
 slots/open_questions/next_question may only use: service, datetime, name.
+If memory.profile.current_referents or memory.profile.pending_question_contract is present,
+use it as grounded dialog state for follow-up questions.
+Treat inflected or prepositional service phrases as explicit service mention; do not
+switch to collect only because the service is not in base dictionary form.
 Use intent=master_query only when user explicitly asks about specialists for a concrete service/skill.
+Availability or specialist-selection questions for a concrete service (for example,
+"есть ли специалист по X" or "есть мастер по X") are master_query, not pricing.
+If the service is already present, do not collect specialist name; return fact with
+tool_action=catalog.service_query and tool_args.service_query instead.
+Example: "У вас есть специалист по окрашиванию?" -> intent=master_query,
+action=fact, tool_action=catalog.service_query, tool_args.service_query="окрашивание".
+Example: "Какого мастера вы можете предложить?" -> intent=master_query,
+action=collect, tool_action=collect, next_question=service.
 master_query requires slots.service or tool_args.service_query for fact answers.
 If service is missing for master_query, use action=collect, tool_action=collect,
 next_question=service and open_questions must include service.
+subject_kind values: service, specialist, branch, booking, general.
+capability values: pricing, duration, location, hours, promotions, bookability,
+live_availability, booking_manage, consultation, portfolio, other.
+temporal_scope values: none, specific_time, day, weekday, weekend, date_range.
+resolution_mode values: direct, referent_followup, clarify_missing_subject,
+clarify_missing_time, policy_fact, live_calendar.
 """
 
 _CONTROLLER_PROMPT_CACHE: str | None = None
@@ -2121,6 +2157,8 @@ def route_llm_policy_core(
         "elapsed_ms": 0.0,
         "compact_input_used": False,
         "compact_retry_used": False,
+        "structured_output_enabled": False,
+        "structured_output_fallback_used": False,
     }
     normalized = (message or "").strip()
     if not normalized:
@@ -2229,6 +2267,7 @@ def route_llm_policy_core(
     )
     use_compact_messages = compact_first_attempt
     structured_output_enabled = _policy_core_structured_output_enabled()
+    result["structured_output_enabled"] = structured_output_enabled
     policy_response_format = (
         _build_policy_core_response_format(allowed_tool_actions)
         if structured_output_enabled
@@ -2465,6 +2504,7 @@ def route_llm_policy_core(
     result["elapsed_ms"] = elapsed_ms
     result["compact_input_used"] = compact_input_used
     result["compact_retry_used"] = compact_retry_used
+    result["structured_output_fallback_used"] = structured_output_fallback_used
     _log_timing(
         "policy_core_llm_ms",
         elapsed_ms,
@@ -2685,7 +2725,8 @@ def interpret_expected_reply(
         return result
     parsed = contract.model_dump()
 
-    slot = _clean_answer_slot(parsed.get("slot")) or expected_slot
+    detected_slot = _clean_answer_slot(parsed.get("slot")) or expected_slot
+    slot = detected_slot
     error = None
     if slot != expected_slot:
         error = "slot_mismatch"
@@ -2707,6 +2748,7 @@ def interpret_expected_reply(
 
     result["payload"] = {
         "slot": slot,
+        "detected_slot": detected_slot or "",
         "value": value,
         "confidence": confidence,
         "reason": reason,

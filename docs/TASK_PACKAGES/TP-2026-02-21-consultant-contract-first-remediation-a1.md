@@ -1,1271 +1,362 @@
 # TP-2026-02-21-consultant-contract-first-remediation-a1
 
-- Название/цель: Contract-first remediation консультанта по форензике прогонов (базовое окно 11h + addendum 2026-02-24). Цель: закрепить `LLM-first semantic owner`, исключить text-fitting/hardcode в core, перевести доменную интерпретацию на `semantic-first + resolver + contracts`, масштабировать поведение на multi-niche runtime без нишевого кода в core, и вернуть устойчивое качество `>=95%` на валидном full critical replay.
-- Canon refs: `AGENTS.md`, `STATE.md`, `STRUCTURE.md`, `TECH.md`, `SPECS/SYSTEM_REFERENCE.md`, `STRATEGY/REQUIREMENTS.md`.
-- STATE refs: текущий GAP по quality/run-integrity/semantic drift и architecture drift (hardcode/text-coupling).
+- Название/цель: P1 re-open и доведение `Single Semantic Owner` до полного, fail-closed, tenant/branch-aware, capability-scoped, multilingual-safe business-agnostic состояния без semantic rewrite в runtime path.
+- Canon refs: `AGENTS.md`, `STATE.md`, `STRUCTURE.md`, `STRATEGY/REQUIREMENTS.md`, `SPECS/SYSTEM_REFERENCE.md`, `TECH.md`.
+- STATE refs: GAP по semantic ownership, fact-evidence linkage, booking commit contract, process-trust quality chain.
 - Branch: `fix/llm-first-firebreak-2026-02-19`.
 - Worktree: `/home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19`.
 - Base ref: `origin/main`.
 - Merge policy: merge only (rebase запрещен).
 - Cleanup: Brain/Top Architect после merge удаляет branch + worktree.
 
-## Problem Snapshot (FACT, forensic window = 11h)
-
-Период: `2026-02-23T11:17Z`..`2026-02-23T22:17Z`.
-
-Evidence (forensics):
-- `/tmp/booking_quality/analysis-last-11h-20260223T221713Z.json`
-- `/tmp/booking_quality/analysis-last-11h-20260223T221713Z.md`
-- `/tmp/booking_quality/analysis-last-11h-runs-20260223T221713Z.tsv`
-- `/tmp/booking_quality/analysis-last-11h-dialogs-20260223T221713Z.tsv`
-- `/tmp/booking_quality/analysis-last-11h-files-20260223T221713Z.tsv`
-- `/tmp/booking_quality/analysis-last-11h-bad-turns-20260223T221713Z.jsonl`
-
-Факты:
-- total_runs: `13`
-- total_turns_from_responses: `314`
-- strict_fail_turns: `5`
-- hard_fail_turns: `1`
-- judge_fail_turns: `4`
-- missing_bot_reply_turns: `1`
-- webhook_error_turns: `2`
-- weak_oracle_turns: `21`
-- Есть run-папки без полного артефакт-пакета (`summary+brief` есть, но нет `scenarios/responses/trace_bundle`).
-- Критичные semantic-провалы концентрируются в `calendar.get_booking/time_mismatch` и `master`-ветке с нерелевантным `not_found_fallback`.
-
-Системные причины (root causes):
-1. В runtime есть text-coupling и phrase-sensitive branching в core-пути (архитектурный drift).
-2. В тестах часть проверок все еще опирается на текстовые фразы вместо структурного контракта (`decision_meta/decision_trace`).
-3. Run-economy/preflight ранее блокировал не все бесполезные replay цепочки (baseline quality/readability/canonicality).
-4. Нет hard-fail инфраструктурного запрета на внесение новых keyword/regex веток в core-файлы.
-5. Доменные слова/жаргон местами решаются ad-hoc в коде, а не через resolver/data contract.
-
-## Problem Snapshot Addendum (FACT, forensic window = 3h, 2026-02-24)
-
-Evidence (forensics):
-- `/tmp/booking_quality/analysis-last3h-run-audit-20260224T124020Z.tsv`
-- `/tmp/booking_quality/analysis-last3h-file-audit-clean-20260224T124129Z.tsv`
-- `/tmp/booking_quality/firebreak-full-critical-4defects-v2-20260224-a1-r2/summary.json`
-- `/tmp/booking_quality/firebreak-full-critical-4defects-v2-20260224-a1-r2/responses.jsonl`
-- `/tmp/booking_quality/firebreak-full-critical-4defects-v2-20260224-a1-r3/summary.json`
-- `/tmp/booking_quality/firebreak-full-critical-4defects-v2-20260224-a1-r3/responses.jsonl`
-
-Факты:
-- За 3 часа: `PASS=3`, `FAIL=4`, `NON-CANONICAL=6` (run-level audit).
-- В non-canonical окне зафиксированы `invalid_run_economy_preflight`, `invalid_runtime_fingerprint_preflight`, `invalid_scenario_contract_preflight`, `system_exit`, `dry_run_non_evaluable`.
-- На сопоставимом `code_fingerprint` + `scenario_fingerprint` один full-run дал `semantic_valid=false` (`r2`), другой `semantic_valid=true` (`r3`) при `seed=null`.
-- В full critical зафиксированы timeout/degrade случаи (`policy_error:deadline_exceeded`, `timeout_degrade`) и `pipeline_ms` до `23521.83` при бюджете `18000ms`.
-- `dedup_db_fallback_rate=1.0` и `dedup_fallback_reason=redis_error` в обоих full-runs (`r2/r3`), что указывает на infra-contract gap.
-
-## Problem Snapshot Addendum (FACT, runtime provenance + anti-loop, 2026-02-26)
-
-Evidence (forensics):
-- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r4-forensic/summary.json`
-- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r4-forensic/problem_turns.json`
-- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r4-runtime18291/summary.json`
-- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r4-runtime18291/problem_turns.json`
-- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r4-runtime18291-postmixfix/summary.json`
-
-Факты:
-- Replay на старом runtime (`:18290`) показал `semantic_valid=false` с `post_llm_semantic_rewrite_budget_exceeded` и `judge_fail`; в traces были override c `reason=info_ref_resolution`.
-- Replay на свежем runtime (`:18291`) из текущего коммита убрал `judge_fail` и критичный semantic override drift; `strict_pass_rate` вырос с `0.9483` до `0.9828`.
-- Остался один fail-turn, классифицированный как ложный `mix_info_booking` для `intent=catalog.service_query` + `tool_decision=missing_slot` (это booking collect, не semantic leak).
-- Длинный replay может зависать в хвосте с `stop_reason=in_progress` и неполным артефактом (`brief.md` отсутствует), что делает run non-canonical и расходует ресурсы.
-- Запуск replay поверх baseline с `baseline_canonical=false` подтверждает цикл "дорогой прогон без права на acceptance", если preflight не fail-closed.
-- В lock run `booking-lock-20260226-envelope-a1-r10` обнаружен security/perf дефект: judge transport через `curl` subprocess включал `Authorization: Bearer ...` в argv процесса (`ps`) и давал дополнительный per-turn overhead.
-- Remediation: judge transport переведен на in-process HTTP request (без subprocess и без секрета в argv); lock до фикса классифицирован forensic-only.
-
-## Problem Snapshot Addendum (FACT, master intent semantics, 2026-02-27)
-
-Evidence:
-- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r38/summary.json`
-- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r38/responses.jsonl`
-
-Факты:
-- В replay (`r38`) зафиксирован semantic-fail `expected_info_section_miss` по `master`.
-- Фактический ответ на "Я хочу узнать о ваших услугах." ушёл в `catalog.service_query` (service_choice), `info_sections` пустые.
-- Это подтверждает mismatch между ожиданием сценария и желаемой семантикой: master-ответ должен быть только при явном master-запросе.
-
-Решение (binding):
-- Master-ответ выдаётся только по явным запросам о мастерах/опыте/кто делает услугу.
-- Общие вопросы про услуги остаются service-query и не переводятся в master без явного сигнала.
-- Реализация — через semantic resolver + pack data, без core hardcode/regex.
-
-## Problem Snapshot Addendum (FACT, budget reality + process trust, 2026-02-27)
-
-Evidence:
-- `/tmp/firebreak_summary_scan.json`
-- `/tmp/booking_quality_firebreak/summary.json`
-- `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r38/summary.json`
-- `/tmp/booking_quality/analysis-last-11h-20260223T221713Z.md`
-- `/tmp/booking_quality/analysis-last-3h.md`
-
-Факты:
-- По текущему скану `summary.json` (`25` run): `semantic_red=13`, `infra_red=4`, `non_canonical=7`.
-- Значимая доля run в окне остается непригодной для baseline/comparison из-за process/integrity (`INVALID`, `run_incomplete`, `early_failure`, interrupted stop-reasons).
-- Зафиксирован process trust gap: `manual_audit.json=status:done`, но `summary.manual_audit.status=pending` в большинстве run текущей цепочки firebreak (`25/26` проверенных run со статусом).
-- В lock/replay артефактах одновременно наблюдаются:
-  - зеленые deterministic/delivery метрики,
-  - красные semantic-blockers (`wrong_action`, `handoff_miss`, `post_llm_semantic_rewrite_budget_exceeded`),
-  что подтверждает мульти-слойный характер дефекта.
-- Экономика прогонов: запуск полного `lock -> replay -> full` как каждодневного debug-цикла приводит к перерасходу токенов/времени до закрытия корневых дефектов в process + semantic + data слоях.
-
-Решение (binding):
-- Полная acceptance-цепочка `lock -> replay -> full` сохраняется как release-gate и не используется как основной inner-loop разработки.
-- В ежедневном цикле вводится обязательный бюджетный dev-lane (детерминированный + micro LLM + ручной аудит), а full-chain запускается только после прохождения `Go-to-Full` критериев.
-
-## Contradictions Found And Resolved In This TP
-
-1. Противоречие: требование "один semantic owner" было не зафиксировано как жесткий контракт.
-- Обновление: введён обязательный invariant single semantic arbiter + запрет post-hoc semantic rewrite вне whitelist reason-code.
-
-2. Противоречие: в mandatory checks присутствовали `judge_mode off` прогонки, что конфликтует с Quality Validity/Baseline Integrity gate.
-- Обновление: `judge off` оставлен только как forensic/non-acceptance lane; acceptance-цепочка только с `judge.enabled=true`.
-
-3. Противоречие: timeout/degrade политика не закрепляла защиту factual-path в booking context.
-- Обновление: добавлен контракт "booking context не ломает FACT"; при factual intent запрещен generic collect по timeout.
-
-4. Противоречие: acceptance-chain не была зафиксирована как единая цепочка с одинаковыми fingerprint.
-- Обновление: добавлен обязательный canonical flow `lock -> replay -> full`, `run_economy=block`, единый `scenario_fingerprint` и `code_fingerprint`.
-
-5. Противоречие: TP не фиксировал control-plane детерминизм как источник semantic drift.
-- Обновление: добавлен scope/plan на стабилизацию control-plane stochastic режима через structured contracts и variance control.
-
-6. Противоречие: риск "чистого детерминизма" не был зафиксирован как архитектурный anti-pattern.
-- Обновление: закреплен hybrid-контур "probabilistic semantic reasoning + deterministic policy/contracts/tool-boundary"; запрещено принимать byte-identical текст как proxy качества.
-
-7. Противоречие: изоляция tenant tools/facts описана декларативно, но не закреплена протокольно.
-- Обновление: добавлен capability-contract (tenant manifest + tool protocol gate), где core не может вызвать инструмент/факт вне allowlist текущего tenant.
-
-8. Противоречие: forensic/debug флаги раннера могли попадать в acceptance-контур.
-- Обновление: закреплён fail-closed запрет на acceptance через `--allow-no-code-delta`, `--allow-judge-off`, `--skip-outbox`, `count<10`, либо урезанный coverage без `include_media` и `handoff`.
-
-9. Противоречие: явные info-вопросы в booking-контексте могли деградировать в pricing/service из-за stale service carryover.
-- Обновление: закреплён контракт: explicit `hours/location/parking/contact` не может быть переопределён в `price_query/service_match` без явного price/duration сигнала текущего turn.
-
-10. Противоречие: шаги исполнения были размазаны между волнами и не были зафиксированы как обязательная последовательность.
-- Обновление: добавлен binding `Execution Contract (1..5)` с stop conditions и evidence для каждого шага.
-
-11. Противоречие: runtime provenance проверялся неполно, из-за чего quality-прогоны могли идти на устаревшем container code.
-- Обновление: введён обязательный runtime provenance gate (`base_url -> /admin/version -> git_commit`) с fail-closed при несовпадении ожидаемого fingerprint.
-
-12. Противоречие: lock/replay state мог теряться при раннем останове, что провоцировало повтор неканонических lock-циклов.
-- Обновление: checkpoint/failure summary обязаны сохранять `run_economy + runtime_preflight + lock/replay fingerprint state`; повтор lock при прежнем non-canonical fingerprint блокируется.
-
-13. Противоречие: contract oracle ошибочно помечал booking collect как `mix_info_booking` в `service_query + missing_slot`.
-- Обновление: зафиксирован guard: `catalog.service_query` с `missing_slot/slot_mismatch` не считается mix-leak; это валидный booking collect path.
-
-14. Противоречие: tooling transport нарушал secret hygiene и добавлял лишний runtime overhead.
-- Обновление: введён запрет на передачу API ключей через argv subprocess; judge/tool API вызовы обязаны быть in-process transport с redacted observability.
-
-## Architecture Charter (binding)
-
-1. LLM-first semantic owner
-- Единственный владелец смысла turn (`FACT/COLLECT/HANDOFF + intent/slots/fact_refs`) — policy-core LLM.
-- Любые fast-path/guards после semantic-owner не переосмысляют intent/action, а только валидируют/блокируют/деградируют контрактно.
-
-2. Deterministic boundaries only
-- Детерминизм разрешён только на границах: LAW/safety, schema validation, capability/tool protocol, idempotency/outbox/state.
-- Детерминизм в core не может быть primary business router.
-
-3. Business-agnostic core
-- Core не содержит нишевых phrase/regex веток для маршрутизации ответов.
-- Доменная специфика живёт в packs/resolver/manifests.
-
-4. Graceful degrade budget (5%)
-- Допускается ограниченный деградированный путь (LLM timeout/unavailable/schema mismatch), но как исключение.
-- Error budget на acceptance: доля degrade-path событий не выше `0.05`; каждое событие обязано иметь `reason_code` и trace/meta evidence.
-
-5. Context continuity
-- Контекст диалога, ожидаемые слоты и capability-ограничения не теряются между turn'ами.
-- Degrade-path не должен ломать factual intent и не должен сбрасывать клиента в generic collect без контрактного основания.
-
-6. Acceptance oracle
-- Приёмка строится по поведенческому контракту (`action/tool/trace/meta/outcome`), не по идентичности текста.
-
-### Charter Precedence (anti-contradiction rule)
-
-- При конфликте между секциями приоритет такой:
-  1) `Architecture Charter (binding)` и `Invariant`,
-  2) `Plan Addendum (2026-02-24, execution order)`,
-  3) `Plan (1..16)`.
-- Любой шаг/чек, противоречащий приоритетным секциям, считается невалидным для acceptance.
-
-## Execution Contract (1..5, binding)
-
-1. Governance sync first
-- Синхронизировать канон/пороги до кода: charter, thresholds, acceptance envelope.
-- Stop condition: обнаружен acceptance-hack или конфликт канона.
-
-2. Semantic core remediation
-- Исправлять только семантический корень (single semantic owner + boundary determinism), без phrase-based hotfix.
-- Stop condition: любое post-hoc semantic rewrite вне whitelist reason-code.
-
-3. Deterministic contract lock
-- Зафиксировать детерминированные контрактные тесты на актуальные fail-turn clusters до дорогих LLM run.
-- Stop condition: новый fail-turn не имеет contract test/waiver.
-
-4. Canonical quality chain
-- Запускать только `lock -> replay -> full` на сопоставимых fingerprints и валидных preflight.
-- Stop condition: INVALID/NON-CANONICAL run, interrupted chain, mixed run_economy/judge mode.
-
-5. Evidence handoff
-- Обязательный пакет: `summary.json + brief.md + responses.jsonl + trace_bundle.jsonl + top_failures + exact replay command`.
-- Stop condition: отсутствует любой обязательный evidence-артефакт или FACT без evidence в STATE.
-
-## Execution Addendum (2026-02-26, mandatory)
-
-1. TP precedence
-- Этот TP является главным контрактом исполнения для текущей ветки до закрытия `P14`.
-- Любые локальные решения/фиксы/прогоны, противоречащие TP, считаются `INVALID`.
-
-2. Anti-drift process (all test tooling)
-- Для quality-цепочки обязателен один и тот же процесс: `lock -> replay -> full` без смешивания lanes.
-- Для replay/full обязателен фиксированный `scenarios.json` из lock и `--baseline-summary` lock.
-- Сравнение метрик разрешено только между сопоставимыми fingerprint (`code + scenario + runtime + judge_mode + run_economy`).
-- Повторные lock/replay без изменения fingerprint классифицируются как forensic-only и не обновляют baseline.
-- Нельзя принимать acceptance по partial/non-canonical run (`run_incomplete`, `INVALID`, `NON-CANONICAL`).
-
-3. Manual artifact analysis (MUST)
-- После каждого прогона обязателен ручной аудит всех артефактов:
-  - `summary.json`,
-  - `responses.jsonl`,
-  - `trace_bundle.jsonl`,
-  - `brief.md`.
-- Judge verdict не заменяет ручной аудит; judge используется как вспомогательный оркестр.
-- Если ручной аудит обнаруживает конфликт judge vs contract, это фиксируется как отдельный root-cause и вход в доработку judge/rubric.
-- Стандартная команда post-run аудита:
-  - `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/booking-lock-20260227-a1 --status done --strict-artifacts`
-- Acceptance запрещен, если `manual_audit.status != done` или `artifact_integrity.valid != true`.
-
-4. Stop-the-line for efficiency
-- Если run перешел в `run_incomplete`/`stop_reason=in_progress`, цепочка останавливается до root-cause фикса.
-- Нельзя компенсировать нестабильный lock множеством новых lock попыток без анализа предыдущих артефактов.
-- Любой новый run до post-run manual audit предыдущего run — нарушение процесса.
-- Runtime preflight обязан применять `manual_audit_gate=block` (или эквивалентный fail-closed guard) и останавливать новый run при `manual_audit_pending:booking-lock-20260227-a1`.
-
-5. Throughput firebreak (mandatory)
-- Если в lock-run наблюдается `bot_response` без текстового payload (boolean reply) и прогон уходит в длительное polling-ожидание, run классифицируется как `forensic-only` до устранения причины.
-- Если фактический throughput падает ниже устойчивого минимума (операционно: `dialogs_seen < expected` при длительном wall-time и/или `run_completion_gap`), прерывание run допустимо только после фиксации root-cause в `manual_audit`.
-- После принудительного стопа обязателен полный post-run audit (`summary/responses/trace/brief`) с analyst root-causes и next steps; baseline/comparison для такого run запрещены.
-- Перед следующим lock-run нужно применить remediation на уровне runner/runtime:
-  - минимизировать бессмысленные poll/trace ожидания,
-  - исключить ожидание assistant-message там, где webhook уже дал терминальный contract payload,
-  - сохранять неизменными acceptance-гейты (`judge=all`, `include_media`, `coverage booking,info,interrupt,handoff`, `count>=10`).
-- Любой lock, не завершивший полный dialog-coverage, остаётся non-canonical независимо от частичных pass-метрик.
-
-6. Anti-loop lock gate (mandatory)
-- Повторный lock с тем же `lock_fingerprint` после неканонического lock (`semantic_valid=false` или `run_integrity_valid=false` или `stop_reason in_progress/signal`) блокируется fail-closed.
-- Разблокировка только двумя путями:
-  - есть code/runtime delta (новый fingerprint),
-  - либо явный forensic override (не acceptance lane, baseline update запрещен).
-- Replay/full запрещены, пока не получен первый канонический lock (`infra_valid=true`, `semantic_valid=true`, `run_integrity_valid=true`, `manual_audit.done=true`).
-- Любая цепочка, где lock неканоничен, автоматически считается `forensic-only`, даже если replay/full локально были запущены вручную.
-
-7. Canonical completion gate (mandatory)
-- `P10` и `P13` считаются закрытыми только при завершённой цепочке:
-  - lock (canonical) -> replay (canonical) -> full (canonical),
-  - у каждого шага полный пакет артефактов и manual audit.
-- Любой `INVALID`/`INCOMPLETE` шаг в цепочке обнуляет статус closure и возвращает процесс к root-cause remediation.
-
-8. Runtime provenance gate (mandatory)
-- Перед каждым lock/replay/full обязателен preflight runtime identity:
-  - проверить `base_url` + `runtime_fingerprint`,
-  - зафиксировать `/admin/version` (`git_commit`, `build_time`) в `summary`.
-- Несовпадение ожидаемого code/runtime fingerprint -> `INVALID(runtime_commit_mismatch)`, прогон останавливается до исправления runtime.
-- Сравнение baseline разрешено только если runtime provenance сопоставим между lock/replay/full.
-- Commit parity недостаточен при грязном worktree: для изменённых owner-файлов (`decision.py`, `ops/diagnose.py`, related contracts/tests) обязателен hash-parity check между worktree и runtime container перед quality-run.
-- Если hash-parity не соблюдён, run маркируется `forensic-only`; acceptance/baseline/comparison запрещены до rebuild runtime из текущего worktree.
-
-9. Artifact completion gate for interrupted runs (mandatory)
-- Даже при `signal/system_exit/in_progress` runner обязан писать минимальный финальный артефакт-пакет:
-  - `summary.json` с terminal `status`,
-  - `brief.md` c stop_reason,
-  - сохранённый lock/replay fingerprint state.
-- Если пакет неполный, run автоматически маркируется `forensic-only` и не допускается в comparison/baseline.
-- Новый run с тем же lock_fingerprint запрещён до закрытого manual audit предыдущего interrupted run.
-- Повторный lock с тем же fingerprint после non-canonical run допускается только через явный forensic override (`--allow-no-code-delta`) и остаётся вне acceptance lane до canonical lock.
-
-10. Artifact index + resume manifest (mandatory)
-- Каждый run обязан сохранять `run_manifest.json` c аргументами запуска, статусом, путями артефактов и resume-командой.
-- Индекс артефактов ведётся по часам и по типам (`lock/replay/full`) в `/tmp/booking_quality/_index`, чтобы всегда было видно последние прогоны, их аргументы и статус.
-- Любой новый run блокируется, если предыдущий в том же режиме имеет `manual_audit!=done` или неполный артефакт‑пакет.
-
-11. Semantic boundary guard for booking/info (mandatory)
-- Явный booking collect turn (`catalog.service_query` + `tool_decision in {missing_slot,slot_mismatch}`) не может классифицироваться как `mix_info_booking`.
-- Для explicit info-intent запрещено переопределение в `price_query/service_match` без явного price/duration сигнала текущего turn.
-- Любое отклонение от этого правила считается semantic contract regression и блокирует acceptance.
-
-12. Secret-safe transport gate (mandatory)
-- Запрещено передавать `OPENAI_API_KEY` или другие секреты в argv subprocess (`ps` visibility).
-- Judge/tool HTTP вызовы должны выполняться in-process transport (или эквивалент с гарантированной secret redaction).
-- Обнаружение секрета в argv/log artifact = `INVALID(secret_exposure_detected)` и stop-the-line до remediation.
-
-## Execution Addendum (2026-02-27, master intent semantics mandatory)
-
-1. Master-intent contract (mandatory)
-- Intent `master`/`master_query` разрешён только при явных master-запросах: “какие мастера делают X”, “кто делает X”, “кто лучше/опытнее по X”.
-- Общие вопросы “про услуги” остаются `catalog.service_query` без master-ответа.
-
-2. Pack-driven only (mandatory)
-- Ответы про мастеров строятся только из pack-данных (masters/services/experience), без домыслов.
-- При отсутствии service-слота обязателен уточняющий вопрос.
-
-3. No core hardcode (mandatory)
-- Запрещены phrase/regex ветки в core для master-routing.
-- Master intent определяется LLM/resolver + pack контрактом.
-
-4. P10/P13 gate
-- `P10/P13` нельзя закрывать до внедрения master-intent контракта, pack-данных и контрактных тестов.
-
-## Execution Addendum (2026-02-27, budget-aware operating model, mandatory)
-
-1. Two-lane operating model (mandatory)
-- `Dev lane` (дешевый, обязательный): deterministic contract tests + micro LLM replay + post-run manual audit.
-- `Acceptance lane` (дорогой, release-only): только canonical `lock -> replay -> full` с полными гейтами.
-- Любой вывод о релизной готовности из `Dev lane` недопустим.
-- Двухконтурность не является снижением quality bar: acceptance-инварианты/пороговые значения/архитектурные требования остаются неизменными.
-
-2. Go-to-Full gate (mandatory)
-- `Acceptance lane` разрешён только если одновременно:
-  - `manual_audit.status=done` и синхронен в `summary + manual_audit.json`,
-  - `artifact_integrity.valid=true`,
-  - `weak_oracle_turn_count=0`,
-  - последние dev-run не содержат `INVALID/NON-CANONICAL/INCOMPLETE`,
-  - нет активных blocker-классов `wrong_action|handoff_miss|booking_flow_break` на целевых дефект-кластерах,
-  - `rewrite_governance.valid=true` и `post_llm_semantic_rewrite_rate <= 0.02`.
-- Нарушение любого пункта блокирует full-chain и возвращает процесс в remediation.
-
-3. Full-chain frequency policy (mandatory)
-- Full-chain не запускается "после каждого фикса".
-- Разрешенный режим: milestone/candidate runs (по готовности gate), либо фиксированное окно (например, 1 раз в 24-48 часов) при выполненном Go-to-Full.
-- Любой full-run вне этой политики маркируется forensic-only и не используется для acceptance.
-- Запрет: использовать budget/time/token ограничения как аргумент для смягчения acceptance требований или для внедрения workaround в production path.
-
-4. Vertical remediation packets (mandatory)
-- Исправления выполняются пакетами "semantics + contracts + data + evidence", а не одиночными hotfix.
-- Минимум 3 обязательных пакета:
-  - `Packet A`: process trust (`manual_audit sync`, artifact completion, preflight fail-closed),
-  - `Packet B`: semantic routing (`master/service`, action ownership, rewrite budget),
-  - `Packet C`: pack/data contracts (masters/services/experience + slot requirements).
-- Частичное закрытие пакета не считается выполнением этапа.
-
-5. Past -> Present -> Future context contract (mandatory)
-- Каждый этап обязан явно фиксировать:
-  - `Past`: что уже делали и какой эффект подтвержден evidence,
-  - `Present`: какие root-causes активны сейчас,
-  - `Future`: какой следующий атомарный пакет закрывает какую бизнес-потерю.
-- Запись "сделано" без этой триады считается неполным handoff и не может быть использована как acceptance-evidence.
-
-6. Budget-aware stop-the-line (mandatory)
-- При росте `INVALID/NON-CANONICAL` или process-trust gap (audit mismatch) дорогие LLM прогоны останавливаются до фикса runner/process слоя.
-- Токены/время считаются ограниченным ресурсом качества; расход без прохождения Go-to-Full трактуется как process regression.
-- Если полноценная проверка временно недоступна, статус этапа = `BLOCKED`; "упрощенный pass" по бюджету запрещен.
-
-## Execution Addendum (2026-02-28, runtime reliability root-fix, mandatory)
-
-1. Root-cause scope (mandatory)
-- Текущий активный blocker после process-fix: `semantic_valid=false` при `infra_valid=true` из-за `degraded_fallback_rate > 0.05` в timeout-degrade кластере.
-- Root-cause считается runtime reliability path (`policy_core_degraded_collect/timeout_degrade`), а не oracle/text mismatch.
-
-2. Quality-constant protection (mandatory)
-- Порог `degraded_fallback_rate <= 0.05` не смягчается.
-- Запрещено снижать acceptance threshold, отключать judge/coverage или менять quality lane как workaround.
-
-3. Single-degrade-per-context contract (mandatory)
-- Для `timeout_degrade` в booking collect допускается только один degrade-turn на conversation context.
-- Повторный `timeout_degrade` в том же context обязан приводить в `clarify_limit -> HANDOFF` (или эквивалентный contract escalation), а не к повторному `degraded_collect`.
-- Любой второй подряд `policy_core_mode=degraded_fallback` на том же timeout-контексте без escalation = regression.
-
-4. Observability contract (mandatory)
-- Повторный timeout-degrade обязан быть наблюдаем через `decision_trace`/`decision_meta`:
-  - `reason_code=timeout_degrade`,
-  - retry counter/limit,
-  - explicit decision (`timeout_booking_limit`/`clarify_limit`/`handoff`).
-- Silent fallback without retry metadata запрещён.
-
-5. Deterministic gate before replay (mandatory)
-- Обязательный тест: timeout booking-safe fallback first-hit -> collect prompt; second-hit (same context) -> clarify-limit escalation.
-- Acceptance replay разрешён только после зелёного deterministic test для этого контракта.
-
-6. Completion criteria for this packet (mandatory)
-- Dev-lane replay с `judge-mode all` на фиксированном hotset показывает:
-  - `infra_valid=true`,
-  - `run_integrity_valid=true`,
-  - `degraded_fallback_rate <= 0.05`,
-  - без новых `wrong_action|handoff_miss|booking_flow_break` blocker-классов.
+## Status Reset (binding, 2026-03-05)
+
+- Все ранние секции/матрицы с `done/all done` в этом TP считаются историческим архивом и не являются acceptance-истиной.
+- Активный статус:
+  - `P1 Single Semantic Owner`: `re-open`.
+  - Rollout (`canary/full`): `STOP-THE-LINE` до полного closure P1 + обязательного локального realism контура.
+  - `P1.6` promotion discovery loop: `budget-blocked after latest evidence`; новые дорогие `dev/acceptance` quality run не являются default dev-loop до следующего acceptance window.
+  - Current execution focus: `P1.6o16 booking time-guidance question owner`; guarded rerun `p1.6o6-l2-dev-20260308-a1-r11` is audited but non-admissible (`infra_valid=false`, `semantic_valid=false`) and surfaced the next semantic family on `На какое время лучше записаться?`, so no new expensive `dev L2` action is allowed until `docs/TASK_PACKAGES/TP-2026-03-08-p1.6o16-booking-time-guidance-question-owner-a1.md` is green on deterministic contour and transport is stable again.
+- Форензика состояния chain:
+  - `/tmp/booking_quality/_chain/20260305-firebreak-e2e3-a1-r33.json` -> `blocked_reason=canary_rollback_executed`.
+  - `/tmp/booking_quality/booking-canary-20260305-firebreak-e2e3-a1-r33/rollback.json` -> `status=executed`, `source=auto_canary_no_go`.
+
+## Architecture Clarification (binding)
+
+- `business-agnostic` в этом TP означает:
+  - runtime-core не знает заранее конкретную нишу, филиал и набор услуг;
+  - tenant/branch различия живут в `packs`, `policy`, `capabilities`, `runtime manifests`;
+  - доступные tools определяются capability/protocol boundary для конкретного tenant/branch, а не core hardcode;
+  - semantic-owner должен выдерживать разные языки и code-switching без отдельного keyword-router как основного механизма;
+  - `demo_salon` используется как acceptance canary-pack, а не как модель мира для core.
+- Следствие:
+  - любой фикс, который улучшает поведение только под текущий pack/лексикон/язык и не переносит знание в data/config/capability layer, считается неполным.
+
+## Atomic Sub-TP Matrix (binding)
+
+| Block | Sub-TP | Status | Closure mode |
+|---|---|---|---|
+| `P1.1 Remove semantic rewrite runtime paths` | `docs/TASK_PACKAGES/TP-2026-03-05-p1.1-single-owner-rewrite-removal-a1.md` | `done` | code + mandatory deterministic checks |
+| `P1.2a Remove phrase/token routing in policy info arbitration` | `docs/TASK_PACKAGES/TP-2026-03-05-p1.2a-core-phrase-routing-removal-a1.md` | `done` | code + contract tests |
+| `P1.2b Remove remaining phrase routing in tool-response arbitration` | `docs/TASK_PACKAGES/TP-2026-03-05-p1.2b-tool-response-phrase-routing-removal-a1.md` | `done` | code + contract tests |
+| `P1.3a Deterministic hard lock dead-rewrite removal` | `docs/TASK_PACKAGES/TP-2026-03-05-p1.3a-boundary-hardlock-dead-rewrite-removal-a1.md` | `done` | code + deterministic pack |
+| `P1.3b Acceptance semantic override gate` | `docs/TASK_PACKAGES/TP-2026-03-05-p1.3b-acceptance-semantic-override-gate-a1.md` | `done` | quality-gate + evidence |
+| `P1.4 LLM tool hint hardcode removal` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.4-llm-tool-hint-hardcode-removal-a1.md` | `done` | code + contract tests |
+| `P1.5 Remove post-plan semantic rescue paths` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.5-post-plan-semantic-rescue-removal-a1.md` | `done` | code + contract tests |
+| `P1.5b Single-owner contract suite realignment` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.5b-booking-interrupt-info-owner-protection-a1.md` | `done` | test contract realignment |
+| `P1.5c Booking interrupt plan-conflict fail-closed` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.5c-booking-interrupt-plan-conflict-fail-closed-a1.md` | `done` | code + contract tests |
+| `P1.6 Local realism + canonical acceptance lock` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.6-local-realism-canonical-lock-a1.md` | `budget-blocked` | realism + fresh lock evidence |
+| `P1.6o Demo-salon architecture closure program` | `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md` | `in_progress` | program stays open until all known blocker families and any newly surfaced family are closed and the full proof bundle (`deterministic -> dev L2 -> lock -> replay -> audit`) is green |
+| `P1.6a Policy-core structured-output compatibility` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.6a-policy-core-structured-output-compat-a1.md` | `done` | code + runtime probe |
+| `P1.6b Info followup hardcode removal` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.6b-info-followup-hardcode-removal-a1.md` | `done` | code + targeted contract tests |
+| `P1.6c Pre-lock readiness envelope` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.6c-pre-lock-readiness-envelope-a1.md` | `done` | L1/L2 evidence + blocker extraction before guarded lock |
+| `P1.6d Timeout-degrade fallback hardening` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.6d-timeout-degrade-fallback-hardening-a1.md` | `done` | code + targeted timeout fallback tests + fresh dev L2 blocker rollover |
+| `P1.6e Booking-active master_query pack enforcement` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.6e-booking-master-query-pack-enforcement-a1.md` | `done` | code + contract realignment for master-query under booking |
+| `P1.6f Master-availability query ownership` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.6f-master-availability-query-ownership-a1.md` | `done` | prompt + resolver + contract + live probe |
+| `P1.6g Reused-handover pending snapshot parity` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.6g-reused-handover-context-capture-a1.md` | `done` | code + deterministic contract tests |
+| `P1.6h Partial-datetime slot completeness parity` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.6h-partial-datetime-slot-completeness-parity-a1.md` | `done` | prompt + policy memory/profile + deterministic booking completeness alignment |
+| `P1.6i Booking collect slot-order invariant` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.6i-booking-collect-slot-order-invariant-a1.md` | `done` | deterministic validator + fail-closed earliest-slot prompt + targeted regressions |
+| `P1.6j Booking confirmation priority over policy-core degrade` | `docs/TASK_PACKAGES/TP-2026-03-06-p1.6j-booking-confirmation-priority-over-policy-core-degrade-a1.md` | `done` | policy-core guard + trace/meta + targeted confirmation regression |
+| `P1.6k Demo-salon release-lane cleanup after budget stop` | `docs/TASK_PACKAGES/TP-2026-03-07-p1.6k-demo-salon-release-lane-cleanup-a1.md` | `done` | cleanup lane is green again on deterministic contour; `E508` closed; next action is one fresh guarded `demo_salon` dev L2 |
+| `P1.6l LLM policy-core message-endpoint family closure` | `docs/TASK_PACKAGES/TP-2026-03-07-p1.6l-llm-policy-core-message-endpoint-family-a1.md` | `done` | real runtime gaps (`calendar.* fact_guard`, `person_service_signal`) closed; full `message_endpoint` green before fresh `demo_salon` dev L2 |
+| `P1.6m Booking expected-reply alternate-slot capture under stale question state` | `docs/TASK_PACKAGES/TP-2026-03-07-p1.6m-booking-expected-reply-alternate-slot-capture-a1.md` | `done` | question-contract now preserves validated alternate booking slot answers under stale expected-reply state; next action returns to one fresh guarded `demo_salon` dev L2 |
+| `P1.6n Weekend-availability service-referent arbitration` | `docs/TASK_PACKAGES/TP-2026-03-07-p1.6n-weekend-availability-service-referent-arbitration-a1.md` | `queued under P1.6o2/P1.6o3` | `r22` remains the first open family, but its closure now depends on the program-level semantic envelope + dialog-state + referent resolver slices |
+| `P1.7 Acceptance replay + regression gate` | `TBD (create before start)` | `pending` | replay evidence |
+| `P3.1 Booking commit contact minimum fail-closed` | `docs/TASK_PACKAGES/TP-2026-03-06-p3.1-book-slot-contact-minimum-fail-closed-a1.md` | `done` | no appointment create without resolved name+phone |
+| `P3.1r Demo-salon booking contact evidence contract parity` | `docs/TASK_PACKAGES/TP-2026-03-07-p3.1r-demo-salon-booking-contact-evidence-contract-a1.md` | `done` | success meta/trace now records contact sources, quality guard accepts valid profile-name + remote-jid phone evidence, next action returns to one fresh guarded `demo_salon` dev L2 |
+| `P3.2 Booking create transactional write boundary` | `docs/TASK_PACKAGES/TP-2026-03-06-p3.2-booking-create-transaction-boundary-a1.md` | `done` | appointment + outbox + reminders + profile sync share one write boundary |
+| `P3.3 Booking mutation transactional parity` | `docs/TASK_PACKAGES/TP-2026-03-06-p3.3-booking-mutation-transaction-parity-a1.md` | `done` | reschedule/cancel mutation writes no longer commit independently |
+| `P4.1 FACT evidence linkage fail-closed` | `docs/TASK_PACKAGES/TP-2026-03-06-p4.1-fact-evidence-linkage-fail-closed-a1.md` | `done` | no FACT without valid evidence linkage |
+| `P5.1 Invariant quality gates blocking` | `docs/TASK_PACKAGES/TP-2026-03-06-p5.1-invariant-quality-gates-blocking-a1.md` | `done` | branch progression blocked on invariant regressions, not only case-list failures |
+| `P6.1 Open-world scenario generator metamorphic coverage` | `docs/TASK_PACKAGES/TP-2026-03-06-p6.1-open-world-scenario-generator-metamorphic-coverage-a1.md` | `done` | deterministic generator produces multilingual/code-switch surface variants without new core hardcode |
+| `P6.2 Open-world translit code-switch coverage` | `docs/TASK_PACKAGES/TP-2026-03-06-p6.2-open-world-translit-code-switch-coverage-a1.md` | `done` | deterministic generator produces Cyrillic/Latin mixed-script variants without changing tags/expect |
+| `P6.3 Open-world typo surface coverage` | `docs/TASK_PACKAGES/TP-2026-03-06-p6.3-open-world-typo-surface-coverage-a1.md` | `done` | deterministic generator produces typo/noisy surface variants without changing tags/expect |
+| `P6.4 Open-world paraphrase synonym coverage` | `docs/TASK_PACKAGES/TP-2026-03-06-p6.4-open-world-paraphrase-synonym-coverage-a1.md` | `done` | deterministic generator adds semantic-equivalent paraphrase families beyond language/script/noise axes |
+| `P6.5 Open-world slot-format mutation coverage` | `docs/TASK_PACKAGES/TP-2026-03-06-p6.5-open-world-slot-format-mutation-coverage-a1.md` | `done` | deterministic generator adds time/phone/date format variants without changing slot expectations |
+| `P6A Deterministic metamorphic expansion foundation` | `closed by P6.1-P6.5` | `done` | cheap replayable surface mutation layer exists, but it is only the foundation of open-world proof |
+| `P6B.1 LLM stress synthesizer pack/branch context contract` | `docs/TASK_PACKAGES/TP-2026-03-06-p6b1-llm-open-world-stress-synthesizer-context-a1.md` | `done` | LLM scenario generation becomes pack-aware, branch-aware, capability-aware, and no longer salon-hardcoded |
+| `P6B.2 Multi-pack / multi-capability LLM stress matrix` | `docs/TASK_PACKAGES/TP-2026-03-06-p6b2-multi-pack-multi-capability-stress-matrix-a1.md` | `done` | run the same LLM stress contract across multiple packs/capability envelopes |
+| `P6C.1 Failure clustering and root-cause family reporting` | `docs/TASK_PACKAGES/TP-2026-03-06-p6c1-failure-clustering-root-cause-families-a1.md` | `done` | failures are grouped by invariant/root-cause family, not only by individual bad turns |
+| `P6C.2 Acceptance closure for P6` | `docs/TASK_PACKAGES/TP-2026-03-06-p6c2-p6-acceptance-closure-a1.md` | `blocked` | closure command/evidence gate implemented; real proof bundle still required before `P6` can close |
+
+- Execution law for this TP:
+  - One block at a time.
+  - A block can be marked `done` only with its own sub-TP + evidence.
+  - Exception: if an expensive realism/promotion block is explicitly marked `budget-blocked` with audited evidence, implementation may continue on the next systemic block while rollout/promotion stays frozen.
+  - `lock/replay/canary/full` is an acceptance promotion chain, not the primary debugging loop; during `P1.6` we first close readiness via `P1.6c` (`L1/L2 evidence`, audit debt, `PG checklist`) and only then start guarded `lock`.
+  - If a realism/acceptance loop hits `budget-stop` while diff review shows patch-fitting drift, the mandatory next block is release-lane cleanup; no new expensive run starts before that cleanup block is complete and deterministic checks are green.
+
+## P6 Clarification (binding)
+
+- `P6` is not equal to the deterministic mutation blocks already closed.
+- Correct full-scope `P6` is split into:
+  - `P6A Deterministic metamorphic expansion foundation`:
+    - `P6.1`..`P6.5`
+    - purpose: cheap replayable multilingual/script/noise/paraphrase/slot-format expansion
+  - `P6B LLM open-world stress synthesis`:
+    - purpose: generate unexpected, business-agnostic, pack/branch/tool-aware scenarios that a production consultant must survive
+  - `P6C Forensic clustering + acceptance closure`:
+    - purpose: turn failures into root-cause families and decide whether `P6` is truly closed
+- Heavy stress policy:
+  - acceptance `lock/replay/canary/full` runs stay on `demo_salon` only
+  - multi-pack proof for `P6` is collected via `dev/forensic` matrix evidence, not acceptance lane stresses
+- Therefore:
+  - `P6.1`..`P6.5` are necessary but not sufficient
+  - `P6` is not closed until `P6B` and `P6C` are completed
+  - no claim of business-agnostic / multi-branch / multilingual robustness may rely only on deterministic scenario expansion
+
+## One Web Search (mandatory before implementation)
+
+- Query: `NIST SP 800-207 policy decision point policy enforcement point`.
+- Time (UTC): `2026-03-05T12:44:50Z`.
+- Open sources:
+  - NIST SP 800-207 (Zero Trust Architecture): `https://csrc.nist.gov/pubs/sp/800/207/final`
+  - NIST glossary: Policy Decision Point: `https://csrc.nist.gov/glossary/term/policy_decision_point`
+  - NIST glossary: Policy Enforcement Point: `https://csrc.nist.gov/glossary/term/policy_enforcement_point`
+- Ready solutions found:
+  - Контрактное разделение Decision Point и Enforcement Point: enforcement валидирует/блокирует, но не подменяет решение decision owner.
+- Decision (`reuse/integrate/build`):
+  - `integrate`: применить PDP/PEP separation к текущему policy-core.
+  - `reuse`: существующий trace/meta контракт и hard-lock фрейм уже есть, но incomplete.
+  - `build`: точечное удаление latent rewrite paths и перенос phrase logic из core в pack/resolver.
+- Rejected variants:
+  - Второй deterministic semantic router (rejected: нарушает single owner).
+  - Расширение keyword hardcode в core как "быстрый фикс" (rejected: нарушает business-agnostic charter).
+
+## Root Cause (mandatory)
+
+- Symptom:
+  - Семантика все еще частично распределена между LLM-owner и детерминированными ветками/legacy-эвристиками.
+  - Есть риски ложного FACT и sidecar-смешения booking/info.
+  - Booking commit не fail-closed по контактному минимуму и не атомарен end-to-end.
+  - LLM tool-execution path до сих пор использует message-text heuristics для `info_sections_hint` и guard-сигналов.
+  - Acceptance пока доказывает single-owner в основном на одном canary pack и еще не доказывает multi-business / multilingual / code-switch robustness.
+
+- Minimal reproduction:
+  1. `wc -l truffles-api/app/routers/webhook/decision.py` -> `17996` (god-file orchestration).
+  2. `rg -n "_legacy|legacy\." truffles-api/app/routers/webhook/decision.py | wc -l` -> `230`.
+  3. `rg -n "_register_policy_override|policy_action\s*=|policy_tool_action\s*=" truffles-api/app/routers/webhook/decision.py`.
+  4. `rg -n "FACT_GUARD_ENABLED" truffles-api/app/routers/webhook/decision.py` -> `False`.
+  5. `sed -n '4040,4155p' truffles-api/app/routers/webhook/decision.py` (required fields for `calendar.book_slot`).
+
+- Evidence:
+  - `truffles-api/app/routers/webhook/decision.py`
+    - latent semantic rewrite branches still present (guarded by hard-lock, but physically in runtime core).
+    - explicit phrase markers in core (`адрес`, `где`, `парков`, `до скольки`, `мест`).
+    - `FACT_GUARD_ENABLED = False`.
+    - LLM tool path использует `_detect_info_class_intents(message_text, ...)` для hint/guard.
+  - `truffles-api/app/services/tool_registry_service.py`
+    - booking create + sync + reminder исполняются отдельными commit-точками.
+  - `truffles-api/app/services/appointment_service.py`
+    - appointment creation commit независим от outbox/reminder/profile transition.
+  - `truffles-api/app/routers/webhook/response.py`
+    - append-sidecar/followup ветки могут смешивать FACT и booking prompts в одном body.
+  - `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
+    - `must_include/must_include_any`: `895` вхождений (phrase-oracle давление).
+
+- Five Whys:
+  1. Почему semantic drift продолжает всплывать: core совмещает owner-решение и post-processing семантики.
+  2. Почему это осталось: hard-lock блокирует часть мутаций, но rewrite-код и phrase ветки не удалены архитектурно.
+  3. Почему это опасно: любой обход/регрессия снова включает второй semantic owner.
+  4. Почему качество нестабильно: acceptance частично ориентирован на phrase-oracle и demo-lexicon, а не на open-world invariants.
+  5. Почему бизнес-agnostic не достигается: core содержит нишевые/языковые маркеры и demo-coupled fallback patterns, а multilingual/code-switch robustness пока не доказана отдельным open-world acceptance.
+
+- Root cause statement:
+  - Корневая проблема не в одном дефекте, а в смешении semantic ownership и deterministic эвристик внутри монолитного orchestrator слоя, плюс неполный контракт fail-closed на FACT и booking commit.
+
+- Fix mechanism:
+  - Удалить semantic rewrite как runtime capability (не только блокировать), оставить deterministic только boundary validation.
+  - Перенести phrase/lexicon routing из core в pack/resolver contracts.
+  - Убрать message-text info hinting из LLM tool path, закрепить LLM-owned `pack_refs`.
+  - Закрыть fail-closed контракты по FACT evidence linkage и booking commit atomicity как обязательные boundary gates.
 
 ## Invariant
 
-- Не менять продуктовый контракт `FACT/COLLECT/HANDOFF`.
-- Не ослаблять LAW/policy/safety hard-gates.
-- Runtime core остается pack-agnostic.
-- Один semantic arbiter владеет итоговым решением turn (`FACT/COLLECT/HANDOFF + intent/slots/fact_refs`); downstream-слои только валидируют/блокируют, но не переосмысляют смысл.
-- Core не использует phrase/regex branching как primary бизнес-маршрутизацию.
-- `decision_meta`/`decision_trace` обязательны и консистентны на каждом user turn.
-- INVALID/INCOMPLETE run не участвует в baseline/comparison.
-- Никаких hardcoded phrase-branching в core-path (`decision/booking/tool_registry`) как способа фикса качества.
-- Timeout/degrade не должен превращать factual запрос в generic collect; только контрактный degrade-path с reason-code.
-- Доля degrade-path событий в acceptance-цепочке не выше `0.05`.
-- Acceptance только по канонической цепочке `lock -> replay -> full` при `run_economy=block` и сопоставимых fingerprint.
-- В booking-контексте explicit info-intent (`hours/location/parking/contact`) не может переезжать в `price_query/service_match` без явного price/duration сигнала текущего turn.
-- Любой fallback/override, меняющий semantic class turn, обязан писать `reason_code` в trace/meta.
-- Runtime provenance (`runtime_fingerprint` + `/admin/version.git_commit`) должен совпадать по всей канонической цепочке.
-- Interrupted run обязан завершаться terminal summary/brief; "вечный in_progress" для acceptance запрещён.
-- Master intent допускается только при явном master-запросе; общие вопросы про услуги остаются service-query.
-- Ответы про мастеров строятся только из pack-данных; без фактов — уточнение/эскалация.
-- Acceptance lane запускается только после прохождения Go-to-Full; full-chain не используется как постоянный debug-цикл.
-- `manual_audit` статус обязан быть консистентен между `summary` и `manual_audit.json`; рассинхрон = process-blocker.
-- Бюджетные ограничения не меняют целевую архитектуру и не легализуют обходные решения в core/runtime.
+1. Один semantic owner: `action/intent/slots/fact_refs` определяются только policy-core LLM.
+2. Deterministic слой не меняет semantic decision, только `validate/block/degrade` с reason_code.
+3. Core остается business-agnostic: без tenant/niche phrase branching.
+4. Core остается tenant/branch-aware только через runtime capabilities/packs/manifests, а не через tenant-specific logic branches.
+5. Multilingual/code-switch turns не должны требовать language-router в core.
+6. FACT без валидного evidence linkage запрещен.
+7. Booking commit без контактного минимума запрещен.
 
 ## Scope
 
-- Перевести доменную интерпретацию на resolver-contract и удалить text-coupling из core.
-- Ввести fail-closed гейты, которые блокируют добавление хардкода в core на уровне CI.
-- Перестроить тестовый oracle на структурные сигналы (`action/intent/slots/outcomes/trace`), а не на ответные фразы.
-- Довести run-quality контур до стабильного anti-drift цикла (lock/replay/acceptance).
-- Стабилизировать control-plane stochastic поведение (policy-core/multi-intent/answer-interpreter/consult controller) через structured contracts и variance control, без требования byte-identical ответа.
-- Зафиксировать boundary-only детерминизм: deterministic code не подменяет semantic-owner решения.
-- Закрыть infra-contract gap для dedup/cache budget path (Redis contract + fallback observability gate).
-- Ввести business-agnostic capability-contract: каждый tenant/ниша использует только свои tools/packs через capability manifest, без нишевого кода в core.
-- Зафиксировать protocol boundary для external tools (MCP-compatible adapter): migration без vendor lock-in и без hardcode provider semantics в core.
-- Ввести master-intent семантику через resolver + pack-данные (masters/services/experience), без core hardcode.
+1. `P1 Single Semantic Owner hard closure`:
+  - удалить/деактивировать latent rewrite paths в runtime (не оставлять switchable fallback).
+  - вынести phrase-based semantic hints из core runtime path.
+  - оставить только whitelist boundary overrides (`LAW/safety/schema/capability/idempotency/state`) с trace/meta reason.
+2. Обновить deterministic gates и тесты под новый контракт P1.
+3. Зафиксировать process-trust preconditions для следующего блока (P2/P3), но без их полной реализации в этом TP.
+4. Зафиксировать, что доказательство multi-business/multilingual robustness принимается позже отдельным open-world block, а не объявляется закрытым по одному canary-pack.
 
-## Architectural Position (explicit)
+## Out Of Scope
 
-- Семантический арбитр остаётся вероятностным (LLM semantic reasoning), а не "чисто детерминированным".
-- Детерминизм применяется только там, где это контракт/безопасность:
-  - policy/LAW/safety gates,
-  - schema validation,
-  - tool capability allowlist,
-  - idempotency/outbox/state invariants.
-- Acceptance и регрессия проверяются по поведенческим контрактам (`action/tool/trace/meta/outcome`), а не по идентичности текста.
+1. Полная реализация `P2 FACT body neutrality`.
+2. Полная реализация `P3 Booking Commit Protocol`.
+3. Полная реализация `P4 FACT evidence linkage`.
+4. Полный open-world generator (P6).
 
-## Technology Mapping (2025 targeted, non-generic)
+## Touch-list (allowed)
 
-1. Semantic arbiter contract via structured outputs
-- Технология: structured JSON outputs для LLM policy-core (Responses-style schema enforcement).
-- Почему: один владелец semantic decision, меньше post-hoc reinterpretation, fail-closed при schema mismatch.
-- Где в системе: `decision.py` + policy-core adapter + `decision_meta` schema.
-
-2. Tool boundary via MCP-compatible capability gateway
-- Технология: протокол инструментов (MCP-compatible) + tenant capability manifest (`allowed_tools`, `allowed_fact_scopes`, `handoff_policy`).
-- Почему: business-agnostic масштабируемость; новая ниша подключает свои инструменты/факты без изменений core.
-- Где в системе: `tool_registry_service.py`, `pack_runtime_service.py`, onboarding/control-plane capability provisioning.
-
-3. Pack Query Engine with hybrid retrieval
-- Технология: dense+sparse retrieval + strict metadata filters (tenant/branch/pack scope) + margin abstain.
-- Почему: уход от phrase-fitting и устойчивость к перефразам/типо/mixed language.
-- Где в системе: `pack_runtime_service.py` + pack compiler artifacts + query contract.
-
-4. Contract-first eval stack (agentic, not phrase-based)
-- Технология: action/tool/trace graders, multi-seed reproducibility, scenario fingerprint lock.
-- Почему: quality-приёмка по поведению, а не по тексту; контроль stochastic drift.
-- Где в системе: `ops/diagnose.py` + `test_booking_quality_*` + run-economy gates.
-
-5. Durable workflow boundary for long-running paths
-- Технология: durable/background execution only для long tasks (handoff/media/heavy retrieval), без переноса semantic ownership из core.
-- Почему: таймауты и `deadline_exceeded` не должны ломать turn outcome.
-- Где в системе: async outbox/handoff/media pipeline, без переписывания turn arbiter.
-
-## Out of scope
-
-- DEC-уровневая полная замена оркестрации.
-- Изменение бизнес-политик/LAW.
-- Глобальная миграция всех исторических паков за один PR.
-
-## Touch-list
-
-- `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`
-- `ops/diagnose.py`
 - `truffles-api/app/routers/webhook/decision.py`
-- `truffles-api/app/routers/webhook/booking.py`
-- `truffles-api/app/routers/webhook/info.py`
-- `truffles-api/app/routers/webhook/session_memory.py`
-- `truffles-api/app/services/tool_registry_service.py`
-- `truffles-api/app/services/pack_runtime_service.py`
-- `truffles-api/app/services/consult_pack_service.py`
-- `truffles-api/app/services/tool_protocol_gateway.py` (new, if absent)
-- `truffles-api/app/services/capability_manifest_service.py` (new, if absent)
-- `truffles-api/tests/test_booking_quality_status_gate.py`
-- `truffles-api/tests/test_booking_quality_scenario_contract_gate.py`
-- `truffles-api/tests/test_booking_quality_response_guard.py`
-- `truffles-api/tests/test_calendar_slot_response_contract.py`
-- `truffles-api/tests/test_master_info_flow.py`
+- `truffles-api/app/routers/webhook/response.py`
+- `truffles-api/app/services/expected_reply_contract.py`
+- `truffles-api/app/services/pack_runtime_neutral_adapter.py`
 - `truffles-api/tests/test_message_endpoint.py`
-- `truffles-api/tests/test_pack_runtime_service.py`
-- `truffles-api/tests/test_tool_capability_manifest.py`
-- `truffles-api/tests/test_tool_protocol_gate.py`
-- `truffles-api/tests/test_pack_query_engine_contract.py`
-- `truffles-api/tests/test_pack_query_engine_abstain.py`
-- `truffles-api/tests/test_cross_domain_capability_isolation.py`
-- `truffles-api/tests/test_booking_quality_*.py`
+- `truffles-api/tests/test_booking_quality_response_guard.py`
+- `truffles-api/tests/test_demo_salon_eval.py`
+- `ops/diagnose.py`
+- `scripts/quality_chain_controller.sh`
+- `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`
 
-## Plan (Atomic LLM-First, binding)
+## Plan (1..N)
 
-### Analysis Gate (обязателен перед каждым пунктом)
-- `AG-1 Evidence`: собрать факты из `summary/responses/trace/meta` по конкретному дефекту.
-- `AG-2 Contract Delta`: зафиксировать, какой поведенческий контракт нарушен (`action/tool/slots/reason_code`).
-- `AG-3 Design Decision`: явно разделить probabilistic (`LLM/resolver`) и deterministic boundary.
-- `AG-4 Risk/Rollback`: описать риск, обратимую миграцию, rollback-команду.
-- `AG-5 Test Matrix`: утвердить набор deterministic + LLM checks до начала кода.
+1. `P1.1` Remove semantic rewrite runtime paths
+- Убрать runtime-ветки, где `policy_action/policy_tool_action/policy_intent` меняются post-hoc.
+- Сохранить только `semantic_override_blocked` с reason_code + trace/meta.
 
-### Atomic Work Plan
-1. `P0 Governance Lock`
-- Синхронизировать charter/TP/runner-гейты без противоречий.
-- Зафиксировать dual-lane приемку: semantic vs delivery.
-- Stop-the-line: любой acceptance через debug-режимы/неполный coverage.
+2. `P1.2` Remove core phrase routing
+- Удалить нишевые/языковые marker lists из `decision.py` semantic router path.
+- Перенести необходимые сигналы в pack/resolver/config слой.
 
-2. `P1 Semantic Decision Envelope`
-- Ввести единый `Semantic Decision Envelope` как source of truth turn:
-  - `action_class`, `intent_class`, `tool_action`, `slot_candidates`,
-  - `fact_refs/entity_refs`, `confidence`, `abstain_reason`,
-  - `override_reason_codes`, `resolver_id/version`.
-- Downstream не может менять semantic-class без whitelist reason-code.
+3. `P1.3` Enforce deterministic boundary contract
+- Ввести fail-closed guard: любое semantic delta после owner -> блок/clarify/handoff.
+- Зафиксировать `semantic_override_rate=0` как blocking invariant в acceptance lane.
 
-3. `P2 Structured Policy-Core Adapter`
-- Schema-first structured output для policy-core.
-- Любой schema mismatch/timeout -> controlled degrade с обязательным reason-code.
-- Запрет silent fallback без trace/meta.
+4. `P1.4` LLM tool hint hardcode removal
+- Удалить message-text fallback для LLM tool hints и обновить contract tests на LLM-owned `pack_refs`.
+- Запретить core lexical hinting в LLM tool path (contract test).
 
-4. `P3 Semantic Firewall`
-- Реализовать fail-closed: deterministic слой может только `validate/block/replan`.
-- Запрет post-hoc semantic rewrite вне whitelist policy overrides.
-- Каждый override/degrade обязан писать `reason_code`.
+5. `P1.5` Remove post-plan semantic rescue paths
+- Убрать deterministic восстановление `pack_refs` и `service_query` из `message_text` после LLM plan.
+- Перевести missing semantic refs в fail-closed path (`clarify`/block reason), а не в text-driven rescue.
 
-5. `P4 Expected-Reply Refactor`
-- Оставить expected-reply как slot-evidence, а не semantic-owner.
-- Исключить захват маршрута `booking -> info` из-за stale expected-reply.
-- Выровнять clear/set контур expected-reply и session memory.
-- Добавить master-intent контракт: явные master-запросы -> master intent, общие услуги -> service-query.
+6. `P1.6` Local realism and canonical acceptance lock
+- Прогнать обязательный локальный контур для core behavior.
+- Сформировать новый single-owner baseline lock, пригодный для дальнейшего replay.
 
-6. `P5 Pack Query Engine v2`
-- Hybrid retrieval: lexical recall + semantic rerank + strict tenant/branch filters.
-- Margin-based abstain: низкая уверенность -> `COLLECT/HANDOFF`, без guessing.
-- Добавить provenance bundle (`pack_id/entity_id/source_ref/confidence`).
+7. `P1.7` Acceptance replay gate
+- Прогнать replay строго по lock-сценариям и fail-on-regression.
+- Сформировать evidence packet для Brain/Top Architect.
 
-7. `P6 Capability Manifest + Protocol Gate`
-- Tenant capability manifest (`allowed_tools`, `allowed_fact_scopes`, `handoff_policy`).
-- MCP-compatible protocol gate deny-by-default до фактического вызова инструмента.
-- Runtime не может вызвать tool/fact вне allowlist tenant.
+8. `Post-P1 proof obligation` (binding note, not implemented in this TP)
+- После closure `P1.7` следующий program-level proof обязан явно покрыть:
+  - несколько business packs;
+  - branch-specific capability differences;
+  - multilingual/code-switch phrasing;
+  - tool availability differences per branch/business.
+- Это принимается в `P6 Open-world tests`, а не считается закрытым только по `demo_salon`.
 
-8. `P7 Core De-hardcoding Sweep`
-- Удалить business phrase/regex routing из core (`decision/booking/info/tool_registry`).
-- Оставить в core только boundary validation/safety/idempotency/outbox.
-- Нишевая семантика допускается только в packs/resolver/manifests.
+## DoD
 
-9. `P8 Acceptance Engine Split`
-- Ввести два независимых статуса:
-  - `semantic_acceptance`: качество поведения по контракту,
-  - `delivery_acceptance`: транспорт/доставка.
-- `CHATFLOW_BILLING_BLOCKED` классифицировать как `delivery_waiver_billing`,
-  не блокирующий `semantic_acceptance`.
-- Baseline для семантики не должен ломаться из-за billing-blocked в текущем режиме оплаты.
+1. Нет runtime rewrite пути, который меняет owner semantic decision после LLM.
+2. `semantic_override_rate` в acceptance lane = `0` (кроме whitelist degrade reason-codes, отдельно учтенных).
+3. В `decision.py` нет business-specific phrase routing веток для semantic arbitration.
+4. Все обязательные локальные тесты зеленые.
+5. Есть полный evidence packet (trace/meta/artifacts) и обновление `STATE.md` (Brain/Top Architect).
 
-10. `P9 Contract Test Migration`
-- Перевести regression oracle на `decision_meta/decision_trace/action/tool/state`.
-- Текстовые сравнения ответов исключить как primary oracle.
-- Зафиксировать детерминированные тесты на все active fail-turn clusters.
+## Checks
 
-11. `P10 Canonical Quality Chain`
-- Acceptance только по `lock -> replay -> full` на сопоставимых fingerprint.
-- Multi-seed drift для контрактных метрик (`action/tool/reason-code drift`).
-- INVALID/INCOMPLETE run не участвует в baseline/comparison.
+- Static contract checks:
+  - `rg -n "_register_policy_override" truffles-api/app/routers/webhook/decision.py`
+  - `rg -n "policy_action\s*=|policy_tool_action\s*=" truffles-api/app/routers/webhook/decision.py`
+  - `rg -n "адрес|где|парков|до скольки|во сколько|мест" truffles-api/app/routers/webhook/decision.py`
 
-12. `P11 Budget-Go-To-Full Control`
-- Внедрить fail-closed `Go-to-Full` preflight и lane enforcement в runner.
-- Синхронизировать `manual_audit` статус между артефактами и summary агрегатами.
-- Блокировать full-chain при process trust gap.
+- Mandatory deterministic tests:
+  - `pytest -q truffles-api/tests/test_message_endpoint.py`
+  - `pytest -q truffles-api/tests/test_booking_chaos_dialogs.py`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py`
+  - `pytest -q truffles-api/tests/test_demo_salon_eval.py`
 
-13. `P13 Canary + Rollback`
-- Stage A: deterministic contracts + micro replay.
-- Stage B: lock/replay/full acceptance.
-- Stage C: canary rollout с stop-the-line при regression.
+- Mandatory local realism:
+  - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id booking-lock-p1-20260306-a1`
 
-14. `P14 Evidence + STATE Handoff`
-- Обязательный пакет: `summary`, `brief`, `responses`, `trace_bundle`,
-  top-failures, replay/full commands, contract drift digest.
-- FACT в `STATE.md` только с evidence.
-
-15. `P15 Timeout-Degrade Reliability Remediation`
-- Убрать повторный timeout-degrade collect в booking контексте через `single-degrade-per-context`.
-- На втором timeout-degrade того же intent/context делать contract escalation (`clarify_limit -> HANDOFF`) вместо второго collect.
-- Зафиксировать turn-level evidence и deterministic regression test до следующего judge replay.
-
-## Acceptance Requirements (binding)
-
-### A. Semantic Acceptance
-- `semantic_valid=true`
-- `strict_pass_rate>=0.95`
-- `hard_fail_turns=0`
-- `reason_code` покрывает все override/degrade случаи (`rewrite_reason_coverage=1.0`)
-- Нет несанкционированного semantic rewrite вне whitelist.
-- `judge_fail` блокирует semantic lane только при подтверждённом deterministic semantic contract-fail; standalone judge fail считается advisory и требует manual-audit root-cause.
-
-### B. Delivery Acceptance
-- Отдельный verdict, не смешивается с semantic baseline.
-- `CHATFLOW_BILLING_BLOCKED` допустим как `delivery_waiver_billing` в текущем режиме
-  (оплата не активна) при обязательной фиксации в evidence.
-- Другие delivery-инциденты классифицируются и учитываются в отдельном error budget lane.
-
-### C. Canonical Run Integrity
-- Acceptance-run только при:
-  - `run_economy.mode=block`,
-  - `judge.enabled=true`,
-  - `count>=10`,
-  - `include_media=true`,
-  - `scenario_coverage=booking,info,interrupt,handoff`,
-  - сопоставимых `code_fingerprint + scenario_fingerprint`.
-- INVALID/NON-CANONICAL/INCOMPLETE run исключаются из baseline/comparison.
-- Повтор lock с неизменным fingerprint после неканонического lock запрещён (anti-loop gate).
-- Replay/full разрешены только после первого канонического lock и завершённого manual audit этого lock.
-- Обязательный post-run audit gate:
-  - `manual_audit.status=done`,
-  - `artifact_integrity.valid=true`,
-  - root-cause digest заполнен для всех `critical/high` findings.
-- Runtime preflight обязан подтвердить `runtime_commit_match=true` между chain-step и ожидаемым кодом ветки.
-- Master intent допустим только для явных мастер-запросов; общие запросы про услуги остаются service-query.
-- Master-ответы должны ссылаться на pack-данные; отсутствие данных -> уточнение/эскалация.
-
-## Testing Methods (binding)
-
-1. `Static Contract Gates`
-- AST/Semgrep запрет бизнес-phrase/regex routing в core.
-- CI fail-closed при новых нарушениях.
-
-2. `Schema + Contract Unit Tests`
-- Structured-output schema tests для policy-core.
-- Envelope integrity tests (`action/tool/slots/reason_code/provenance`).
-
-3. `Integration Contract Tests`
-- Webhook -> policy -> protocol gate -> tool -> trace/meta.
-- Проверки на запрет post-hoc semantic rewrite.
-
-4. `Deterministic Regression Suite`
-- Turn-level tests по контракту для известных fail-clusters.
-- Без byte-identical сравнения ответов.
-
-5. `LLM Quality Suite`
-- Canonical `lock -> replay -> full`.
-- Multi-seed contract drift report (`seed 7/19/42` минимум).
-- Judge graders должны быть узкими и контрактными (да/нет по `action/tool/trace/meta`); free-form judge summary не может быть единственным блокером acceptance.
-
-6. `Budget-aware Lane Suite`
-- Dev lane обязателен для каждого fix-пакета: deterministic + micro replay + manual audit.
-- Acceptance lane запускается только после Go-to-Full и не заменяется dev lane метриками.
-- Проверка консистентности `manual_audit` (`summary` vs `manual_audit.json`) обязательна перед full.
-
-7. `Dual-Lane Validation`
-- Semantic lane: contract metrics.
-- Delivery lane: transport metrics + waiver taxonomy.
-
-8. `Cross-domain Capability Suite`
-- Isolation tests tenant A/B + несалонные packs.
-
-9. `Master Intent Contract Suite`
-- Сценарии “какие мастера делают X / кто лучше / опыт по X” -> master intent.
-- Сценарии “какие услуги вы оказываете” -> service-query, без master.
-- Проверки по `intent/action/tool/trace`, без текст-ораклов.
-
-10. `Timeout-Degrade Reliability Suite`
-- Deterministic test на booking timeout-degrade:
-  - first-hit -> slot-driven collect,
-  - second-hit same context -> clarify-limit escalation/handoff.
-- Replay check на фиксированном сценарии подтверждает снижение `degraded_fallback_rate` до контрактного порога без ослабления gates.
-
-## Execution Waves (binding)
-
-1. `Wave 0`: `P0`-`P1` governance + semantic envelope lock.
-2. `Wave A`: `P2`-`P4` semantic owner remediation.
-3. `Wave B`: `P5`-`P7` retrieval/capability/core de-hardcoding.
-4. `Wave C`: `P8`-`P11` acceptance split + quality chain + budget-go-to-full control.
-5. `Wave D`: `P13`-`P14` rollout + evidence closure (`P12` de-scoped from current release scope).
-
-Forensic only (not acceptance):
-- `judge_mode off/critical` допускается только в diagnostic lane.
-- `--allow-no-code-delta`, `--allow-judge-off`, `--skip-outbox` запрещены для acceptance.
+- Acceptance chain (after P1 green only):
+  - `scripts/llm_quality_guarded.sh --mode replay ... --reset-before-dialog --fail-on-regression`
 
 ## Evidence
 
-- Forensics 11h:
-  - `/tmp/booking_quality/analysis-last-11h-20260223T221713Z.json`
-  - `/tmp/booking_quality/analysis-last-11h-20260223T221713Z.md`
-  - `/tmp/booking_quality/analysis-last-11h-bad-turns-20260223T221713Z.jsonl`
-- Forensics 3h addendum (2026-02-24):
-  - `/tmp/booking_quality/analysis-last3h-run-audit-20260224T124020Z.tsv`
-  - `/tmp/booking_quality/analysis-last3h-file-audit-clean-20260224T124129Z.tsv`
-  - `/tmp/booking_quality/firebreak-full-critical-4defects-v2-20260224-a1-r2/summary.json`
-  - `/tmp/booking_quality/firebreak-full-critical-4defects-v2-20260224-a1-r2/responses.jsonl`
-  - `/tmp/booking_quality/firebreak-full-critical-4defects-v2-20260224-a1-r3/summary.json`
-  - `/tmp/booking_quality/firebreak-full-critical-4defects-v2-20260224-a1-r3/responses.jsonl`
-- Budget/process trust addendum (2026-02-27):
-  - `/tmp/firebreak_summary_scan.json`
-  - `/tmp/booking_quality_firebreak/summary.json`
-  - `/tmp/booking_quality_firebreak/booking-replay-20260226-envelope-a1-r38/summary.json`
-- Quality run artifacts:
-  - `/tmp/booking_quality/RUN_ID/summary.json`
-  - `/tmp/booking_quality/RUN_ID/brief.md`
-  - `/tmp/booking_quality/RUN_ID/responses.jsonl`
-  - `/tmp/booking_quality/RUN_ID/trace_bundle.jsonl`
-  - `/tmp/booking_quality/RUN_ID/manual_audit.md`
-  - `/tmp/booking_quality/RUN_ID/manual_audit.json`
-- Contract evidence:
-  - `decision_meta` sample rows,
-  - `decision_trace` sample rows with resolver/policy/tool stages,
-  - acceptance command + output digest.
+1. Code diff (P1 scope only).
+2. Test logs for all mandatory checks.
+3. LLM-quality run dir with:
+  - `summary.json`
+  - `brief.md`
+  - `responses.jsonl`
+  - `trace_bundle.jsonl`
+  - `manual_audit.md`
+  - `manual_audit.json`
+  - `run_manifest.json`
+4. Top failures with exact replay command.
+5. `STATE.md` entry by Brain/Top Architect (before merge for behavior/core changes).
 
-- External research inputs (2025, primary):
-  - OpenAI Responses API updates (background mode, remote MCP, encrypted reasoning items): `https://openai.com/index/new-tools-and-features-in-the-responses-api/`
-  - Model Context Protocol specification (2025 revision): `https://modelcontextprotocol.io/specification/2025-06-18`
-  - OpenAI Evals design guidance (agentic evals and graders): `https://platform.openai.com/docs/guides/evals`
-  - LangGraph v1.0 durable agent orchestration: `https://blog.langchain.com/langgraph-v1/`
-  - Qdrant 1.16 hybrid retrieval and multitenancy capabilities: `https://qdrant.tech/blog/qdrant-1.16.x/`
+## Release Safety
 
-### One web search (mandatory before implementation)
-
-- Query: `site:docs.python.org os.replace atomic write json file`
-- Date/time: `2026-03-01T04:48:53Z`
-- Opened sources:
-  - `https://docs.python.org/3.12/library/os.html#os.replace` (primary)
-  - `https://docs.python.org/3/library/fcntl.html`
-- Ready solutions found:
-  - atomic file replacement (`tmp write -> os.replace`) for process state/registry updates;
-  - OS file-lock primitives (`fcntl`) for cross-process coordination when needed.
-- Decision: `reuse/integrate`
-  - keep existing atomic `os.replace` write path in runner state/registry updates;
-  - apply chain-scoped filtering in forensic/oracle gates (no lock-subsystem rewrite in this packet).
-- Rejected options:
-  - introducing a new lock daemon/DB lock for this remediation wave (out of scope, high migration cost).
-- Query: `OWASP fail secure principle fail closed`
-- Date/time: `2026-03-01T05:11:47Z`
-- Opened sources:
-  - `https://owasp.org/www-community/Fail_securely` (primary)
-- Ready solutions found:
-  - fail-closed gate is preferred for security/reliability-critical transitions;
-  - permissive fallback on missing evidence is a control failure.
-- Decision: `reuse/integrate`
-  - keep acceptance promotion fail-closed;
-  - enforce machine-check of L2 evidence artifact before any acceptance lock.
-- Rejected options:
-  - allowing checklist-only self-declaration of PG3 without artifact validation.
-- Query: `pytest junitxml file and classname attributes`
-- Date/time: `2026-03-01T05:42:07Z`
-- Opened sources:
-  - `https://docs.pytest.org/en/stable/reference.html#confval-junit_family` (primary)
-- Ready solutions found:
-  - pytest JUnit XML carries deterministic testcase attributes (`name`, `classname`, optional `file`) suitable for machine linkage to target tests;
-  - JUnit artifact can be used as deterministic L1 evidence instead of self-declared flags.
-- Decision: `reuse/integrate`
-  - require `l1_evidence.junit_xml_path` in Go-to-Full checklist and match each `defect_mapping.target_test` against passed JUnit testcase;
-  - enforce freshness window across L1 (JUnit) and L2 (summary) evidence.
-- Rejected options:
-  - accepting checklist-only L1 pass declarations without artifact linkage.
-- Query: `json schema versioning best practices`
-- Date/time: `2026-03-01T06:03:10Z`
-- Opened sources:
-  - `https://json-schema.org/understanding-json-schema/reference/schema` (primary)
-  - `https://www.sourcemeta.com/blog/how-we-built-jsonschema-for-modern-c` (secondary)
-- Ready solutions found:
-  - registry contracts should carry explicit schema version for controlled evolution;
-  - consumers should fail-closed on unsupported schema when strict compatibility is required.
-- Decision: `reuse/integrate`
-  - add explicit scenario governance `schema_version` and enforce fail-closed in acceptance replay/full;
-  - version and persist realism SLA + lifecycle metadata inside registry entries.
-- Rejected options:
-  - keeping unversioned registry shape with implicit field assumptions.
+- Strategy: rollout freeze (`stop-the-line`) until P1 DoD passes.
+- Go/no-go signals:
+  - `semantic_override_rate=0`
+  - mandatory suite green
+  - local realism valid (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`)
+- Rollback:
+  - revert the specific P1 commit(s) via non-interactive `git revert`.
+  - rerun mandatory deterministic suite.
 
 ## Rollback
 
-- Runtime/code rollback: revert commit(s) in this branch and rerun deterministic suite.
-- Gate rollback: только через отдельный TP waiver и временный `warn`, с явным сроком удаления waiver.
+1. Run non-interactive `git revert` for the specific P1 commit SHA that introduced the regression.
+2. `pytest -q truffles-api/tests/test_message_endpoint.py`.
+3. `pytest -q truffles-api/tests/test_booking_quality_response_guard.py`.
+4. If regression persists: stop rollout and restore last known good branch snapshot (merge-only policy).
 
 ## No-go
 
-- Нельзя фиксить качество через hardcoded answer text fitting.
-- Нельзя добавлять keyword/regex branching в core-path.
-- Нельзя сравнивать/обновлять baseline по INVALID/INCOMPLETE run.
-- Нельзя запускать full expensive replay до green deterministic + micro replay.
-- Нельзя принимать DoD без `decision_meta/decision_trace` contract evidence.
-- Нельзя смешивать `run_economy` режимы (`off/warn/block`) в одной acceptance цепочке.
-- Нельзя использовать `judge_mode off` как acceptance доказательство canonical quality.
-- Нельзя блокировать/разрешать semantic acceptance только по standalone `judge_fail` без contract corroboration.
-- Нельзя требовать byte-identical текст ответа как основной acceptance-критерий.
-- Нельзя расширять core под нишевые фразы вместо capability/pack contracts.
-- Нельзя обходить capability manifest прямым вызовом tool из webhook/router слоя.
-- Нельзя делать lexical fallback primary semantic path в Pack Query Engine.
-- Нельзя принимать quality по subset-сценариям (`count<10`) или без полного coverage (`include_media`, `handoff`).
-- Нельзя использовать debug/forensic runner flags (`--allow-no-code-delta`, `--allow-judge-off`, `--skip-outbox`) как acceptance-доказательство.
-- Нельзя маскировать semantic drift ручным приоритетом stale service carryover над explicit текущим info-вопросом.
-- Нельзя переводить service-query в master без явного master-сигнала.
-- Нельзя реализовывать master-routing через core hardcode/regex.
-- Нельзя запускать full-chain как основной дневной debug-цикл до прохождения Go-to-Full.
-- Нельзя игнорировать `manual_audit` рассинхрон между `summary` и `manual_audit.json`.
-- Нельзя понижать threshold `degraded_fallback_rate` или отключать timeout-degrade контроль как способ пройти semantic gate.
+1. Запрещено добавлять новые keyword/regex routing ветки в core semantic path.
+2. Запрещено оставлять latent semantic rewrite behind feature flag.
+3. Запрещено "чинить" качество через `must_include` без контрактных метрик trace/meta.
+4. Запрещено продвигать canary/full при `semantic_override_rate>0` или неполном evidence handoff.
+5. Запрещено ослаблять acceptance thresholds ради бюджета/скорости.
 
-## Риски/блокеры
+## Risks/Blockers
 
-- На первом этапе возможен рост `INVALID` из-за новых hard gates (ожидаемо и допустимо).
-- Возможны ложные срабатывания static hardcode gate; требуется точная allowlist разрешенных зон.
-- Переход на contract-only oracle может вскрыть старые тесты, которые держались на тексте.
-- Понадобится синхронное обновление resolver + tests + run-gates, иначе churn в CI.
+1. `decision.py` монолит (17996 строк) повышает риск hidden regressions.
+2. Историческое смешение `legacy` и policy-core усложняет изоляцию semantic owner.
+3. Process-trust gap: часть старых `summary.json` не синхронизирует evidence_handoff поля консистентно.
+4. P1 closure может выявить новые падения в старых phrase-driven тестах (ожидаемо, не blocker).
 
-## Execution Addendum (2026-02-28, Chain Controller + Budget Firebreak)
+## Residual Architecture Debt (mandatory)
 
-### FACT audit (last 5h, budget loop evidence)
+- Current residuals accepted in this block:
+  - `P1.5b` single-owner contract suite realignment.
+  - `P1.6` local realism + canonical acceptance lock closure.
+  - `P1.7` acceptance replay + regression gate.
+  - Program-level blocks after P1 (`P3`, `P4`, `P6`).
 
-Источники:
-- `/tmp/booking_quality/_index/by_hour/2026-02-28/**`
-- `/tmp/booking_quality/_run_guard/ledger.tsv`
-- `/tmp/booking_quality/booking-lock-20260228-a1-r11/summary.json`
-- `/tmp/booking_quality/booking-lock-20260228-a1-r12/summary.json`
-- `/tmp/booking_quality/booking-lock-20260228-a1-r13/summary.json`
-- `/tmp/booking_quality/booking-replay-20260228-a1-r11-fix{1,2,3,4}/summary.json`
+- Why not in this block:
+  - После пользовательского указания принят atomic режим `1 block -> 1 sub-TP -> 1 closure`.
 
-Факты:
-- За последние 5 часов: `27` run, из них `canonical=3`, `non-canonical=24`.
-- Стоимость non-canonical части существенно выше полезной:
-  - `turns`: `407` vs `45` (canonical),
-  - `judge judged`: `297` vs `39`,
-  - `duration_s`: `7566.3` vs `777.55`.
-- По guard ledger есть повторные циклы с одинаковым fingerprint в одном и том же окне:
-  - `mode=replay`: один fingerprint запущен `8` раз,
-  - `mode=lock`: один fingerprint запущен `2` раза.
-- Есть реальный `resume` механизм (`run_manifest.resume_command` + `--resume`), но на практике запускались новые run-id цепочки и быстрые preflight retries.
-- Есть путаница идентичности run: `run_id` с префиксом `lock-` может фактически быть `mode=replay` (определение mode идет по `scenarios_file/run_economy`).
+- Risk if deferred:
+  - P1 remains incomplete even при закрытом P1.1; rollout still blocked.
 
-Вывод:
-- Корень сжигания бюджета в этом окне: не отсутствие quality-gates, а отсутствие обязательного chain-level оркестратора, который технически запрещает divergence-path (new-run вместо resume/step-order).
+- Linked follow-up Task Package(s):
+  - Этот TP как master + `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md` as the active closure contract.
+  - Child execution slices under `P1.6o`, then `P1.7`.
 
-### Что уже реализовано (и что это закрывает)
+- Expiry/trigger to stop deferral:
+  - До любого `canary/full` блоки `P1.5b..P1.7` должны быть closed.
 
-- Chain-level state machine реализован в `scripts/quality_chain_controller.sh` с `lock -> replay -> full`, run_id/mode контрактом, resume-only и ROI stop-loss.
-- Acceptance token gate реализован в `ops/diagnose.py` и блокирует acceptance без chain-token.
-- Guarded wrapper делегирует acceptance в controller и требует `--pg-checklist` для acceptance lock (`scripts/llm_quality_guarded.sh`).
-- Bootstrap/import command для legacy run-артефактов добавлен в `scripts/quality_chain_controller.sh` (создает chain state из summary/run_manifest).
-- `run_manifest.json` + индекс `_index` + `resume_command` формируются в `ops/diagnose.py`.
-- `manual_audit_gate`, `oracle_conflict_gate`, `forensic_sla_gate`, `scenario_governance_gate`, `quality_constant_gate`, `hardcode_core_gate`, `lexicon_regex_delta_gate` реализованы в `ops/diagnose.py`.
-- Deterministic тесты для controller/guard/гейтов есть в `truffles-api/tests/test_booking_quality_chain_controller.py`, `truffles-api/tests/test_booking_quality_guarded_wrapper.py`, `truffles-api/tests/test_booking_quality_status_gate.py`.
-- Handoff brief enforced для перехода между шагами (`brief_for_next_agent.md`) в `scripts/quality_chain_controller.sh`.
+## Next-block Contract (mandatory)
 
-### Что не реализовано (ключевые пробелы)
+- Next block objective:
+  - execute `P1.6o1` as the first active child block under `P1.6o`; after that move to `P1.6o2/P1.6o3` for referent continuity and capability arbitration, and only then return to one fresh guarded `demo_salon` `dev L2`.
 
-- Нет новых ключевых пробелов в chain controller после bootstrap; открытые пункты остаются в `P14` и process-gates addendum (secret-safe) по актуальному Execution Status (`P4/P5/P7/P9/P13` закрыты отдельными блоками).
+- First deterministic check command:
+  - `pytest -q truffles-api/tests/test_llm_policy_core.py::test_validate_llm_policy_core_output_accepts_semantic_envelope_fields && pytest -q truffles-api/tests/test_message_endpoint.py::test_llm_policy_core_semantic_envelope_fields_persist_in_meta`
 
-### Что может сломаться даже после текущих gate (failure map)
+- Blocked-by conditions:
+  - `P1.6o` child TP hierarchy не создана и не синхронизирована в docs.
+  - Не закрыт `P1.6o1` на deterministic contour.
+  - Runtime `http://127.0.0.1:18184` не обновлен после code delta.
+  - Нет подготовленного guarded `dev L2` run-id / `PG checklist` для следующего окна.
 
-1. **Bypass risk:** оператор запускает `ops/diagnose.py` напрямую, минуя guarded wrapper.
-2. **Identity drift:** `lock-` run-id при фактическом replay уводит аудит и decision trail в неверный контекст.
-3. **Chain split risk:** можно параллельно вести разные acceptance-кандидаты, потому что индекс и gate mode-local.
-4. **Resume abandonment:** interrupted lock имеет `resume_command`, но ничто не заставляет использовать его вместо нового run-id.
-5. **False progress:** dev-lane canonical run воспринимается как закрытие acceptance chain.
-6. **Global state collision:** `.run_economy_lock_state.json/.run_economy_replay_state.json` глобальны, не chain-scoped.
-7. **Budget runaway:** нет автоматического стопа при повторных non-canonical прогонах без сокращения target failures.
-
----
-
-## TP: Chain Controller Enforcement (full implementation plan)
-
-- Название/цель:
-  - Ввести обязательный chain-controller для acceptance quality, чтобы исключить бюджетный цикл повторных non-canonical запусков и устранить зависимость процесса от "памяти агента".
-
-- Canon refs:
-  - `AGENTS.md` (Quality Constant Gate, No Shortcut Gate, Booking anti-drift loop)
-  - текущий TP (sections 6, 7, 9, 10, 11)
-  - CA_ID: `CA-QUALITY-CHAIN-CONTROLLER-2026-02-28`
-
-- Invariant:
-  - Качество и acceptance критерии не ослабляются.
-  - `lock -> replay -> full` остается обязательной acceptance-цепочкой.
-  - Прямой обход chain-controller для acceptance невозможен технически.
-
-- Scope:
-  - Chain-level оркестрация acceptance прогонов.
-  - Hard enforcement step-order/resume-only/run-id contract.
-  - Budget stop-loss и mandatory context handoff.
-  - Обновление runbook/TP evidence flow.
-
-- Out of scope:
-  - Изменение semantic логики консультанта.
-  - Ослабление существующих quality gates.
-  - Изменение deterministic oracle на текстовый.
-
-- Touch-list (files/paths):
-  - `ops/diagnose.py`
-  - `scripts/llm_quality_guarded.sh`
-  - `scripts/quality_chain_controller.sh` (new)
-  - `scripts/quality_artifact_report.py` (optional extensions for chain view)
-  - `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`
-  - `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`
-  - `truffles-api/tests/test_booking_quality_chain_controller.py` (new)
-  - `truffles-api/tests/test_booking_quality_guarded_wrapper.py` (new)
-
-- Plan (implementation steps):
-  1. Add chain state model:
-     - New store `/tmp/booking_quality/_chain/{chain_id}.json`.
-     - Fields: `chain_id`, `lane`, `status`, `current_step`, `steps.lock/replay/full`, `active_run_id`, `target_blockers`, `roi_window`, `context_hash`, `next_command`.
-  2. Add single entrypoint script:
-     - `scripts/quality_chain_controller.sh` with commands:
-       - `start`, `resume`, `advance`, `status`, `close`, `abort`.
-     - `advance` chooses exactly one legal next action (`resume current` or next step), no free-form launch.
-  3. Add acceptance hard gate inside `ops/diagnose.py llm-quality`:
-     - New args: `--chain-id`, `--chain-step`, `--chain-token`.
-     - For `quality_lane=acceptance` require valid chain-token and state alignment.
-     - Direct acceptance launch without controller token -> `INVALID(chain_controller_required)`.
-  4. Add run_id/mode strict contract:
-     - `run_id` prefix must match resolved mode:
-       - `booking-lock-*` -> lock,
-       - `booking-replay-*` -> replay,
-       - `booking-full-*` -> full.
-     - Mismatch -> `INVALID(run_id_mode_mismatch)`.
-  5. Add resume-only enforcement:
-     - If latest chain step run is `incomplete` and has `resume_command`, only resume is allowed.
-     - Starting new run-id for same step blocked with explicit reason.
-  6. Add chain-level anti-loop/ROI stop-loss:
-     - Track target blockers (`wrong_action`, `handoff_miss`, `booking_flow_break`, `run_incomplete`).
-     - If `N` consecutive expensive runs (`judge_judged` above threshold) without delta on target blockers -> auto `BLOCKED(root_cause_required)`.
-  7. Scope run_economy state by chain:
-     - Keep lock/replay fingerprint state in chain namespace, not only global singleton files.
-  8. Integrate guarded wrapper with controller:
-     - `scripts/llm_quality_guarded.sh` delegates acceptance launches to controller.
-     - Add strict deny message when user tries acceptance run directly.
-  9. Add mandatory handoff context artifact:
-     - `brief_for_next_agent.md` generated per chain step with:
-       - root causes,
-       - exact next command,
-       - allowed next transitions only.
-     - Missing brief blocks `advance`.
-  10. Extend reporting:
-      - `quality_artifact_report.py` adds chain view: current state, blocked reason, last canonical step.
-  11. Add deterministic tests:
-      - step-order enforcement,
-      - resume-only enforcement,
-      - run_id/mode mismatch fail,
-      - direct acceptance bypass fail,
-      - stop-loss trigger and unblock rules.
-  12. Add rollout + migration:
-      - bootstrap command to import existing run artifacts into chain state (for in-flight chains).
-      - fallback mode for old data = read-only + explicit migration required.
-
-- DoD:
-  - Acceptance run cannot start without chain-controller token.
-  - Interrupted acceptance step cannot be replaced by a new run-id; only resume allowed.
-  - `run_id/mode` mismatch blocked deterministically.
-  - Chain-level status shows exactly one active step and one allowed next action.
-  - Stop-loss blocks repeated budget burn without blocker improvement.
-  - Docs/runbook include exact operator flow (start/resume/advance/close).
-  - Tests green for all new gates.
-
-- Checks:
-  - `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py`
-  - `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py`
-  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py`
-  - `pytest -q truffles-api/tests/test_booking_quality_progress_gate.py`
-  - `python3 scripts/quality_artifact_report.py --hours 6 --show-commands`
-  - One dry acceptance simulation:
-    - start chain -> lock interrupt -> resume -> replay -> full.
-
-- Evidence:
-  - Chain state file snapshots (`_chain/{chain_id}.json`) for each transition.
-  - run manifests linked to chain id/step.
-  - blocked examples:
-    - direct acceptance call without token,
-    - run_id/mode mismatch,
-    - new run-id while resume pending,
-    - stop-loss trigger.
-  - Final canonical chain evidence:
-    - lock/replay/full summaries + manual audits + chain close event.
-
-- Rollback:
-  - Feature flag `QUALITY_CHAIN_CONTROLLER_MODE=warn` for temporary downgrade from block -> warn.
-  - Revert controller integration commit and restore previous guarded wrapper path.
-  - Keep artifacts/index untouched.
-
-- No-go:
-  - Нельзя добавлять bypass-флаг, который отключает chain-controller в acceptance lane.
-  - Нельзя ослаблять existing acceptance gates ради прохождения chain.
-  - Нельзя считать dev-lane canonical run закрытием acceptance chain.
-  - Нельзя обновлять baseline, если chain не в статусе `canonical_closed`.
-
-- Риски/блокеры:
-  - Ложные блокировки на старых run без chain metadata (решается bootstrap migration).
-  - Операторские ошибки при переходе на новый entrypoint (решается runbook + explicit errors).
-  - Конкурентный запуск нескольких контроллеров (решается file lock на chain_id).
-  - Частичный отказ записи chain state (решается atomic write + backup copy).
-
-## Execution Addendum (2026-02-28, Quality Operating Model v2, mandatory)
-
-### Why previous loop fails (root cause, not symptom)
-
-- Acceptance chain (`lock -> replay -> full`) использовался как debug loop вместо release gate.
-- Большая часть expensive runs завершалась non-canonical/invalid и не могла обновлять baseline.
-- Ошибки обнаруживались слишком поздно, потому что не было обязательного дешевого pre-gate.
-- Oracle stack был смещен в сторону judge verdict вместо contract-first (`decision_meta/decision_trace/outcome`).
-- Нет процессного SLA на forensic разбор артефактов до запуска следующего expensive run.
-
-### Binding Operating Model (L0-L3)
-
-- `L0 Static/Contract Lane`:
-  - Цель: поймать структурные регрессии без токенов.
-  - Состав: schema/contract/unit/static gates.
-  - Блокер: любой red = STOP.
-- `L1 Deterministic Targeted Lane`:
-  - Цель: доказать фикс по конкретному root-cause в узком контуре.
-  - Состав: targeted deterministic tests + contract assertions.
-  - Блокер: нет target test или target test не reproduces defect.
-- `L2 Micro Chaos Fail-Fast Lane`:
-  - Цель: дешево проверить устойчивость фикса на живом шуме.
-  - Состав: llm-quality micro run с fail-fast (`--max-failures`) и ограниченным budget.
-  - Блокер: regression по целевому blocker-классу.
-- `L3 Acceptance Release Lane`:
-  - Цель: финальная приемка only.
-  - Состав: canonical `lock -> replay -> full` в acceptance envelope.
-  - Ограничение: L3 запрещен без прохождения `Go-to-Full Gate`.
-
-### Go-to-Full Gate (PG0..PG6, required before L3)
-
-- `PG0 Root-Cause Evidence`:
-  - Есть формализованный root-cause statement с ссылкой на артефакты.
-- `PG1 Target Contract Test`:
-  - Есть новый/обновленный тест, который падал до фикса и зелен после фикса.
-- `PG2 Deterministic Green`:
-  - Обязательный deterministic subset зелен локально.
-- `PG3 Micro Chaos Improvement`:
-  - L2 показал улучшение в target blocker-class, без новых P0/P1 регрессий.
-- `PG4 Forensic Complete`:
-  - manual audit выполнен (`manual_audit.status=done`) и сверен с summary.
-- `PG5 Provenance/Preflight Valid`:
-  - runtime/provenance/preflight валидны; fingerprint согласован.
-- `PG6 No Pending Ambiguity`:
-  - Нет незакрытого interrupted/pending run в том же chain/fingerprint.
-
-### No-Loop Law (hard stop)
-
-- Запрещен повтор expensive run без нового evidence-сигнала по root-cause.
-- Запрещен новый `lock` после non-canonical `lock` с тем же fingerprint без:
-  - code/runtime delta, или
-  - доказанного process remediation evidence.
-- Любой `INVALID/NON-CANONICAL` в L3 автоматически возвращает процесс в `L1/L2`.
-- L3 не может быть "основным дневным циклом" разработки.
-
-### Oracle Stack Contract (binding)
-
-- Primary oracle:
-  - `decision_meta`, `decision_trace`, tool outcomes, state/outcome contract.
-- Secondary oracle:
-  - judge verdict/classification как advisory corroboration.
-- Tertiary oracle:
-  - text-level checks (`must_include`) только как debug hints, не acceptance basis.
-- Acceptance decision запрещено принимать по judge-only или text-only сигналу.
-
-### Judge Reliability Protocol (mandatory)
-
-- Judge используется как panel-consistency evaluator, не single authority.
-- При конфликте `judge` vs `contract`:
-  - фиксируется как отдельный finding в manual audit,
-  - приоритет у contract oracle,
-  - запускается отдельный remediation backlog для judge/rubric.
-- Для acceptance требуется явная пометка:
-  - `judge_alignment = corroborated | conflicted`.
-
-### Forensic SOP (mandatory before next expensive run)
-
-- Минимальный пакет ручного разбора:
-  - `summary.json`,
-  - `responses.jsonl`,
-  - `trace_bundle.jsonl`,
-  - `brief.md`,
-  - `manual_audit.json/md`.
-- В handoff обязателен блок:
-  - `root_causes`,
-  - `top_failures`,
-  - `what_changed_since_last_run`,
-  - `exact_next_command`,
-  - `why L3 is or is not allowed`.
-- Новый expensive run до закрытия forensic SOP = `INVALID process`.
-
-### Scenario Asset Governance (quality as product asset)
-
-- Сценарии делятся на пулы:
-  - `production-like`,
-  - `expert hard cases`,
-  - `chaos/noise`.
-- Для каждого пула фиксируются quality targets:
-  - coverage, drift, blocker rate.
-- Сценарии версионируются как baseline asset (`scenario_fingerprint`) и не меняются в середине цепочки.
-- Примитивные "идеальные" вопросы не могут быть единственным acceptance corpus.
-
-### Interruption/Resume Contract
-
-- Прерванный run должен:
-  - быть резюмирован через `resume`, или
-  - быть закрыт forensic-only с явной причиной.
-- Старт нового run-id вместо resume без причины = process violation.
-- Chain state обязан хранить:
-  - `resume_command`,
-  - `stop_reason`,
-  - `resume_required`.
-
-### Promotion Rules (L0 -> L1 -> L2 -> L3)
-
-- Переход на следующий lane разрешен только при явном green предыдущего lane.
-- `L3` разрешается только после `PG0..PG6`.
-- `L3 fail` не ведет к новому `L3`; сначала обязательный возврат в `L1/L2`.
-
-### Implementation Program (full rollout)
-
-- `Stage A: Governance Sync`
-  - Обновить TP/runbook/AGENTS references под модель L0-L3 + PG0..PG6.
-  - Exit criteria: doc gates консистентны и не противоречат charter.
-- `Stage B: Oracle Rebalance`
-  - Укрепить contract-first acceptance; judge понижен до corroboration role.
-  - Exit criteria: decision rule в tooling отражает oracle priority.
-- `Stage C: Forensic Automation`
-  - Стандартизовать manual audit output и handoff artifact template.
-  - Exit criteria: следующий шаг всегда имеет deterministic `next_command + reason`.
-- `Stage D: Scenario Governance`
-  - Версионировать scenario pools, добавить chaos realism requirements.
-  - Exit criteria: acceptance corpus содержит production-like + chaos buckets.
-- `Stage E: Fail-Fast Economics`
-  - Закрепить L2 micro fail-fast как обязательный pre-gate.
-  - Exit criteria: expensive runs происходят только после L2 green signal.
-- `Stage F: Chain Integrity`
-  - Довести chain controller до строгого enforcement resume/order/identity.
-  - Exit criteria: bypass/identity drift/resume abandonment блокируются hard.
-- `Stage G: Acceptance Re-enable`
-  - Запустить L3 только после прохождения Stage A-F и PG0..PG6.
-  - Exit criteria: `lock -> replay -> canary -> full` используется как release confirmation, не как debug loop.
-
-### Execution Status Update (2026-03-02, code-fact audit refresh)
-
-- `P0 Governance Lock` partial: L0 static gates are implemented in `ops/diagnose.py` and wired in `.github/workflows/ci.yml` via `llm-quality-gates`; doc sync and runtime evidence are not code-verified.
-- `P1 Semantic Decision Envelope` implemented in `truffles-api/app/routers/webhook/decision.py` with coverage in `truffles-api/tests/test_llm_policy_core.py`.
-- `P2 Structured Policy-Core Adapter` implemented in `truffles-api/app/services/intent_service.py` + `truffles-api/app/schemas/intent.py` with tests in `truffles-api/tests/test_llm_policy_core.py`.
-- `P3 Semantic Firewall` implemented in `truffles-api/app/routers/webhook/decision.py` with reason-code enforcement coverage in `truffles-api/tests/test_message_endpoint.py`.
-- `P4 Expected-Reply Refactor` done via `docs/TASK_PACKAGES/TP-2026-03-02-p4-expected-reply-full-closure-a1.md`: router-level semantic branching by `expected_reply_type` removed from `truffles-api/app/routers/webhook/booking.py` and `truffles-api/app/routers/webhook/info.py` and replaced with boundary contract helpers in `truffles-api/app/services/expected_reply_contract.py` (`expected_reply_slot_key`, `should_prefer_info_class_for_booking_interrupt`, `should_override_truth_gate_off_topic_contract`, `truth_gate_expected_reply_prompt_contract`, `should_repeat_booking_prompt`, `should_mark_booking_time_service_candidate`, `should_keep_booking_prompt_for_info_clarify_time_followup`, `should_use_expected_service_off_topic_prompt`); deterministic coverage green: `pytest -q truffles-api/tests/test_expected_reply_contract.py` (`20 passed`), `pytest -q truffles-api/tests/test_message_endpoint.py -k "expected_reply or booking_info_interrupt"` (`22 passed, 248 deselected`), `pytest -q truffles-api/tests/test_master_info_flow.py` (`29 passed`), `pytest -q truffles-api/tests/test_message_endpoint.py -k "truth_gate or off_topic"` (`6 passed, 264 deselected`), `ruff check truffles-api/app/services/expected_reply_contract.py truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/info.py truffles-api/tests/test_expected_reply_contract.py`.
-- `P5 Pack Query Engine v2` done with residual fully closed by `docs/TASK_PACKAGES/TP-2026-03-02-p5b-distributed-retrieval-backend-a1.md`: distributed backend adapter + mode switch (`runtime_local|backend_shadow|backend_primary`) is implemented in `truffles-api/app/services/pack_query_backend_service.py` and wired into `truffles-api/app/services/pack_runtime_service.py` with explicit fallback reason/meta and strict scope filtering preserved; deterministic evidence: `pytest -q truffles-api/tests/test_pack_query_backend_service.py truffles-api/tests/test_pack_runtime_service.py truffles-api/tests/test_pack_query_engine_contract.py truffles-api/tests/test_cross_domain_signal_contract_suite.py` (`26 passed`) + `pytest -q truffles-api/tests/test_message_endpoint.py -k "semantic_service_matcher or service_not_found"` (`6 passed, 264 deselected`) + packet lint (`ruff check ...` green).
-- `P6 Capability Manifest + Protocol Gate` implemented in `truffles-api/app/services/capability_manifest_service.py`, `truffles-api/app/services/capabilities_runtime.py`, `truffles-api/app/services/tool_registry_service.py` with tests `truffles-api/tests/test_tool_protocol_gate.py` and `truffles-api/tests/test_cross_domain_capability_isolation.py`; dedicated `tool_protocol_gateway.py` file not found.
-- `P7 Core De-hardcoding Sweep` done: phrase/regex routing removed from `truffles-api/app/routers/webhook/info.py`, `truffles-api/app/routers/webhook/booking.py`, `truffles-api/app/services/tool_registry_service.py` by moving matchers to `truffles-api/app/services/info_signal_service.py` and `truffles-api/app/services/booking_signal_service.py`; checks green (`test_booking_appointments.py`, `test_master_info_flow.py`, `test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply"`).
-- `P7` continuity follow-up opened as mandatory program block `SIG-PROGRAM-S0-S4` in `docs/TASK_PACKAGES/TP-2026-03-02-process-integrity-signal-program-a1.md` to prevent context loss and enforce `S1/S2/S3/S4` completion without residual hardcode drift.
-- `P8 Acceptance Engine Split` implemented in `ops/diagnose.py` (`semantic_acceptance` and `delivery_acceptance`).
-- `P9 Contract Test Migration` done via `docs/TASK_PACKAGES/TP-2026-03-02-p9-contract-oracle-full-closure-a1.md`: remaining literal business phrase-oracles removed from `truffles-api/tests/test_message_endpoint.py` in favor of contract/meta/state assertions, with deterministic proof `pytest -q truffles-api/tests/test_message_endpoint.py -k "test_service_matcher_short_circuits_llm or test_llm_policy_core_catalog_tool_decision_mismatch_services_overview_recovery or test_llm_policy_core_get_booking_ok_does_not_force_handoff or test_llm_policy_core_normalizes_action_from_tool_action or test_llm_policy_core_list_slots_ok_appends_derived_followup_prompt or test_llm_policy_core_collect_list_slots_with_known_service_normalizes_to_fact or test_llm_policy_core_info_tool_uses_tool_args_info_refs or test_llm_policy_core_info_single_info_ref_stays_info_in_booking_context or test_booking_interrupt_hours_contract_blocks_price_takeover or test_llm_policy_core_book_slot_backfills_required_args_from_slots_and_specialist_hint or test_llm_policy_core_book_slot_contract_invalid_does_not_auto_escalate or test_llm_policy_core_tool_decision_mismatch_does_not_auto_escalate or test_llm_policy_core_catalog_services_overview_sets_followup_without_info_sections or test_llm_policy_core_handoff_style_reference_keeps_media_prompt_without_plan_rewrite or test_llm_policy_core_list_slots_keeps_context_datetime_when_expected_time or test_llm_policy_core_catalog_service_reply_keeps_info_answer_for_info_query or test_llm_policy_core_provider_unavailable_escalates_after_clarify_limit or test_llm_policy_core_list_slots_provider_unavailable_keeps_booking_question or test_booking_verification_request_does_not_escalate_active_booking_without_reference or test_booking_reschedule_missing_slot_does_not_escalate_without_manager_request or test_llm_policy_core_collect_check_booking_uses_reference_prompt or test_llm_policy_core_service_query_non_service_refs_routes_to_info or test_llm_policy_core_info_tool_master_reply_sent_without_clarify or test_llm_policy_core_catalog_service_reply_normalized_to_master_info_by_signal or test_llm_policy_core_catalog_location_reply_normalized_to_master_info or test_llm_policy_core_semantic_arbitration_off_keeps_master_without_location_rewrite or test_llm_policy_core_consult_ref_does_not_shadow_allowed_consult_refs or test_llm_policy_core_degraded_timeout_booking_safe_second_hit_escalates or test_llm_policy_core_degraded_booking_guard_retries_with_llm_rescue_then_uses_calendar_tool"` (`29 passed, 241 deselected`) and `rg -n "assert .*\"[^\"]+\" .*response\\.bot_response|assert any\\(token in response_text" truffles-api/tests/test_message_endpoint.py` (no matches).
-- `P10 Canonical Quality Chain` implemented: chain controller + acceptance token gate implemented in `scripts/quality_chain_controller.sh`, `scripts/llm_quality_guarded.sh`, `ops/diagnose.py`, and multi-seed drift enforcement added to PG checklist validation (`multi_seed_evidence` required for acceptance lock).
-- `P11 Budget-Go-To-Full Control` implemented in `scripts/quality_chain_controller.sh` (PG checklist + L1/L2 evidence linkage) and enforced via `scripts/llm_quality_guarded.sh` for acceptance lock.
-- Chain controller bootstrap/import implemented in `scripts/quality_chain_controller.sh` with deterministic coverage in `truffles-api/tests/test_booking_quality_chain_controller.py`.
-- `P12 Cross-domain Hardening` de-scoped from current release scope (2026-03-03): deterministic non-salon hardening remains implemented (`truffles-api/tests/test_cross_domain_signal_contract_suite.py`, matrix gate in `ops/diagnose.py`), but runtime onboarding for two real non-salon domains is explicitly excluded from this release cycle; block moved out of active open-block list.
-- `P13 Canary + Rollback` done via `docs/TASK_PACKAGES/TP-2026-03-02-p13-canary-rollback-full-closure-a1.md`: acceptance chain now enforces `lock -> replay -> canary -> full`, `scripts/quality_chain_controller.sh` includes explicit `rollback` command and automatic rollback on non-canonical canary step (`blocked_reason=canary_rollback_executed`, rollback artifact persisted), guarded wrapper accepts `--mode canary`; deterministic evidence: `bash -n scripts/quality_chain_controller.sh`, `bash -n scripts/llm_quality_guarded.sh`, `ruff check ops/diagnose.py truffles-api/tests/test_booking_quality_chain_controller.py truffles-api/tests/test_booking_quality_guarded_wrapper.py` (`All checks passed`), `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py` (`18 passed`), `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py` (`3 passed`).
-- `P14 Evidence + STATE Handoff` done via `docs/TASK_PACKAGES/TP-2026-03-02-p14-evidence-state-handoff-full-closure-a1.md`: fail-closed evidence handoff is now coded in `ops/diagnose.py` (`evidence_handoff_valid` + reasons + manifest/summary sync), chain pre-promotion blocks missing prior-step evidence handoff in `scripts/quality_chain_controller.sh`, and `scripts/session_check.sh` enforces full evidence bundle + `manual_audit=done` + `STATE.md` handoff for core behavior merges; deterministic checks green: `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "handoff or artifact or evidence"` (`7 passed, 73 deselected`), `pytest -q truffles-api/tests/test_booking_quality_chain_controller.py -k "handoff or evidence"` (`4 passed, 15 deselected`), `bash -n scripts/session_check.sh`, `bash -n scripts/quality_chain_controller.sh`, `ruff check ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_chain_controller.py`.
-- `P15 Timeout-Degrade Reliability Remediation` implemented: timeout degrade retry limit and clarify/handoff escalation logic exist in `truffles-api/app/routers/webhook/decision.py` with deterministic tests in `truffles-api/tests/test_message_endpoint.py` (booking timeout retry exhaust -> handoff).
-
-### Open blocks closure contract (strict, no wave slicing)
-
-- Для текущего release scope применяются только блоки из `Open Blocks Matrix (code-fact, 2026-03-03)`.
-- `P12` исключён из активного open-block списка этого ТЗ (de-scoped) и не участвует в mandatory next blocks текущего цикла.
-
-### Mandatory Continuation for P7 (S0..S4, code-fact status at 2026-03-02)
-
-- `S0 No-Hardcode Gate Scope Fix` done: static hardcode gate in `ops/diagnose.py` now includes signal-layer files (`truffles-api/app/services/booking_signal_service.py`, `truffles-api/app/services/info_signal_service.py`) and explicit technical-format whitelist (`LLM_QUALITY_HARDCODE_TECHNICAL_ALLOW_SNIPPETS`); coverage updated in `truffles-api/tests/test_booking_quality_status_gate.py`.
-- `S1 Signal Manifest Externalization` done: domain regex/markers moved out of runtime signal services into declarative manifest + schema:
-  - manifest: `truffles-api/app/knowledge/generic/SIGNAL_MANIFEST.yaml`
-  - schema: `contracts/packs/signal_manifest.v1.jsonschema`
-  - runtime loader: `truffles-api/app/services/signal_manifest_service.py`
-  - consumers migrated: `truffles-api/app/services/booking_signal_service.py`, `truffles-api/app/services/info_signal_service.py`
-  - deterministic evidence: `pytest -q truffles-api/tests/test_signal_manifest_service.py`, `pytest -q truffles-api/tests/test_booking_appointments.py`, `pytest -q truffles-api/tests/test_master_info_flow.py`, `pytest -q truffles-api/tests/test_message_endpoint.py -k "info_intents or booking_info_intents or expected_reply"`.
-- `S2 Signal Runtime Compiler` done: signal loader now builds compiled runtime bundle with explicit version/fingerprint/signature metadata and cache-by-signature contract in `truffles-api/app/services/signal_manifest_service.py` (`CompiledSignalManifest`, `compiled_version`, `manifest_fingerprint`, `manifest_signature`, `get_signal_manifest_runtime_meta`); deterministic proof in `truffles-api/tests/test_signal_manifest_service.py` (`8 passed`).
-- `S3 No-Hardcode Gate v2` done for scope enforcement: hardcode gate path policy in `ops/diagnose.py` now fail-checks `runtime/core/signal` scope (`webhook/*.py`, `*_signal_service.py`, `*_runtime_service.py`, `pack_runtime_service.py`, `tool_registry_service.py`) with deterministic scope tests in `truffles-api/tests/test_booking_quality_status_gate.py` (`8 passed` for scope/gate slice).
-- `S4 Cross-domain Contract Suite` done (code-fact): dedicated deterministic suite for minimum two non-salon packs added in `truffles-api/tests/test_cross_domain_signal_contract_suite.py` (covers info/booking/tool_registry contract path via runtime truth datasets), and quality matrix now supports fail-closed cross-domain gate (`ops/diagnose.py`, helper `_llm_quality_build_cross_domain_matrix_contract_status`, args `--cross-domain-contract`, `--cross-domain-min-non-salon`, `--cross-domain-excluded-slugs`) with deterministic coverage in `truffles-api/tests/test_booking_quality_status_gate.py` (`cross_domain_matrix_contract*` tests).
-
-### DoD for this Addendum
-
-- TP явно фиксирует L0-L3 operating model.
-- `Go-to-Full Gate` и `No-Loop Law` закреплены как обязательные.
-- Oracle/judge responsibility разделены contract-first способом.
-- Определен полный rollout-план Stage A-G с exit criteria.
-
-### Checks
-
-- Документарная проверка:
-  - TP sections не противоречат `Architecture Charter` и текущим No-go.
-- Процессная проверка:
-  - любой предложенный L3 run должен проходить PG0..PG6 checklist перед запуском.
-- Аудиторская проверка:
-  - handoff содержит forensic SOP пакет и next-command rationale.
-
-### Evidence
-
-- Обновленный TP с этим addendum.
-- Пример заполненного PG0..PG6 чеклиста в session evidence перед следующим L3.
-- Пример forensic handoff, где объяснено почему L3 разрешен или заблокирован.
-
-### No-go (additional)
-
-- Нельзя запускать L3 "чтобы проверить, вдруг теперь пройдет", без PG0..PG6.
-- Нельзя повышать роль judge до primary acceptance oracle.
-- Нельзя заменять root-cause фиксы повтором expensive runs.
-- Нельзя принимать успех по "зелёным общим метрикам" при красных target blockers.
-
-## Execution Addendum (2026-03-03, contract alignment + atomic closure, mandatory)
-
-### Release Scope vs Program Scope (binding)
-
-- `Release Scope` (текущий релизный контур): блоки, закрываемые кодом/тестами/гейтами в этой ветке без внешнего onboarding.
-- `Program Scope` (долгий контур): блоки, требующие внешней готовности runtime/данных/доменных onboardings.
-- Правило фиксации статуса:
-  - `done`: есть deterministic + runtime evidence по контракту блока.
-  - `partial`: есть кодовая реализация, но нет полного evidence closure.
-  - `blocked`: closure зависит от внешнего условия (business/runtime onboarding), не решается локальной правкой в ветке.
-
-### Atomic Closure Rule (mandatory)
-
-- Один открытый блок = один TP = один PR = один closure evidence packet.
-- Разбиение на `step/wave` допустимо только если явно объявлено в TP до начала реализации.
-- Пост-фактум декомпозиция (после частичной реализации) запрещена.
-- Для каждого TP closure обязателен:
-  - deterministic checks,
-  - runtime/quality checks (если блок требует),
-  - exact artifact paths,
-  - обновление parent TP статуса в том же цикле.
-
-### Optimization-First Change Policy (mandatory)
-
-- Порядок изменений: `reuse -> modify -> remove -> add`.
-- Для каждого нового TP обязательна таблица:
-  - `What reused`
-  - `What modified`
-  - `What removed as duplicate`
-  - `What added and why reuse/modify were insufficient`
-- Добавление новых сущностей без аудита дубликатов запрещено.
-
-### UX/Business Coherence Gate (mandatory)
-
-- Любое изменение должно явно маппиться на продуктовый исход `FACT/COLLECT/HANDOFF`.
-- Запрещены функции/кнопки/ветки, не имеющие измеримого бизнес-эффекта или дублирующие существующие флоу.
-- Для каждого нового TP обязательны:
-  - `Business flow impact` (какой исход меняется),
-  - `Operator UX impact` (что упрощается/убирается),
-  - `Duplicate-surface audit` (где исключены пересечения с существующими реализациями).
-
-### Scenario Taxonomy Sync (mandatory)
-
-- Stage D считается закрытым только при явной связке бизнес-терминов и runtime-гейтов.
-- Каноническое соответствие для acceptance governance:
-  - `production-like` -> coverage `booking,info,handoff` + валидный scenario_contract.
-  - `expert-hard` -> наличие hard cases (`interrupt`, `check_booking`, `confirm`, policy/law intents) в corpus.
-  - `chaos/noise` -> noise-слой в сценариях (`tags`/generator) и верификация в L2 micro-chaos.
-- Closure-факт фиксируется только при machine-check в runtime (`taxonomy_mapping_version`, `business_bucket_presence`, `business_valid`) + deterministic tests + runbook sync.
-
-### Open Blocks Matrix (code-fact, 2026-03-03)
-
-| Block | Status | Evidence (code-fact) | Closure condition |
-|---|---|---|---|
-| `P0 Governance lock` | `done` | `docs/TASK_PACKAGES/TP-2026-03-03-p0-governance-runtime-closure-a1.md`; runtime `governance_closure` added in `ops/diagnose.py`, enforced in `scripts/session_check.sh`, deterministic proof `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "governance or closure or handoff"` (`18 passed`) | Closed (machine-checkable governance closure in summary + fail-closed session gate) |
-| `Scenario taxonomy sync (Stage D)` | `done` | `docs/TASK_PACKAGES/TP-2026-03-03-stage-d-scenario-taxonomy-sync-a1.md`; runtime mapping added in `ops/diagnose.py` (`taxonomy_mapping_version`, `business_bucket_presence`, `business_valid`); deterministic proof `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "scenario_governance or realism"` | Closed (business taxonomy enforced fail-closed in acceptance governance + runbook synced) |
-| `Secret-safe transport gate` | `done` | `ops/diagnose.py`: added `secret_exposure_detected` taxonomy + acceptance fail-closed gate `_llm_quality_build_secret_transport_gate_status`; removed webhook `curl` argv path from `_send_webhook_payload`; `scripts/llm_quality_guarded.sh` sanitizes ledger command args; tests green: `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "secret or webhook_secret_preflight"` and `pytest -q truffles-api/tests/test_booking_quality_guarded_wrapper.py` | Closed (explicit secret in argv blocked for acceptance; command artifacts redacted; deterministic tests green) |
-
-### Mandatory Next Blocks (atomic, no ad-hoc waves)
-
-- none in `binding-addendum 2026-03-03` (all matrix blocks are `done`).
-
-### Status Precedence Note
-
-- Для открытых блоков использовать только `Open Blocks Matrix (code-fact, 2026-03-03)` в этом addendum.
-- Более ранние секции со статусами трактуются как исторический срез и не переопределяют матрицу 2026-03-03.
+- Owner role for closure:
+  - `Top Architect + Brain`

@@ -81,6 +81,9 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - **Budget Interpretation Gate:** бюджет влияет только на порядок и частоту запусков (cadence), но не на качество критериев, не на контракт продукта и не на целевую архитектуру.
 - **Anti Test-Fitting Gate:** запрещено добавлять/усиливать `must_include` как основной oracle без эквивалентных контрактных проверок в `decision_meta/decision_trace`.
 - **Demo-Neutral Gate:** demo-pack (`demo_salon`) используется только как канарейка; runtime-core остаётся pack-agnostic.
+- **Open-World Proof Gate:** claim про `business-agnostic`/`multilingual` robustness допустим только если есть оба слоя evidence: `deterministic metamorphic expansion` и `LLM stress synthesis` как минимум на нескольких `pack/capability` envelope; surface-mutation генератор сам по себе не закрывает proof.
+- **Open-World Closure Artifact Gate:** финальное закрытие `P6` допускается только при machine-readable closure evidence от `python3 ops/diagnose.py llm-quality-open-world-closure ...`; narrative summary без closure artifact = `BLOCKED`.
+- **Failure Family Gate:** дорогие quality-run handoff/acceptance решения должны опираться на `failure families` (invariant/root-cause clusters), а не только на список отдельных bad turns.
 - **Lexicon/Regex Delta Gate:** расширение словарей/regex допустимо только вместе с изменением резолвера и контрактных тестов.
 - **Semantic Ownership Gate:** post-hoc semantic rewrite вне whitelist reason-codes считается нарушением контракта.
 - **Boundary Determinism Gate:** детерминированные ветки не подменяют semantic-owner решение; они только валидируют/блокируют/деградируют контрактно.
@@ -269,6 +272,23 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
   - rollback процедура и проверка.
 - Продвижение rollout без фактических сигналов запрещено.
 - При устойчивой деградации надежности (SLO/error-budget breach) feature rollout останавливается до восстановления baseline.
+
+### 6.5 Runtime Hygiene Gate (обязательно)
+- Цель: исключить накопление runtime-дублей/мусора, которые приводят к OOM, swap pressure и disk pressure.
+- Перед cleanup обязателен baseline-срез evidence:
+  - `date`
+  - `free -h`
+  - `df -h /`
+  - `docker ps --format '{{.Names}}' | wc -l`
+  - `docker system df`
+- Разрешено удалять без отдельного эскалационного решения только stale runtime clones по шаблонам `^truffles-api-` и `^firebreak-hq1-runtime` (по умолчанию старше 48 часов), если это не противоречит активному TP.
+- Удаление core-контейнеров (`truffles-api`, `truffles-postgres`, `truffles-redis`, `truffles-console-keycloak`, `truffles-prometheus`, `truffles-grafana`, `truffles-traefik`) без явного TP/owner-решения запрещено.
+- Любой долгий prune (`docker image prune`, `docker builder prune`) запускается с `timeout` и логированием в файл; если операция зависла/нет прогресса более 10 минут — stop-the-line, зафиксировать как infra GAP.
+- После cleanup обязателен post-state evidence тем же набором метрик + `docker image ls -f dangling=true -q | wc -l`.
+- Профилактика обязательна:
+  - ежедневный runtime hygiene job (stale clones + dangling images + journal vacuum),
+  - еженедельный deep cleanup build cache.
+- Канонический entrypoint: `/usr/local/bin/truffles-runtime-hygiene.sh`; cron-манифест: `/etc/cron.d/truffles-runtime-hygiene`.
 
 ### 6.1 Local-first validation law (обязательно)
 - Любая правка core‑поведения сначала проходит локальный реалистичный контур; без этого PR/приёмка = BLOCKED.

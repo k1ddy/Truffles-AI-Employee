@@ -5,12 +5,14 @@ from dataclasses import dataclass
 EXPECTED_REPLY_SERVICE = "service_choice"
 EXPECTED_REPLY_TIME = "time"
 EXPECTED_REPLY_NAME = "name"
+EXPECTED_REPLY_PHONE = "phone"
 EXPECTED_REPLY_INTENT_CHOICE = "intent_choice"
 
 EXPECTED_REPLY_ALLOWED_TYPES = {
     EXPECTED_REPLY_SERVICE,
     EXPECTED_REPLY_TIME,
     EXPECTED_REPLY_NAME,
+    EXPECTED_REPLY_PHONE,
     EXPECTED_REPLY_INTENT_CHOICE,
 }
 
@@ -18,12 +20,14 @@ EXPECTED_REPLY_SLOT_KEYS = {
     EXPECTED_REPLY_SERVICE: "service",
     EXPECTED_REPLY_TIME: "datetime",
     EXPECTED_REPLY_NAME: "name",
+    EXPECTED_REPLY_PHONE: "phone",
 }
 
 EXPECTED_REPLY_OFF_TOPIC_PROMPT_MAP = {
     EXPECTED_REPLY_SERVICE: ("service_clarify", "service_clarify"),
     EXPECTED_REPLY_TIME: ("booking_ask_datetime", "booking_followup"),
     EXPECTED_REPLY_NAME: ("booking_ask_name", "booking_followup"),
+    EXPECTED_REPLY_PHONE: ("booking_ask_phone", "booking_followup"),
 }
 
 
@@ -292,7 +296,12 @@ def resolve_tool_expected_reply_contract(
         return None
 
     if normalized_action == "calendar.list_slots":
-        if normalized_decision in {"ok", "specialist_missing"}:
+        if normalized_decision == "specialist_missing":
+            return ExpectedReplyContractDecision(
+                expected_reply_type=EXPECTED_REPLY_NAME,
+                reason="calendar_list_slots_specialist_followup",
+            )
+        if normalized_decision == "ok":
             if booking_has_service:
                 return ExpectedReplyContractDecision(
                     expected_reply_type=EXPECTED_REPLY_TIME,

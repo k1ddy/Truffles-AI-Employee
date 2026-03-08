@@ -239,6 +239,12 @@ master_query_person_terms:
     - специалист
     - специалисты
     - кто
+master_query_relation_terms:
+  ru:
+    - по
+    - на
+    - для
+    - с
 master_query_action_terms:
   ru:
     - дела
@@ -247,6 +253,8 @@ master_query_action_terms:
     - работает
     - выполняет
     - проводит
+    - выбрать
+    - подобрать
 master_query_experience_terms:
   ru:
     - лучше
@@ -515,7 +523,6 @@ carryover_followup_question_phrases:
     - стоим
     - длител
     - время
-    - час
 handover_status_keywords:
   ru:
     - передал

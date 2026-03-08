@@ -221,6 +221,26 @@ class TestAnswerInterpreterSchema:
         assert result["ok"] is False
         assert result["error"] == "invalid_schema"
 
+    def test_slot_mismatch_preserves_detected_slot(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "slot": "name",
+            "value": "Лена",
+            "confidence": 0.92,
+            "reason": "name_provided",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(
+                json.dumps(payload, ensure_ascii=False)
+            )
+            result = interpret_expected_reply("Меня зовут Лена", expected_reply_type="time")
+
+        assert result["ok"] is False
+        assert result["error"] == "slot_mismatch"
+        assert result["payload"]["slot"] == "datetime"
+        assert result["payload"]["detected_slot"] == "name"
+        assert result["payload"]["value"] == "Лена"
+
 
 class TestPolicyCoreTimeoutRetry:
     @staticmethod
@@ -479,6 +499,24 @@ class TestPolicyCoreTimeoutRetry:
                     "active_goal": "booking",
                     "expected_reply_type": "time",
                     "active_slots": ["service", "datetime", "service"],
+                    "current_referents": {
+                        "service": "маникюр",
+                        "booking_ref": "ref-123",
+                        "ignored": "skip",
+                    },
+                    "pending_question_contract": {
+                        "slot": "datetime",
+                        "expected_reply_type": "time",
+                        "reason": "booking_followup",
+                        "value": "завтра после 15",
+                        "ignored": "skip",
+                    },
+                    "consult_state": {
+                        "active": True,
+                        "topic": "уход за волосами",
+                        "question": "что лучше после окрашивания",
+                        "questions": ["первый вопрос", "второй вопрос", "", 1],
+                    },
                     "stored_keys": [
                         "preferred_master",
                         "preferred_master",
@@ -514,6 +552,22 @@ class TestPolicyCoreTimeoutRetry:
             "preferred_master",
             "parking_near",
         ]
+        assert memory_payload.get("profile", {}).get("current_referents") == {
+            "service": "маникюр",
+            "booking_ref": "ref-123",
+        }
+        assert memory_payload.get("profile", {}).get("pending_question_contract") == {
+            "slot": "datetime",
+            "expected_reply_type": "time",
+            "reason": "booking_followup",
+            "value": "завтра после 15",
+        }
+        assert memory_payload.get("profile", {}).get("consult_state") == {
+            "active": True,
+            "topic": "уход за волосами",
+            "question": "что лучше после окрашивания",
+            "questions": ["первый вопрос", "второй вопрос"],
+        }
         assert memory_payload.get("profile", {}).get("retrieved_items") == [
             {"key": "preferred_master", "value": "Алия"},
             {"key": "parking_note", "value": "Рядом со входом", "source": "booking_slot"},
@@ -530,50 +584,30 @@ class TestPolicyCoreTimeoutRetry:
             result = route_llm_policy_core("нужна запись")
 
         assert result["ok"] is True
+        assert result["structured_output_enabled"] is True
+        assert result["structured_output_fallback_used"] is True
         assert mock_llm.return_value.generate.call_count == 2
         first_kwargs = mock_llm.return_value.generate.call_args_list[0].kwargs
         second_kwargs = mock_llm.return_value.generate.call_args_list[1].kwargs
         assert isinstance(first_kwargs.get("response_format"), dict)
         assert "response_format" not in second_kwargs or second_kwargs.get("response_format") is None
 
-    def test_policy_core_response_format_keeps_non_strict_dynamic_objects(self):
+    def test_policy_core_response_format_is_provider_compatible_and_keeps_dynamic_objects(self):
         response_format = _build_policy_core_response_format(["calendar.book_slot"])
         assert response_format["json_schema"]["strict"] is False
         schema = response_format["json_schema"]["schema"]
+        assert schema["type"] == "object"
         assert schema["properties"]["tool_args"]["additionalProperties"] is True
         assert schema["properties"]["slots"]["additionalProperties"] == {"type": "string"}
         assert "entity_refs" in schema["properties"]
+        assert "subject_kind" in schema["properties"]
+        assert "capability" in schema["properties"]
+        assert "temporal_scope" in schema["properties"]
+        assert "resolution_mode" in schema["properties"]
         assert "resolver_id" in schema["properties"]
         assert "resolver_version" in schema["properties"]
-        assert isinstance(schema.get("allOf"), list) and schema["allOf"]
-        master_query_contract = schema["allOf"][0]
-        master_intent_enum = (
-            master_query_contract.get("if", {})
-            .get("properties", {})
-            .get("intent", {})
-            .get("enum", [])
-        )
-        assert "master_query" in master_intent_enum
-        assert "master" in master_intent_enum
-        master_query_paths = master_query_contract.get("then", {}).get("anyOf", [])
-        assert any(
-            path.get("properties", {})
-            .get("slots", {})
-            .get("required", [])
-            == ["service"]
-            for path in master_query_paths
-        )
-        assert any(
-            path.get("properties", {})
-            .get("tool_args", {})
-            .get("required", [])
-            == ["service_query"]
-            for path in master_query_paths
-        )
-        assert any(
-            path.get("properties", {}).get("next_question", {}).get("const") == "service"
-            for path in master_query_paths
-        )
+        for keyword in ("allOf", "oneOf", "anyOf", "not", "enum"):
+            assert keyword not in schema
 
 
 class TestPolicyCoreErrorClassification:

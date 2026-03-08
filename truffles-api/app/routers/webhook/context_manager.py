@@ -7,6 +7,7 @@ from typing import Any
 
 from app.models import Conversation, Message
 from app.routers.webhook.booking import _get_booking_context
+from app.routers.webhook.runtime_primitives import SERVICE_CARRYOVER_TTL_MESSAGES
 from app.routers.webhook.session_memory import (
     _record_session_memory_update,
     _update_session_memory_on_question,
@@ -17,6 +18,465 @@ from app.routers.webhook.trace import (
     _retain_decision_trace,
     _update_message_decision_metadata,
 )
+
+CANONICAL_DIALOG_STATE_KEY = "canonical_dialog_state"
+CANONICAL_DIALOG_STATE_OWNER = "context_manager.dialog_state.v1"
+CANONICAL_DIALOG_STATE_VERSION = "v1"
+_CANONICAL_REFERENT_KEYS = {"service", "master", "branch", "booking_ref"}
+_EXPECTED_REPLY_SLOT_BY_TYPE = {
+    "service_choice": "service",
+    "time": "datetime",
+    "name": "name",
+    "phone": "phone",
+}
+
+
+def _canonical_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = " ".join(value.split()).strip()
+    return cleaned or None
+
+
+def _canonical_int(value: Any, *, default: int = 0) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(normalized, 0)
+
+
+def _canonical_state_base() -> dict[str, Any]:
+    return {
+        "owner_id": CANONICAL_DIALOG_STATE_OWNER,
+        "version": CANONICAL_DIALOG_STATE_VERSION,
+        "current_referents": {},
+    }
+
+
+def _get_canonical_dialog_state(manager: dict) -> dict[str, Any]:
+    payload = manager.get(CANONICAL_DIALOG_STATE_KEY) if isinstance(manager, dict) else None
+    state = dict(payload) if isinstance(payload, dict) else _canonical_state_base()
+    owner_id = _canonical_text(state.get("owner_id")) or CANONICAL_DIALOG_STATE_OWNER
+    version = _canonical_text(state.get("version")) or CANONICAL_DIALOG_STATE_VERSION
+    referents = state.get("current_referents")
+    cleaned_referents: dict[str, dict[str, Any]] = {}
+    if isinstance(referents, dict):
+        for referent_key, raw_payload in referents.items():
+            if referent_key not in _CANONICAL_REFERENT_KEYS or not isinstance(raw_payload, dict):
+                continue
+            value = _canonical_text(raw_payload.get("value"))
+            if not value:
+                continue
+            item: dict[str, Any] = {"value": value, "message_count": _canonical_int(raw_payload.get("message_count"))}
+            source = _canonical_text(raw_payload.get("source"))
+            if source:
+                item["source"] = source
+            score = raw_payload.get("score")
+            if isinstance(score, (int, float)):
+                item["score"] = float(score)
+            ttl = raw_payload.get("ttl")
+            if isinstance(ttl, int) and ttl > 0:
+                item["ttl"] = ttl
+            cleaned_referents[referent_key] = item
+    state["owner_id"] = owner_id
+    state["version"] = version
+    state["current_referents"] = cleaned_referents
+
+    pending_question_contract = state.get("pending_question_contract")
+    if isinstance(pending_question_contract, dict):
+        cleaned_pending: dict[str, Any] = {}
+        slot = _canonical_text(pending_question_contract.get("slot"))
+        if slot in {"service", "datetime", "name", "phone"}:
+            cleaned_pending["slot"] = slot
+        expected_reply_type = _canonical_text(pending_question_contract.get("expected_reply_type"))
+        if expected_reply_type:
+            cleaned_pending["expected_reply_type"] = expected_reply_type
+        reason = _canonical_text(pending_question_contract.get("reason"))
+        if reason:
+            cleaned_pending["reason"] = reason
+        value = _canonical_text(pending_question_contract.get("value"))
+        if value:
+            cleaned_pending["value"] = value
+        cleaned_pending["message_count"] = _canonical_int(pending_question_contract.get("message_count"))
+        if cleaned_pending.get("slot") or cleaned_pending.get("expected_reply_type"):
+            state["pending_question_contract"] = cleaned_pending
+        else:
+            state.pop("pending_question_contract", None)
+    else:
+        state.pop("pending_question_contract", None)
+
+    consult_state = state.get("consult_state")
+    if isinstance(consult_state, dict):
+        cleaned_consult: dict[str, Any] = {"message_count": _canonical_int(consult_state.get("message_count"))}
+        topic = _canonical_text(consult_state.get("topic"))
+        if topic:
+            cleaned_consult["topic"] = topic
+        question = _canonical_text(consult_state.get("question"))
+        if question:
+            cleaned_consult["question"] = question
+        raw_questions = consult_state.get("questions")
+        if isinstance(raw_questions, list):
+            questions = [_canonical_text(item) for item in raw_questions]
+            questions = [item for item in questions if item]
+            if questions:
+                cleaned_consult["questions"] = questions
+        ttl = consult_state.get("ttl")
+        if isinstance(ttl, int) and ttl > 0:
+            cleaned_consult["ttl"] = ttl
+        if len(cleaned_consult) > 1:
+            state["consult_state"] = cleaned_consult
+        else:
+            state.pop("consult_state", None)
+    else:
+        state.pop("consult_state", None)
+    return state
+
+
+def _set_canonical_dialog_state(manager: dict, state: dict[str, Any] | None) -> dict:
+    manager = dict(manager)
+    if state:
+        manager[CANONICAL_DIALOG_STATE_KEY] = state
+    else:
+        manager.pop(CANONICAL_DIALOG_STATE_KEY, None)
+    return manager
+
+
+def _referent_ttl(referent_key: str) -> int | None:
+    if referent_key in {"service", "master"}:
+        return SERVICE_CARRYOVER_TTL_MESSAGES
+    return None
+
+
+def _set_canonical_referent(
+    manager: dict,
+    *,
+    referent_key: str,
+    value: str | None,
+    message_count: int,
+    source: str | None = None,
+    score: float | None = None,
+    ttl: int | None = None,
+) -> dict:
+    if referent_key not in _CANONICAL_REFERENT_KEYS:
+        return dict(manager)
+    manager = dict(manager)
+    state = _get_canonical_dialog_state(manager)
+    referents = dict(state.get("current_referents") or {})
+    normalized_value = _canonical_text(value)
+    if not normalized_value:
+        referents.pop(referent_key, None)
+    else:
+        payload: dict[str, Any] = {
+            "value": normalized_value,
+            "message_count": _canonical_int(message_count),
+        }
+        normalized_source = _canonical_text(source)
+        if normalized_source:
+            payload["source"] = normalized_source
+        if isinstance(score, (int, float)):
+            payload["score"] = float(score)
+        referent_ttl = ttl if isinstance(ttl, int) and ttl > 0 else _referent_ttl(referent_key)
+        if isinstance(referent_ttl, int) and referent_ttl > 0:
+            payload["ttl"] = referent_ttl
+        referents[referent_key] = payload
+    state["current_referents"] = referents
+    return _set_canonical_dialog_state(manager, state)
+
+
+def _project_canonical_referent(
+    manager: dict,
+    *,
+    referent_key: str,
+    message_count: int,
+) -> dict[str, Any] | None:
+    state = _get_canonical_dialog_state(manager)
+    referents = state.get("current_referents")
+    payload = referents.get(referent_key) if isinstance(referents, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    value = _canonical_text(payload.get("value"))
+    if not value:
+        return None
+    ttl = payload.get("ttl")
+    ttl_value = ttl if isinstance(ttl, int) and ttl > 0 else None
+    age = max(_canonical_int(message_count) - _canonical_int(payload.get("message_count")), 0)
+    if ttl_value is not None and age > ttl_value:
+        return None
+    return {
+        "value": value,
+        "source": _canonical_text(payload.get("source")),
+        "score": payload.get("score") if isinstance(payload.get("score"), (int, float)) else None,
+        "age": max(age, 1),
+        "ttl": ttl_value,
+        "remaining": max((ttl_value or 0) - age + 1, 0) if ttl_value is not None else None,
+        "projection_source": CANONICAL_DIALOG_STATE_KEY,
+        "canonical_state_owner": state.get("owner_id") or CANONICAL_DIALOG_STATE_OWNER,
+    }
+
+
+def _prune_canonical_referent(
+    manager: dict,
+    *,
+    referent_key: str,
+    message_count: int,
+) -> tuple[dict, dict[str, Any] | None]:
+    manager = dict(manager)
+    state = _get_canonical_dialog_state(manager)
+    referents = dict(state.get("current_referents") or {})
+    payload = referents.get(referent_key)
+    if not isinstance(payload, dict):
+        return manager, None
+    ttl = payload.get("ttl")
+    if not isinstance(ttl, int) or ttl <= 0:
+        return manager, None
+    age = max(_canonical_int(message_count) - _canonical_int(payload.get("message_count")), 0)
+    if age <= ttl:
+        return manager, None
+    value = _canonical_text(payload.get("value"))
+    referents.pop(referent_key, None)
+    state["current_referents"] = referents
+    manager = _set_canonical_dialog_state(manager, state)
+    return manager, {
+        "reason": "expired",
+        "age": age,
+        "ttl": ttl,
+        "value": value,
+        "projection_source": CANONICAL_DIALOG_STATE_KEY,
+        "canonical_state_owner": state.get("owner_id") or CANONICAL_DIALOG_STATE_OWNER,
+    }
+
+
+def _set_canonical_pending_question_contract(
+    manager: dict,
+    *,
+    expected_reply_type: str | None,
+    reason: str | None,
+    message_count: int,
+    value: str | None = None,
+) -> dict:
+    manager = dict(manager)
+    state = _get_canonical_dialog_state(manager)
+    normalized_expected_reply_type = _canonical_text(expected_reply_type)
+    if not normalized_expected_reply_type:
+        state.pop("pending_question_contract", None)
+        return _set_canonical_dialog_state(manager, state)
+    payload: dict[str, Any] = {
+        "expected_reply_type": normalized_expected_reply_type,
+        "message_count": _canonical_int(message_count),
+    }
+    slot = _EXPECTED_REPLY_SLOT_BY_TYPE.get(normalized_expected_reply_type)
+    if slot:
+        payload["slot"] = slot
+    normalized_reason = _canonical_text(reason)
+    if normalized_reason:
+        payload["reason"] = normalized_reason
+    normalized_value = _canonical_text(value)
+    if normalized_value:
+        payload["value"] = normalized_value
+    state["pending_question_contract"] = payload
+    return _set_canonical_dialog_state(manager, state)
+
+
+def _set_canonical_consult_state(
+    manager: dict,
+    *,
+    topic: str | None,
+    question: str | None,
+    questions: list[str] | None,
+    message_count: int,
+) -> dict:
+    from . import _legacy as legacy
+
+    manager = dict(manager)
+    state = _get_canonical_dialog_state(manager)
+    normalized_topic = _canonical_text(topic)
+    normalized_question = _canonical_text(question)
+    cleaned_questions = [
+        item for item in (_canonical_text(entry) for entry in (questions or [])) if item
+    ]
+    if not normalized_topic and not normalized_question and not cleaned_questions:
+        state.pop("consult_state", None)
+        return _set_canonical_dialog_state(manager, state)
+    state["consult_state"] = {
+        "topic": normalized_topic,
+        "question": normalized_question,
+        "questions": cleaned_questions,
+        "message_count": _canonical_int(message_count),
+        "ttl": legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+    }
+    return _set_canonical_dialog_state(manager, state)
+
+
+def _project_canonical_consult_state(
+    manager: dict,
+    *,
+    message_count: int,
+) -> dict[str, Any] | None:
+    state = _get_canonical_dialog_state(manager)
+    consult_state = state.get("consult_state")
+    if not isinstance(consult_state, dict):
+        return None
+    ttl = consult_state.get("ttl")
+    ttl_value = ttl if isinstance(ttl, int) and ttl > 0 else None
+    age = max(_canonical_int(message_count) - _canonical_int(consult_state.get("message_count")), 0)
+    if ttl_value is not None and age > ttl_value:
+        return None
+    result: dict[str, Any] = {
+        "age": max(age, 1),
+        "ttl": ttl_value,
+        "remaining": max((ttl_value or 0) - age + 1, 0) if ttl_value is not None else None,
+        "projection_source": CANONICAL_DIALOG_STATE_KEY,
+        "canonical_state_owner": state.get("owner_id") or CANONICAL_DIALOG_STATE_OWNER,
+    }
+    topic = _canonical_text(consult_state.get("topic"))
+    if topic:
+        result["topic"] = topic
+    question = _canonical_text(consult_state.get("question"))
+    if question:
+        result["question"] = question
+    questions = consult_state.get("questions")
+    if isinstance(questions, list):
+        cleaned_questions = [
+            item for item in (_canonical_text(entry) for entry in questions) if item
+        ]
+        if cleaned_questions:
+            result["questions"] = cleaned_questions
+    if "topic" not in result and "question" not in result and "questions" not in result:
+        return None
+    return result
+
+
+def _prune_canonical_consult_state(
+    manager: dict,
+    *,
+    message_count: int,
+) -> tuple[dict, dict[str, Any] | None]:
+    manager = dict(manager)
+    state = _get_canonical_dialog_state(manager)
+    consult_state = state.get("consult_state")
+    if not isinstance(consult_state, dict):
+        return manager, None
+    ttl = consult_state.get("ttl")
+    if not isinstance(ttl, int) or ttl <= 0:
+        return manager, None
+    age = max(_canonical_int(message_count) - _canonical_int(consult_state.get("message_count")), 0)
+    if age <= ttl:
+        return manager, None
+    state.pop("consult_state", None)
+    manager = _set_canonical_dialog_state(manager, state)
+    return manager, {
+        "reason": "expired",
+        "age": age,
+        "ttl": ttl,
+        "projection_source": CANONICAL_DIALOG_STATE_KEY,
+        "canonical_state_owner": state.get("owner_id") or CANONICAL_DIALOG_STATE_OWNER,
+    }
+
+
+def _sync_canonical_dialog_state(
+    manager: dict,
+    *,
+    booking_state: dict[str, Any] | None,
+    expected_reply_type: str | None,
+    expected_reply_reason: str | None,
+    message_count: int,
+    branch_id: Any = None,
+    consult_context: dict[str, Any] | None = None,
+) -> dict:
+    from . import _legacy as legacy
+
+    manager = dict(manager)
+    if isinstance(booking_state, dict):
+        service_value = _canonical_text(booking_state.get("service"))
+        if service_value:
+            manager = _set_canonical_referent(
+                manager,
+                referent_key="service",
+                value=service_value,
+                source="booking_state",
+                score=1.0,
+                message_count=message_count,
+            )
+        specialist_value = _canonical_text(
+            booking_state.get("specialist_name") or booking_state.get("specialist_id")
+        )
+        if specialist_value:
+            manager = _set_canonical_referent(
+                manager,
+                referent_key="master",
+                value=specialist_value,
+                source="booking_state",
+                score=1.0,
+                message_count=message_count,
+            )
+        for ref_key in ("appointment_id", "booking_id", "external_booking_id"):
+            reference_value = _canonical_text(booking_state.get(ref_key))
+            if reference_value:
+                manager = _set_canonical_referent(
+                    manager,
+                    referent_key="booking_ref",
+                    value=reference_value,
+                    source="booking_state",
+                    score=1.0,
+                    message_count=message_count,
+                    ttl=None,
+                )
+                break
+    if branch_id is not None:
+        manager = _set_canonical_referent(
+            manager,
+            referent_key="branch",
+            value=str(branch_id),
+            source="conversation_branch",
+            score=1.0,
+            message_count=message_count,
+            ttl=None,
+        )
+    state = _get_canonical_dialog_state(manager)
+    referents = state.get("current_referents") if isinstance(state, dict) else {}
+    service_payload = referents.get("service") if isinstance(referents, dict) else None
+    if not isinstance(service_payload, dict):
+        legacy_payload = manager.get(legacy.SERVICE_CARRYOVER_KEY) if isinstance(manager, dict) else None
+        if isinstance(legacy_payload, dict):
+            service_query = _canonical_text(legacy_payload.get("service_query"))
+            if service_query:
+                manager = _set_canonical_referent(
+                    manager,
+                    referent_key="service",
+                    value=service_query,
+                    source=_canonical_text(legacy_payload.get("service_query_source")) or "legacy_service_carryover",
+                    score=legacy_payload.get("service_query_score") if isinstance(legacy_payload.get("service_query_score"), (int, float)) else None,
+                    message_count=_canonical_int(legacy_payload.get("message_count"), default=message_count),
+                    ttl=legacy_payload.get("ttl") if isinstance(legacy_payload.get("ttl"), int) else None,
+                )
+    if isinstance(consult_context, dict):
+        manager = _set_canonical_consult_state(
+            manager,
+            topic=consult_context.get("topic"),
+            question=consult_context.get("question"),
+            questions=consult_context.get("questions") if isinstance(consult_context.get("questions"), list) else None,
+            message_count=message_count,
+        )
+    elif isinstance(manager.get(legacy.CONSULT_CONTEXT_KEY), dict):
+        legacy_consult = manager.get(legacy.CONSULT_CONTEXT_KEY)
+        manager = _set_canonical_consult_state(
+            manager,
+            topic=legacy_consult.get("topic") if isinstance(legacy_consult, dict) else None,
+            question=legacy_consult.get("question") if isinstance(legacy_consult, dict) else None,
+            questions=legacy_consult.get("questions") if isinstance(legacy_consult, dict) else None,
+            message_count=_canonical_int(
+                legacy_consult.get("message_count") if isinstance(legacy_consult, dict) else None,
+                default=message_count,
+            ),
+        )
+    manager = _set_canonical_pending_question_contract(
+        manager,
+        expected_reply_type=expected_reply_type,
+        reason=expected_reply_reason,
+        message_count=message_count,
+    )
+    return manager
 
 
 def _get_conversation_context(conversation: Conversation) -> dict:
@@ -167,6 +627,14 @@ def _set_expected_reply_context(
         from . import _legacy as legacy
 
         context[legacy.EXPECTED_REPLY_REASON_KEY] = reason.strip()
+    context_manager = _get_context_manager(context)
+    context_manager = _set_canonical_pending_question_contract(
+        context_manager,
+        expected_reply_type=expected_reply_type,
+        reason=reason,
+        message_count=_canonical_int(context_manager.get("message_count")),
+    )
+    context = _set_context_manager(context, context_manager)
     re_entry_cleared = False
     if isinstance(expected_reply_type, str) and expected_reply_type.strip():
         if _is_re_entry_required(context):
@@ -338,6 +806,25 @@ def _set_class_carryover(
 
     manager = dict(manager)
     normalized_class = legacy._normalize_class_name(class_name)
+    section_intent_map = {
+        "address": "location",
+        "location": "location",
+        "hours": "hours",
+        "parking": "parking",
+        "guest_policy": "guest_policy",
+        "pricing": "pricing",
+        "price": "pricing",
+        "duration": "duration",
+        "service_duration": "duration",
+        "promotions": "promotions",
+        "promotion": "promotions",
+        "promo": "promotions",
+        "discounts": "promotions",
+        "discount": "promotions",
+        "master": "master",
+        "specialist": "master",
+        "contact": "contact",
+    }
     cleaned_intents = []
     seen = set()
     for intent in intents:
@@ -357,6 +844,15 @@ def _set_class_carryover(
             if not value:
                 continue
             cleaned_sections.append(value)
+            normalized_section = value.casefold()
+            derived_intent = section_intent_map.get(normalized_section)
+            if (
+                derived_intent
+                and derived_intent in legacy.INFO_INTENTS
+                and derived_intent not in seen
+            ):
+                cleaned_intents.append(derived_intent)
+                seen.add(derived_intent)
     manager[legacy.CLASS_CARRYOVER_KEY] = {
         "class": normalized_class,
         "intents": cleaned_intents,
@@ -394,6 +890,11 @@ def _maybe_store_class_carryover(
         info_sections=info_sections,
         message_count=message_count,
     )
+    stored_payload = (
+        context_manager.get(legacy.CLASS_CARRYOVER_KEY)
+        if isinstance(context_manager, dict)
+        else None
+    )
     context = _set_context_manager(context, context_manager)
     _set_conversation_context(conversation, context)
     _record_decision_trace(
@@ -402,8 +903,16 @@ def _maybe_store_class_carryover(
             "stage": "class_carryover",
             "decision": "set",
             "class": normalized_class,
-            "intents": intent_list,
-            "info_sections": info_sections,
+            "intents": (
+                stored_payload.get("intents")
+                if isinstance(stored_payload, dict)
+                else intent_list
+            ),
+            "info_sections": (
+                stored_payload.get("info_sections")
+                if isinstance(stored_payload, dict)
+                else info_sections
+            ),
             "ttl": legacy.CLASS_CARRYOVER_TTL_MESSAGES,
             "reason": reason,
         },
@@ -413,20 +922,25 @@ def _maybe_store_class_carryover(
 def _prune_service_carryover(manager: dict, *, message_count: int) -> tuple[dict, dict | None]:
     from . import _legacy as legacy
 
+    manager, canonical_event = _prune_canonical_referent(
+        manager,
+        referent_key="service",
+        message_count=message_count,
+    )
     payload = manager.get(legacy.SERVICE_CARRYOVER_KEY)
     if not isinstance(payload, dict):
-        return manager, None
+        return manager, canonical_event
     service_query = payload.get("service_query")
     if not isinstance(service_query, str) or not service_query.strip():
         manager = dict(manager)
         manager.pop(legacy.SERVICE_CARRYOVER_KEY, None)
-        return manager, {"reason": "invalid"}
+        return manager, canonical_event or {"reason": "invalid"}
     try:
         last_count = int(payload.get("message_count"))
     except (TypeError, ValueError):
         manager = dict(manager)
         manager.pop(legacy.SERVICE_CARRYOVER_KEY, None)
-        return manager, {"reason": "invalid"}
+        return manager, canonical_event or {"reason": "invalid"}
     ttl = payload.get("ttl", legacy.SERVICE_CARRYOVER_TTL_MESSAGES)
     try:
         ttl = int(ttl)
@@ -438,12 +952,34 @@ def _prune_service_carryover(manager: dict, *, message_count: int) -> tuple[dict
     if age > ttl:
         manager = dict(manager)
         manager.pop(legacy.SERVICE_CARRYOVER_KEY, None)
-        return manager, {"reason": "expired", "age": age, "ttl": ttl, "service_query": service_query}
-    return manager, None
+        return manager, canonical_event or {
+            "reason": "expired",
+            "age": age,
+            "ttl": ttl,
+            "service_query": service_query,
+        }
+    return manager, canonical_event
 
 
 def _get_service_carryover(manager: dict, *, message_count: int) -> dict | None:
     from . import _legacy as legacy
+
+    canonical_projection = _project_canonical_referent(
+        manager,
+        referent_key="service",
+        message_count=message_count,
+    )
+    if isinstance(canonical_projection, dict):
+        return {
+            "service_query": canonical_projection.get("value"),
+            "service_query_source": canonical_projection.get("source"),
+            "service_query_score": canonical_projection.get("score"),
+            "age": canonical_projection.get("age"),
+            "ttl": canonical_projection.get("ttl"),
+            "remaining": canonical_projection.get("remaining"),
+            "projection_source": canonical_projection.get("projection_source"),
+            "canonical_state_owner": canonical_projection.get("canonical_state_owner"),
+        }
 
     payload = manager.get(legacy.SERVICE_CARRYOVER_KEY)
     if not isinstance(payload, dict):
@@ -473,6 +1009,8 @@ def _get_service_carryover(manager: dict, *, message_count: int) -> dict | None:
         "age": age,
         "ttl": ttl,
         "remaining": remaining,
+        "projection_source": payload.get("projection_source"),
+        "canonical_state_owner": payload.get("canonical_state_owner"),
     }
 
 
@@ -490,12 +1028,22 @@ def _set_service_carryover(
     score_value = 0.0
     if isinstance(score, (int, float)):
         score_value = float(score)
+    manager = _set_canonical_referent(
+        manager,
+        referent_key="service",
+        value=service_query,
+        source=source or "unknown",
+        score=score_value,
+        message_count=message_count,
+    )
     manager[legacy.SERVICE_CARRYOVER_KEY] = {
         "service_query": service_query,
         "service_query_source": source or "unknown",
         "service_query_score": score_value,
         "message_count": message_count,
         "ttl": legacy.SERVICE_CARRYOVER_TTL_MESSAGES,
+        "projection_source": CANONICAL_DIALOG_STATE_KEY,
+        "canonical_state_owner": CANONICAL_DIALOG_STATE_OWNER,
     }
     return manager
 
@@ -539,6 +1087,8 @@ def _maybe_store_service_carryover(
             "service_query_source": source,
             "service_query_score": score,
             "ttl": legacy.SERVICE_CARRYOVER_TTL_MESSAGES,
+            "projection_source": CANONICAL_DIALOG_STATE_KEY,
+            "canonical_state_owner": CANONICAL_DIALOG_STATE_OWNER,
             "reason": reason,
         },
     )
@@ -547,15 +1097,19 @@ def _maybe_store_service_carryover(
 def _prune_consult_context(manager: dict, *, message_count: int) -> tuple[dict, dict | None]:
     from . import _legacy as legacy
 
+    manager, canonical_event = _prune_canonical_consult_state(
+        manager,
+        message_count=message_count,
+    )
     payload = manager.get(legacy.CONSULT_CONTEXT_KEY)
     if not isinstance(payload, dict):
-        return manager, None
+        return manager, canonical_event
     try:
         last_count = int(payload.get("message_count"))
     except (TypeError, ValueError):
         manager = dict(manager)
         manager.pop(legacy.CONSULT_CONTEXT_KEY, None)
-        return manager, {"reason": "invalid"}
+        return manager, canonical_event or {"reason": "invalid"}
     ttl = payload.get("ttl", legacy.CONSULT_CONTEXT_TTL_MESSAGES)
     try:
         ttl = int(ttl)
@@ -567,12 +1121,19 @@ def _prune_consult_context(manager: dict, *, message_count: int) -> tuple[dict, 
     if age > ttl:
         manager = dict(manager)
         manager.pop(legacy.CONSULT_CONTEXT_KEY, None)
-        return manager, {"reason": "expired", "age": age, "ttl": ttl}
-    return manager, None
+        return manager, canonical_event or {"reason": "expired", "age": age, "ttl": ttl}
+    return manager, canonical_event
 
 
 def _get_consult_context(manager: dict, *, message_count: int) -> dict | None:
     from . import _legacy as legacy
+
+    canonical_projection = _project_canonical_consult_state(
+        manager,
+        message_count=message_count,
+    )
+    if isinstance(canonical_projection, dict):
+        return canonical_projection
 
     payload = manager.get(legacy.CONSULT_CONTEXT_KEY)
     if not isinstance(payload, dict):
@@ -612,6 +1173,8 @@ def _get_consult_context(manager: dict, *, message_count: int) -> dict | None:
         "age": age,
         "ttl": ttl,
         "remaining": remaining,
+        "projection_source": payload.get("projection_source"),
+        "canonical_state_owner": payload.get("canonical_state_owner"),
     }
 
 
@@ -637,12 +1200,21 @@ def _set_consult_context(
     topic_value = topic.strip() if isinstance(topic, str) and topic.strip() else None
     question = consult_meta.get("consult_question") if isinstance(consult_meta, dict) else None
     question_value = question.strip() if isinstance(question, str) and question.strip() else None
+    manager = _set_canonical_consult_state(
+        manager,
+        topic=topic_value,
+        question=question_value,
+        questions=questions,
+        message_count=message_count,
+    )
     manager[legacy.CONSULT_CONTEXT_KEY] = {
         "questions": questions,
         "topic": topic_value,
         "question": question_value,
         "message_count": message_count,
         "ttl": legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+        "projection_source": CANONICAL_DIALOG_STATE_KEY,
+        "canonical_state_owner": CANONICAL_DIALOG_STATE_OWNER,
     }
     return manager
 
@@ -687,6 +1259,12 @@ def _apply_consult_return(
             trace_payload["consult_topic"] = consult_topic
         if consult_question:
             trace_payload["consult_question"] = consult_question
+        projection_source = consult_context.get("projection_source")
+        canonical_state_owner = consult_context.get("canonical_state_owner")
+        if projection_source:
+            trace_payload["projection_source"] = projection_source
+        if canonical_state_owner:
+            trace_payload["canonical_state_owner"] = canonical_state_owner
     _record_decision_trace(conversation, trace_payload)
     if saved_message:
         updates = {"consult_return": True, "current_goal": "consult"}
@@ -694,6 +1272,12 @@ def _apply_consult_return(
             consult_topic = consult_context.get("topic")
             if consult_topic:
                 updates["consult_topic"] = consult_topic
+            projection_source = consult_context.get("projection_source")
+            canonical_state_owner = consult_context.get("canonical_state_owner")
+            if projection_source:
+                updates["projection_source"] = projection_source
+            if canonical_state_owner:
+                updates["canonical_state_owner"] = canonical_state_owner
         _update_message_decision_metadata(saved_message, updates)
     from . import _legacy as legacy
 
@@ -1084,6 +1668,7 @@ __all__ = [
     "_apply_consult_return",
     "_build_compact_summary_text",
     "_build_consult_return_prompt",
+    "_get_canonical_dialog_state",
     "_get_asr_confirmation",
     "_get_asr_inflight",
     "_get_class_carryover",
@@ -1116,6 +1701,7 @@ __all__ = [
     "_set_consult_context",
     "_set_context_manager",
     "_set_conversation_context",
+    "_sync_canonical_dialog_state",
     "_set_re_entry_required",
     "_clear_re_entry_required",
     "_set_expected_reply_context",

@@ -99,6 +99,8 @@ def test_llm_quality_generate_batch_uses_scenario_timeout(monkeypatch):
         mode="llm",
         media_mode="text",
         media_kind="photo",
+        client_slug="demo_salon",
+        branch_slug="almaty-center",
         scenario_coverage="booking,info,interrupt,handoff",
         include_media=True,
         llm_model="gpt-4o-mini",
@@ -116,7 +118,12 @@ def test_llm_quality_generate_batch_uses_scenario_timeout(monkeypatch):
     monkeypatch.setattr(_module, "_llm_quality_dialog_script", lambda: "/tmp/fake_script.py")
     monkeypatch.setattr(_module, "run_command", _fake_run_command)
 
-    dialogs, warnings, error = _module._llm_quality_generate_batch(args, count=1, seed=42)
+    dialogs, warnings, error = _module._llm_quality_generate_batch(
+        args,
+        count=1,
+        seed=42,
+        scenario_context_path="/tmp/scenario_context.json",
+    )
 
     assert error is None
     assert len(dialogs) == 1
@@ -124,6 +131,12 @@ def test_llm_quality_generate_batch_uses_scenario_timeout(monkeypatch):
     assert captured["timeout"] == 123.0
     assert "--llm-api-key" not in captured["command"]
     assert captured["env"]["OPENAI_API_KEY"] == "test-key"
+    assert "--client-slug" in captured["command"]
+    assert "demo_salon" in captured["command"]
+    assert "--branch-slug" in captured["command"]
+    assert "almaty-center" in captured["command"]
+    assert "--scenario-context-file" in captured["command"]
+    assert "/tmp/scenario_context.json" in captured["command"]
 
 
 def test_llm_quality_generate_batch_expands_timeout_budget_for_llm(monkeypatch):
@@ -142,6 +155,8 @@ def test_llm_quality_generate_batch_expands_timeout_budget_for_llm(monkeypatch):
         mode="llm",
         media_mode="text",
         media_kind="photo",
+        client_slug="demo_salon",
+        branch_slug=None,
         scenario_coverage="booking,info,interrupt,handoff",
         include_media=True,
         llm_model="gpt-4o-mini",
@@ -159,13 +174,107 @@ def test_llm_quality_generate_batch_expands_timeout_budget_for_llm(monkeypatch):
     monkeypatch.setattr(_module, "_llm_quality_dialog_script", lambda: "/tmp/fake_script.py")
     monkeypatch.setattr(_module, "run_command", _fake_run_command)
 
-    dialogs, warnings, error = _module._llm_quality_generate_batch(args, count=5, seed=42)
+    dialogs, warnings, error = _module._llm_quality_generate_batch(
+        args,
+        count=5,
+        seed=42,
+        scenario_context_path="/tmp/scenario_context.json",
+    )
 
     assert error is None
     assert len(dialogs) == 1
     assert warnings == {}
     assert captured["timeout"] == pytest.approx(205.0)
     assert "--progress-stderr" in captured["command"]
+
+
+def test_llm_quality_structured_meta_expectation_is_strong_oracle():
+    expectations = _module._llm_quality_extract_expectations(
+        {
+            "tags": ["booking"],
+            "expect": {
+                "action": None,
+                "info_sections": [],
+                "reply_type": None,
+                "state": None,
+                "expected_reply": None,
+                "allow_booking_stall": False,
+                "meta": {
+                    "action": "booking_prompt",
+                    "expected_reply_type": "time",
+                },
+                "trace_contains": [
+                    {
+                        "stage": "question_contract",
+                        "decision": "set",
+                        "expected_reply_type": "time",
+                    }
+                ],
+            },
+        }
+    )
+
+    assert expectations["meta"]["expected_reply_type"] == "time"
+    assert expectations["trace_contains"][0]["stage"] == "question_contract"
+    assert _module._llm_quality_is_weak_oracle_expectation(expectations) is False
+
+
+def test_llm_quality_build_scenario_context_merges_pack_and_capabilities(monkeypatch):
+    monkeypatch.setattr(
+        _module,
+        "_llm_quality_fetch_latest_capability_payload",
+        lambda _db_user, *, client_id, scope, branch_id=None: (
+            {
+                "domain_slug": "clinic",
+                "tools": {"allow": ["calendar.*"]},
+                "allowed_fact_scopes": ["info.location"],
+            },
+            None,
+        )
+        if scope == "client"
+        else (
+            {
+                "tools": {"deny": ["consult.*"]},
+                "handoff_policy": "manager_request_only",
+            },
+            None,
+        ),
+    )
+
+    scenario_context = _module._llm_quality_build_scenario_context(
+        db_user="postgres",
+        client_slug="clinic_pack",
+        branch_slug="branch-a",
+        client_meta={"client_id": "client-1", "branch_id": "branch-1", "branch_slug": "branch-a"},
+        pack_context={
+            "truth": {
+                "salon": {
+                    "name": "MedCare",
+                    "services_summary": "Диагностика и базовые обследования.",
+                    "communication": {"languages": ["ru", "kk"]},
+                },
+                "services_catalog": [
+                    {"name": "УЗИ брюшной полости"},
+                    {"name": "ЭКГ"},
+                ],
+                "masters_catalog": {
+                    "specialists": [{"name": "Др. Айгерим"}],
+                },
+            },
+            "errors": {},
+        },
+    )
+
+    assert scenario_context["client_slug"] == "clinic_pack"
+    assert scenario_context["branch_slug"] == "branch-a"
+    assert scenario_context["business"]["display_name"] == "MedCare"
+    assert scenario_context["business"]["languages"] == ["ru", "kk"]
+    assert scenario_context["services"] == ["УЗИ брюшной полости", "ЭКГ"]
+    assert scenario_context["specialists"] == ["Др. Айгерим"]
+    assert scenario_context["capabilities"]["domain_slug"] == "clinic"
+    assert scenario_context["capabilities"]["tools"]["allow"] == ["calendar.*"]
+    assert scenario_context["capabilities"]["tools"]["deny"] == ["consult.*"]
+    assert scenario_context["capabilities"]["handoff_policy"] == "manager_request_only"
 
 
 def test_prepare_output_dir_resume_keeps_existing_artifacts(tmp_path):
@@ -303,3 +412,259 @@ def test_run_manifest_preserves_command_when_rewritten_without_args(tmp_path):
     assert initial_manifest.get("command")
     assert rewritten_manifest.get("command") == initial_manifest.get("command")
     assert rewritten_manifest.get("args") == initial_manifest.get("args")
+
+
+def test_llm_quality_normalize_matrix_branch_slugs_preserves_alignment():
+    assert _module._llm_quality_normalize_matrix_branch_slugs(
+        "branch-a,,branch-c",
+        expected_count=3,
+    ) == ["branch-a", None, "branch-c"]
+
+    with pytest.raises(ValueError):
+        _module._llm_quality_normalize_matrix_branch_slugs(
+            "branch-a,branch-b",
+            expected_count=3,
+        )
+
+
+def test_llm_quality_build_scenario_context_contract_status_detects_service_hits(tmp_path):
+    scenarios_path = tmp_path / "scenarios.json"
+    scenario_context_file = tmp_path / "scenario_context.json"
+    scenario_context_file.write_text("{}", encoding="utf-8")
+    scenarios_path.write_text(
+        json.dumps(
+            {
+                "source": {"type": "generated"},
+                "scenario_context_file": str(scenario_context_file),
+                "scenario_context": {
+                    "client_slug": "clinic_pack",
+                    "branch_slug": "downtown",
+                    "services": ["УЗИ брюшной полости", "ЭКГ"],
+                    "capabilities": {"domain_slug": "clinic"},
+                },
+                "dialogs": [
+                    {
+                        "turns": [
+                            {"text": "Здравствуйте, хочу записаться на УЗИ брюшной полости."}
+                        ]
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    status = _module._llm_quality_build_scenario_context_contract_status(
+        mode="block",
+        scenarios_path=str(scenarios_path),
+        expected_client_slug="clinic_pack",
+        expected_branch_slug="downtown",
+    )
+
+    assert status["valid"] is True
+    assert status["service_hits"] == ["УЗИ брюшной полости"]
+    assert status["domain_slug"] == "clinic"
+
+
+def test_llm_quality_build_failure_family_report_groups_same_root_cause():
+    failure_families = {}
+    record = {
+        "type": "turn",
+        "last_trace_stage": "policy_core_guard",
+        "conversation_state": "bot_active",
+        "message_id": "m1",
+        "conversation_id": "c1",
+    }
+    _module._llm_quality_record_failure_family(
+        failure_families, "fact_without_evidence", record
+    )
+    _module._llm_quality_record_failure_family(
+        failure_families,
+        "fact_without_evidence",
+        {**record, "message_id": "m2"},
+    )
+
+    report = _module._llm_quality_build_failure_family_report(failure_families)
+
+    assert report["family_count"] == 1
+    family = report["top_families"][0]
+    assert family["count"] == 2
+    assert family["reason"] == "fact_without_evidence"
+    assert family["trace_stage"] == "policy_core_guard"
+    assert family["state"] == "bot_active"
+
+
+def test_llm_quality_has_fact_without_evidence_ignores_service_clarify_collect():
+    meta = {
+        "action": "reply",
+        "intent": "service_clarify",
+        "source": "llm_policy_core",
+        "expected_reply_type": "service_choice",
+        "expected_reply_reason": "llm_policy_core_collect",
+    }
+
+    assert _module._llm_quality_is_fact_like_reply(meta) is False
+    assert _module._llm_quality_has_fact_without_evidence(meta) is False
+
+
+def test_llm_quality_accepts_master_query_missing_subject_service_clarify_fallback():
+    meta = {
+        "action": "reply",
+        "intent": "service_clarify",
+        "source": "llm_policy_core",
+        "expected_reply_type": "service_choice",
+        "llm_policy_core": {
+            "intent": "master_query",
+            "subject_kind": "specialist",
+            "resolution_mode": "clarify_missing_subject",
+            "next_question": "service",
+            "open_questions": ["service"],
+            "payload": {
+                "intent": "master_query",
+                "subject_kind": "specialist",
+                "resolution_mode": "clarify_missing_subject",
+                "next_question": "service",
+                "open_questions": ["service"],
+            },
+        },
+    }
+    trace_entries = [
+        {
+            "stage": "llm_policy_core",
+            "intent": "master_query",
+            "subject_kind": "specialist",
+            "resolution_mode": "clarify_missing_subject",
+            "next_question": "service",
+        },
+        {
+            "stage": "question_contract",
+            "decision": "llm_policy_core_collect",
+            "missing_slot": "service",
+        },
+    ]
+
+    assert (
+        _module._llm_quality_has_master_query_missing_subject_info_fallback(
+            meta=meta,
+            trace_entries=trace_entries,
+            expected_reply_type=None,
+            actual_expected_reply_type="service_choice",
+        )
+        is True
+    )
+
+
+def test_run_llm_quality_matrix_passes_branch_slug_and_records_context_contract(
+    monkeypatch, tmp_path
+):
+    captured_child_argv = []
+
+    def _fake_parse_llm_quality_args(argv):
+        captured_child_argv.append(list(argv))
+        parsed = {}
+        idx = 0
+        while idx < len(argv):
+            token = argv[idx]
+            if token.startswith("--"):
+                parsed[token] = argv[idx + 1] if idx + 1 < len(argv) and not argv[idx + 1].startswith("--") else True
+                idx += 2 if parsed[token] is not True else 1
+            else:
+                idx += 1
+        return SimpleNamespace(
+            client_slug=parsed.get("--client-slug"),
+            branch_slug=parsed.get("--branch-slug"),
+            output_dir=parsed.get("--output-dir"),
+            mode="llm",
+            scenarios_file=None,
+        )
+
+    def _fake_run_llm_quality(child_args):
+        output_dir = Path(child_args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "summary.json").write_text(
+            json.dumps(
+                {
+                    "infra_valid": True,
+                    "semantic_valid": True,
+                    "quality_status": {"comparison_blocked": False},
+                    "metrics": {
+                        "rates": {"strict_pass_rate": 1.0, "degraded_fallback_rate": 0.0},
+                        "counts": {"turns_missing_response": 0},
+                    },
+                    "failure_families": {
+                        "family_count": 1,
+                        "families": [
+                            {
+                                "family_id": "reason:fact_without_evidence|type:turn|category:evidence|stage:policy_core_guard|state:bot_active",
+                                "reason": "fact_without_evidence",
+                                "category": "evidence",
+                                "record_type": "turn",
+                                "trace_stage": "policy_core_guard",
+                                "state": "bot_active",
+                                "label": "fact_without_evidence; stage=policy_core_guard; state=bot_active",
+                                "count": 2 if child_args.client_slug == "demo_salon" else 1,
+                                "sample_turns": [],
+                            }
+                        ],
+                        "top_families": [],
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        scenario_context_path = output_dir / "scenario_context.json"
+        scenario_context_path.write_text("{}", encoding="utf-8")
+        service_name = "Маникюр" if child_args.client_slug == "demo_salon" else "УЗИ брюшной полости"
+        (output_dir / "scenarios.json").write_text(
+            json.dumps(
+                {
+                    "source": {"type": "generated"},
+                    "scenario_context_file": str(scenario_context_path),
+                    "scenario_context": {
+                        "client_slug": child_args.client_slug,
+                        "branch_slug": child_args.branch_slug,
+                        "services": [service_name],
+                        "capabilities": {"domain_slug": "beauty" if child_args.client_slug == "demo_salon" else "clinic"},
+                    },
+                    "dialogs": [
+                        {
+                            "turns": [
+                                {"text": f"Хочу записаться на {service_name}."},
+                            ]
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(_module, "_parse_llm_quality_args", _fake_parse_llm_quality_args)
+    monkeypatch.setattr(_module, "_run_llm_quality", _fake_run_llm_quality)
+
+    args = SimpleNamespace(
+        client_slugs="demo_salon,clinic_pack",
+        branch_slugs="almaty-main,downtown",
+        run_id_prefix="matrix-test",
+        output_dir=str(tmp_path / "matrix"),
+        allow_output_overwrite=False,
+        continue_on_error=False,
+        cross_domain_contract="block",
+        cross_domain_min_non_salon=1,
+        cross_domain_excluded_slugs="demo_salon",
+        scenario_context_contract="block",
+        llm_quality_args=["--mode", "llm", "--count", "1"],
+    )
+
+    _module._run_llm_quality_matrix(args)
+
+    assert any("--branch-slug" in argv and "almaty-main" in argv for argv in captured_child_argv)
+    assert any("--branch-slug" in argv and "downtown" in argv for argv in captured_child_argv)
+    summary = json.loads((tmp_path / "matrix" / "matrix_summary.json").read_text(encoding="utf-8"))
+    assert summary["all_ok"] is True
+    assert summary["branch_slugs"] == ["almaty-main", "downtown"]
+    assert all(row["scenario_context_valid"] is True for row in summary["rows"])
+    assert summary["failure_families"]["family_count"] == 1
+    assert summary["failure_families"]["families"][0]["count"] == 3

@@ -316,7 +316,8 @@ class SchedulingService:
                 self.db.flush()
             self.db.refresh(appointment)
         except IntegrityError as exc:
-            self.db.rollback()
+            if commit:
+                self.db.rollback()
             logger.warning("Appointment conflict", extra={"error": str(exc)})
             raise AppointmentConflictError("Slot already booked") from exc
 

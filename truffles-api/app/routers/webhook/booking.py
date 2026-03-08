@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -24,6 +25,9 @@ from app.services.booking_signal_service import (
 )
 from app.services.booking_signal_service import (
     collapse_repeats as _collapse_repeats,
+)
+from app.services.booking_signal_service import (
+    extract_relative_date_token as _extract_relative_date_token,
 )
 from app.services.booking_signal_service import (
     has_daypart_stem as _has_daypart_stem,
@@ -48,6 +52,9 @@ from app.services.booking_signal_service import (
 )
 from app.services.booking_signal_service import (
     parse_iso_datetime as _parse_iso_datetime,
+)
+from app.services.booking_signal_service import (
+    pick_daypart_token as _pick_daypart_token,
 )
 from app.services.booking_signal_service import (
     swap_keyboard_layout as _swap_keyboard_layout,
@@ -502,15 +509,60 @@ def _validate_datetime_slot(
         return None
     from . import _legacy as legacy
 
-    extracted = legacy._extract_datetime(message_text, client_slug=client_slug)
-    if extracted:
-        return extracted
-    match = _match_booking_hour_fallback(message_text)
-    if not match:
-        return None
     normalized = legacy._normalize_text(message_text)
     has_duration_context = _has_duration_context_marker(normalized)
     booking_signal = bool(legacy._is_booking_request(message_text, client_slug=client_slug))
+
+    def _allow_partial_daypart_candidate(value: str) -> bool:
+        if not isinstance(value, str) or not value.strip():
+            return False
+        if legacy.TIME_PATTERN.search(value) or legacy.TIME_HOUR_PATTERN.search(value):
+            return True
+        is_daypart_only = bool(
+            _pick_daypart_token(value)
+            and not _extract_relative_date_token(value)
+        )
+        if not is_daypart_only:
+            return True
+        ambiguous_bare_day = bool(
+            re.search(r"\bдень\b", normalized)
+            and not any(
+                marker in normalized
+                for marker in (
+                    "днем",
+                    "днём",
+                    "после обеда",
+                    "ближе к обеду",
+                    "на день",
+                    "дневн",
+                )
+            )
+        )
+        if ambiguous_bare_day:
+            return False
+        if not booking_signal and len(normalized.split()) > 6:
+            return False
+        return True
+
+    extracted = legacy._extract_datetime(message_text, client_slug=client_slug)
+    if extracted and _allow_partial_daypart_candidate(extracted):
+        return extracted
+    resolved_partial = _normalize_resolved_datetime_value(
+        message_text,
+        normalized_text=normalized,
+    )
+    if resolved_partial:
+        resolved_normalized = legacy.normalize_for_matching(resolved_partial)
+        if (
+            resolved_normalized
+            and _has_daypart_stem(resolved_normalized)
+            and not (has_duration_context and not booking_signal)
+            and _allow_partial_daypart_candidate(resolved_partial)
+        ):
+            return resolved_partial
+    match = _match_booking_hour_fallback(message_text)
+    if not match:
+        return None
     prep = (match.get("prep") or "").casefold()
     if has_duration_context and not booking_signal:
         return None
@@ -581,10 +633,23 @@ def _validate_name_slot(
     return cleaned
 
 
+def _validate_phone_slot(
+    message_text: str,
+    *,
+    allow_freeform: bool,
+    client_slug: str | None,
+) -> str | None:
+    del allow_freeform, client_slug
+    if _is_blocked_slot_message(message_text):
+        return None
+    return _normalize_phone_digits(message_text)
+
+
 BOOKING_SLOT_VALIDATORS = {
     "service": _validate_service_slot,
     "datetime": _validate_datetime_slot,
     "name": _validate_name_slot,
+    "phone": _validate_phone_slot,
 }
 
 
@@ -597,6 +662,8 @@ def _expected_reply_for_booking_question(last_question: str | None) -> str | Non
         return legacy.EXPECTED_REPLY_TIME
     if last_question == "name":
         return legacy.EXPECTED_REPLY_NAME
+    if last_question == "phone":
+        return legacy.EXPECTED_REPLY_PHONE
     return None
 
 
@@ -611,6 +678,7 @@ def _match_expected_reply(
         "service": _validate_service_slot,
         "datetime": _validate_datetime_slot,
         "name": _validate_name_slot,
+        "phone": _validate_phone_slot,
     }
     if not expected_reply_type or not message_text:
         return False, None, []
@@ -648,10 +716,14 @@ def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None
         incoming = incoming_value.strip()
         if not existing or not incoming:
             return None
-        if legacy.TIME_PATTERN.search(existing) or legacy.TIME_HOUR_PATTERN.search(existing):
-            return None
-        if not (legacy.TIME_PATTERN.search(incoming) or legacy.TIME_HOUR_PATTERN.search(incoming)):
-            return None
+        existing_day = _extract_relative_date_token(existing)
+        incoming_day = _extract_relative_date_token(incoming)
+        existing_daypart = _pick_daypart_token(existing)
+        incoming_daypart = _pick_daypart_token(incoming)
+        merged_day = existing_day or incoming_day
+        merged_daypart = existing_daypart or incoming_daypart
+        if merged_day and merged_daypart:
+            return f"{merged_day} {merged_daypart}".strip()
         existing_normalized = legacy.normalize_for_matching(existing)
         incoming_normalized = legacy.normalize_for_matching(incoming)
         if (
@@ -666,6 +738,10 @@ def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None
             and incoming_normalized in existing_normalized
         ):
             return existing
+        if legacy.TIME_PATTERN.search(existing) or legacy.TIME_HOUR_PATTERN.search(existing):
+            return None
+        if not (legacy.TIME_PATTERN.search(incoming) or legacy.TIME_HOUR_PATTERN.search(incoming)):
+            return None
         return f"{existing} {incoming}".strip()
 
     booking_state = _get_booking_context(context)
@@ -949,21 +1025,16 @@ def _is_datetime_grounded_for_prompt(
 
     if legacy.TIME_PATTERN.search(value) or legacy.TIME_HOUR_PATTERN.search(value):
         return True
-    normalized_value = legacy.normalize_for_matching(value)
-    if normalized_value and _has_daypart_stem(normalized_value):
+    if not _pick_daypart_token(value):
+        return False
+    if _extract_relative_date_token(value):
         return True
-
-    parsed = _resolve_datetime_offline(value, client_slug=client_slug)
-    if not isinstance(parsed, dict):
-        return False
-    evidence = parsed.get("evidence")
-    if not isinstance(evidence, dict):
-        return False
-    if evidence.get("parser") != "lexicon":
-        return False
-    matches = evidence.get("lexicon_matches")
-    if not isinstance(matches, list) or len(matches) < 2:
-        return False
+    if re.search(r"\d{4}-\d{2}-\d{2}", value) or re.search(
+        r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b",
+        value,
+    ):
+        return True
+    _, matches = _canonicalize_datetime_text(value, client_slug=client_slug)
     canonical_tokens: list[str] = []
     for item in matches:
         if not isinstance(item, dict):
@@ -971,10 +1042,8 @@ def _is_datetime_grounded_for_prompt(
         token = str(item.get("canonical") or item.get("variant") or "").strip().casefold()
         if token:
             canonical_tokens.append(token)
-    if len(canonical_tokens) < 2:
-        return False
     return any(
-        _has_daypart_stem(token)
+        token and not _has_daypart_stem(token)
         for token in canonical_tokens
     )
 
@@ -998,15 +1067,23 @@ def _next_booking_prompt(
         from . import _legacy as legacy
 
         if isinstance(datetime_value, str) and datetime_value.strip():
-            service_value = booking.get("service")
-            if isinstance(service_value, str) and service_value.strip():
-                prompt = (
-                    f"Понял, {datetime_value.strip()} по услуге «{service_value.strip()}». "
-                    "Подскажите, пожалуйста, точное время."
-                )
-            else:
-                prompt = f"Понял, {datetime_value.strip()}. Подскажите, пожалуйста, точное время."
-            return booking, prompt
+            has_daypart_only = bool(
+                _pick_daypart_token(datetime_value)
+                and not _is_datetime_grounded_for_prompt(datetime_value, client_slug=client_slug)
+                and not _extract_relative_date_token(datetime_value)
+                and not re.search(r"\d{4}-\d{2}-\d{2}", datetime_value)
+                and not re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", datetime_value)
+            )
+            if not has_daypart_only:
+                service_value = booking.get("service")
+                if isinstance(service_value, str) and service_value.strip():
+                    prompt = (
+                        f"Понял, {datetime_value.strip()} по услуге «{service_value.strip()}». "
+                        "Подскажите, пожалуйста, точное время."
+                    )
+                else:
+                    prompt = f"Понял, {datetime_value.strip()}. Подскажите, пожалуйста, точное время."
+                return booking, prompt
         return booking, legacy.MSG_BOOKING_ASK_DATETIME
     if not booking.get("name"):
         from . import _legacy as legacy
@@ -1746,9 +1823,19 @@ def _handle_booking_interrupt(
             )
         if promotions_signal and "promotions" not in booking_info_intents:
             booking_info_intents = [*booking_info_intents, "promotions"]
+        master_service_query = None
+        if isinstance(intent_decomp_payload, dict):
+            raw_master_service_query = intent_decomp_payload.get("service_query")
+            if isinstance(raw_master_service_query, str) and raw_master_service_query.strip():
+                master_service_query = raw_master_service_query.strip()
+        if not master_service_query:
+            booking_service_value = booking_state.get("service")
+            if isinstance(booking_service_value, str) and booking_service_value.strip():
+                master_service_query = booking_service_value.strip()
         master_resolution = resolve_master_intent(
             message_text=booking_interrupt_text,
             client_slug=client_slug,
+            service_query=master_service_query,
             intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
             force_master_intent=False,
         )
@@ -1758,6 +1845,12 @@ def _handle_booking_interrupt(
             booking_info_intents = [
                 intent_name for intent_name in booking_info_intents if intent_name != "master"
             ]
+        resolved_master_service_query = (
+            master_resolution.service_query
+            if isinstance(master_resolution.service_query, str)
+            and master_resolution.service_query.strip()
+            else master_service_query
+        )
         guest_policy_hit = bool(
             booking_interrupt_text
             and legacy._matches_guest_policy_lexicon(
@@ -1809,6 +1902,28 @@ def _handle_booking_interrupt(
                         action="reply",
                         response=contract_reply,
                         intent=contract_intent,
+                        meta=contract_meta if isinstance(contract_meta, dict) else None,
+                    )
+                    info_source = "booking_info_contract"
+            master_only_interrupt = set(booking_info_intents) == {"master"}
+            if (
+                not info_decision
+                and master_only_interrupt
+                and master_resolution.explicit
+                and isinstance(resolved_master_service_query, str)
+                and resolved_master_service_query.strip()
+            ):
+                contract_reply, contract_meta = _build_booking_interrupt_info_reply(
+                    "master",
+                    service_query=resolved_master_service_query.strip(),
+                    client_slug=client_slug,
+                    message_text=booking_interrupt_text,
+                )
+                if contract_reply:
+                    info_decision = PackDecision(
+                        action="reply",
+                        response=contract_reply,
+                        intent="master",
                         meta=contract_meta if isinstance(contract_meta, dict) else None,
                     )
                     info_source = "booking_info_contract"
@@ -3214,6 +3329,12 @@ def _handle_booking_flow(
                                 "service_query_score": carryover.get("service_query_score")
                                 if isinstance(carryover, dict)
                                 else None,
+                                "projection_source": carryover.get("projection_source")
+                                if isinstance(carryover, dict)
+                                else None,
+                                "canonical_state_owner": carryover.get("canonical_state_owner")
+                                if isinstance(carryover, dict)
+                                else None,
                                 "reason": "booking_flow",
                             },
                         )
@@ -3224,6 +3345,12 @@ def _handle_booking_flow(
                                     "service_query": service_query.strip(),
                                     "service_query_source": "context",
                                     "service_query_score": carryover.get("service_query_score")
+                                    if isinstance(carryover, dict)
+                                    else None,
+                                    "projection_source": carryover.get("projection_source")
+                                    if isinstance(carryover, dict)
+                                    else None,
+                                    "canonical_state_owner": carryover.get("canonical_state_owner")
                                     if isinstance(carryover, dict)
                                     else None,
                                 },

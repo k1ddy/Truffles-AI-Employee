@@ -170,6 +170,22 @@ def test_is_timeout_fact_fallback_candidate_requires_fact_confidence_margin() ->
     assert runtime.is_timeout_fact_fallback_candidate(low_conf_decision, min_confidence=0.6) is False
 
 
+def test_capability_question_contract_selects_fact_for_hours_scope() -> None:
+    contract = runtime.build_capability_question_contract(
+        subject_kind="service",
+        capability="hours",
+        temporal_scope="weekend",
+        requested_resolution_mode="referent_followup",
+    )
+
+    assert contract.get("contract_resolution_mode") == "policy_fact"
+    assert contract.get("tool_action") == "info"
+    assert contract.get("info_refs") == ["hours"]
+    assert contract.get("referent_key") == "service"
+    assert contract.get("prefers_referent") is True
+    assert contract.get("requires_referent") is False
+
+
 def test_has_walkin_without_booking_signal_fallback() -> None:
     assert runtime.has_walkin_without_booking_signal("Можно прийти без записи?")
     assert not runtime.has_walkin_without_booking_signal("Хочу записаться на завтра")
@@ -229,6 +245,79 @@ def test_pack_runtime_service_semantic_match_returns_hybrid_meta() -> None:
     assert result.meta.get("engine") == "pack_query_engine.v2"
     assert result.meta.get("filters", {}).get("tenant_slug") == "dental_pack"
     assert result.meta.get("filters", {}).get("branch_id") == str(branch_id)
+
+
+def test_resolve_master_intent_person_service_query_is_explicit() -> None:
+    resolution = runtime.resolve_master_intent(
+        message_text="У вас есть специалист по окрашиванию?",
+        client_slug="demo_salon",
+        service_query="окрашивание",
+    )
+
+    assert resolution.explicit is True
+    assert resolution.reason == "person_service_signal"
+    assert resolution.service_query == "окрашивание"
+
+
+def test_resolve_master_intent_person_term_without_relation_stays_non_explicit() -> None:
+    resolution = runtime.resolve_master_intent(
+        message_text="Мастер-класс по окрашиванию будет?",
+        client_slug="demo_salon",
+        service_query="окрашивание",
+    )
+
+    assert resolution.explicit is False
+    assert resolution.reason is None
+    assert resolution.service_query == "окрашивание"
+
+
+def test_resolve_master_intent_choose_specialist_with_service_query_is_explicit() -> None:
+    resolution = runtime.resolve_master_intent(
+        message_text="Могу ли я выбрать специалиста?",
+        client_slug="demo_salon",
+        service_query="маникюр",
+    )
+
+    assert resolution.explicit is True
+    assert resolution.reason == "person_action_signal"
+    assert resolution.service_query == "маникюр"
+
+
+def test_resolve_master_intent_choose_specialist_without_service_query_is_explicit() -> None:
+    resolution = runtime.resolve_master_intent(
+        message_text="Могу ли я выбрать специалиста?",
+        client_slug="demo_salon",
+    )
+
+    assert resolution.explicit is True
+    assert resolution.reason == "person_action_signal"
+    assert resolution.service_query is None
+    assert resolution.needs_service_clarify is True
+
+
+def test_resolve_master_intent_named_master_question_with_service_query_is_explicit() -> None:
+    resolution = runtime.resolve_master_intent(
+        message_text="Можно к мастеру Айгерим?",
+        client_slug="demo_salon",
+        service_query="маникюр",
+    )
+
+    assert resolution.explicit is True
+    assert resolution.reason == "person_named_question_signal"
+    assert resolution.service_query == "маникюр"
+    assert "Айгерим" in resolution.matched_signals
+
+
+def test_resolve_master_intent_named_master_booking_command_stays_non_explicit() -> None:
+    resolution = runtime.resolve_master_intent(
+        message_text="Запишите меня к мастеру Айгерим на маникюр завтра.",
+        client_slug="demo_salon",
+        service_query="маникюр",
+    )
+
+    assert resolution.explicit is False
+    assert resolution.reason is None
+    assert resolution.service_query == "маникюр"
 
 
 def test_pack_runtime_service_get_pack_service_hint_uses_runtime_fallback_when_scope_allows(monkeypatch) -> None:
