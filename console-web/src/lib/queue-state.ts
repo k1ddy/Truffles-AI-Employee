@@ -21,7 +21,9 @@ type SearchParamsLike = {
     get(name: string): string | null;
 };
 
-type QueueStateSurface = "cases" | "calendar";
+type SearchParamsInput = string | URLSearchParams | SearchParamsLike;
+
+export type QueueStateSurface = "cases" | "calendar";
 
 type QueueStateRecord = {
     found?: boolean;
@@ -33,6 +35,17 @@ type QueueStateRecord = {
     query_state?: Record<string, unknown> | null;
     updated_at?: string | null;
 };
+
+export interface QueueStateSavedViewLike {
+    id?: string;
+    name?: string;
+    query_state?: Record<string, unknown> | null;
+    is_default?: boolean;
+    scope?: "personal" | "team";
+    is_applicable?: boolean;
+    target_branch_id?: string | null;
+    target_role?: string | null;
+}
 
 export interface CasesQueueStateSnapshot {
     filters: InboxCaseFilters;
@@ -48,6 +61,35 @@ export interface CalendarQueueStateSnapshot {
     queueStatusFilter: BookingStatusFilter;
     queueSearch: string;
 }
+
+const CASE_QUEUE_URL_PARAM_KEYS = [
+    "view_id",
+    "status",
+    "queue_view",
+    "assigned_to_me",
+    "assignee_id",
+    "unassigned",
+    "branch_id",
+    "q",
+    "has_delivery_error",
+    "has_pending_outbox",
+    "has_human_lock",
+    "date_from",
+    "date_to",
+    "resolved_from",
+    "resolved_to",
+    "sort_by",
+] as const;
+
+const CALENDAR_QUEUE_URL_PARAM_KEYS = [
+    "view_id",
+    "date",
+    "date_from",
+    "date_to",
+    "lane",
+    "status",
+    "q",
+] as const;
 
 function trimToUndefined(value: string | null | undefined): string | undefined {
     if (typeof value !== "string") {
@@ -102,6 +144,41 @@ function normalizeCalendarStatusFilter(value: unknown): BookingStatusFilter {
         : "all";
 }
 
+function toMutableSearchParams(searchParams: SearchParamsInput): URLSearchParams {
+    if (typeof searchParams === "string") {
+        return new URLSearchParams(searchParams.startsWith("?") ? searchParams.slice(1) : searchParams);
+    }
+    if (searchParams instanceof URLSearchParams) {
+        return new URLSearchParams(searchParams.toString());
+    }
+    const params = new URLSearchParams();
+    for (const key of [...CASE_QUEUE_URL_PARAM_KEYS, ...CALENDAR_QUEUE_URL_PARAM_KEYS]) {
+        const value = searchParams.get(key);
+        if (value != null) {
+            params.set(key, value);
+        }
+    }
+    return params;
+}
+
+function stripQueueUrlParams(params: URLSearchParams, surface: QueueStateSurface): URLSearchParams {
+    const next = new URLSearchParams(params.toString());
+    const keys = surface === "cases" ? CASE_QUEUE_URL_PARAM_KEYS : CALENDAR_QUEUE_URL_PARAM_KEYS;
+    for (const key of keys) {
+        next.delete(key);
+    }
+    return next;
+}
+
+function buildHref(pathname: string, params: URLSearchParams): string {
+    const queryString = params.toString();
+    return queryString ? `${pathname}?${queryString}` : pathname;
+}
+
+export function readQueueStateViewIdFromUrl(searchParams: SearchParamsLike): string | null {
+    return trimToUndefined(searchParams.get("view_id")) ?? null;
+}
+
 export function readCasesQueueStateFromServer(
     record: QueueStateRecord | null | undefined,
     {
@@ -152,6 +229,26 @@ export function readCasesQueueStateFromServer(
         activeViewId,
         searchValue: query ?? "",
     };
+}
+
+export function readCasesQueueStateFromSavedView(
+    savedView: QueueStateSavedViewLike | null | undefined,
+    options: {
+        branchFilterEnabled: boolean;
+        privilegedOwnerFilterVisible: boolean;
+    },
+): CasesQueueStateSnapshot | null {
+    if (!savedView?.query_state || typeof savedView.query_state !== "object") {
+        return null;
+    }
+    return readCasesQueueStateFromServer(
+        {
+            found: true,
+            surface: "cases",
+            query_state: savedView.query_state,
+        },
+        options,
+    );
 }
 
 export function readCasesQueueStateFromUrl(
@@ -254,6 +351,84 @@ export function buildCasesQueueStatePayload(
     };
 }
 
+export function getCasesQueueStateFingerprint(
+    snapshot: CasesQueueStateSnapshot,
+    options: {
+        branchFilterEnabled: boolean;
+    },
+): string {
+    return JSON.stringify(buildCasesQueueStatePayload(snapshot, options));
+}
+
+export function getSavedViewFingerprint(
+    savedView: QueueStateSavedViewLike | null | undefined,
+): string {
+    if (!savedView?.query_state || typeof savedView.query_state !== "object") {
+        return JSON.stringify({});
+    }
+    return JSON.stringify(savedView.query_state);
+}
+
+export function isTeamSavedView(savedView: QueueStateSavedViewLike | null | undefined): boolean {
+    return savedView?.scope === "team";
+}
+
+export function isApplicableTeamSavedView(savedView: QueueStateSavedViewLike | null | undefined): boolean {
+    return isTeamSavedView(savedView) && savedView?.is_applicable !== false;
+}
+
+export function findManagedDefaultSavedView<T extends QueueStateSavedViewLike>(
+    savedViews: T[],
+): T | null {
+    return savedViews.find((view) => isApplicableTeamSavedView(view) && view.is_default) ?? null;
+}
+
+export function findPersonalDefaultSavedView<T extends QueueStateSavedViewLike>(
+    savedViews: T[],
+): T | null {
+    return savedViews.find((view) => !isTeamSavedView(view) && view.is_default) ?? null;
+}
+
+export function findPreferredDefaultSavedView<T extends QueueStateSavedViewLike>(
+    savedViews: T[],
+): T | null {
+    return findManagedDefaultSavedView(savedViews) ?? findPersonalDefaultSavedView(savedViews);
+}
+
+function getSavedViewMatchPriority(savedView: QueueStateSavedViewLike): number {
+    if (!isTeamSavedView(savedView)) {
+        return 2;
+    }
+    return savedView.is_applicable === false ? 0 : 1;
+}
+
+export function findSavedViewByFingerprint<T extends QueueStateSavedViewLike>(
+    savedViews: T[],
+    fingerprint: string,
+    {
+        includeNonApplicableTeam = true,
+    }: {
+        includeNonApplicableTeam?: boolean;
+    } = {},
+): T | null {
+    let bestMatch: T | null = null;
+    let bestPriority = -1;
+    for (const view of savedViews) {
+        if (getSavedViewFingerprint(view) !== fingerprint) {
+            continue;
+        }
+        const priority = getSavedViewMatchPriority(view);
+        if (!includeNonApplicableTeam && priority === 0) {
+            continue;
+        }
+        if (priority > bestPriority) {
+            bestMatch = view;
+            bestPriority = priority;
+        }
+    }
+    return bestMatch;
+}
+
 export function buildCasesQueueUrlParams(
     snapshot: CasesQueueStateSnapshot,
     {
@@ -281,6 +456,39 @@ export function buildCasesQueueUrlParams(
     return params;
 }
 
+export function buildCasesQueueHref(
+    snapshot: CasesQueueStateSnapshot,
+    {
+        pathname,
+        currentSearch,
+        branchFilterEnabled,
+        privilegedOwnerFilterVisible,
+        viewId,
+    }: {
+        pathname: string;
+        currentSearch: SearchParamsInput;
+        branchFilterEnabled: boolean;
+        privilegedOwnerFilterVisible: boolean;
+        viewId?: string | null;
+    },
+): string {
+    const params = stripQueueUrlParams(toMutableSearchParams(currentSearch), "cases");
+    if (viewId) {
+        params.set("view_id", viewId);
+    }
+    const queueParams = buildCasesQueueUrlParams(snapshot, {
+        branchFilterEnabled,
+        privilegedOwnerFilterVisible,
+    });
+    if (Array.from(queueParams.keys()).length === 0) {
+        queueParams.set("status", snapshot.modeScope);
+    }
+    queueParams.forEach((value, key) => {
+        params.set(key, value);
+    });
+    return buildHref(pathname, params);
+}
+
 export function readCalendarQueueStateFromServer(
     record: QueueStateRecord | null | undefined,
     {
@@ -301,6 +509,26 @@ export function readCalendarQueueStateFromServer(
         queueStatusFilter: normalizeCalendarStatusFilter(queryState.status_filter),
         queueSearch: trimToUndefined(queryState.query as string | undefined) ?? "",
     };
+}
+
+export function readCalendarQueueStateFromSavedView(
+    savedView: QueueStateSavedViewLike | null | undefined,
+    options: {
+        defaultSelectedDate: string;
+        defaultQueueLane: BookingQueueLane;
+    },
+): CalendarQueueStateSnapshot | null {
+    if (!savedView?.query_state || typeof savedView.query_state !== "object") {
+        return null;
+    }
+    return readCalendarQueueStateFromServer(
+        {
+            found: true,
+            surface: "calendar",
+            query_state: savedView.query_state,
+        },
+        options,
+    );
 }
 
 export function readCalendarQueueStateFromUrl(
@@ -340,6 +568,10 @@ export function buildCalendarQueueStatePayload(snapshot: CalendarQueueStateSnaps
     };
 }
 
+export function getCalendarQueueStateFingerprint(snapshot: CalendarQueueStateSnapshot): string {
+    return JSON.stringify(buildCalendarQueueStatePayload(snapshot));
+}
+
 export function buildCalendarQueueUrlParams(
     snapshot: CalendarQueueStateSnapshot,
     {
@@ -365,4 +597,37 @@ export function buildCalendarQueueUrlParams(
         params.set("q", query);
     }
     return params;
+}
+
+export function buildCalendarQueueHref(
+    snapshot: CalendarQueueStateSnapshot,
+    {
+        pathname,
+        currentSearch,
+        defaultSelectedDate,
+        defaultQueueLane,
+        viewId,
+    }: {
+        pathname: string;
+        currentSearch: SearchParamsInput;
+        defaultSelectedDate: string;
+        defaultQueueLane: BookingQueueLane;
+        viewId?: string | null;
+    },
+): string {
+    const params = stripQueueUrlParams(toMutableSearchParams(currentSearch), "calendar");
+    if (viewId) {
+        params.set("view_id", viewId);
+    }
+    const queueParams = buildCalendarQueueUrlParams(snapshot, {
+        defaultSelectedDate,
+        defaultQueueLane,
+    });
+    if (Array.from(queueParams.keys()).length === 0) {
+        queueParams.set("lane", snapshot.queueLane);
+    }
+    queueParams.forEach((value, key) => {
+        params.set(key, value);
+    });
+    return buildHref(pathname, params);
 }

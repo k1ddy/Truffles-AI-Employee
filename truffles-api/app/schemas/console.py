@@ -1074,6 +1074,16 @@ class ConsoleCaseListResponse(BaseModel):
 
 
 ConsoleQueueStateSurface = Literal["cases", "calendar"]
+ConsoleSavedViewScope = Literal["personal", "team"]
+ConsoleSavedViewTargetRole = Literal[
+    "platform_admin",
+    "owner",
+    "admin",
+    "manager",
+    "support",
+    "specialist",
+    "viewer",
+]
 
 
 class ConsoleQueueStateCurrentRequest(ConsoleRequestModel):
@@ -1093,6 +1103,46 @@ class ConsoleQueueStateCurrentResponse(BaseModel):
     version: int = 1
     query_state: dict[str, Any] = Field(default_factory=dict)
     updated_at: Optional[str] = None
+
+
+class ConsoleSavedView(BaseModel):
+    id: UUID
+    surface: ConsoleQueueStateSurface
+    scope: ConsoleSavedViewScope = "personal"
+    name: str
+    version: int = 1
+    query_state: dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+    is_applicable: bool = True
+    created_by_agent_id: Optional[UUID] = None
+    target_branch_id: Optional[UUID] = None
+    target_role: Optional[ConsoleSavedViewTargetRole] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleSavedViewListResponse(BaseModel):
+    items: list[ConsoleSavedView]
+
+
+class ConsoleSavedViewCreateRequest(ConsoleRequestModel):
+    surface: ConsoleQueueStateSurface
+    scope: ConsoleSavedViewScope = "personal"
+    name: StrictStr
+    version: int = Field(default=1, ge=1)
+    query_state: dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+    target_branch_id: Optional[UUID] = None
+    target_role: Optional[ConsoleSavedViewTargetRole] = None
+
+
+class ConsoleSavedViewUpdateRequest(ConsoleRequestModel):
+    name: Optional[StrictStr] = None
+    version: Optional[int] = Field(default=None, ge=1)
+    query_state: Optional[dict[str, Any]] = None
+    is_default: Optional[bool] = None
+    target_branch_id: Optional[UUID] = None
+    target_role: Optional[ConsoleSavedViewTargetRole] = None
 
 
 class ConsoleSyncStatus(BaseModel):

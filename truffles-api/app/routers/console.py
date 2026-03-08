@@ -304,6 +304,10 @@ from app.schemas.console import (
     ConsoleReminderListResponse,
     ConsoleReminderRetryRequest,
     ConsoleReminderRetryResponse,
+    ConsoleSavedView,
+    ConsoleSavedViewCreateRequest,
+    ConsoleSavedViewListResponse,
+    ConsoleSavedViewUpdateRequest,
     ConsoleSettingsResponse,
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
@@ -385,7 +389,12 @@ from app.services.compliance_policy_registry_service import (
     resolve_effective_compliance_policy_version,
     rollback_compliance_policy_version,
 )
-from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
+from app.services.console_auth import (
+    ConsoleAuthContext,
+    get_console_context,
+    has_console_permission,
+    require_console_permission,
+)
 from app.services.console_branch_changes import (
     BRANCH_CHANGE_MUTABLE_STATUSES as _BRANCH_CHANGE_MUTABLE_STATUSES,
 )
@@ -623,6 +632,27 @@ from app.services.console_router_utils import (
 )
 from app.services.console_router_utils import (
     validate_limit as _validate_limit_util,
+)
+from app.services.console_saved_views import (
+    create_saved_view as _create_saved_view,
+)
+from app.services.console_saved_views import (
+    delete_saved_view as _delete_saved_view,
+)
+from app.services.console_saved_views import (
+    get_saved_view_for_client as _get_saved_view_for_client,
+)
+from app.services.console_saved_views import (
+    list_saved_views as _list_saved_views,
+)
+from app.services.console_saved_views import (
+    normalize_saved_view_scope as _normalize_saved_view_scope,
+)
+from app.services.console_saved_views import (
+    saved_view_applies_to_context as _saved_view_applies_to_context,
+)
+from app.services.console_saved_views import (
+    update_saved_view as _update_saved_view,
 )
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import resolve_telegram_routing
@@ -10923,6 +10953,106 @@ def _require_queue_state_permission(context: ConsoleAuthContext, surface: str) -
     raise ConsoleAPIError(400, "INVALID_PARAM", "surface is invalid")
 
 
+def _can_manage_team_saved_views(context: ConsoleAuthContext) -> bool:
+    return has_console_permission(context.role, "team", "write")
+
+
+def _require_team_saved_view_manage_permission(context: ConsoleAuthContext) -> None:
+    require_console_permission(
+        context,
+        "team",
+        "write",
+        message="Only owner/admin can manage team queue presets",
+    )
+
+
+def _saved_view_current_branch_id(context: ConsoleAuthContext) -> Optional[UUID]:
+    return (
+        getattr(context, "selected_branch_id", None)
+        or getattr(context, "effective_branch_id", None)
+        or getattr(getattr(context, "agent", None), "branch_id", None)
+    )
+
+
+def _normalize_saved_view_target_branch_id(
+    context: ConsoleAuthContext,
+    *,
+    target_branch_id: Optional[UUID],
+) -> Optional[UUID]:
+    if target_branch_id is None:
+        return None
+    allowed_branch_ids = {branch_id for branch_id in getattr(context, "allowed_branch_ids", set()) if branch_id}
+    if allowed_branch_ids and target_branch_id not in allowed_branch_ids:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
+    return target_branch_id
+
+
+def _normalize_saved_view_target_role(
+    *,
+    surface: str,
+    target_role: Optional[str],
+) -> Optional[str]:
+    cleaned = _normalize_optional_text(target_role)
+    if cleaned is None:
+        return None
+    if surface == "cases":
+        allowed = has_console_permission(cleaned, "inbox", "read")
+    elif surface == "calendar":
+        allowed = has_console_permission(cleaned, "calendar", "read")
+    else:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "surface is invalid")
+    if not allowed:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "target_role is invalid")
+    return cleaned
+
+
+def _resolve_saved_view_targeting(
+    context: ConsoleAuthContext,
+    *,
+    surface: str,
+    scope: str,
+    target_branch_id: Optional[UUID],
+    target_role: Optional[str],
+) -> tuple[str, Optional[UUID], Optional[str]]:
+    normalized_scope = _normalize_saved_view_scope(scope)
+    if normalized_scope == "personal":
+        if target_branch_id is not None or target_role is not None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Personal saved views do not support team targeting")
+        return normalized_scope, None, None
+    _require_team_saved_view_manage_permission(context)
+    return (
+        normalized_scope,
+        _normalize_saved_view_target_branch_id(context, target_branch_id=target_branch_id),
+        _normalize_saved_view_target_role(surface=surface, target_role=target_role),
+    )
+
+
+def _assert_saved_view_access(
+    context: ConsoleAuthContext,
+    *,
+    record,
+    mutate: bool,
+) -> None:
+    scope = _normalize_saved_view_scope(getattr(record, "scope", "personal"))
+    if scope == "personal":
+        if getattr(record, "agent_id", None) != context.agent.id:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+        return
+    if mutate:
+        _require_team_saved_view_manage_permission(context)
+        _normalize_saved_view_target_branch_id(
+            context,
+            target_branch_id=getattr(record, "target_branch_id", None),
+        )
+        return
+    if not _saved_view_applies_to_context(
+        record,
+        role=context.role,
+        current_branch_id=_saved_view_current_branch_id(context),
+    ):
+        raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+
+
 def _build_current_queue_state_response(
     *,
     surface: str,
@@ -10948,6 +11078,24 @@ def _build_current_queue_state_response(
         conversation_id=record.conversation_id,
         version=record.version,
         query_state=dict(record.query_state or {}),
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
+def _serialize_saved_view(record) -> ConsoleSavedView:
+    return ConsoleSavedView(
+        id=record.id,
+        surface=record.surface,
+        scope=getattr(record, "scope", "personal"),
+        name=record.name,
+        version=record.version,
+        query_state=dict(record.query_state or {}),
+        is_default=bool(record.is_default),
+        is_applicable=bool(getattr(record, "is_applicable", True)),
+        created_by_agent_id=getattr(record, "created_by_agent_id", None),
+        target_branch_id=getattr(record, "target_branch_id", None),
+        target_role=getattr(record, "target_role", None),
+        created_at=record.created_at.isoformat() if record.created_at else None,
         updated_at=record.updated_at.isoformat() if record.updated_at else None,
     )
 
@@ -11015,6 +11163,196 @@ async def put_current_queue_state(
         query_state=query_state,
     )
     return _build_current_queue_state_response(surface=scope.surface, scope=scope, record=record)
+
+
+@router.get(
+    "/queue-state/views",
+    response_model=ConsoleSavedViewListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_queue_state_views(
+    request: Request,
+    surface: str = Query(...),
+    db: Session = Depends(get_db),
+) -> ConsoleSavedViewListResponse:
+    context = get_console_context(request, db)
+    _reject_unknown_query_params(request, {"surface"})
+    _require_queue_state_permission(context, surface)
+    scope = _build_queue_state_scope(context, surface=surface)
+    current_branch_id = _saved_view_current_branch_id(context)
+    items = _list_saved_views(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        surface=scope.surface,
+        role=context.role,
+        current_branch_id=current_branch_id,
+        include_all_team_presets=_can_manage_team_saved_views(context),
+    )
+    for item in items:
+        item.is_applicable = _saved_view_applies_to_context(
+            item,
+            role=context.role,
+            current_branch_id=current_branch_id,
+        )
+    return ConsoleSavedViewListResponse(items=[_serialize_saved_view(item) for item in items])
+
+
+@router.get(
+    "/queue-state/views/{view_id}",
+    response_model=ConsoleSavedView,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_queue_state_view(
+    view_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleSavedView:
+    context = get_console_context(request, db)
+    record = _get_saved_view_for_client(
+        db,
+        client_id=context.client.id,
+        view_id=view_id,
+    )
+    if record is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+    _assert_saved_view_access(context, record=record, mutate=False)
+    _require_queue_state_permission(context, record.surface)
+    record.is_applicable = _saved_view_applies_to_context(
+        record,
+        role=context.role,
+        current_branch_id=_saved_view_current_branch_id(context),
+    )
+    return _serialize_saved_view(record)
+
+
+@router.post(
+    "/queue-state/views",
+    response_model=ConsoleSavedView,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def create_queue_state_view(
+    body: ConsoleSavedViewCreateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleSavedView:
+    context = get_console_context(request, db)
+    _require_queue_state_permission(context, body.surface)
+    scope, target_branch_id, target_role = _resolve_saved_view_targeting(
+        context,
+        surface=body.surface,
+        scope=body.scope,
+        target_branch_id=body.target_branch_id,
+        target_role=body.target_role,
+    )
+    query_state = _normalize_queue_state_payload(
+        context,
+        surface=body.surface,
+        query_state=body.query_state,
+    )
+    record = _create_saved_view(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id if scope == "personal" else None,
+        created_by_agent_id=context.agent.id,
+        surface=body.surface,
+        scope=scope,
+        name=body.name,
+        version=body.version,
+        query_state=query_state,
+        is_default=body.is_default,
+        target_branch_id=target_branch_id,
+        target_role=target_role,
+    )
+    record.is_applicable = _saved_view_applies_to_context(
+        record,
+        role=context.role,
+        current_branch_id=_saved_view_current_branch_id(context),
+    )
+    return _serialize_saved_view(record)
+
+
+@router.patch(
+    "/queue-state/views/{view_id}",
+    response_model=ConsoleSavedView,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def update_queue_state_view(
+    view_id: UUID,
+    body: ConsoleSavedViewUpdateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleSavedView:
+    context = get_console_context(request, db)
+    record = _get_saved_view_for_client(
+        db,
+        client_id=context.client.id,
+        view_id=view_id,
+    )
+    if record is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+    _assert_saved_view_access(context, record=record, mutate=True)
+    _require_queue_state_permission(context, record.surface)
+    body_fields = body.model_dump(exclude_unset=True)
+    query_state = (
+        _normalize_queue_state_payload(
+            context,
+            surface=record.surface,
+            query_state=body.query_state,
+        )
+        if body.query_state is not None
+        else None
+    )
+    update_kwargs = {
+        "name": body.name,
+        "version": body.version,
+        "query_state": query_state,
+        "is_default": body.is_default,
+    }
+    if "target_branch_id" in body_fields:
+        update_kwargs["target_branch_id"] = _normalize_saved_view_target_branch_id(
+            context,
+            target_branch_id=body.target_branch_id,
+        )
+    if "target_role" in body_fields:
+        update_kwargs["target_role"] = _normalize_saved_view_target_role(
+            surface=record.surface,
+            target_role=body.target_role,
+        )
+    updated = _update_saved_view(
+        db,
+        record=record,
+        **update_kwargs,
+    )
+    updated.is_applicable = _saved_view_applies_to_context(
+        updated,
+        role=context.role,
+        current_branch_id=_saved_view_current_branch_id(context),
+    )
+    return _serialize_saved_view(updated)
+
+
+@router.delete(
+    "/queue-state/views/{view_id}",
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def delete_queue_state_view(
+    view_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    context = get_console_context(request, db)
+    record = _get_saved_view_for_client(
+        db,
+        client_id=context.client.id,
+        view_id=view_id,
+    )
+    if record is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Saved view not found")
+    _assert_saved_view_access(context, record=record, mutate=True)
+    _require_queue_state_permission(context, record.surface)
+    _delete_saved_view(db, record=record)
+    return JSONResponse({"success": True})
 
 
 @router.get(

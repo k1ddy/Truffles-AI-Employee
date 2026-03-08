@@ -208,7 +208,10 @@
 | Wave21 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave21-a1.md` | Split allowed and expected: `Part A semantic context`, `Part B booking-state propagation` | Довести бесшовную semantic chain между ботом, заявкой, действиями менеджера и календарём `Записи`, чтобы case/business state и booking state объясняли друг друга. | Done (merged via `PR #942` and `PR #943`) |
 | Wave22 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-a1.md` + `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave22-live-proof-a1.md` | Split executed: `Part A deterministic proof` merged via `PR #944`; `Part B live-proof closure` merged via `PR #946` | Закрыть программу forbidden-state matrix, deterministic acceptance и live no-mocks validation без fake-pass. | Done (deterministic proof merged via `PR #944`; explicit live proof + helper hardening merged via `PR #946`) |
 | Wave23 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave23-a1.md` | Planning/decomposition block only; no product PR | Провести owner-approved post-closeout defect clustering and lock the next maturity sequence without reopening closed correctness claims. | Done |
-| Wave24 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md` | Split allowed and expected: `Part A queue-state schema/storage`, `Part B frontend rollout + URL codec` | Ввести server-owned `Queue State Canon` for inbox/calendar before any saved views, managed presets, shareable URLs, or richer routing work. | Planned (ready after explicit owner/Brain go) |
+| Wave24 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md` | Split executed: backend canon + frontend restore rollout | Ввести server-owned `Queue State Canon` for inbox/calendar before any saved views, managed presets, shareable URLs, or richer routing work. | Done locally; `PR #947` opened |
+| Wave25 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave25-a1.md` | Split allowed and expected: `Part A personal catalog backend`, `Part B save/apply frontend UX` | Добавить personal named saved views для `Заявки` и `Записи` поверх `Queue State Canon`, не смешивая их с team presets/share URLs. | Done locally; `PR #947` updated |
+| Wave26 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave26-a1.md` | Split allowed and expected: `Part A managed preset backend`, `Part B frontend governance/default rollout` | Добавить managed team presets для `Заявки` и `Записи` на том же saved-view object: owner/admin-managed branch/role defaults without forking a second preset model. | Done locally; opened `PR #948` |
+| Wave27 | `TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md` | Split allowed: `Part A single-view read contract`, `Part B URL sync + copy-link UX` | Добавить shareable queue URLs для `Заявки` и `Записи` через explicit queue params + optional `view_id`, без opaque blobs и без richer routing. | Done locally; `PR #948` updated |
 
 ## Wave-by-wave closure contract (mandatory)
 1. `Wave5` closes only when SLA перестает быть абстрактным и становится action-driven на сервере и в ключевых UI surface.
@@ -291,14 +294,14 @@
 - If calendar follow-up ownership/history is skipped, future routing will optimize against an incomplete operational model.
 
 ## Residual architecture debt (mandatory)
-- `Current residuals accepted in this block`: the original reconstruction remains closed, but future maturity work is still pending: server-owned queue-state canon, saved views, managed team presets, shareable queue URLs, bookings supervisor-grade governance, and richer routing.
+- `Current residuals accepted in this block`: the original reconstruction remains closed, but post-closeout maturity work is still pending: shareable queue URLs, bookings supervisor-grade governance, and richer routing.
 - `Why not in this block`: this master refresh only records the correct post-closeout sequence; it does not reopen product/runtime delivery.
 - `Risk if deferred`: the team may slip back into ad-hoc spot fixes or start routing/saved-view work on top of fragmented local state.
-- `Linked follow-up Task Package(s)`: `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave23-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md`.
+- `Linked follow-up Task Package(s)`: `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave23-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave24-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave25-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave26-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md`.
 - `Expiry/trigger to stop deferral`: any future inbox/calendar maturity work must either execute `Wave24` or explicitly supersede it with a new owner-approved TP that preserves the same queue-state-first invariant.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: execute `Wave24` and introduce server-owned `Queue State Canon` for inbox/calendar before any saved-view, preset, shareable URL, or richer routing work.
-- `First deterministic check command`: `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "readInboxCaseListPrefs|writeInboxCaseListPrefs|readCalendarWorkspacePrefs|writeCalendarWorkspacePrefs|_reject_unknown_query_params|_normalize_case_routing_policy" console-web/src truffles-api/app`
-- `Blocked-by conditions`: explicit Brain/Owner go for runtime execution; any regression in the closed Wave22 semantics blocks the block immediately.
+- `Next block objective`: add supervisor-grade booking governance (`follow-up owner`, `due`, `history/archive`) before any richer routing expands beyond `least_open_cases`.
+- `First deterministic check command`: `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "Wave27|follow-up owner|history/archive" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md docs/TASK_PACKAGES/TP-2026-03-07-inbox-calendar-ux-reconstruction-wave27-a1.md`
+- `Blocked-by conditions`: any regression in Wave24-27 queue-state/saved-view/share-URL contracts, or any attempt to open richer routing before explicit booking ownership/history semantics exist, blocks the block immediately.
 - `Owner role for closure`: Brain / Top Architect.

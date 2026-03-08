@@ -39,6 +39,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/queue-state/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Queue State Views */
+        get: operations["list_queue_state_views_console_v1_queue_state_views_get"];
+        put?: never;
+        /** Create Queue State View */
+        post: operations["create_queue_state_view_console_v1_queue_state_views_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/queue-state/views/{view_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Queue State View */
+        get: operations["get_queue_state_view_console_v1_queue_state_views__view_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Queue State View */
+        delete: operations["delete_queue_state_view_console_v1_queue_state_views__view_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Queue State View */
+        patch: operations["update_queue_state_view_console_v1_queue_state_views__view_id__patch"];
+        trace?: never;
+    };
     "/console/v1/agents": {
         parameters: {
             query?: never;
@@ -8076,6 +8113,106 @@ export interface components {
             /** Matched */
             matched: number;
         };
+        /** ConsoleSavedView */
+        ConsoleSavedView: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "cases" | "calendar";
+            /**
+             * Scope
+             * @default personal
+             * @enum {string}
+             */
+            scope: "personal" | "team";
+            /** Name */
+            name: string;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Query State */
+            query_state?: Record<string, never>;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+            /**
+             * Is Applicable
+             * @default true
+             */
+            is_applicable: boolean;
+            /** Created By Agent Id */
+            created_by_agent_id?: string | null;
+            /** Target Branch Id */
+            target_branch_id?: string | null;
+            /** Target Role */
+            target_role?: ("owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer") | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleSavedViewCreateRequest */
+        ConsoleSavedViewCreateRequest: {
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "cases" | "calendar";
+            /**
+             * Scope
+             * @default personal
+             * @enum {string}
+             */
+            scope: "personal" | "team";
+            /** Name */
+            name: string;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Query State */
+            query_state?: Record<string, never>;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+            /** Target Branch Id */
+            target_branch_id?: string | null;
+            /** Target Role */
+            target_role?: ("owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer") | null;
+        };
+        /** ConsoleSavedViewListResponse */
+        ConsoleSavedViewListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleSavedView"][];
+        };
+        /** ConsoleSavedViewUpdateRequest */
+        ConsoleSavedViewUpdateRequest: {
+            /** Name */
+            name?: string | null;
+            /** Version */
+            version?: number | null;
+            /** Query State */
+            query_state?: Record<string, never> | null;
+            /** Is Default */
+            is_default?: boolean | null;
+            /** Target Branch Id */
+            target_branch_id?: string | null;
+            /** Target Role */
+            target_role?: ("owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer") | null;
+        };
         /** ConsoleSettingsResponse */
         ConsoleSettingsResponse: {
             /** Branches */
@@ -9198,6 +9335,257 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleQueueStateCurrentResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_queue_state_views_console_v1_queue_state_views_get: {
+        parameters: {
+            query: {
+                surface: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSavedViewListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_queue_state_view_console_v1_queue_state_views_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleSavedViewCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSavedView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_queue_state_view_console_v1_queue_state_views__view_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSavedView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_queue_state_view_console_v1_queue_state_views__view_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_queue_state_view_console_v1_queue_state_views__view_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleSavedViewUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSavedView"];
                 };
             };
             /** @description Unauthorized */

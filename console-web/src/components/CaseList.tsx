@@ -10,8 +10,12 @@ import { Case } from "@/types";
 import { getCaseBusinessStatusBadge, getCaseSlaIndicator } from "@/utils/labels";
 import {
     casesApi,
+    canAccessConsole,
     type CaseAssigneeOption,
     type CaseBulkActionResponse,
+    type ConsoleRole,
+    type QueueSavedView,
+    queueStateApi,
 } from "@/lib/api-client";
 import {
     buildCaseListSearchParams,
@@ -43,9 +47,17 @@ import {
     writeInboxCaseListPrefs,
 } from "@/lib/inbox-workspace";
 import {
+    buildCasesQueueHref,
     buildCasesQueueStatePayload,
+    findPreferredDefaultSavedView,
+    findSavedViewByFingerprint,
+    getCasesQueueStateFingerprint,
+    getSavedViewFingerprint,
+    isTeamSavedView,
     readCasesQueueStateFromServer,
+    readCasesQueueStateFromSavedView,
     readCasesQueueStateFromUrl,
+    readQueueStateViewIdFromUrl,
     type CasesQueueStateSnapshot,
 } from "@/lib/queue-state";
 import toast from "react-hot-toast";
@@ -160,6 +172,28 @@ const FIELD_LABELS: Record<InboxCaseVisibleField, string> = {
 };
 
 const BULK_SNOOZE_PRESETS = [30, 60, 120];
+const SAVED_VIEW_SCOPE_LABELS = {
+    personal: "Личный",
+    team: "Команда",
+} as const;
+const SAVED_VIEW_ROLE_LABELS: Record<ConsoleRole, string> = {
+    platform_admin: "Платформа",
+    owner: "Owner",
+    admin: "Админ",
+    manager: "Менеджер",
+    support: "Поддержка",
+    specialist: "Специалист",
+    viewer: "Наблюдатель",
+};
+const SAVED_VIEW_TARGET_ROLES: ConsoleRole[] = [
+    "platform_admin",
+    "owner",
+    "admin",
+    "manager",
+    "support",
+    "specialist",
+    "viewer",
+];
 
 function caseNoun(count: number) {
     if (count === 1) {
@@ -344,6 +378,102 @@ function buildQueueViews(): QueueViewDefinition[] {
     return sharedViews;
 }
 
+function getApiErrorMessage(error: unknown, fallback: string): string {
+    return (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
+        || (error as Error)?.message
+        || fallback;
+}
+
+async function copyText(text: string): Promise<void> {
+    try {
+        await navigator.clipboard.writeText(text);
+        return;
+    } catch {
+        window.prompt("Скопируйте ссылку", text);
+    }
+}
+
+function getSavedViewBranchLabel(branchId: string | null | undefined, branchMap: Map<string, string>): string | null {
+    if (!branchId) {
+        return null;
+    }
+    return branchMap.get(branchId) ?? branchId;
+}
+
+function getSavedViewRoleLabel(role: string | null | undefined): string | null {
+    if (!role) {
+        return null;
+    }
+    return SAVED_VIEW_ROLE_LABELS[role as ConsoleRole] ?? role;
+}
+
+function buildSavedViewOptionLabel(view: QueueSavedView, branchMap: Map<string, string>): string {
+    const parts = [view.name, SAVED_VIEW_SCOPE_LABELS[view.scope ?? "personal"]];
+    const branchLabel = getSavedViewBranchLabel(view.target_branch_id, branchMap);
+    const roleLabel = getSavedViewRoleLabel(view.target_role);
+    if (branchLabel) {
+        parts.push(branchLabel);
+    }
+    if (roleLabel) {
+        parts.push(roleLabel);
+    }
+    if (view.is_default) {
+        parts.push("default");
+    }
+    if (isTeamSavedView(view) && view.is_applicable === false) {
+        parts.push("вне текущего контура");
+    }
+    return parts.join(" · ");
+}
+
+function countMatchingSavedViews(
+    savedViews: QueueSavedView[],
+    {
+        scope,
+        targetBranchId,
+        targetRole,
+    }: {
+        scope: "personal" | "team";
+        targetBranchId: string;
+        targetRole: string;
+    },
+): number {
+    return savedViews.filter((view) => {
+        if ((view.scope ?? "personal") !== scope) {
+            return false;
+        }
+        if (scope === "personal") {
+            return true;
+        }
+        return (view.target_branch_id ?? "") === targetBranchId
+            && (view.target_role ?? "") === targetRole;
+    }).length;
+}
+
+function hasDefaultSavedViewForTarget(
+    savedViews: QueueSavedView[],
+    {
+        scope,
+        targetBranchId,
+        targetRole,
+    }: {
+        scope: "personal" | "team";
+        targetBranchId: string;
+        targetRole: string;
+    },
+): boolean {
+    return savedViews.some((view) => {
+        if (!view.is_default || (view.scope ?? "personal") !== scope) {
+            return false;
+        }
+        if (scope === "personal") {
+            return true;
+        }
+        return (view.target_branch_id ?? "") === targetBranchId
+            && (view.target_role ?? "") === targetRole;
+    });
+}
+
 function normalizeStoredPrefs(
     raw: InboxCaseListPrefs | null,
     {
@@ -445,6 +575,7 @@ export default function CaseList({
     const [stateReady, setStateReady] = useState(!storageEnabled);
     const restoredQueueStateRef = useRef<string | null>(null);
     const lastSavedQueueStateRef = useRef<string>("");
+    const saveViewInputRef = useRef<HTMLInputElement | null>(null);
     const hasToken = !!(session as { accessToken?: string } | null)?.accessToken;
 
     const [filters, setFilters] = useState<CaseFilters>(DEFAULT_FILTERS);
@@ -457,6 +588,16 @@ export default function CaseList({
     const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
     const [modeScope, setModeScope] = useState<InboxCaseModeScope>("open");
     const [activeViewId, setActiveViewId] = useState<InboxQueueViewId>("all_open");
+    const [activeSavedViewId, setActiveSavedViewId] = useState<string | null>(null);
+    const [saveViewDraftName, setSaveViewDraftName] = useState("");
+    const [saveViewComposerOpen, setSaveViewComposerOpen] = useState(false);
+    const [saveViewScopeDraft, setSaveViewScopeDraft] = useState<"personal" | "team">("personal");
+    const [saveViewTargetBranchIdDraft, setSaveViewTargetBranchIdDraft] = useState("");
+    const [saveViewTargetRoleDraft, setSaveViewTargetRoleDraft] = useState<ConsoleRole | "">("");
+    const [saveViewDefaultDraft, setSaveViewDefaultDraft] = useState(false);
+    const [saveViewDefaultTouched, setSaveViewDefaultTouched] = useState(false);
+    const [selectedTeamTargetBranchIdDraft, setSelectedTeamTargetBranchIdDraft] = useState("");
+    const [selectedTeamTargetRoleDraft, setSelectedTeamTargetRoleDraft] = useState<ConsoleRole | "">("");
     const [visibleFields, setVisibleFields] = useState<InboxCaseVisibleFields>(DEFAULT_VISIBLE_FIELDS);
     const [fieldPanelOpen, setFieldPanelOpen] = useState(false);
     const [documentVisible, setDocumentVisible] = useState(true);
@@ -491,8 +632,17 @@ export default function CaseList({
     const branchMap = new Map(
         selectableBranches.map((branch) => [branch.id as string, branch.name ?? branch.id as string])
     );
+    const canManageTeamPresets = canAccessConsole(viewerRole, "team", "write");
+    const savedViewTargetRoleOptions = useMemo(
+        () => SAVED_VIEW_TARGET_ROLES.filter((role) => canAccessConsole(role, "inbox", "read")),
+        [],
+    );
     const privilegedOwnerFilterVisible = isPrivilegedQueueRole(viewerRole);
     const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
+    const urlSavedViewId = useMemo(
+        () => readQueueStateViewIdFromUrl(searchParams),
+        [searchParams],
+    );
     const urlQueueState = useMemo(
         () =>
             readCasesQueueStateFromUrl(searchParams, {
@@ -502,8 +652,11 @@ export default function CaseList({
         [branchFilterEnabled, privilegedOwnerFilterVisible, searchParams],
     );
     const urlQueueStateKey = useMemo(
-        () => JSON.stringify(urlQueueState ?? null),
-        [urlQueueState],
+        () => JSON.stringify({
+            viewId: urlSavedViewId,
+            queueState: urlQueueState ?? null,
+        }),
+        [urlQueueState, urlSavedViewId],
     );
     const resetPagination = () => {
         setCursor(undefined);
@@ -512,6 +665,16 @@ export default function CaseList({
     useEffect(() => {
         restoredQueueStateRef.current = null;
         lastSavedQueueStateRef.current = "";
+        setActiveSavedViewId(null);
+        setSaveViewDraftName("");
+        setSaveViewComposerOpen(false);
+        setSaveViewScopeDraft("personal");
+        setSaveViewTargetBranchIdDraft("");
+        setSaveViewTargetRoleDraft("");
+        setSaveViewDefaultDraft(false);
+        setSaveViewDefaultTouched(false);
+        setSelectedTeamTargetBranchIdDraft("");
+        setSelectedTeamTargetRoleDraft("");
         setStateReady(!workspaceScope);
     }, [urlQueueStateKey, workspaceScope]);
 
@@ -531,6 +694,46 @@ export default function CaseList({
         retry: 1,
         staleTime: 60_000,
     });
+    const savedViewsQuery = useQuery({
+        queryKey: ["queue-state-views", "cases"],
+        queryFn: async () => {
+            const response = await queueStateApi.listViews("cases");
+            return response.data;
+        },
+        enabled: hasToken,
+        retry: 1,
+        staleTime: 60_000,
+    });
+    const urlSavedViewQuery = useQuery({
+        queryKey: ["queue-state-view", "cases", urlSavedViewId],
+        queryFn: async () => {
+            const response = await queueStateApi.getView(urlSavedViewId as string);
+            return response.data;
+        },
+        enabled: hasToken && !!urlSavedViewId,
+        retry: false,
+        staleTime: 60_000,
+    });
+    const savedViews = useMemo(
+        () => savedViewsQuery.data?.items ?? [],
+        [savedViewsQuery.data?.items],
+    );
+    const defaultSavedView = useMemo(
+        () => findPreferredDefaultSavedView(savedViews),
+        [savedViews],
+    );
+    const personalSavedViews = useMemo(
+        () => savedViews.filter((view) => !isTeamSavedView(view)),
+        [savedViews],
+    );
+    const teamSavedViews = useMemo(
+        () => savedViews.filter((view) => isTeamSavedView(view)),
+        [savedViews],
+    );
+    const urlSavedView = useMemo(
+        () => urlSavedViewQuery.data ?? savedViews.find((view) => view.id === urlSavedViewId) ?? null,
+        [savedViews, urlSavedViewId, urlSavedViewQuery.data],
+    );
 
     useEffect(() => {
         if (!workspaceScope) {
@@ -542,7 +745,14 @@ export default function CaseList({
             || !hasToken
             || currentQueueStateQuery.isFetched
             || currentQueueStateQuery.isError;
-        if (!currentQueueStateSettled || restoredQueueStateRef.current === restoreKey) {
+        const savedViewsSettled = !hasToken || savedViewsQuery.isFetched || savedViewsQuery.isError;
+        const urlSavedViewSettled = !urlSavedViewId || urlSavedViewQuery.isFetched || urlSavedViewQuery.isError;
+        if (
+            !currentQueueStateSettled
+            || !savedViewsSettled
+            || !urlSavedViewSettled
+            || restoredQueueStateRef.current === restoreKey
+        ) {
             return;
         }
         const restored = normalizeStoredPrefs(readInboxCaseListPrefs(workspaceScope), {
@@ -562,14 +772,37 @@ export default function CaseList({
             branchFilterEnabled,
             privilegedOwnerFilterVisible,
         });
-        const queueSnapshot = urlQueueState ?? serverSnapshot ?? localSnapshot;
+        const urlSavedViewSnapshot = readCasesQueueStateFromSavedView(urlSavedView, {
+            branchFilterEnabled,
+            privilegedOwnerFilterVisible,
+        });
+        const defaultSavedViewSnapshot = readCasesQueueStateFromSavedView(defaultSavedView, {
+            branchFilterEnabled,
+            privilegedOwnerFilterVisible,
+        });
+        const queueSnapshot = urlQueueState ?? urlSavedViewSnapshot ?? serverSnapshot ?? defaultSavedViewSnapshot ?? localSnapshot;
         const source = urlQueueState
             ? "url"
+            : urlSavedViewSnapshot
+                ? "url_view"
             : serverSnapshot
                 ? "server"
-                : localSnapshot
+                : defaultSavedViewSnapshot
+                    ? "saved_default"
+                    : localSnapshot
                     ? "local"
                     : "default";
+        const matchedSavedView = (urlSavedView && (source === "url" || source === "url_view"))
+            ? urlSavedView
+            : source === "saved_default"
+            ? defaultSavedView
+            : queueSnapshot
+                ? findSavedViewByFingerprint(
+                    savedViews,
+                    getCasesQueueStateFingerprint(queueSnapshot, { branchFilterEnabled }),
+                    { includeNonApplicableTeam: false },
+                )
+                : null;
 
         if (queueSnapshot) {
             setFilters(queueSnapshot.filters);
@@ -577,12 +810,14 @@ export default function CaseList({
             setModeScope(queueSnapshot.modeScope);
             setSearchValue(queueSnapshot.searchValue);
             setActiveViewId(queueSnapshot.activeViewId);
+            setActiveSavedViewId(matchedSavedView?.id ?? null);
         } else {
             setFilters(DEFAULT_FILTERS);
             setOwnerScope({ ...DEFAULT_OWNER_SCOPE });
             setModeScope("open");
             setSearchValue("");
             setActiveViewId("all_open");
+            setActiveSavedViewId(null);
         }
         setShowAdvancedFilters(
             source === "local" && restored
@@ -601,6 +836,13 @@ export default function CaseList({
         setFiltersCollapsed(restored?.filtersCollapsed ?? false);
         setAutoRefreshEnabled(restored?.autoRefreshEnabled ?? true);
         setVisibleFields(normalizeVisibleFields(restored?.visibleFields));
+        setSaveViewDraftName("");
+        setSaveViewComposerOpen(false);
+        setSaveViewScopeDraft("personal");
+        setSaveViewTargetBranchIdDraft("");
+        setSaveViewTargetRoleDraft("");
+        setSaveViewDefaultDraft(false);
+        setSaveViewDefaultTouched(false);
         setCursor(undefined);
         setCaseItems([]);
         if (source === "server" && queueSnapshot) {
@@ -619,6 +861,14 @@ export default function CaseList({
         currentQueueStateQuery.isFetched,
         hasToken,
         privilegedOwnerFilterVisible,
+        defaultSavedView,
+        savedViews,
+        savedViewsQuery.isError,
+        savedViewsQuery.isFetched,
+        urlSavedView,
+        urlSavedViewId,
+        urlSavedViewQuery.isError,
+        urlSavedViewQuery.isFetched,
         urlQueueState,
         urlQueueStateKey,
         workspaceScope,
@@ -630,6 +880,17 @@ export default function CaseList({
         }
         setActiveViewId("all_open");
     }, [activeViewId, queueViewMap]);
+
+    useEffect(() => {
+        if (!saveViewComposerOpen) {
+            return;
+        }
+        const timeoutId = window.setTimeout(() => {
+            saveViewInputRef.current?.focus();
+            saveViewInputRef.current?.select();
+        }, 0);
+        return () => window.clearTimeout(timeoutId);
+    }, [saveViewComposerOpen]);
 
     useEffect(() => {
         const handle = setTimeout(() => {
@@ -684,6 +945,96 @@ export default function CaseList({
         }),
         [activeViewId, branchFilterEnabled, filters, modeScope],
     );
+    const currentQueueSnapshot = useMemo<CasesQueueStateSnapshot>(
+        () => ({
+            filters: effectiveFilters,
+            ownerScope: effectiveOwnerScope,
+            modeScope,
+            activeViewId,
+            searchValue: effectiveFilters.query ?? searchValue,
+        }),
+        [activeViewId, effectiveFilters, effectiveOwnerScope, modeScope, searchValue],
+    );
+    const currentQueueFingerprint = useMemo(
+        () => getCasesQueueStateFingerprint(currentQueueSnapshot, { branchFilterEnabled }),
+        [branchFilterEnabled, currentQueueSnapshot],
+    );
+    const selectedSavedView = useMemo(
+        () => savedViews.find((view) => view.id === activeSavedViewId) ?? null,
+        [activeSavedViewId, savedViews],
+    );
+    const matchingScopeSavedViewCount = useMemo(
+        () => countMatchingSavedViews(savedViews, {
+            scope: saveViewScopeDraft,
+            targetBranchId: saveViewTargetBranchIdDraft,
+            targetRole: saveViewTargetRoleDraft,
+        }),
+        [saveViewScopeDraft, saveViewTargetBranchIdDraft, saveViewTargetRoleDraft, savedViews],
+    );
+    const suggestedSaveViewDefault = useMemo(
+        () => !hasDefaultSavedViewForTarget(savedViews, {
+            scope: saveViewScopeDraft,
+            targetBranchId: saveViewTargetBranchIdDraft,
+            targetRole: saveViewTargetRoleDraft,
+        }),
+        [saveViewScopeDraft, saveViewTargetBranchIdDraft, saveViewTargetRoleDraft, savedViews],
+    );
+    const selectedSavedViewScope = selectedSavedView?.scope ?? "personal";
+    const selectedSavedViewBranchLabel = getSavedViewBranchLabel(selectedSavedView?.target_branch_id, branchMap);
+    const selectedSavedViewRoleLabel = getSavedViewRoleLabel(selectedSavedView?.target_role);
+    const canMutateSelectedSavedView = Boolean(
+        selectedSavedView && (
+            selectedSavedViewScope === "personal"
+            || canManageTeamPresets
+        ),
+    );
+    const selectedTeamTargetingDirty = selectedSavedViewScope === "team" && (
+        (selectedSavedView?.target_branch_id ?? "") !== selectedTeamTargetBranchIdDraft
+        || (selectedSavedView?.target_role ?? "") !== selectedTeamTargetRoleDraft
+    );
+    const savedViewDirty = selectedSavedView
+        ? getSavedViewFingerprint(selectedSavedView) !== currentQueueFingerprint
+        : false;
+    const savedViewsLoading = savedViewsQuery.isFetching && savedViews.length === 0;
+    const queueShareHref = useMemo(() => {
+        if (typeof window === "undefined") {
+            return "";
+        }
+        return buildCasesQueueHref(currentQueueSnapshot, {
+            pathname: window.location.pathname,
+            currentSearch: window.location.search,
+            branchFilterEnabled,
+            privilegedOwnerFilterVisible,
+            viewId: activeSavedViewId,
+        });
+    }, [
+        activeSavedViewId,
+        branchFilterEnabled,
+        currentQueueSnapshot,
+        privilegedOwnerFilterVisible,
+    ]);
+
+    useEffect(() => {
+        if (!saveViewComposerOpen || saveViewDefaultTouched) {
+            return;
+        }
+        setSaveViewDefaultDraft(suggestedSaveViewDefault);
+    }, [saveViewComposerOpen, saveViewDefaultTouched, suggestedSaveViewDefault]);
+
+    useEffect(() => {
+        if (selectedSavedViewScope !== "team") {
+            setSelectedTeamTargetBranchIdDraft("");
+            setSelectedTeamTargetRoleDraft("");
+            return;
+        }
+        setSelectedTeamTargetBranchIdDraft(selectedSavedView?.target_branch_id ?? "");
+        setSelectedTeamTargetRoleDraft(selectedSavedView?.target_role ?? "");
+    }, [
+        selectedSavedView?.id,
+        selectedSavedView?.target_branch_id,
+        selectedSavedView?.target_role,
+        selectedSavedViewScope,
+    ]);
     const visibleSortOptions = sortOptions.filter((option) => {
         if (modeScope === "open") {
             return option.id !== "resolved_at";
@@ -742,6 +1093,45 @@ export default function CaseList({
         }`
     );
     const enabledFieldCount = FIELD_ORDER.filter((field) => visibleFields[field]).length;
+
+    useEffect(() => {
+        if (activeSavedViewId && selectedSavedView) {
+            return;
+        }
+        if (activeSavedViewId && !selectedSavedView && !savedViewsQuery.isFetching) {
+            setActiveSavedViewId(null);
+            return;
+        }
+        if (activeSavedViewId || savedViews.length === 0) {
+            return;
+        }
+        const matchedSavedView = findSavedViewByFingerprint(savedViews, currentQueueFingerprint, {
+            includeNonApplicableTeam: false,
+        });
+        if (matchedSavedView) {
+            setActiveSavedViewId(matchedSavedView.id);
+        }
+    }, [
+        activeSavedViewId,
+        currentQueueFingerprint,
+        savedViews,
+        savedViewsQuery.isFetching,
+        selectedSavedView,
+    ]);
+
+    useEffect(() => {
+        if (!stateReady || !restoredQueueStateRef.current || typeof window === "undefined") {
+            return;
+        }
+        if (!queueShareHref) {
+            return;
+        }
+        const currentHref = `${window.location.pathname}${window.location.search}`;
+        if (currentHref === queueShareHref) {
+            return;
+        }
+        window.history.replaceState(window.history.state, "", queueShareHref);
+    }, [queueShareHref, stateReady]);
 
     useEffect(() => {
         if (!filtersCompact) {
@@ -971,6 +1361,213 @@ export default function CaseList({
             : null,
     ].filter((item): item is { key: string; label: string; onClear: () => void } => Boolean(item));
 
+    const applyCasesQueueSnapshot = (
+        snapshot: CasesQueueStateSnapshot,
+        {
+            savedViewId = null,
+        }: {
+            savedViewId?: string | null;
+        } = {},
+    ) => {
+        setBulkSummary(null);
+        resetPagination();
+        setCaseItems([]);
+        setSelectedCaseIds([]);
+        setFilters(snapshot.filters);
+        setOwnerScope(snapshot.ownerScope);
+        setModeScope(snapshot.modeScope);
+        setSearchValue(snapshot.searchValue);
+        setActiveViewId(snapshot.activeViewId);
+        setActiveSavedViewId(savedViewId);
+        setSaveViewDraftName("");
+        setSaveViewComposerOpen(false);
+        setSaveViewScopeDraft("personal");
+        setSaveViewTargetBranchIdDraft("");
+        setSaveViewTargetRoleDraft("");
+        setSaveViewDefaultDraft(false);
+        setSaveViewDefaultTouched(false);
+        setShowAdvancedFilters(
+            snapshot.modeScope !== "open"
+            || hasAdvancedCaseRefinements(snapshot.filters, { branchFilterEnabled }),
+        );
+    };
+
+    const createSavedViewMutation = useMutation({
+        mutationFn: async (payload: {
+            name: string;
+            isDefault: boolean;
+            scope: "personal" | "team";
+            targetBranchId: string;
+            targetRole: ConsoleRole | "";
+        }) => {
+            const response = await queueStateApi.createView({
+                surface: "cases",
+                name: payload.name,
+                scope: payload.scope,
+                version: 1,
+                query_state: buildCasesQueueStatePayload(currentQueueSnapshot, { branchFilterEnabled }),
+                is_default: payload.isDefault,
+                target_branch_id: payload.scope === "team" ? (payload.targetBranchId || null) : null,
+                target_role: payload.scope === "team" ? (payload.targetRole || null) : null,
+            });
+            return response.data;
+        },
+        onSuccess: async (savedView) => {
+            setActiveSavedViewId(savedView.id);
+            setSaveViewDraftName("");
+            setSaveViewComposerOpen(false);
+            setSaveViewScopeDraft("personal");
+            setSaveViewTargetBranchIdDraft("");
+            setSaveViewTargetRoleDraft("");
+            setSaveViewDefaultDraft(false);
+            setSaveViewDefaultTouched(false);
+            await queryClient.invalidateQueries({ queryKey: ["queue-state-views", "cases"] });
+            toast.success(`Вид «${savedView.name}» сохранён`);
+        },
+        onError: (error: unknown) => {
+            toast.error(getApiErrorMessage(error, "Не удалось сохранить вид"));
+        },
+    });
+
+    const updateSavedViewMutation = useMutation({
+        mutationFn: async (payload: {
+            viewId: string;
+            queryState?: Record<string, unknown>;
+            isDefault?: boolean;
+            targetBranchId?: string | null;
+            targetRole?: ConsoleRole | null;
+        }) => {
+            const response = await queueStateApi.updateView(payload.viewId, {
+                query_state: payload.queryState,
+                is_default: payload.isDefault,
+                target_branch_id: payload.targetBranchId,
+                target_role: payload.targetRole,
+            });
+            return response.data;
+        },
+        onSuccess: async (savedView) => {
+            setActiveSavedViewId(savedView.id);
+            setSelectedTeamTargetBranchIdDraft(savedView.target_branch_id ?? "");
+            setSelectedTeamTargetRoleDraft(savedView.target_role ?? "");
+            await queryClient.invalidateQueries({ queryKey: ["queue-state-views", "cases"] });
+            toast.success(`Вид «${savedView.name}» обновлён`);
+        },
+        onError: (error: unknown) => {
+            toast.error(getApiErrorMessage(error, "Не удалось обновить вид"));
+        },
+    });
+
+    const deleteSavedViewMutation = useMutation({
+        mutationFn: async (viewId: string) => {
+            await queueStateApi.deleteView(viewId);
+            return viewId;
+        },
+        onSuccess: async (viewId) => {
+            if (activeSavedViewId === viewId) {
+                setActiveSavedViewId(null);
+            }
+            await queryClient.invalidateQueries({ queryKey: ["queue-state-views", "cases"] });
+            toast.success("Вид удалён");
+        },
+        onError: (error: unknown) => {
+            toast.error(getApiErrorMessage(error, "Не удалось удалить вид"));
+        },
+    });
+    const savedViewMutationPending = createSavedViewMutation.isPending
+        || updateSavedViewMutation.isPending
+        || deleteSavedViewMutation.isPending;
+
+    const handleCopyQueueLink = async () => {
+        if (!queueShareHref || typeof window === "undefined") {
+            toast.error("Не удалось собрать ссылку на очередь");
+            return;
+        }
+        const absoluteHref = new URL(queueShareHref, window.location.origin).toString();
+        await copyText(absoluteHref);
+        toast.success("Ссылка на очередь скопирована");
+    };
+
+    const handleOpenSaveViewComposer = () => {
+        setSaveViewDraftName("");
+        const nextScope = canManageTeamPresets && selectedSavedViewScope === "team"
+            ? "team"
+            : "personal";
+        const nextTargetBranchId = nextScope === "team" ? (selectedSavedView?.target_branch_id ?? "") : "";
+        const nextTargetRole = nextScope === "team" ? (selectedSavedView?.target_role ?? "") : "";
+        setSaveViewScopeDraft(nextScope);
+        setSaveViewTargetBranchIdDraft(nextTargetBranchId);
+        setSaveViewTargetRoleDraft(nextTargetRole);
+        setSaveViewDefaultTouched(false);
+        setSaveViewDefaultDraft(!hasDefaultSavedViewForTarget(savedViews, {
+            scope: nextScope,
+            targetBranchId: nextTargetBranchId,
+            targetRole: nextTargetRole,
+        }));
+        setSaveViewComposerOpen(true);
+    };
+
+    const handleSaveCurrentView = () => {
+        const name = saveViewDraftName.trim();
+        if (!name) {
+            toast.error("Введите название вида");
+            return;
+        }
+        createSavedViewMutation.mutate({
+            name,
+            isDefault: saveViewDefaultDraft,
+            scope: saveViewScopeDraft,
+            targetBranchId: saveViewTargetBranchIdDraft,
+            targetRole: saveViewTargetRoleDraft,
+        });
+    };
+
+    const handleApplySavedView = (viewId: string) => {
+        const savedView = savedViews.find((item) => item.id === viewId);
+        const snapshot = readCasesQueueStateFromSavedView(savedView, {
+            branchFilterEnabled,
+            privilegedOwnerFilterVisible,
+        });
+        if (!savedView || !snapshot) {
+            toast.error("Не удалось прочитать сохранённый вид");
+            return;
+        }
+        applyCasesQueueSnapshot(snapshot, { savedViewId: savedView.id });
+        toast.success(`Применён вид «${savedView.name}»`);
+    };
+
+    const handleUpdateSavedView = () => {
+        if (!selectedSavedView || !canMutateSelectedSavedView) {
+            return;
+        }
+        updateSavedViewMutation.mutate({
+            viewId: selectedSavedView.id,
+            queryState: buildCasesQueueStatePayload(currentQueueSnapshot, { branchFilterEnabled }),
+            targetBranchId: selectedSavedViewScope === "team" ? (selectedTeamTargetBranchIdDraft || null) : undefined,
+            targetRole: selectedSavedViewScope === "team" ? (selectedTeamTargetRoleDraft || null) : undefined,
+        });
+    };
+
+    const handleToggleSavedViewDefault = () => {
+        if (!selectedSavedView || !canMutateSelectedSavedView) {
+            return;
+        }
+        updateSavedViewMutation.mutate({
+            viewId: selectedSavedView.id,
+            isDefault: !selectedSavedView.is_default,
+        });
+    };
+
+    const handleDeleteSavedView = () => {
+        if (!selectedSavedView || !canMutateSelectedSavedView) {
+            return;
+        }
+        const confirmed = window.confirm(`Удалить вид «${selectedSavedView.name}»?`);
+        if (!confirmed) {
+            return;
+        }
+        deleteSavedViewMutation.mutate(selectedSavedView.id);
+    };
+
     const bulkActionMutation = useMutation({
         mutationFn: async () => {
             if (selectedCaseIds.length === 0 || !bulkActionMode) {
@@ -1083,16 +1680,7 @@ export default function CaseList({
         const payload = {
             surface: "cases" as const,
             version: 1,
-            query_state: buildCasesQueueStatePayload(
-                {
-                    filters: effectiveFilters,
-                    ownerScope: effectiveOwnerScope,
-                    modeScope,
-                    activeViewId,
-                    searchValue: effectiveFilters.query ?? searchValue,
-                },
-                { branchFilterEnabled },
-            ),
+            query_state: buildCasesQueueStatePayload(currentQueueSnapshot, { branchFilterEnabled }),
         };
         const fingerprint = JSON.stringify(payload);
         if (lastSavedQueueStateRef.current === fingerprint) {
@@ -1111,14 +1699,10 @@ export default function CaseList({
         }, 250);
         return () => window.clearTimeout(timeoutId);
     }, [
-        activeViewId,
         api,
         branchFilterEnabled,
-        effectiveFilters,
-        effectiveOwnerScope,
+        currentQueueSnapshot,
         hasToken,
-        modeScope,
-        searchValue,
         stateReady,
         workspaceScope,
     ]);
@@ -1392,6 +1976,355 @@ export default function CaseList({
                             : "Поиск по открытым и закрытым заявкам. Очередные режимы доступны только в списке открытых заявок."}
                     </div>
                 )}
+                <div className="rounded-xl border border-border/60 bg-card/80 p-3" data-testid="cases-saved-views">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                Сохранённые виды
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                Личные виды и командные пресеты поверх текущего server-owned состояния.
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    void handleCopyQueueLink();
+                                }}
+                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                data-testid="cases-queue-copy-link"
+                            >
+                                Копировать ссылку
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleOpenSaveViewComposer}
+                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                disabled={savedViewMutationPending}
+                                data-testid="cases-saved-view-save"
+                            >
+                                Сохранить текущий
+                            </button>
+                            {selectedSavedView && savedViewDirty && (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleApplySavedView(selectedSavedView.id)}
+                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                        disabled={savedViewMutationPending}
+                                        data-testid="cases-saved-view-reapply"
+                                    >
+                                        Вернуть вид
+                                    </button>
+                                    {canMutateSelectedSavedView && (
+                                        <button
+                                            type="button"
+                                            onClick={handleUpdateSavedView}
+                                            className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary"
+                                            disabled={savedViewMutationPending}
+                                            data-testid="cases-saved-view-update"
+                                        >
+                                            Обновить вид
+                                        </button>
+                                    )}
+                                </>
+                            )}
+                            {selectedSavedView && !savedViewDirty && selectedTeamTargetingDirty && canMutateSelectedSavedView && (
+                                <button
+                                    type="button"
+                                    onClick={handleUpdateSavedView}
+                                    className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary"
+                                    disabled={savedViewMutationPending}
+                                    data-testid="cases-saved-view-update"
+                                >
+                                    Сохранить targeting
+                                </button>
+                            )}
+                            {selectedSavedView && canMutateSelectedSavedView && (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={handleToggleSavedViewDefault}
+                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                        disabled={savedViewMutationPending}
+                                        data-testid="cases-saved-view-default"
+                                    >
+                                        {selectedSavedView.is_default ? "Снять дефолт" : "Сделать дефолтом"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleDeleteSavedView}
+                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-destructive"
+                                        disabled={savedViewMutationPending}
+                                        data-testid="cases-saved-view-delete"
+                                    >
+                                        Удалить
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                        <select
+                            value={activeSavedViewId ?? ""}
+                            onChange={(event) => {
+                                const nextId = event.target.value;
+                                if (!nextId) {
+                                    setActiveSavedViewId(null);
+                                    return;
+                                }
+                                handleApplySavedView(nextId);
+                            }}
+                            className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                            disabled={savedViewsLoading || savedViewMutationPending}
+                            data-testid="cases-saved-view-select"
+                        >
+                            <option value="">
+                                {savedViewsLoading
+                                    ? "Загружаем виды..."
+                                    : savedViews.length === 0
+                                        ? "Нет сохранённых видов"
+                                        : "Выберите сохранённый вид"}
+                            </option>
+                            {teamSavedViews.length > 0 && (
+                                <optgroup label="Командные пресеты">
+                                    {teamSavedViews.map((view) => (
+                                        <option key={view.id} value={view.id}>
+                                            {buildSavedViewOptionLabel(view, branchMap)}
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            )}
+                            {personalSavedViews.length > 0 && (
+                                <optgroup label="Личные виды">
+                                    {personalSavedViews.map((view) => (
+                                        <option key={view.id} value={view.id}>
+                                            {buildSavedViewOptionLabel(view, branchMap)}
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            )}
+                        </select>
+                        {selectedSavedView && (
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
+                                    {selectedSavedView.name}
+                                </span>
+                                <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
+                                    {SAVED_VIEW_SCOPE_LABELS[selectedSavedViewScope]}
+                                </span>
+                                {selectedSavedViewBranchLabel && (
+                                    <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
+                                        {selectedSavedViewBranchLabel}
+                                    </span>
+                                )}
+                                {selectedSavedViewRoleLabel && (
+                                    <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
+                                        {selectedSavedViewRoleLabel}
+                                    </span>
+                                )}
+                                {selectedSavedView.is_default && (
+                                    <span className="rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary">
+                                        default
+                                    </span>
+                                )}
+                                {isTeamSavedView(selectedSavedView) && selectedSavedView.is_applicable === false && (
+                                    <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
+                                        вне текущего контура
+                                    </span>
+                                )}
+                                {savedViewDirty && (
+                                    <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-900">
+                                        изменён
+                                    </span>
+                                )}
+                                {selectedTeamTargetingDirty && (
+                                    <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-900">
+                                        targeting изменён
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    {selectedSavedViewScope === "team" && canManageTeamPresets && selectedSavedView && (
+                        <div className="mt-3 grid gap-2 border-t border-border/60 pt-3 sm:grid-cols-2">
+                            <label className="space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    Командный филиал
+                                </span>
+                                <select
+                                    value={selectedTeamTargetBranchIdDraft}
+                                    onChange={(event) => setSelectedTeamTargetBranchIdDraft(event.target.value)}
+                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                    disabled={savedViewMutationPending}
+                                    data-testid="cases-saved-view-team-branch"
+                                >
+                                    <option value="">Все филиалы</option>
+                                    {selectableBranches.map((branch) => (
+                                        <option key={branch.id} value={branch.id}>
+                                            {branch.name ?? branch.id}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                            <label className="space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    Командная роль
+                                </span>
+                                <select
+                                    value={selectedTeamTargetRoleDraft}
+                                    onChange={(event) => setSelectedTeamTargetRoleDraft(event.target.value as ConsoleRole | "")}
+                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                    disabled={savedViewMutationPending}
+                                    data-testid="cases-saved-view-team-role"
+                                >
+                                    <option value="">Все роли</option>
+                                    {savedViewTargetRoleOptions.map((role) => (
+                                        <option key={role} value={role}>
+                                            {SAVED_VIEW_ROLE_LABELS[role]}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                        </div>
+                    )}
+                    {saveViewComposerOpen && (
+                        <div className="mt-3 flex flex-col gap-3 border-t border-border/60 pt-3">
+                            <input
+                                ref={saveViewInputRef}
+                                type="text"
+                                value={saveViewDraftName}
+                                onChange={(event) => setSaveViewDraftName(event.target.value)}
+                                onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        handleSaveCurrentView();
+                                    }
+                                }}
+                                placeholder="Например: Мои открытые"
+                                className="min-w-[220px] flex-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                data-testid="cases-saved-view-name-input"
+                            />
+                            {canManageTeamPresets && (
+                                <div className="grid gap-2 sm:grid-cols-3">
+                                    <label className="space-y-1">
+                                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                            Scope
+                                        </span>
+                                        <select
+                                            value={saveViewScopeDraft}
+                                            onChange={(event) => setSaveViewScopeDraft(event.target.value as "personal" | "team")}
+                                            className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                            disabled={createSavedViewMutation.isPending}
+                                            data-testid="cases-saved-view-scope"
+                                        >
+                                            <option value="personal">Личный</option>
+                                            <option value="team">Команда</option>
+                                        </select>
+                                    </label>
+                                    {saveViewScopeDraft === "team" && (
+                                        <>
+                                            <label className="space-y-1">
+                                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                    Филиал
+                                                </span>
+                                                <select
+                                                    value={saveViewTargetBranchIdDraft}
+                                                    onChange={(event) => setSaveViewTargetBranchIdDraft(event.target.value)}
+                                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                    disabled={createSavedViewMutation.isPending}
+                                                    data-testid="cases-saved-view-target-branch"
+                                                >
+                                                    <option value="">Все филиалы</option>
+                                                    {selectableBranches.map((branch) => (
+                                                        <option key={branch.id} value={branch.id}>
+                                                            {branch.name ?? branch.id}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                            <label className="space-y-1">
+                                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                    Роль
+                                                </span>
+                                                <select
+                                                    value={saveViewTargetRoleDraft}
+                                                    onChange={(event) => setSaveViewTargetRoleDraft(event.target.value as ConsoleRole | "")}
+                                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                    disabled={createSavedViewMutation.isPending}
+                                                    data-testid="cases-saved-view-target-role"
+                                                >
+                                                    <option value="">Все роли</option>
+                                                    {savedViewTargetRoleOptions.map((role) => (
+                                                        <option key={role} value={role}>
+                                                            {SAVED_VIEW_ROLE_LABELS[role]}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <input
+                                    type="checkbox"
+                                    checked={saveViewDefaultDraft}
+                                    onChange={(event) => {
+                                        setSaveViewDefaultTouched(true);
+                                        setSaveViewDefaultDraft(event.target.checked);
+                                    }}
+                                    className="h-4 w-4 rounded border-border/60"
+                                    disabled={createSavedViewMutation.isPending}
+                                    data-testid="cases-saved-view-default-checkbox"
+                                />
+                                <span>
+                                    {saveViewScopeDraft === "team"
+                                        ? "Сделать дефолтным командным пресетом"
+                                        : "Сделать дефолтным личным видом"}
+                                </span>
+                                {!saveViewDefaultTouched && (
+                                    <span className="text-muted-foreground/80">
+                                        {suggestedSaveViewDefault ? "рекомендуется" : "по желанию"}
+                                    </span>
+                                )}
+                            </label>
+                            <div className="text-xs text-muted-foreground">
+                                {saveViewScopeDraft === "team"
+                                    ? `Командных пресетов в этом targeting: ${matchingScopeSavedViewCount}`
+                                    : `Личных видов: ${matchingScopeSavedViewCount}`}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleSaveCurrentView}
+                                    className="rounded-full border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary"
+                                    disabled={createSavedViewMutation.isPending}
+                                    data-testid="cases-saved-view-name-submit"
+                                >
+                                    {createSavedViewMutation.isPending ? "Сохраняем..." : "Сохранить"}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setSaveViewDraftName("");
+                                        setSaveViewComposerOpen(false);
+                                        setSaveViewScopeDraft("personal");
+                                        setSaveViewTargetBranchIdDraft("");
+                                        setSaveViewTargetRoleDraft("");
+                                        setSaveViewDefaultDraft(false);
+                                        setSaveViewDefaultTouched(false);
+                                    }}
+                                    className="rounded-full border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                    disabled={createSavedViewMutation.isPending}
+                                >
+                                    Отмена
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
                 {isCompact ? (
                     <div className="grid w-full gap-3" data-testid="cases-filter-compact-layout">
                         <input
@@ -1493,6 +2426,18 @@ export default function CaseList({
                     {modeScope === "open" && activeViewId !== "all_open" && (
                         <span className="rounded-full border border-border/60 bg-card px-2 py-1 font-semibold text-foreground/80">
                             {activeQueueView?.label ?? "Все открытые"}
+                        </span>
+                    )}
+                    {selectedSavedView && (
+                        <span
+                            className={`rounded-full border px-2 py-1 font-semibold ${
+                                savedViewDirty
+                                    ? "border-amber-300 bg-amber-100 text-amber-900"
+                                    : "border-border/60 bg-card text-foreground/80"
+                            }`}
+                            data-testid="cases-saved-view-summary"
+                        >
+                            Вид: {selectedSavedView.name}{savedViewDirty ? " · изменён" : ""}
                         </span>
                     )}
                     {effectiveFilters.query && (

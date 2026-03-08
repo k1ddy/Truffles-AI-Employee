@@ -43,6 +43,8 @@ def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
 
     expected_methods = {
         "/queue-state/current": {"get", "put"},
+        "/queue-state/views": {"get", "post"},
+        "/queue-state/views/{view_id}": {"get", "patch", "delete"},
         "/calendar/specialists": {"get", "post"},
         "/calendar/specialists/{specialist_id}": {"patch"},
         "/calendar/specialists/{specialist_id}/enable": {"post"},
@@ -86,6 +88,10 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
         ("BookingsListResponse",),
         ("ConsoleQueueStateCurrentRequest",),
         ("ConsoleQueueStateCurrentResponse",),
+        ("ConsoleSavedView",),
+        ("ConsoleSavedViewListResponse",),
+        ("ConsoleSavedViewCreateRequest",),
+        ("ConsoleSavedViewUpdateRequest",),
     ]
     for aliases in required_schema_aliases:
         assert any(name in schemas for name in aliases), (
@@ -213,6 +219,57 @@ def test_queue_state_current_response_contract_exposes_restore_payload() -> None
     assert (properties.get("query_state") or {}).get("type") == "object"
     assert "updated_at" in properties
     assert _has_string_type(properties.get("updated_at") or {})
+
+
+def test_queue_state_saved_views_contract_exposes_catalog_payload() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    saved_view_schema = schemas.get("ConsoleSavedView") or {}
+    properties = saved_view_schema.get("properties") or {}
+
+    assert "id" in properties
+    assert _has_string_type(properties.get("id") or {})
+    assert "surface" in properties
+    assert _has_string_type(properties.get("surface") or {})
+    assert "scope" in properties
+    assert _has_string_type(properties.get("scope") or {})
+    assert "name" in properties
+    assert _has_string_type(properties.get("name") or {})
+    assert "version" in properties
+    assert _has_integer_type(properties.get("version") or {})
+    assert "query_state" in properties
+    assert (properties.get("query_state") or {}).get("type") == "object"
+    assert "is_default" in properties
+    assert (properties.get("is_default") or {}).get("type") == "boolean"
+    assert "is_applicable" in properties
+    assert (properties.get("is_applicable") or {}).get("type") == "boolean"
+    assert "created_by_agent_id" in properties
+    assert _has_string_type(properties.get("created_by_agent_id") or {})
+    assert "target_branch_id" in properties
+    assert _has_string_type(properties.get("target_branch_id") or {})
+    assert "target_role" in properties
+    assert _has_string_type(properties.get("target_role") or {})
+
+
+def test_queue_state_saved_view_mutation_contract_exposes_managed_scope_fields() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+
+    create_schema = schemas.get("ConsoleSavedViewCreateRequest") or {}
+    create_props = create_schema.get("properties") or {}
+    assert "scope" in create_props
+    assert _has_string_type(create_props.get("scope") or {})
+    assert "target_branch_id" in create_props
+    assert _has_string_type(create_props.get("target_branch_id") or {})
+    assert "target_role" in create_props
+    assert _has_string_type(create_props.get("target_role") or {})
+
+    update_schema = schemas.get("ConsoleSavedViewUpdateRequest") or {}
+    update_props = update_schema.get("properties") or {}
+    assert "target_branch_id" in update_props
+    assert _has_string_type(update_props.get("target_branch_id") or {})
+    assert "target_role" in update_props
+    assert _has_string_type(update_props.get("target_role") or {})
 
 
 def test_bookings_list_response_contract_exposes_cursor_and_has_more() -> None:
