@@ -137,7 +137,7 @@ async def test_register_booking_no_show_followup_is_idempotent_when_already_clos
 
 
 @pytest.mark.asyncio
-async def test_register_booking_no_show_followup_allows_rebooked_without_link(monkeypatch):
+async def test_register_booking_no_show_followup_requires_rebook_link(monkeypatch):
     booking_id = uuid4()
     context = SimpleNamespace(
         client=SimpleNamespace(id=uuid4()),
@@ -145,33 +145,22 @@ async def test_register_booking_no_show_followup_allows_rebooked_without_link(mo
     )
     booking = SimpleNamespace(id=booking_id, status="NO_SHOW", version=1)
     db = Mock()
-    audit_query = Mock()
-    audit_query.filter.return_value = audit_query
-    audit_query.order_by.return_value = audit_query
-    audit_query.first.return_value = None
-    db.query.side_effect = lambda model: audit_query if model is calendar_router.AppointmentAudit else Mock()
-
     monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
     monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: booking)
-    monkeypatch.setattr(
-        calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: _booking_response_payload(str(booking_id)),
-    )
 
-    response = await calendar_router.register_booking_no_show_followup(
-        request=SimpleNamespace(),
-        booking_id=str(booking_id),
-        data=calendar_router.BookingNoShowFollowUpRequest(result="rebooked"),
-        db=db,
-    )
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await calendar_router.register_booking_no_show_followup(
+            request=SimpleNamespace(),
+            booking_id=str(booking_id),
+            data=calendar_router.BookingNoShowFollowUpRequest(result="rebooked"),
+            db=db,
+        )
 
-    assert response.success is True
-    audit_row = db.add.call_args.args[0]
-    assert audit_row.payload.get("result") == "rebooked"
-    assert audit_row.payload.get("rebooked_appointment_id") is None
-    db.commit.assert_called_once()
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"
+    db.add.assert_not_called()
+    db.commit.assert_not_called()
 
 
 @pytest.mark.asyncio

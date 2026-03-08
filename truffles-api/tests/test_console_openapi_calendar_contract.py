@@ -119,6 +119,19 @@ def test_booking_status_update_contract_uses_simple_terminal_statuses() -> None:
         assert status_schema.get("type") == "string"
 
 
+def test_booking_create_contract_requires_operator_grade_customer_fields() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    booking_create = schemas.get("BookingCreate") or {}
+    properties = booking_create.get("properties") or {}
+    required = set(booking_create.get("required") or [])
+
+    assert {"specialist_id", "start_at", "end_at", "customer_name", "customer_phone", "service_type"} <= required
+    assert (properties.get("customer_name") or {}).get("type") == "string"
+    assert (properties.get("customer_phone") or {}).get("type") == "string"
+    assert (properties.get("service_type") or {}).get("type") == "string"
+
+
 def test_booking_response_contract_exposes_no_show_followup_flag() -> None:
     spec = _load_console_contract()
     schemas = ((spec.get("components") or {}).get("schemas")) or {}
@@ -201,6 +214,19 @@ def test_booking_follow_up_governance_contract_exposes_request_body() -> None:
         or {}
     )
     assert (request_schema.get("$ref") or "").endswith("/BookingFollowUpGovernanceRequest")
+
+
+def test_booking_no_show_follow_up_contract_exposes_rebook_link_field() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    no_show_schema = schemas.get("BookingNoShowFollowUpRequest") or {}
+    properties = no_show_schema.get("properties") or {}
+
+    assert "result" in properties
+    assert "rebooked_appointment_id" in properties
+    assert _has_string_type(properties.get("rebooked_appointment_id") or {})
+    assert "note" in properties
+    assert _has_string_type(properties.get("note") or {})
 
 
 def test_queue_state_current_contract_exposes_surface_and_scope_params() -> None:

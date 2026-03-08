@@ -205,6 +205,7 @@
 | `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave33-a1.md` | Wave33 Task Package for Inbox first-screen decomposition: keep only triage controls inline and move saved views/filters/view/bulk flows into secondary surfaces | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave34-a1.md` | Wave34 Task Package for Calendar first-screen decomposition: keep queue triage primary and move filters/saved views/governance/scheduling into secondary surfaces | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave35-a1.md` | Wave35 Task Package for deterministic operator workflow/layout proof across rebuilt Inbox/Calendar secondary surfaces and medium-width layouts | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave36-a1.md` | Wave36 Task Package for full Calendar operator-grade rebuild: plain-language copy, sanitized follow-up ownership, guided booking composer, inline validation, visual inspections, and misuse-proof testing | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |

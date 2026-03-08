@@ -7573,19 +7573,19 @@ components:
           format: date-time
           title: End At
         customer_name:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
+          maxLength: 255
+          minLength: 1
           title: Customer Name
         customer_phone:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
+          maxLength: 32
+          minLength: 7
           title: Customer Phone
         service_type:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
+          maxLength: 255
+          minLength: 1
           title: Service Type
         notes:
           anyOf:
@@ -7607,6 +7607,9 @@ components:
       - specialist_id
       - start_at
       - end_at
+      - customer_name
+      - customer_phone
+      - service_type
       title: BookingCreate
     BookingFollowUpGovernanceRequest:
       properties:
