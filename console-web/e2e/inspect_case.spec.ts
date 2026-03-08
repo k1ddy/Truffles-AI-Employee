@@ -20,8 +20,82 @@ const SPECIALIST_ID = '77777777-7777-4777-8777-777777777777';
 const TEXT_MACRO_ID = 'abababab-abab-4bab-8bab-abababababab';
 const ACTION_MACRO_ID = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
 const CREATED_MACRO_ID = 'efefefef-efef-4fef-8fef-efefefefefef';
+const CASE_PERSONAL_VIEW_ID = 'case-personal-view-1';
+const CASE_TEAM_VIEW_ID = 'case-team-view-1';
+const CASE_CREATED_TEAM_VIEW_ID = 'cases-created-team-view-1';
+const CALENDAR_PERSONAL_VIEW_ID = 'calendar-personal-view-1';
+const CALENDAR_TEAM_VIEW_ID = 'calendar-team-view-1';
 let lastMacroCreatePayload: unknown = null;
 let lastMacroExecutePayload: unknown = null;
+
+type MockViewerRole = 'admin' | 'manager' | 'owner';
+type MockQueueSurface = 'cases' | 'calendar';
+type MockSavedView = {
+    id: string;
+    surface: MockQueueSurface;
+    name: string;
+    query_state: Record<string, unknown>;
+    is_default: boolean;
+    scope: 'personal' | 'team';
+    target_branch_id: string | null;
+    target_role: MockViewerRole | null;
+};
+type MockQueueStateRecord = {
+    found: boolean;
+    surface: MockQueueSurface;
+    query_state?: Record<string, unknown> | null;
+    updated_at?: string | null;
+    case_id?: string | null;
+    conversation_id?: string | null;
+    version?: number;
+};
+
+function deepClone<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function isSavedViewApplicable(view: MockSavedView, viewerRole: MockViewerRole) {
+    if (view.scope !== 'team') {
+        return true;
+    }
+    const branchMatches = !view.target_branch_id || view.target_branch_id === BRANCH_ID;
+    const roleMatches = !view.target_role || view.target_role === viewerRole;
+    return branchMatches && roleMatches;
+}
+
+function toSavedViewResponse(view: MockSavedView, viewerRole: MockViewerRole) {
+    return {
+        id: view.id,
+        name: view.name,
+        surface: view.surface,
+        query_state: deepClone(view.query_state),
+        is_default: view.is_default,
+        scope: view.scope,
+        target_branch_id: view.target_branch_id,
+        target_role: view.target_role,
+        is_applicable: isSavedViewApplicable(view, viewerRole),
+    };
+}
+
+async function installClipboardCapture(page: import('@playwright/test').Page) {
+    const install = () => {
+        (window as Window & { __copiedText?: string }).__copiedText = '';
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: {
+                writeText: async (text: string) => {
+                    (window as Window & { __copiedText?: string }).__copiedText = text;
+                },
+            },
+        });
+    };
+    await page.addInitScript(install);
+    await page.evaluate(install);
+}
+
+async function readCopiedClipboardText(page: import('@playwright/test').Page) {
+    return page.evaluate(() => (window as Window & { __copiedText?: string }).__copiedText ?? '');
+}
 
 function toJsonResponse(route: import('@playwright/test').Route, payload: unknown) {
     return route.fulfill({
@@ -61,13 +135,304 @@ async function closeCasesSecondaryPanel(page: import('@playwright/test').Page) {
         await expect(panel).toHaveCount(0);
     }
 }
+
+async function openCalendarSecondaryPanel(
+    page: import('@playwright/test').Page,
+    section: 'filters' | 'saved_views' | 'scheduling',
+) {
+    const panel = page.getByTestId('calendar-secondary-panel');
+    if (!(await panel.isVisible().catch(() => false))) {
+        const toggleBySection: Record<typeof section, string> = {
+            filters: 'calendar-secondary-panel-toggle',
+            saved_views: 'calendar-saved-views-panel-toggle',
+            scheduling: 'calendar-scheduling-panel-toggle',
+        };
+        await page.getByTestId(toggleBySection[section]).click({ force: true });
+        await expect(panel).toBeVisible({ timeout: 15000 });
+    }
+    await page.getByTestId(`calendar-secondary-tab-${section}`).click({ force: true });
+}
+
+async function closeCalendarSecondaryPanel(page: import('@playwright/test').Page) {
+    const panel = page.getByTestId('calendar-secondary-panel');
+    if (await panel.isVisible().catch(() => false)) {
+        await page.getByTestId('calendar-secondary-panel-close').click({ force: true });
+        await expect(panel).toHaveCount(0);
+    }
+}
+
+async function closeCalendarBookingPanel(page: import('@playwright/test').Page) {
+    const panel = page.getByTestId('calendar-booking-panel');
+    if (await panel.isVisible().catch(() => false)) {
+        await page.getByTestId('calendar-booking-panel-close').evaluate((element) => {
+            (element as HTMLButtonElement).click();
+        });
+        await expect.poll(() => panel.isVisible().catch(() => false)).toBe(false);
+    }
+}
+
 async function installConsoleMocks(
     page: import('@playwright/test').Page,
-    options?: { viewerRole?: 'admin' | 'manager' | 'owner' },
+    options?: { viewerRole?: MockViewerRole },
 ) {
     lastMacroCreatePayload = null;
     lastMacroExecutePayload = null;
     const viewerRole = options?.viewerRole ?? 'admin';
+    const savedViewStore: MockSavedView[] = [
+        {
+            id: CASE_PERSONAL_VIEW_ID,
+            surface: 'cases',
+            name: 'Мои Айгуль',
+            query_state: {
+                mode_scope: 'open',
+                base_view: 'all_open',
+                owner_scope: {
+                    kind: 'mine',
+                    agent_id: null,
+                },
+                refinements: {
+                    branch_id: null,
+                    query: 'Айгуль',
+                    has_delivery_error: false,
+                    has_pending_outbox: false,
+                    has_human_lock: false,
+                    date_from: null,
+                    date_to: null,
+                    sort_by: 'created_at',
+                },
+            },
+            is_default: false,
+            scope: 'personal',
+            target_branch_id: null,
+            target_role: null,
+        },
+        {
+            id: CASE_TEAM_VIEW_ID,
+            surface: 'cases',
+            name: 'Команда · Ждём клиента',
+            query_state: {
+                mode_scope: 'open',
+                base_view: 'waiting_client',
+                owner_scope: {
+                    kind: 'all',
+                    agent_id: null,
+                },
+                refinements: {
+                    branch_id: null,
+                    query: null,
+                    has_delivery_error: false,
+                    has_pending_outbox: false,
+                    has_human_lock: false,
+                    date_from: null,
+                    date_to: null,
+                    sort_by: 'sla',
+                },
+            },
+            is_default: false,
+            scope: 'team',
+            target_branch_id: BRANCH_ID,
+            target_role: null,
+        },
+        {
+            id: CALENDAR_PERSONAL_VIEW_ID,
+            surface: 'calendar',
+            name: 'Неявки Айгуль',
+            query_state: {
+                selected_date: '2026-03-06',
+                queue_mode: 'ops',
+                queue_lane: 'attention',
+                status_filter: 'no_show',
+                query: 'Айгуль',
+                follow_up_owner_id: '',
+                follow_up_overdue_only: false,
+            },
+            is_default: false,
+            scope: 'personal',
+            target_branch_id: null,
+            target_role: null,
+        },
+        {
+            id: CALENDAR_TEAM_VIEW_ID,
+            surface: 'calendar',
+            name: 'Команда · Follow-up',
+            query_state: {
+                selected_date: '2026-03-06',
+                queue_mode: 'ops',
+                queue_lane: 'attention',
+                status_filter: 'no_show',
+                query: null,
+                follow_up_owner_id: AGENT_ID,
+                follow_up_overdue_only: true,
+            },
+            is_default: false,
+            scope: 'team',
+            target_branch_id: BRANCH_ID,
+            target_role: 'manager',
+        },
+    ];
+    const queueStateCurrentStore: Record<MockQueueSurface, MockQueueStateRecord> = {
+        cases: {
+            found: false,
+            surface: 'cases',
+            query_state: null,
+            updated_at: null,
+            version: 1,
+        },
+        calendar: {
+            found: false,
+            surface: 'calendar',
+            query_state: null,
+            updated_at: null,
+            version: 1,
+        },
+    };
+    const nextSavedViewId = (surface: MockQueueSurface) => {
+        if (surface === 'cases' && !savedViewStore.some((view) => view.id === CASE_CREATED_TEAM_VIEW_ID)) {
+            return CASE_CREATED_TEAM_VIEW_ID;
+        }
+        return `${surface}-created-view-${savedViewStore.filter((view) => view.surface === surface).length + 1}`;
+    };
+    const findSavedView = (viewId: string) => savedViewStore.find((view) => view.id === viewId) ?? null;
+    const clearSavedViewDefaultsForTarget = (view: MockSavedView) => {
+        if (!view.is_default) {
+            return;
+        }
+        for (const item of savedViewStore) {
+            if (item.id === view.id) {
+                continue;
+            }
+            const sameSurface = item.surface === view.surface;
+            const sameScope = item.scope === view.scope;
+            const sameBranch = (item.target_branch_id ?? null) === (view.target_branch_id ?? null);
+            const sameRole = (item.target_role ?? null) === (view.target_role ?? null);
+            if (sameSurface && sameScope && sameBranch && sameRole) {
+                item.is_default = false;
+            }
+        }
+    };
+    await page.route('**/api/proxy/queue-state/current**', async (route) => {
+        const method = route.request().method();
+        if (method !== 'GET' && method !== 'PUT') {
+            await route.fallback();
+            return;
+        }
+        if (method === 'GET') {
+            const url = new URL(route.request().url());
+            const surface = (url.searchParams.get('surface') === 'calendar' ? 'calendar' : 'cases') as MockQueueSurface;
+            await toJsonResponse(route, deepClone(queueStateCurrentStore[surface]));
+            return;
+        }
+        const payload = route.request().postDataJSON() as {
+            surface?: MockQueueSurface;
+            query_state?: Record<string, unknown> | null;
+            case_id?: string | null;
+            conversation_id?: string | null;
+            version?: number;
+        } | null;
+        const surface = payload?.surface === 'calendar' ? 'calendar' : 'cases';
+        queueStateCurrentStore[surface] = {
+            found: true,
+            surface,
+            query_state: deepClone(payload?.query_state ?? null),
+            case_id: payload?.case_id ?? null,
+            conversation_id: payload?.conversation_id ?? null,
+            version: payload?.version ?? 1,
+            updated_at: '2026-03-08T12:35:01+05:00',
+        };
+        await toJsonResponse(route, { success: true, ...deepClone(queueStateCurrentStore[surface]) });
+    });
+    await page.route(/.*\/api\/proxy\/queue-state\/views\/[^/?]+(?:\?.*)?$/, async (route) => {
+        const method = route.request().method();
+        const viewId = route.request().url().split('/').pop()?.split('?')[0] ?? '';
+        const view = findSavedView(viewId);
+        if (!view) {
+            await route.fulfill({
+                status: 404,
+                contentType: 'application/json',
+                body: JSON.stringify({ error: { code: 'NOT_FOUND' } }),
+            });
+            return;
+        }
+        if (method === 'GET') {
+            await toJsonResponse(route, toSavedViewResponse(view, viewerRole));
+            return;
+        }
+        if (method === 'PATCH') {
+            const payload = route.request().postDataJSON() as {
+                query_state?: Record<string, unknown>;
+                is_default?: boolean;
+                target_branch_id?: string | null;
+                target_role?: MockViewerRole | null;
+                name?: string;
+            } | null;
+            if (payload && Object.prototype.hasOwnProperty.call(payload, 'query_state')) {
+                view.query_state = deepClone(payload.query_state ?? {});
+            }
+            if (payload && Object.prototype.hasOwnProperty.call(payload, 'name') && typeof payload.name === 'string') {
+                view.name = payload.name;
+            }
+            if (payload && Object.prototype.hasOwnProperty.call(payload, 'target_branch_id')) {
+                view.target_branch_id = payload.target_branch_id || null;
+            }
+            if (payload && Object.prototype.hasOwnProperty.call(payload, 'target_role')) {
+                view.target_role = payload.target_role || null;
+            }
+            if (payload && Object.prototype.hasOwnProperty.call(payload, 'is_default')) {
+                view.is_default = Boolean(payload.is_default);
+            }
+            clearSavedViewDefaultsForTarget(view);
+            await toJsonResponse(route, toSavedViewResponse(view, viewerRole));
+            return;
+        }
+        if (method === 'DELETE') {
+            const index = savedViewStore.findIndex((item) => item.id === viewId);
+            if (index >= 0) {
+                savedViewStore.splice(index, 1);
+            }
+            await toJsonResponse(route, { success: true });
+            return;
+        }
+        await route.fallback();
+    });
+    await page.route(/.*\/api\/proxy\/queue-state\/views(?:\?.*)?$/, async (route) => {
+        const method = route.request().method();
+        if (method === 'GET') {
+            const url = new URL(route.request().url());
+            const surface = (url.searchParams.get('surface') === 'calendar' ? 'calendar' : 'cases') as MockQueueSurface;
+            const items = savedViewStore
+                .filter((view) => view.surface === surface)
+                .map((view) => toSavedViewResponse(view, viewerRole));
+            await toJsonResponse(route, { items });
+            return;
+        }
+        if (method === 'POST') {
+            const payload = route.request().postDataJSON() as {
+                surface?: MockQueueSurface;
+                name?: string;
+                query_state?: Record<string, unknown>;
+                is_default?: boolean;
+                scope?: 'personal' | 'team';
+                target_branch_id?: string | null;
+                target_role?: MockViewerRole | null;
+            } | null;
+            const surface = payload?.surface === 'calendar' ? 'calendar' : 'cases';
+            const view: MockSavedView = {
+                id: nextSavedViewId(surface),
+                surface,
+                name: payload?.name ?? 'Новый вид',
+                query_state: deepClone(payload?.query_state ?? {}),
+                is_default: Boolean(payload?.is_default),
+                scope: payload?.scope === 'team' ? 'team' : 'personal',
+                target_branch_id: payload?.scope === 'team' ? (payload?.target_branch_id || null) : null,
+                target_role: payload?.scope === 'team' ? (payload?.target_role || null) : null,
+            };
+            savedViewStore.push(view);
+            clearSavedViewDefaultsForTarget(view);
+            await toJsonResponse(route, toSavedViewResponse(view, viewerRole));
+            return;
+        }
+        await route.fallback();
+    });
     await page.route('**/api/auth/session**', async (route) => {
         if (route.request().method() !== 'GET') {
             await route.fallback();
@@ -142,6 +507,30 @@ async function installConsoleMocks(
             branch_selection_required: false,
             selected_company_id: COMPANY_ID,
             selected_branch_id: BRANCH_ID,
+        });
+    });
+    await page.route('**/api/proxy/agents', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [
+                {
+                    id: AGENT_ID,
+                    name: 'Manager',
+                    role: 'manager',
+                    branch_id: BRANCH_ID,
+                    is_active: true,
+                },
+                {
+                    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    name: 'Manager Two',
+                    role: 'manager',
+                    branch_id: BRANCH_ID,
+                    is_active: true,
+                },
+            ],
         });
     });
     const caseState = {
@@ -292,6 +681,10 @@ async function installConsoleMocks(
         no_show_followup_closed_at: null,
         no_show_followup_closed_by: null,
         no_show_followup_rebooked_appointment_id: null,
+        follow_up_owner_id: null,
+        follow_up_owner_name: null,
+        follow_up_due_at: null,
+        follow_up_overdue: false,
         conversation_id: CONVERSATION_ID,
         case_id: CASE_ID,
         needs_action: true,
@@ -499,6 +892,7 @@ async function installConsoleMocks(
                     branch_id: BRANCH_ID,
                     is_current: false,
                     open_case_count: 2,
+                    assignment_eligible: true,
                 },
                 {
                     agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -507,6 +901,7 @@ async function installConsoleMocks(
                     branch_id: BRANCH_ID,
                     is_current: false,
                     open_case_count: 1,
+                    assignment_eligible: true,
                 },
             ],
         });
@@ -692,6 +1087,7 @@ async function installConsoleMocks(
                     branch_id: BRANCH_ID,
                     is_current: true,
                     open_case_count: 2,
+                    assignment_eligible: true,
                 },
                 {
                     agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -700,6 +1096,41 @@ async function installConsoleMocks(
                     branch_id: BRANCH_ID,
                     is_current: false,
                     open_case_count: 1,
+                    assignment_eligible: true,
+                },
+                {
+                    agent_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                    agent_name: 'Paused Manager',
+                    role: 'manager',
+                    branch_id: BRANCH_ID,
+                    is_current: false,
+                    open_case_count: 0,
+                    routing_status: 'paused',
+                    assignment_eligible: false,
+                    assignment_block_reason_code: 'paused',
+                    max_open_case_count: 5,
+                },
+                {
+                    agent_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+                    agent_name: 'Follow-up Only',
+                    role: 'manager',
+                    branch_id: BRANCH_ID,
+                    is_current: false,
+                    open_case_count: 1,
+                    routing_status: 'follow_up_only',
+                    assignment_eligible: false,
+                    assignment_block_reason_code: 'follow_up_only',
+                },
+                {
+                    agent_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+                    agent_name: 'At Capacity',
+                    role: 'manager',
+                    branch_id: BRANCH_ID,
+                    is_current: false,
+                    open_case_count: 5,
+                    assignment_eligible: false,
+                    assignment_block_reason_code: 'at_capacity',
+                    max_open_case_count: 5,
                 },
             ],
             routing: {
@@ -924,6 +1355,29 @@ async function installConsoleMocks(
             case_effects: caseEffects,
         });
     });
+    await page.route(`**/api/proxy/calendar/bookings/${bookingState.id}/follow-up-governance`, async (route) => {
+        if (route.request().method() !== 'POST') {
+            await route.fallback();
+            return;
+        }
+        const payload = route.request().postDataJSON() as {
+            owner_agent_id?: string | null;
+            due_at?: string | null;
+        } | null;
+        bookingState.follow_up_owner_id = payload?.owner_agent_id ?? null;
+        bookingState.follow_up_owner_name = bookingState.follow_up_owner_id === AGENT_ID
+            ? 'Manager'
+            : bookingState.follow_up_owner_id === 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+                ? 'Manager Two'
+                : null;
+        bookingState.follow_up_due_at = payload?.due_at ?? null;
+        bookingState.follow_up_overdue = false;
+        await toJsonResponse(route, {
+            success: true,
+            booking: { ...bookingState },
+            case_effects: [],
+        });
+    });
 }
 
 async function gotoWithRetry(page: import('@playwright/test').Page, url: string, attempts = 3) {
@@ -1034,7 +1488,10 @@ async function assertCalendarQueueSurface(page: import('@playwright/test').Page)
     await expect(page.getByTestId('calendar-page')).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId('calendar-queue-controls')).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId('calendar-queue-lane-attention')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('calendar-secondary-panel-toggle')).toBeVisible({ timeout: 20000 });
+    await openCalendarSecondaryPanel(page, 'filters');
     await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
+    await closeCalendarSecondaryPanel(page);
     const screenshotPath = path.resolve('calendar_no_cases_context.png');
     await page.screenshot({ path: screenshotPath, fullPage: true });
     console.log(`Calendar no-cases screenshot saved to: ${screenshotPath}`);
@@ -1533,8 +1990,11 @@ test('inspect first case', async ({ page }) => {
         await expect(page.getByTestId('calendar-queue-controls')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-mode-ops')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-queue-mode-history')).toBeVisible({ timeout: 20000 });
-        await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
+        await expect(page.getByTestId('calendar-secondary-panel-toggle')).toBeVisible({ timeout: 20000 });
         await expect(page.getByTestId('calendar-history-all-dates-hint')).toBeVisible({ timeout: 20000 });
+        await openCalendarSecondaryPanel(page, 'filters');
+        await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
+        await closeCalendarSecondaryPanel(page);
 
         const calendarScreenshotPath = path.resolve('calendar_case_context.png');
         await page.screenshot({ path: calendarScreenshotPath, fullPage: true });
@@ -1545,7 +2005,8 @@ test('inspect first case', async ({ page }) => {
             await openLinkedCase.click();
             await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
             await expect(page.locator('[data-testid=\"case-bookings-panel\"]:visible').first()).toBeVisible({ timeout: 20000 });
-            await expect(page).toHaveURL(new RegExp(`/cases/${CASE_ID}\\?panel=bookings$`));
+            await expect.poll(() => new URL(page.url()).pathname).toBe(`/cases/${CASE_ID}`);
+            await expect.poll(() => new URL(page.url()).searchParams.get('panel')).toBe('bookings');
         }
     } else {
         console.log('case-open-calendar button is not visible for this case.');
@@ -1754,6 +2215,175 @@ test('booking no-show reopens resolved case and preserves case-booking semantics
     await expect(page.getByTestId('case-business-status')).toContainText('Нужен ответ', { timeout: 15000 });
     await expect(page.getByTestId('case-next-action')).toContainText('Ответить до', { timeout: 15000 });
     await expect(page.getByTestId('case-booking-summary')).toContainText('Клиент не пришел', { timeout: 15000 });
+});
+
+test('calendar secondary panels isolate filters and booking actions', async ({ page }) => {
+    test.skip(!useRouteMocks, 'Wave34 calendar decomposition is covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page);
+    await ensureLoggedIn(page);
+    await gotoWithRetry(page, `${baseURL}/calendar`);
+    await expect(page.getByTestId('calendar-page')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('calendar-queue-controls')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('calendar-queue-status-filter')).toHaveCount(0);
+    await expect(page.getByTestId('calendar-follow-up-governance-card')).toHaveCount(0);
+
+    await openCalendarSecondaryPanel(page, 'filters');
+    await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
+    await closeCalendarSecondaryPanel(page);
+
+    await page.getByTestId('calendar-booking-open-actions').first().click({ force: true });
+    const bookingPanel = page.getByTestId('calendar-booking-panel');
+    await expect(bookingPanel).toBeVisible({ timeout: 20000 });
+    await bookingPanel.getByRole('button', { name: 'Не пришел', exact: true }).click();
+    await expect(bookingPanel.getByTestId('calendar-follow-up-governance-owner')).toBeVisible({ timeout: 20000 });
+    await expect(bookingPanel.getByRole('button', { name: 'Связались', exact: true })).toBeVisible({ timeout: 20000 });
+
+    await closeCalendarBookingPanel(page);
+    await expect(page.getByTestId('calendar-follow-up-governance-card')).toHaveCount(0);
+});
+
+test('saved views, team presets, and share urls stay reachable from inbox secondary surfaces', async ({ page }) => {
+    test.skip(!useRouteMocks, 'Wave35 saved views/team presets/share URLs are covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page, { viewerRole: 'owner' });
+    await ensureLoggedIn(page);
+    await installClipboardCapture(page);
+    await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
+    await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
+
+    await openCasesSecondaryPanel(page, 'saved_views');
+    const savedViewSelect = page.getByTestId('cases-saved-view-select');
+    await savedViewSelect.selectOption(CASE_PERSONAL_VIEW_ID);
+    await expect(page.getByText('Применён вид «Мои Айгуль»')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('cases-saved-view-summary')).toContainText('Мои Айгуль', { timeout: 15000 });
+    await expect(page.getByTestId('cases-search-summary')).toContainText('Айгуль', { timeout: 15000 });
+    await expect(page.getByTestId('cases-owner-summary')).toContainText('Мои заявки', { timeout: 15000 });
+    await expect.poll(() => new URL(page.url()).searchParams.get('view_id')).toBe(CASE_PERSONAL_VIEW_ID);
+    await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe('Айгуль');
+
+    await page.getByTestId('cases-saved-view-save').click({ force: true });
+    await page.getByTestId('cases-saved-view-name-input').fill('Команда · Айгуль');
+    await page.getByTestId('cases-saved-view-scope').selectOption('team');
+    await page.getByTestId('cases-saved-view-target-branch').selectOption(BRANCH_ID);
+    await page.getByTestId('cases-saved-view-target-role').selectOption('manager');
+    await page.getByTestId('cases-saved-view-name-submit').click({ force: true });
+
+    await expect(page.getByText('Вид «Команда · Айгуль» сохранён')).toBeVisible({ timeout: 15000 });
+    await expect(savedViewSelect).toHaveValue(CASE_CREATED_TEAM_VIEW_ID, { timeout: 15000 });
+    await expect(page.getByTestId('cases-saved-view-team-branch')).toHaveValue(BRANCH_ID);
+    await expect(page.getByTestId('cases-saved-view-team-role')).toHaveValue('manager');
+
+    await page.getByTestId('cases-saved-view-team-role').selectOption('');
+    await page.getByTestId('cases-saved-view-update').click({ force: true });
+    await expect(page.getByText('Вид «Команда · Айгуль» обновлён')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('cases-saved-view-team-role')).toHaveValue('');
+
+    await page.getByTestId('cases-queue-copy-link').click({ force: true });
+    await expect.poll(() => readCopiedClipboardText(page)).toContain(`view_id=${CASE_CREATED_TEAM_VIEW_ID}`);
+    const copiedUrl = await readCopiedClipboardText(page);
+    expect(copiedUrl).toContain('q=%D0%90%D0%B9%D0%B3%D1%83%D0%BB%D1%8C');
+
+    await gotoWithRetry(page, copiedUrl);
+    await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('cases-search-summary')).toContainText('Айгуль', { timeout: 15000 });
+    await expect(page.getByTestId('cases-owner-summary')).toContainText('Мои заявки', { timeout: 15000 });
+    await openCasesSecondaryPanel(page, 'saved_views');
+    await expect(page.getByTestId('cases-saved-view-select')).toHaveValue(CASE_CREATED_TEAM_VIEW_ID);
+    await expect(page.getByTestId('cases-saved-view-team-branch')).toHaveValue(BRANCH_ID);
+    await expect(page.getByTestId('cases-saved-view-team-role')).toHaveValue('');
+});
+
+test('follow-up governance stays inside the calendar booking panel', async ({ page }) => {
+    test.skip(!useRouteMocks, 'Wave35 follow-up governance proof is covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page, { viewerRole: 'owner' });
+    await ensureLoggedIn(page);
+    await gotoWithRetry(page, `${baseURL}/calendar`);
+    await expect(page.getByTestId('calendar-page')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('calendar-follow-up-governance-card')).toHaveCount(0);
+
+    await page.getByTestId('calendar-booking-open-actions').first().click({ force: true });
+    const bookingPanel = page.getByTestId('calendar-booking-panel');
+    await expect(bookingPanel).toBeVisible({ timeout: 20000 });
+    await bookingPanel.getByRole('button', { name: 'Не пришел', exact: true }).click();
+    await expect(bookingPanel.getByTestId('calendar-follow-up-governance-owner')).toBeVisible({ timeout: 20000 });
+
+    await bookingPanel.getByTestId('calendar-follow-up-governance-owner').selectOption(AGENT_ID);
+    await bookingPanel.getByTestId('calendar-follow-up-governance-due').fill('2026-03-06T14:30');
+    await bookingPanel.getByTestId('calendar-follow-up-governance-save').click({ force: true });
+    await expect(page.getByText('Follow-up owner и дедлайн обновлены')).toBeVisible({ timeout: 15000 });
+
+    await closeCalendarBookingPanel(page);
+    await page.getByTestId('calendar-booking-open-actions').first().click({ force: true });
+    const reopenedPanel = page.getByTestId('calendar-booking-panel');
+    await expect(reopenedPanel.getByTestId('calendar-follow-up-governance-owner')).toHaveValue(AGENT_ID);
+    await expect(reopenedPanel.getByTestId('calendar-follow-up-governance-due')).toHaveValue('2026-03-06T14:30');
+    await closeCalendarBookingPanel(page);
+    await expect(page.getByTestId('calendar-follow-up-governance-card')).toHaveCount(0);
+});
+
+test('routing profile restrictions stay visible in reassignment panel', async ({ page }) => {
+    test.skip(!useRouteMocks, 'Wave35 routing-profile restriction proof is covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page);
+    await ensureLoggedIn(page);
+    await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
+    await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
+
+    await page.getByTestId('case-reassign-toggle').click({ force: true });
+    const reassignPanel = page.getByTestId('case-reassign-panel');
+    await expect(reassignPanel).toBeVisible({ timeout: 15000 });
+
+    const pausedOption = reassignPanel.locator('button').filter({ hasText: 'Paused Manager' }).first();
+    await expect(pausedOption).toBeDisabled();
+    await expect(pausedOption).toContainText('Новые заявки временно отключены этим routing profile.');
+
+    const followUpOnlyOption = reassignPanel.locator('button').filter({ hasText: 'Follow-up Only' }).first();
+    await expect(followUpOnlyOption).toBeDisabled();
+    await expect(followUpOnlyOption).toContainText('Можно назначать только на явный follow-up continuity кейс.');
+
+    const atCapacityOption = reassignPanel.locator('button').filter({ hasText: 'At Capacity' }).first();
+    await expect(atCapacityOption).toBeDisabled();
+    await expect(atCapacityOption).toContainText('Достигнут лимит 5/5.');
+
+    await expect(reassignPanel.getByTestId('case-reassign-policy-submit')).toBeEnabled();
+});
+
+test('medium-width inbox and calendar keep primary queue surfaces visible', async ({ page }) => {
+    test.skip(!useRouteMocks, 'Wave35 medium-width layout proof is covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page);
+    await ensureLoggedIn(page);
+
+    for (const width of [1280, 1100]) {
+        await page.setViewportSize({ width, height: 900 });
+
+        await gotoWithRetry(page, `${baseURL}/cases/${CASE_ID}`);
+        await expect(page.getByTestId('case-conversation')).toBeVisible({ timeout: 20000 });
+        await expect(page.getByTestId('cases-mode-scopes')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-secondary-panel-toggle')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('cases-secondary-panel')).toHaveCount(0);
+        await expect(page.getByTestId('cases-saved-views')).toHaveCount(0);
+        const inboxList = page.getByTestId('inbox-list');
+        await expect(inboxList).toBeVisible({ timeout: 15000 });
+        const inboxListWidth = await inboxList.evaluate((element) => element.getBoundingClientRect().width);
+        expect(inboxListWidth).toBeGreaterThan(280);
+
+        await gotoWithRetry(page, `${baseURL}/calendar`);
+        await expect(page.getByTestId('calendar-page')).toBeVisible({ timeout: 20000 });
+        await expect(page.getByTestId('calendar-queue-controls')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('calendar-secondary-panel-toggle')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('calendar-secondary-panel')).toHaveCount(0);
+        await expect(page.getByTestId('calendar-saved-views')).toHaveCount(0);
+        await expect(page.getByTestId('calendar-follow-up-governance-card')).toHaveCount(0);
+        await expect(page.getByTestId('calendar-booking-open-actions').first()).toBeVisible({ timeout: 15000 });
+    }
 });
 
 test('live action feedback validation requires explicit safe case and hides raw sync codes', {
