@@ -9,12 +9,16 @@ import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
     bookingNeedsAttention,
+    canCancelBooking,
+    canEditBooking,
+    cancelBooking,
     collectBookingCaseEffectMessages,
     createBooking,
     fetchBookings,
     getBookingAttentionLabel,
     getVisitActionOptions,
     registerNoShowFollowUp,
+    updateBooking,
     type BookingQueueLane,
     type BookingQueueMode,
     type BookingStatusFilter,
@@ -89,6 +93,10 @@ type NoShowFollowUpDraft = {
     rebookedAppointmentId: string;
     note: string;
 };
+type CalendarFilterDraft = Pick<
+    CalendarQueueStateSnapshot,
+    "queueSearch" | "queueStatusFilter" | "followUpOwnerId" | "followUpOverdueOnly"
+>;
 
 const CALENDAR_STATUS_FILTER_LABELS: Record<BookingStatusFilter, string> = {
     all: "Все статусы",
@@ -258,16 +266,36 @@ function getSlotPeriodLabel(startTime: string): "Утро" | "День" | "Ве�
     return "Вечер";
 }
 
+function buildCalendarFilterDraft(snapshot: CalendarQueueStateSnapshot): CalendarFilterDraft {
+    return {
+        queueSearch: snapshot.queueSearch,
+        queueStatusFilter: snapshot.queueStatusFilter,
+        followUpOwnerId: snapshot.followUpOwnerId,
+        followUpOverdueOnly: snapshot.followUpOverdueOnly,
+    };
+}
+
+function calendarFilterDraftChanged(
+    applied: CalendarFilterDraft,
+    draft: CalendarFilterDraft,
+): boolean {
+    return JSON.stringify(applied) !== JSON.stringify(draft);
+}
+
 function normalizeHumanText(value: string | null | undefined): string {
     return (value || "").trim().replace(/\s+/g, " ");
 }
 
 function normalizePhoneForSubmit(value: string | null | undefined): string | null {
-    const digits = (value || "").replace(/\D/g, "");
+    const rawValue = (value || "").trim();
+    const digits = rawValue.replace(/\D/g, "");
     if (!digits) {
         return null;
     }
     if (digits.length === 10) {
+        if (rawValue.startsWith("+") || /^7(?:[\s().-]|$)/.test(rawValue) || /^8(?:[\s().-]|$)/.test(rawValue)) {
+            return null;
+        }
         return `+7${digits}`;
     }
     if (digits.length === 11 && digits.startsWith("7")) {
@@ -312,6 +340,21 @@ function formatPhoneInput(value: string | null | undefined): string {
         parts.push(third);
     }
     return parts.join(" ");
+}
+
+function buildBookingSlot(startAt: string, endAt: string): TimeSlot | null {
+    const start = new Date(startAt);
+    const end = new Date(endAt);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return null;
+    }
+    return {
+        start: start.toISOString(),
+        end: end.toISOString(),
+        start_time: start.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }),
+        end_time: end.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }),
+        available: true,
+    };
 }
 
 function isTechnicalAgentName(value: string | null | undefined): boolean {
@@ -563,9 +606,11 @@ export default function CalendarPage() {
     const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
     const [selectedService, setSelectedService] = useState<CalendarServiceOption | null>(null);
     const [customerName, setCustomerName] = useState("");
-    const [customerPhone, setCustomerPhone] = useState("");
+    const [customerPhoneInput, setCustomerPhoneInput] = useState("");
     const [notes, setNotes] = useState("");
     const [bookingComposerOpen, setBookingComposerOpen] = useState(false);
+    const [bookingComposerMode, setBookingComposerMode] = useState<"create" | "edit">("create");
+    const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
     const [statusUpdateBookingId, setStatusUpdateBookingId] = useState<string | null>(null);
     const [followUpBookingId, setFollowUpBookingId] = useState<string | null>(null);
     const [followUpGovernanceBookingId, setFollowUpGovernanceBookingId] = useState<string | null>(null);
@@ -576,6 +621,10 @@ export default function CalendarPage() {
     const [queueSearch, setQueueSearch] = useState("");
     const [followUpOwnerId, setFollowUpOwnerId] = useState("");
     const [followUpOverdueOnly, setFollowUpOverdueOnly] = useState(false);
+    const [draftQueueStatusFilter, setDraftQueueStatusFilter] = useState<BookingStatusFilter>("all");
+    const [draftQueueSearch, setDraftQueueSearch] = useState("");
+    const [draftFollowUpOwnerId, setDraftFollowUpOwnerId] = useState("");
+    const [draftFollowUpOverdueOnly, setDraftFollowUpOverdueOnly] = useState(false);
     const [followUpGovernanceDrafts, setFollowUpGovernanceDrafts] = useState<Record<string, { ownerAgentId: string; dueAt: string }>>({});
     const [activeSavedViewId, setActiveSavedViewId] = useState<string | null>(null);
     const [saveViewDraftName, setSaveViewDraftName] = useState("");
@@ -590,6 +639,8 @@ export default function CalendarPage() {
     const [secondaryPanelOpen, setSecondaryPanelOpen] = useState(false);
     const [secondaryPanelSection, setSecondaryPanelSection] = useState<CalendarSecondaryPanelSection>("filters");
     const [bookingActionsBookingId, setBookingActionsBookingId] = useState<string | null>(null);
+    const [cancelReasonDraft, setCancelReasonDraft] = useState("");
+    const [cancelBookingId, setCancelBookingId] = useState<string | null>(null);
 
     const currentQueueStateQuery = useQuery({
         queryKey: ["queue-state", "calendar", calendarWorkspaceScope, focusedCaseId, focusedConversationId],
@@ -702,6 +753,23 @@ export default function CalendarPage() {
         }),
         [followUpOverdueOnly, followUpOwnerId, queueLane, queueMode, queueSearch, queueStatusFilter, selectedDate],
     );
+    const appliedFilterDraft = useMemo<CalendarFilterDraft>(
+        () => buildCalendarFilterDraft(currentQueueSnapshot),
+        [currentQueueSnapshot],
+    );
+    const currentFilterDraft = useMemo<CalendarFilterDraft>(
+        () => ({
+            queueSearch: draftQueueSearch,
+            queueStatusFilter: draftQueueStatusFilter,
+            followUpOwnerId: draftFollowUpOwnerId,
+            followUpOverdueOnly: draftFollowUpOverdueOnly,
+        }),
+        [draftFollowUpOverdueOnly, draftFollowUpOwnerId, draftQueueSearch, draftQueueStatusFilter],
+    );
+    const queueFiltersDirty = useMemo(
+        () => calendarFilterDraftChanged(appliedFilterDraft, currentFilterDraft),
+        [appliedFilterDraft, currentFilterDraft],
+    );
     const currentQueueFingerprint = useMemo(
         () => getCalendarQueueStateFingerprint(currentQueueSnapshot),
         [currentQueueSnapshot],
@@ -778,6 +846,10 @@ export default function CalendarPage() {
         setQueueSearch("");
         setFollowUpOwnerId("");
         setFollowUpOverdueOnly(false);
+        setDraftQueueStatusFilter("all");
+        setDraftQueueSearch("");
+        setDraftFollowUpOwnerId("");
+        setDraftFollowUpOverdueOnly(false);
         setActiveSavedViewId(null);
         setSaveViewDraftName("");
         setSaveViewComposerOpen(false);
@@ -857,13 +929,27 @@ export default function CalendarPage() {
                     includeNonApplicableTeam: false,
                 })
                 : null;
-        setSelectedDate(queueSnapshot?.selectedDate ?? defaultSelectedDate);
-        setQueueMode(queueSnapshot?.queueMode ?? defaultQueueMode);
-        setQueueLane(queueSnapshot?.queueLane ?? defaultQueueLane);
-        setQueueStatusFilter(queueSnapshot?.queueStatusFilter ?? "all");
-        setQueueSearch(queueSnapshot?.queueSearch ?? "");
-        setFollowUpOwnerId(queueSnapshot?.followUpOwnerId ?? "");
-        setFollowUpOverdueOnly(queueSnapshot?.followUpOverdueOnly ?? false);
+        const nextSnapshot = queueSnapshot ?? {
+            selectedDate: defaultSelectedDate,
+            queueMode: defaultQueueMode,
+            queueLane: defaultQueueLane,
+            queueStatusFilter: "all" as BookingStatusFilter,
+            queueSearch: "",
+            followUpOwnerId: "",
+            followUpOverdueOnly: false,
+        };
+        const nextDraft = buildCalendarFilterDraft(nextSnapshot);
+        setSelectedDate(nextSnapshot.selectedDate);
+        setQueueMode(nextSnapshot.queueMode);
+        setQueueLane(nextSnapshot.queueLane);
+        setQueueStatusFilter(nextSnapshot.queueStatusFilter);
+        setQueueSearch(nextSnapshot.queueSearch);
+        setFollowUpOwnerId(nextSnapshot.followUpOwnerId);
+        setFollowUpOverdueOnly(nextSnapshot.followUpOverdueOnly);
+        setDraftQueueStatusFilter(nextDraft.queueStatusFilter);
+        setDraftQueueSearch(nextDraft.queueSearch);
+        setDraftFollowUpOwnerId(nextDraft.followUpOwnerId);
+        setDraftFollowUpOverdueOnly(nextDraft.followUpOverdueOnly);
         setActiveSavedViewId(matchedSavedView?.id ?? null);
         setSaveViewDraftName("");
         setSaveViewComposerOpen(false);
@@ -937,13 +1023,13 @@ export default function CalendarPage() {
         if (!normalizeHumanText(customerName) && prefillName) {
             setCustomerName(prefillName);
         }
-        if (!normalizePhoneForSubmit(customerPhone) && prefillPhone) {
-            setCustomerPhone(prefillPhone);
+        if (!normalizePhoneForSubmit(customerPhoneInput) && prefillPhone) {
+            setCustomerPhoneInput(prefillPhone);
         }
         bookingPrefillScopeRef.current = scopeKey;
     }, [
         customerName,
-        customerPhone,
+        customerPhoneInput,
         focusedCaseId,
         focusedCaseQuery.data?.customer_name,
         focusedCaseQuery.data?.customer_phone,
@@ -1318,14 +1404,14 @@ export default function CalendarPage() {
     const prefilledCasePhone = formatPhoneInput(focusedCaseQuery.data?.customer_phone);
     const hasCasePrefill = Boolean(prefilledCaseName || prefilledCasePhone);
     const normalizedCustomerName = normalizeHumanText(customerName);
-    const normalizedCustomerPhone = normalizePhoneForSubmit(customerPhone);
+    const normalizedCustomerPhone = normalizePhoneForSubmit(customerPhoneInput);
     const normalizedCustomerPhoneDisplay = normalizedCustomerPhone
         ? formatPhoneInput(normalizedCustomerPhone)
         : "";
     const shouldShowBookingValidation = Boolean(
-        selectedSpecialist || selectedService || selectedSlot || normalizedCustomerName || customerPhone,
+        selectedSpecialist || selectedService || selectedSlot || normalizedCustomerName || customerPhoneInput,
     );
-    const shouldShowCustomerValidation = Boolean(selectedSlot || normalizedCustomerName || customerPhone);
+    const shouldShowCustomerValidation = Boolean(selectedSlot || normalizedCustomerName || customerPhoneInput);
     const bookingFormErrors = {
         service: selectedService
             ? null
@@ -1415,7 +1501,7 @@ export default function CalendarPage() {
                                 };
     const customerStepState = normalizedCustomerName && normalizedCustomerPhone
         ? "ready"
-        : normalizedCustomerName || customerPhone
+        : normalizedCustomerName || customerPhoneInput
             ? "review"
             : "empty";
     const bookingNextAction = !selectedService
@@ -1469,18 +1555,41 @@ export default function CalendarPage() {
                                                 description: "Номер нужен, чтобы быстро связаться и подтвердить запись.",
                                             }
                                             : {
-                                                title: "Подтвердите и создайте запись",
-                                                description: "Все обязательные данные заполнены. Проверьте сводку справа и сохраните запись.",
+                                                title: bookingComposerMode === "edit" ? "Сохраните изменения" : "Подтвердите и создайте запись",
+                                                description: bookingComposerMode === "edit"
+                                                    ? "Все обязательные данные заполнены. Проверьте сводку справа и сохраните изменения."
+                                                    : "Все обязательные данные заполнены. Проверьте сводку справа и сохраните запись.",
                                             };
     const bookingActionsBooking = bookingActionsBookingId
         ? bookings.find((booking) => booking.id === bookingActionsBookingId) ?? null
         : null;
+    const editingBooking = editingBookingId
+        ? bookings.find((booking) => booking.id === editingBookingId) ?? null
+        : null;
+    const selectedSlotVisibleInChoices = selectedSlot
+        ? slots.some((slot) => slot.start === selectedSlot.start && slot.end === selectedSlot.end)
+        : false;
+    const showPinnedEditSlot = bookingComposerMode === "edit" && Boolean(selectedSlot && !selectedSlotVisibleInChoices);
+    const bookingComposerTitle = bookingComposerMode === "edit" ? "Изменить запись" : "Новая запись";
+    const bookingComposerDescription = bookingComposerMode === "edit"
+        ? "Проверьте услугу, мастера, день, время и контакты клиента. Если меняете расписание, список слотов подскажет, что ещё свободно."
+        : "Здесь оператор проходит один понятный путь: услуга, мастер, день, время, клиент, подтверждение.";
+    const bookingResetLabel = bookingComposerMode === "edit" ? "Вернуть данные записи" : "Очистить всё";
+    const bookingSubmitLabel = bookingComposerMode === "edit" ? "Сохранить изменения" : "Подтвердить и создать запись";
 
     useEffect(() => {
         if (bookingActionsBookingId && !bookingActionsBooking) {
             setBookingActionsBookingId(null);
         }
     }, [bookingActionsBooking, bookingActionsBookingId]);
+
+    useEffect(() => {
+        if (editingBookingId && !editingBooking) {
+            setEditingBookingId(null);
+            setBookingComposerMode("create");
+            setBookingComposerOpen(false);
+        }
+    }, [editingBooking, editingBookingId]);
 
     const applyCalendarQueueSnapshot = (
         snapshot: CalendarQueueStateSnapshot,
@@ -1490,6 +1599,7 @@ export default function CalendarPage() {
             savedViewId?: string | null;
         } = {},
     ) => {
+        const nextDraft = buildCalendarFilterDraft(snapshot);
         setSelectedDate(snapshot.selectedDate);
         setQueueMode(snapshot.queueMode);
         setQueueLane(snapshot.queueLane);
@@ -1497,6 +1607,10 @@ export default function CalendarPage() {
         setQueueSearch(snapshot.queueSearch);
         setFollowUpOwnerId(snapshot.followUpOwnerId);
         setFollowUpOverdueOnly(snapshot.followUpOverdueOnly);
+        setDraftQueueStatusFilter(nextDraft.queueStatusFilter);
+        setDraftQueueSearch(nextDraft.queueSearch);
+        setDraftFollowUpOwnerId(nextDraft.followUpOwnerId);
+        setDraftFollowUpOverdueOnly(nextDraft.followUpOverdueOnly);
         setActiveSavedViewId(savedViewId);
         setFollowUpGovernanceDrafts({});
         setSaveViewDraftName("");
@@ -1704,6 +1818,70 @@ export default function CalendarPage() {
         },
     });
 
+    const updateMutation = useMutation({
+        mutationFn: async (payload: {
+            bookingId: string;
+            specialist_id: string;
+            start_at: string;
+            end_at: string;
+            customer_name: string;
+            customer_phone: string;
+            service_type: string;
+            notes?: string;
+        }) => {
+            const { bookingId, ...data } = payload;
+            return updateBooking(bookingId, data);
+        },
+        onSuccess: () => {
+            toast.success("Запись обновлена");
+            queryClient.invalidateQueries({ queryKey: ["slots"] });
+            queryClient.invalidateQueries({ queryKey: ["bookings"] });
+            if (focusedCaseId) {
+                queryClient.invalidateQueries({ queryKey: ["case", focusedCaseId] });
+                queryClient.invalidateQueries({ queryKey: ["cases"] });
+            }
+            resetForm({ keepComposerOpen: false, resetSelections: true });
+        },
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "BOOKING_CONFLICT") {
+                toast.error("Это время уже занято. Выберите другой слот.");
+            } else if (code === "BOOKING_UPDATE_DENIED") {
+                toast.error("Эту запись больше нельзя менять из-за её текущего статуса.");
+            } else {
+                toast.error("Не удалось обновить запись");
+            }
+        },
+    });
+
+    const cancelMutation = useMutation({
+        mutationFn: async (payload: { bookingId: string; reason?: string }) => {
+            setCancelBookingId(payload.bookingId);
+            return cancelBooking(payload.bookingId, { reason: payload.reason });
+        },
+        onSuccess: () => {
+            toast.success("Запись отменена");
+            queryClient.invalidateQueries({ queryKey: ["bookings"] });
+            if (focusedCaseId) {
+                queryClient.invalidateQueries({ queryKey: ["case", focusedCaseId] });
+                queryClient.invalidateQueries({ queryKey: ["cases"] });
+            }
+            setCancelReasonDraft("");
+            closeBookingActionsPanel();
+        },
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "BOOKING_CANCEL_DENIED") {
+                toast.error("Эту запись больше нельзя отменить из-за её текущего статуса.");
+            } else {
+                toast.error("Не удалось отменить запись");
+            }
+        },
+        onSettled: () => {
+            setCancelBookingId(null);
+        },
+    });
+
     const statusMutation = useMutation({
         mutationFn: async (payload: { bookingId: string; status: BookingStatusUpdateRequest["status"] }) => {
             setStatusUpdateBookingId(payload.bookingId);
@@ -1847,14 +2025,16 @@ export default function CalendarPage() {
         }
         setSelectedSlot(null);
         setCustomerName(normalizeHumanText(focusedCaseQuery.data?.customer_name));
-        setCustomerPhone(formatPhoneInput(focusedCaseQuery.data?.customer_phone));
+        setCustomerPhoneInput(formatPhoneInput(focusedCaseQuery.data?.customer_phone));
         setNotes("");
+        setBookingComposerMode("create");
+        setEditingBookingId(null);
         setBookingComposerOpen(keepComposerOpen);
     };
 
     const applyCasePrefill = () => {
         setCustomerName(normalizeHumanText(focusedCaseQuery.data?.customer_name));
-        setCustomerPhone(formatPhoneInput(focusedCaseQuery.data?.customer_phone));
+        setCustomerPhoneInput(formatPhoneInput(focusedCaseQuery.data?.customer_phone));
     };
 
     const handleQueueModeChange = (nextMode: BookingQueueMode) => {
@@ -1882,8 +2062,25 @@ export default function CalendarPage() {
         toast.success("Календарь обновлён");
     };
 
+    const resetQueueFilterDraft = () => {
+        setDraftQueueSearch(queueSearch);
+        setDraftQueueStatusFilter(queueStatusFilter);
+        setDraftFollowUpOwnerId(followUpOwnerId);
+        setDraftFollowUpOverdueOnly(followUpOverdueOnly);
+    };
+
+    const applyQueueFilterDraft = () => {
+        setQueueSearch(draftQueueSearch);
+        setQueueStatusFilter(draftQueueStatusFilter);
+        setFollowUpOwnerId(draftFollowUpOwnerId);
+        setFollowUpOverdueOnly(draftFollowUpOverdueOnly);
+    };
+
     const openSecondaryPanel = (section: CalendarSecondaryPanelSection) => {
         setBookingActionsBookingId(null);
+        if (section === "filters") {
+            resetQueueFilterDraft();
+        }
         setSecondaryPanelSection(section);
         setSecondaryPanelOpen(true);
     };
@@ -1891,33 +2088,61 @@ export default function CalendarPage() {
     const openBookingComposer = () => {
         setBookingActionsBookingId(null);
         setSecondaryPanelOpen(false);
+        setBookingComposerMode("create");
+        setEditingBookingId(null);
         if (!bookingDate || bookingDate < today) {
             setBookingDate(bookingDateSuggestion);
         }
         setBookingComposerOpen(true);
     };
 
+    const openEditBookingComposer = (booking: (typeof bookings)[number]) => {
+        const matchedService = serviceCatalog.find((service) => service.name === (booking.service_type ?? ""));
+        const fallbackDuration = Math.max(
+            30,
+            Math.round((new Date(booking.end_at).getTime() - new Date(booking.start_at).getTime()) / (60 * 1000)),
+        );
+        const nextService = matchedService ?? (booking.service_type
+            ? {
+                name: booking.service_type,
+                duration_min: fallbackDuration,
+                price: 0,
+                specialistCount: 1,
+            }
+            : null);
+        const nextSlot = buildBookingSlot(booking.start_at, booking.end_at);
+        const nextDate = booking.start_at.slice(0, 10);
+
+        setSecondaryPanelOpen(false);
+        setBookingActionsBookingId(null);
+        setBookingComposerMode("edit");
+        setEditingBookingId(booking.id);
+        setSelectedService(nextService);
+        setSelectedSpecialist(booking.specialist_id);
+        setBookingDate(nextDate || bookingDateSuggestion);
+        setSelectedSlot(nextSlot);
+        setCustomerName(normalizeHumanText(booking.customer_name));
+        setCustomerPhoneInput(formatPhoneInput(booking.customer_phone));
+        setNotes(booking.notes ?? "");
+        setBookingComposerOpen(true);
+    };
+
     const closeBookingComposer = () => {
-        setBookingComposerOpen(false);
+        resetForm({ keepComposerOpen: false, resetSelections: true });
     };
 
     const closeSecondaryPanel = () => {
         setSecondaryPanelOpen(false);
     };
 
-    const clearQueueFilters = () => {
-        setQueueSearch("");
-        setQueueStatusFilter("all");
-        setFollowUpOwnerId("");
-        setFollowUpOverdueOnly(false);
-    };
-
     const openBookingActionsPanel = (bookingId: string) => {
         setSecondaryPanelOpen(false);
+        setCancelReasonDraft("");
         setBookingActionsBookingId(bookingId);
     };
 
     const closeBookingActionsPanel = () => {
+        setCancelReasonDraft("");
         setBookingActionsBookingId(null);
     };
 
@@ -1963,7 +2188,7 @@ export default function CalendarPage() {
         const startAt = new Date(selectedSlot.start);
         const endAt = new Date(selectedSlot.end);
 
-        createMutation.mutate({
+        const payload = {
             specialist_id: selectedSpecialist,
             start_at: startAt.toISOString(),
             end_at: endAt.toISOString(),
@@ -1973,7 +2198,21 @@ export default function CalendarPage() {
             notes: notes || undefined,
             conversation_id: focusedConversationId || undefined,
             case_id: focusedCaseId || undefined,
-        });
+        };
+        if (bookingComposerMode === "edit" && editingBookingId) {
+            updateMutation.mutate({
+                bookingId: editingBookingId,
+                specialist_id: payload.specialist_id,
+                start_at: payload.start_at,
+                end_at: payload.end_at,
+                customer_name: payload.customer_name,
+                customer_phone: normalizedCustomerPhone ?? "",
+                service_type: payload.service_type,
+                notes: payload.notes,
+            });
+            return;
+        }
+        createMutation.mutate(payload);
     };
 
     const buildCaseHref = (caseId: string) =>
@@ -2507,15 +2746,17 @@ export default function CalendarPage() {
                                             Уточнить список
                                         </p>
                                         <p className="mt-1 text-xs text-muted-foreground">
-                                            Поиск, статус визита и задачи по звонкам вынесены сюда, чтобы основной экран оставался быстрым и понятным.
+                                            Изменения в этой панели не трогают список сразу. Они применятся к очереди, ссылке и сохранённому состоянию только после кнопки «Применить».
                                         </p>
                                     </div>
                                     <button
                                         type="button"
-                                        onClick={clearQueueFilters}
+                                        onClick={resetQueueFilterDraft}
                                         className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                        disabled={!queueFiltersDirty}
+                                        data-testid="calendar-filters-reset"
                                     >
-                                        Сбросить фильтры
+                                        Сбросить изменения
                                     </button>
                                 </div>
                                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -2525,8 +2766,8 @@ export default function CalendarPage() {
                                         </span>
                                         <input
                                             type="text"
-                                            value={queueSearch}
-                                            onChange={(event) => setQueueSearch(event.target.value)}
+                                            value={draftQueueSearch}
+                                            onChange={(event) => setDraftQueueSearch(event.target.value)}
                                             placeholder="Клиент, телефон, услуга, мастер или ID"
                                             className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                             data-testid="calendar-queue-search"
@@ -2537,8 +2778,8 @@ export default function CalendarPage() {
                                             Статус визита
                                         </span>
                                         <select
-                                            value={queueStatusFilter}
-                                            onChange={(event) => setQueueStatusFilter(event.target.value as BookingStatusFilter)}
+                                            value={draftQueueStatusFilter}
+                                            onChange={(event) => setDraftQueueStatusFilter(event.target.value as BookingStatusFilter)}
                                             className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                             data-testid="calendar-queue-status-filter"
                                         >
@@ -2555,8 +2796,8 @@ export default function CalendarPage() {
                                                 Кто отвечает за звонок
                                             </span>
                                             <select
-                                                value={followUpOwnerId}
-                                                onChange={(event) => setFollowUpOwnerId(event.target.value)}
+                                                value={draftFollowUpOwnerId}
+                                                onChange={(event) => setDraftFollowUpOwnerId(event.target.value)}
                                                 className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                                 data-testid="calendar-follow-up-owner-filter"
                                             >
@@ -2572,14 +2813,22 @@ export default function CalendarPage() {
                                     <label className="flex min-h-[48px] items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm text-muted-foreground">
                                         <input
                                             type="checkbox"
-                                            checked={followUpOverdueOnly}
-                                            onChange={(event) => setFollowUpOverdueOnly(event.target.checked)}
+                                            checked={draftFollowUpOverdueOnly}
+                                            onChange={(event) => setDraftFollowUpOverdueOnly(event.target.checked)}
                                             className="h-4 w-4 rounded border-border/60"
                                             data-testid="calendar-follow-up-overdue-filter"
                                         />
                                         <span className="break-words">Только просроченные задачи по звонкам</span>
                                     </label>
                                 </div>
+                                {queueFiltersDirty && (
+                                    <div
+                                        className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                                        data-testid="calendar-filter-draft-banner"
+                                    >
+                                        Изменения пока только в панели. Основной список и ссылка обновятся после кнопки «Применить».
+                                    </div>
+                                )}
                                 {hiddenTechnicalFollowUpOwnersCount > 0 && (
                                     <p className="mt-3 text-xs text-muted-foreground">
                                         Служебные учётные записи не показываем оператору: {hiddenTechnicalFollowUpOwnersCount}
@@ -2597,6 +2846,20 @@ export default function CalendarPage() {
                                             Дополнительные фильтры не заданы
                                         </span>
                                     )}
+                                </div>
+                                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-4">
+                                    <p className="text-xs text-muted-foreground">
+                                        Сейчас в списке применён только тот набор уточнений, который виден в плашках выше.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={applyQueueFilterDraft}
+                                        className="rounded-full border border-primary/30 bg-primary/5 px-4 py-2 text-xs font-semibold text-primary disabled:cursor-not-allowed disabled:border-border/60 disabled:bg-muted disabled:text-muted-foreground"
+                                        disabled={!queueFiltersDirty}
+                                        data-testid="calendar-filters-apply"
+                                    >
+                                        Применить
+                                    </button>
                                 </div>
                             </div>
                         )}
@@ -2969,9 +3232,9 @@ export default function CalendarPage() {
         >
             <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1">
-                    <p className="text-sm font-semibold">Новая запись</p>
+                    <p className="text-sm font-semibold">{bookingComposerTitle}</p>
                     <p className="text-xs text-muted-foreground">
-                        Здесь оператор проходит один понятный путь: услуга, мастер, день, время, клиент, подтверждение.
+                        {bookingComposerDescription}
                     </p>
                 </div>
                 <button
@@ -3000,7 +3263,7 @@ export default function CalendarPage() {
                         className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
                         data-testid="calendar-booking-reset"
                     >
-                        Очистить всё
+                        {bookingResetLabel}
                     </button>
                 </div>
                     <div className="mt-4 grid gap-3 md:grid-cols-5">
@@ -3276,6 +3539,14 @@ export default function CalendarPage() {
 
                             {bookingSlotState.kind === "ready" && (
                                 <div className="mt-4 space-y-4">
+                                    {showPinnedEditSlot && selectedSlot && (
+                                        <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-3 text-sm" data-testid="calendar-edit-current-slot">
+                                            <p className="font-semibold text-foreground">Текущее время записи</p>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                {selectedSlot.start_time} - {selectedSlot.end_time}. Можно оставить как есть или выбрать другой свободный слот ниже.
+                                            </p>
+                                        </div>
+                                    )}
                                     {groupedSlots.map((group) => (
                                         <div key={group.label} className="space-y-2">
                                             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
@@ -3392,28 +3663,28 @@ export default function CalendarPage() {
                                     </span>
                                     <input
                                         type="tel"
-                                        value={customerPhone}
-                                        onChange={(event) => setCustomerPhone(formatPhoneInput(event.target.value))}
+                                        value={customerPhoneInput}
+                                        onChange={(event) => setCustomerPhoneInput(event.target.value)}
                                         placeholder="+7 700 123 45 67"
                                         inputMode="tel"
                                         autoComplete="tel"
-                                        maxLength={20}
+                                        maxLength={32}
                                         className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(shouldShowCustomerValidation && bookingFormErrors.customerPhone) ? "border-destructive/60" : "border-border/60"}`}
                                         data-testid="calendar-booking-customer-phone"
                                     />
-                                    {customerPhone ? (
+                                    {customerPhoneInput ? (
                                         normalizedCustomerPhoneDisplay ? (
                                             <p className="text-xs text-emerald-700">
                                                 Сохраним номер как {normalizedCustomerPhoneDisplay}.
                                             </p>
                                         ) : (
-                                            <p className="text-xs text-destructive">
-                                                Номер пока не распознан. Нужен формат +7 700 123 45 67.
+                                            <p className="text-xs text-muted-foreground">
+                                                Можно писать как удобно: +7, 8, со скобками или без. Сохраним номер, когда он станет полным.
                                             </p>
                                         )
                                     ) : (
                                         <p className="text-xs text-muted-foreground">
-                                            Номер нужен, чтобы быстро подтвердить запись и связаться при переносе.
+                                            Можно ввести +7 700 123 45 67, 8 700 123 45 67 или вставить номер как есть.
                                         </p>
                                     )}
                                     {shouldShowCustomerValidation && bookingFormErrors.customerPhone && (
@@ -3432,6 +3703,7 @@ export default function CalendarPage() {
                                     placeholder="Что важно учесть по клиенту или записи"
                                     rows={3}
                                     className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                    data-testid="calendar-booking-notes"
                                 />
                                 <p className="text-xs text-muted-foreground">
                                     Необязательно. Оставьте только то, что поможет коллеге быстро понять контекст записи.
@@ -3441,11 +3713,15 @@ export default function CalendarPage() {
                             <div className="flex flex-wrap gap-3">
                                 <button
                                     type="submit"
-                                    disabled={!bookingFormReady || createMutation.isPending}
+                                    disabled={!bookingFormReady || createMutation.isPending || updateMutation.isPending}
                                     className="btn-primary disabled:opacity-50"
                                     data-testid="calendar-booking-submit"
                                 >
-                                    {createMutation.isPending ? "Создаём..." : "Подтвердить и создать запись"}
+                                    {createMutation.isPending
+                                        ? "Создаём..."
+                                        : updateMutation.isPending
+                                            ? "Сохраняем..."
+                                            : bookingSubmitLabel}
                                 </button>
                                 <button
                                     type="button"
@@ -3510,6 +3786,9 @@ export default function CalendarPage() {
                     })()
                     : null;
                 const followUpSubmitBlocked = noShowFollowUpDraft.result === "rebooked" && !noShowFollowUpDraft.rebookedAppointmentId;
+                const canEditCurrentBooking = canEditBooking(booking.status);
+                const canCancelCurrentBooking = canCancelBooking(booking.status);
+                const cancelPending = cancelMutation.isPending && cancelBookingId === booking.id;
                 return (
                     <div className="fixed inset-0 z-50" data-testid="calendar-booking-panel-overlay">
                         <div
@@ -3587,10 +3866,37 @@ export default function CalendarPage() {
                                 )}
                             </div>
 
+                            {canWriteCalendar && (
+                                <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                        Исправить запись
+                                    </p>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        Если время, услуга или контакт указаны неверно, откройте запись в режиме редактирования и сохраните новые данные.
+                                    </p>
+                                    {canEditCurrentBooking ? (
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => openEditBookingComposer(booking)}
+                                                className="rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary"
+                                                data-testid="calendar-booking-edit"
+                                            >
+                                                Изменить запись
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <p className="mt-3 rounded-lg border border-border/60 bg-background/80 px-3 py-3 text-xs text-muted-foreground" data-testid="calendar-booking-edit-disabled">
+                                            Для статуса «{getBookingStatusLabel(booking.status)}» редактирование недоступно. Историю визита уже нужно сохранять без скрытого переписывания.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
                             {canWriteCalendar && visitActions.length > 0 && (
                                 <div className="rounded-xl border border-border/60 bg-card/80 p-4">
                                     <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                        1. Что с визитом
+                                        Что с визитом
                                     </p>
                                     <p className="mt-1 text-xs text-muted-foreground">
                                         Выберите итог визита, чтобы список сразу показал корректный следующий шаг.
@@ -3614,10 +3920,53 @@ export default function CalendarPage() {
                                 </div>
                             )}
 
+                            {canWriteCalendar && (
+                                <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                        Отменить запись
+                                    </p>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        Используйте отмену только если визит действительно не состоится. Причина поможет коллеге быстро понять, что произошло.
+                                    </p>
+                                    {canCancelCurrentBooking ? (
+                                        <div className="mt-3 space-y-3">
+                                            <label className="block space-y-1">
+                                                <span className="text-xs font-medium text-muted-foreground">
+                                                    Причина отмены
+                                                </span>
+                                                <textarea
+                                                    value={cancelReasonDraft}
+                                                    onChange={(event) => setCancelReasonDraft(event.target.value)}
+                                                    rows={2}
+                                                    placeholder="Например, клиент отменил визит или время выбрали ошибочно"
+                                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                    data-testid="calendar-booking-cancel-reason"
+                                                />
+                                            </label>
+                                            <div className="flex flex-wrap gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => cancelMutation.mutate({ bookingId: booking.id, reason: cancelReasonDraft || undefined })}
+                                                    disabled={cancelPending}
+                                                    className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs font-semibold text-destructive disabled:opacity-50"
+                                                    data-testid="calendar-booking-cancel-submit"
+                                                >
+                                                    {cancelPending ? "Отменяем..." : "Подтвердить отмену"}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <p className="mt-3 rounded-lg border border-border/60 bg-background/80 px-3 py-3 text-xs text-muted-foreground" data-testid="calendar-booking-cancel-disabled">
+                                            Для статуса «{getBookingStatusLabel(booking.status)}» отмена недоступна. Историю визита нужно оставлять неизменной.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
                             {canWriteCalendar && isNoShow && (
                                 <div className="rounded-xl border border-border/60 bg-card/80 p-4">
                                     <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                        2. Что решили после неявки
+                                        Что решили после неявки
                                     </p>
                                     <p className="mt-1 text-xs text-muted-foreground">
                                         Зафиксируйте итог разговора с клиентом. Если клиента переписали, обязательно привяжите новую запись.
@@ -3748,7 +4097,7 @@ export default function CalendarPage() {
                                 <div className="rounded-xl border border-border/60 bg-card/80 p-4" data-testid="calendar-follow-up-governance-card">
                                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                            3. Кто отвечает за звонок
+                                            Кто отвечает за звонок
                                         </p>
                                         {booking.follow_up_overdue && (
                                             <span className="rounded bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-900">

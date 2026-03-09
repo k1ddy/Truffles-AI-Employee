@@ -62,6 +62,15 @@ class InvalidAppointmentTransitionError(Exception):
         self.target_status = target_status
 
 
+class AppointmentLifecycleActionDeniedError(Exception):
+    """Raised when edit/cancel is attempted for a booking outside the active lifecycle."""
+
+    def __init__(self, action: str, current_status: str):
+        super().__init__(f"{action} is not allowed for status {current_status}")
+        self.action = action
+        self.current_status = current_status
+
+
 @dataclass
 class TimeSlot:
     start: datetime
@@ -106,6 +115,84 @@ class SchedulingService:
 
     def _get_branch(self, branch_id: UUID) -> Optional[Branch]:
         return self.db.query(Branch).filter(Branch.id == branch_id).first()
+
+    def _get_specialist(self, specialist_id: Optional[UUID]) -> Optional[Specialist]:
+        if not specialist_id:
+            return None
+        return self.db.query(Specialist).filter(
+            Specialist.id == specialist_id,
+            Specialist.is_active == True,
+        ).first()
+
+    def _get_appointment(self, appointment_id: UUID, client_id: UUID) -> Appointment:
+        appointment = self.db.query(Appointment).filter(
+            Appointment.id == appointment_id,
+            Appointment.client_id == client_id,
+        ).first()
+        if not appointment:
+            raise AppointmentNotFoundError(f"Appointment {appointment_id} not found")
+        return appointment
+
+    def _assert_lifecycle_action_allowed(self, *, appointment: Appointment, action: str) -> str:
+        normalized_status = self.normalize_visit_status(appointment.status)
+        if normalized_status not in self.ACTIVE_STATUSES:
+            raise AppointmentLifecycleActionDeniedError(action, normalized_status)
+        return normalized_status
+
+    def _assert_slot_available(
+        self,
+        *,
+        appointment_id: UUID,
+        specialist_id: UUID,
+        start_at: datetime,
+        end_at: datetime,
+    ) -> None:
+        overlapping_appointment = self.db.query(Appointment).filter(
+            Appointment.id != appointment_id,
+            Appointment.specialist_id == specialist_id,
+            Appointment.status != "CANCELLED",
+            Appointment.start_at < end_at,
+            Appointment.end_at > start_at,
+        ).first()
+        if overlapping_appointment:
+            raise AppointmentConflictError("Slot already booked")
+
+        overlapping_block = self.db.query(CalendarBlock).filter(
+            CalendarBlock.specialist_id == specialist_id,
+            CalendarBlock.start_at < end_at,
+            CalendarBlock.end_at > start_at,
+        ).first()
+        if overlapping_block:
+            raise AppointmentConflictError("Slot blocked")
+
+    def _upsert_service_snapshot(
+        self,
+        *,
+        appointment_id: UUID,
+        client_id: UUID,
+        branch_id: UUID,
+        service_type: str,
+        start_at: datetime,
+        end_at: datetime,
+    ) -> None:
+        duration_min = int((end_at - start_at).total_seconds() / 60)
+        service_match = self.db.query(Service).filter(
+            Service.client_id == client_id,
+            Service.branch_id == branch_id,
+            Service.name == service_type,
+        ).first()
+        snapshot = self.db.query(AppointmentServiceModel).filter(
+            AppointmentServiceModel.appointment_id == appointment_id,
+        ).first()
+        if not snapshot:
+            snapshot = AppointmentServiceModel(appointment_id=appointment_id, service_name=service_type, duration_min=duration_min)
+            self.db.add(snapshot)
+        snapshot.service_id = service_match.id if service_match else None
+        snapshot.service_name = service_type
+        snapshot.duration_min = duration_min
+        snapshot.price = service_match.price if service_match else None
+        snapshot.buffer_before_min = service_match.buffer_before_min if service_match else 0
+        snapshot.buffer_after_min = service_match.buffer_after_min if service_match else 0
 
     def _get_timezone(self, branch: Optional[Branch]) -> ZoneInfo:
         tz_name = (branch.timezone if branch and branch.timezone else "Asia/Almaty")
@@ -244,15 +331,9 @@ class SchedulingService:
         audit: Optional[Dict[str, Any]] = None,
         commit: bool = True,
     ) -> Appointment:
-        specialist = None
-        if specialist_id:
-            specialist = self.db.query(Specialist).filter(
-                Specialist.id == specialist_id,
-                Specialist.is_active == True,
-            ).first()
-
-            if not specialist:
-                raise SpecialistNotFoundError(f"Specialist {specialist_id} not found")
+        specialist = self._get_specialist(specialist_id)
+        if specialist_id and not specialist:
+            raise SpecialistNotFoundError(f"Specialist {specialist_id} not found")
 
         branch = self._get_branch(branch_id)
         if not branch:
@@ -327,27 +408,147 @@ class SchedulingService:
         logger.info("Created appointment", extra={"appointment_id": str(appointment.id)})
         return appointment
 
-    def cancel_appointment(self, appointment_id: UUID, client_id: UUID, reason: Optional[str] = None) -> Appointment:
-        appointment = self.db.query(Appointment).filter(
-            Appointment.id == appointment_id,
-            Appointment.client_id == client_id,
-        ).first()
+    def cancel_appointment(
+        self,
+        appointment_id: UUID,
+        client_id: UUID,
+        reason: Optional[str] = None,
+        *,
+        actor_id: Optional[UUID] = None,
+        actor_type: str = "agent",
+        channel: str = "console",
+        commit: bool = True,
+    ) -> Appointment:
+        appointment = self._get_appointment(appointment_id, client_id)
+        self._assert_lifecycle_action_allowed(appointment=appointment, action="cancel")
 
-        if not appointment:
-            raise AppointmentNotFoundError(f"Appointment {appointment_id} not found")
-
+        prev_status = appointment.status
+        prev_version = int(appointment.version or 0)
         appointment.status = "CANCELLED"
+        appointment.version = prev_version + 1
         if reason:
             appointment.notes = f"{appointment.notes or ''}\nCancel: {reason}".strip()
         appointment.updated_at = datetime.now(timezone.utc)
+        self.db.add(
+            AppointmentAudit(
+                appointment_id=appointment.id,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                channel=channel,
+                action="cancel",
+                prev_status=prev_status,
+                new_status=appointment.status,
+                prev_version=prev_version,
+                new_version=appointment.version,
+                payload={"reason": reason} if reason else {},
+                correlation_id=str(appointment.conversation_id) if appointment.conversation_id else None,
+            )
+        )
         mark_pending_reminders_failed(
             self.db,
             appointment_id=appointment.id,
             reason="cancelled",
             commit=False,
         )
-        self.db.commit()
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
 
+        return appointment
+
+    def update_appointment(
+        self,
+        *,
+        appointment_id: UUID,
+        client_id: UUID,
+        specialist_id: UUID,
+        start_at: datetime,
+        end_at: datetime,
+        customer_name: Optional[str] = None,
+        customer_phone: Optional[str] = None,
+        service_type: Optional[str] = None,
+        notes: Optional[str] = None,
+        actor_id: Optional[UUID] = None,
+        actor_type: str = "agent",
+        channel: str = "console",
+        trace_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        commit: bool = True,
+    ) -> Appointment:
+        appointment = self._get_appointment(appointment_id, client_id)
+        normalized_current = self._assert_lifecycle_action_allowed(appointment=appointment, action="update")
+        specialist = self._get_specialist(specialist_id)
+        if not specialist:
+            raise SpecialistNotFoundError(f"Specialist {specialist_id} not found")
+        if specialist.branch_id is None:
+            raise BranchNotFoundError(f"Specialist {specialist_id} branch is required")
+
+        self._assert_slot_available(
+            appointment_id=appointment.id,
+            specialist_id=specialist_id,
+            start_at=start_at,
+            end_at=end_at,
+        )
+
+        current_service_snapshot = self.db.query(AppointmentServiceModel).filter(
+            AppointmentServiceModel.appointment_id == appointment.id,
+        ).first()
+        previous_service_name = current_service_snapshot.service_name if current_service_snapshot else None
+        previous_version = int(appointment.version or 0)
+        previous_status = appointment.status
+        schedule_changed = (
+            appointment.specialist_id != specialist_id
+            or appointment.start_at != start_at
+            or appointment.end_at != end_at
+            or previous_service_name != service_type
+        )
+
+        appointment.branch_id = specialist.branch_id
+        appointment.specialist_id = specialist_id
+        appointment.start_at = start_at
+        appointment.end_at = end_at
+        appointment.customer_name = customer_name
+        appointment.customer_phone = customer_phone
+        appointment.notes = notes
+        if schedule_changed and normalized_current in self.ACTIVE_STATUSES:
+            appointment.status = "PENDING_CONFIRMATION"
+        appointment.version = previous_version + 1
+        appointment.updated_at = datetime.now(timezone.utc)
+        if service_type:
+            self._upsert_service_snapshot(
+                appointment_id=appointment.id,
+                client_id=client_id,
+                branch_id=specialist.branch_id,
+                service_type=service_type,
+                start_at=start_at,
+                end_at=end_at,
+            )
+
+        self.db.add(
+            AppointmentAudit(
+                appointment_id=appointment.id,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                channel=channel,
+                action="update",
+                prev_status=previous_status,
+                new_status=appointment.status,
+                prev_version=previous_version,
+                new_version=appointment.version,
+                payload={
+                    "schedule_changed": schedule_changed,
+                    "service_type": service_type,
+                },
+                trace_id=trace_id,
+                correlation_id=correlation_id,
+            )
+        )
+
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
         return appointment
 
     @classmethod

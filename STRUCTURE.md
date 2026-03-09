@@ -208,6 +208,7 @@
 | `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave35-a1.md` | Wave35 Task Package for deterministic operator workflow/layout proof across rebuilt Inbox/Calendar secondary surfaces and medium-width layouts | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave36-a1.md` | Wave36 Task Package for full Calendar operator-grade rebuild: plain-language copy, sanitized follow-up ownership, guided booking composer, inline validation, visual inspections, and misuse-proof testing | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave37-a1.md` | Wave37 Task Package for Calendar acceptance recovery after merged Wave36: focused booking entry, service-first time discovery, intuitive language, hard guardrails, and full operator proof | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave38-a1.md` | Wave38 Task Package for post-merge Calendar hardening: deterministic filters, natural phone input, booking edit/reschedule/cancel lifecycle, and full operator proof | Brain/Architect |
 | `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
 | `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `ops/console_tenants_perf_long_run.py` | Reproducible authenticated long-run perf lane for Tenants (`portfolio/cockpit/branches` + snapshot gate) | QA/OPS/Brain |

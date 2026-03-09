@@ -53,6 +53,7 @@ def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
         "/calendar/specialists/{specialist_id}/disable": {"post"},
         "/calendar/slots": {"get"},
         "/calendar/bookings": {"get", "post"},
+        "/calendar/bookings/{booking_id}": {"patch"},
         "/calendar/bookings/{booking_id}/cancel": {"post"},
         "/calendar/bookings/{booking_id}/status": {"post"},
         "/calendar/bookings/{booking_id}/no-show-followup": {"post"},
@@ -83,6 +84,8 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
         ("SlotResponse",),
         ("SlotsResponse",),
         ("BookingCreate",),
+        ("BookingUpdate",),
+        ("BookingCancelRequest",),
         ("BookingStatusUpdateRequest",),
         ("BookingNoShowFollowUpRequest",),
         ("BookingFollowUpGovernanceRequest",),
@@ -165,6 +168,46 @@ def test_booking_response_contract_exposes_no_show_followup_flag() -> None:
     assert (properties.get("needs_action") or {}).get("type") == "boolean"
     assert "attention_reason" in properties
     assert _has_string_type(properties.get("attention_reason") or {})
+    assert "notes" in properties
+    assert _has_string_type(properties.get("notes") or {})
+
+
+def test_booking_update_contract_requires_operator_grade_fields() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    booking_update = schemas.get("BookingUpdate") or {}
+    properties = booking_update.get("properties") or {}
+    required = set(booking_update.get("required") or [])
+
+    assert {"specialist_id", "start_at", "end_at", "customer_name", "customer_phone", "service_type"} <= required
+    assert (properties.get("specialist_id") or {}).get("type") == "string"
+    assert (properties.get("customer_name") or {}).get("type") == "string"
+    assert (properties.get("customer_phone") or {}).get("type") == "string"
+    assert (properties.get("service_type") or {}).get("type") == "string"
+    assert _has_string_type(properties.get("notes") or {})
+
+
+def test_booking_update_and_cancel_contracts_expose_request_bodies() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+
+    update_path = _find_path(paths, "/calendar/bookings/{booking_id}") or {}
+    update_op = update_path.get("patch") or {}
+    update_schema = (
+        (((update_op.get("requestBody") or {}).get("content") or {}).get("application/json") or {})
+        .get("schema")
+        or {}
+    )
+    assert (update_schema.get("$ref") or "").endswith("/BookingUpdate")
+
+    cancel_path = _find_path(paths, "/calendar/bookings/{booking_id}/cancel") or {}
+    cancel_op = cancel_path.get("post") or {}
+    cancel_schema = (
+        (((cancel_op.get("requestBody") or {}).get("content") or {}).get("application/json") or {})
+        .get("schema")
+        or {}
+    )
+    assert (cancel_schema.get("$ref") or "").endswith("/BookingCancelRequest")
 
 
 def test_booking_action_response_contract_exposes_case_effects() -> None:

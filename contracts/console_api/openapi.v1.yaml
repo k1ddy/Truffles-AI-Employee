@@ -7306,14 +7306,45 @@ paths:
         schema:
           type: string
           title: Booking Id
-      - name: reason
-        in: query
-        required: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingCancelRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/calendar/bookings/{booking_id}:
+    patch:
+      tags:
+      - Calendar
+      summary: Update Booking
+      description: Update an existing booking.
+      operationId: update_booking_console_v1_calendar_bookings__booking_id__patch
+      parameters:
+      - name: booking_id
+        in: path
+        required: true
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Reason
+          type: string
+          title: Booking Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingUpdate'
       responses:
         '200':
           description: Successful Response
@@ -7539,6 +7570,16 @@ components:
       - success
       - booking
       title: BookingActionResponse
+    BookingCancelRequest:
+      properties:
+        reason:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+          title: Reason
+      type: object
+      title: BookingCancelRequest
     BookingCaseEffect:
       properties:
         case_id:
@@ -7680,6 +7721,11 @@ components:
           - type: string
           - type: 'null'
           title: Service Type
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
         status:
           type: string
           title: Status
@@ -7780,6 +7826,48 @@ components:
       required:
       - status
       title: BookingStatusUpdateRequest
+    BookingUpdate:
+      properties:
+        specialist_id:
+          type: string
+          title: Specialist Id
+        start_at:
+          type: string
+          format: date-time
+          title: Start At
+        end_at:
+          type: string
+          format: date-time
+          title: End At
+        customer_name:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Customer Name
+        customer_phone:
+          type: string
+          maxLength: 32
+          minLength: 7
+          title: Customer Phone
+        service_type:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Service Type
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+      type: object
+      required:
+      - specialist_id
+      - start_at
+      - end_at
+      - customer_name
+      - customer_phone
+      - service_type
+      title: BookingUpdate
     BookingsListResponse:
       properties:
         items:

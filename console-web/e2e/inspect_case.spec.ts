@@ -142,8 +142,12 @@ function buildMockDateTime(date: string, hours: number, minutes: number) {
 }
 
 function normalizeMockCalendarPhone(value: unknown): string | null {
-    const digits = String(value ?? '').replace(/\D/g, '');
+    const rawValue = String(value ?? '').trim();
+    const digits = rawValue.replace(/\D/g, '');
     if (digits.length === 10) {
+        if (rawValue.startsWith('+') || /^7(?:[\s().-]|$)/.test(rawValue) || /^8(?:[\s().-]|$)/.test(rawValue)) {
+            return null;
+        }
         return `+7${digits}`;
     }
     if (digits.length === 11 && digits.startsWith('7')) {
@@ -2697,8 +2701,8 @@ test('calendar hides technical follow-up owners and keeps operator-safe labels',
 
     const bookingPanel = await openCalendarBookingActionsByText(page, 'Динара');
     await expect(bookingPanel).toBeVisible({ timeout: 20000 });
-    await expect(bookingPanel).toContainText('2. Что решили после неявки', { timeout: 15000 });
-    await expect(bookingPanel).toContainText('3. Кто отвечает за звонок', { timeout: 15000 });
+    await expect(bookingPanel).toContainText('Что решили после неявки', { timeout: 15000 });
+    await expect(bookingPanel).toContainText('Кто отвечает за звонок', { timeout: 15000 });
     await expect(bookingPanel).toContainText('За звонок отвечает: Служебный аккаунт', { timeout: 15000 });
     await expect(bookingPanel.getByTestId('calendar-follow-up-governance-owner')).toBeVisible({ timeout: 20000 });
     const governanceOptions = await bookingPanel.getByTestId('calendar-follow-up-governance-owner').locator('option').allTextContents();
@@ -2756,7 +2760,7 @@ test('guided booking composer blocks invalid submit until service name phone and
     const errorSummary = page.getByTestId('calendar-booking-error-summary');
     await expect(errorSummary).toContainText('Имя должно содержать минимум 2 символа.', { timeout: 15000 });
     await expect(errorSummary).toContainText('Укажите телефон в формате +7 700 123 45 67.', { timeout: 15000 });
-    await expect(page.getByText('Номер пока не распознан. Нужен формат +7 700 123 45 67.')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('Можно писать как удобно: +7, 8, со скобками или без. Сохраним номер, когда он станет полным.')).toBeVisible({ timeout: 15000 });
     await expect(submitButton).toBeDisabled();
 
     await page.getByTestId('calendar-booking-customer-name').fill('Мадина С.');
