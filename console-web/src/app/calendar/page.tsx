@@ -283,11 +283,15 @@ function normalizeHumanText(value: string | null | undefined): string {
 }
 
 function normalizePhoneForSubmit(value: string | null | undefined): string | null {
-    const digits = (value || "").replace(/\D/g, "");
+    const rawValue = (value || "").trim();
+    const digits = rawValue.replace(/\D/g, "");
     if (!digits) {
         return null;
     }
     if (digits.length === 10) {
+        if (rawValue.startsWith("+") || /^7(?:[\s().-]|$)/.test(rawValue) || /^8(?:[\s().-]|$)/.test(rawValue)) {
+            return null;
+        }
         return `+7${digits}`;
     }
     if (digits.length === 11 && digits.startsWith("7")) {
@@ -583,7 +587,7 @@ export default function CalendarPage() {
     const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
     const [selectedService, setSelectedService] = useState<CalendarServiceOption | null>(null);
     const [customerName, setCustomerName] = useState("");
-    const [customerPhone, setCustomerPhone] = useState("");
+    const [customerPhoneInput, setCustomerPhoneInput] = useState("");
     const [notes, setNotes] = useState("");
     const [bookingComposerOpen, setBookingComposerOpen] = useState(false);
     const [statusUpdateBookingId, setStatusUpdateBookingId] = useState<string | null>(null);
@@ -996,13 +1000,13 @@ export default function CalendarPage() {
         if (!normalizeHumanText(customerName) && prefillName) {
             setCustomerName(prefillName);
         }
-        if (!normalizePhoneForSubmit(customerPhone) && prefillPhone) {
-            setCustomerPhone(prefillPhone);
+        if (!normalizePhoneForSubmit(customerPhoneInput) && prefillPhone) {
+            setCustomerPhoneInput(prefillPhone);
         }
         bookingPrefillScopeRef.current = scopeKey;
     }, [
         customerName,
-        customerPhone,
+        customerPhoneInput,
         focusedCaseId,
         focusedCaseQuery.data?.customer_name,
         focusedCaseQuery.data?.customer_phone,
@@ -1377,14 +1381,14 @@ export default function CalendarPage() {
     const prefilledCasePhone = formatPhoneInput(focusedCaseQuery.data?.customer_phone);
     const hasCasePrefill = Boolean(prefilledCaseName || prefilledCasePhone);
     const normalizedCustomerName = normalizeHumanText(customerName);
-    const normalizedCustomerPhone = normalizePhoneForSubmit(customerPhone);
+    const normalizedCustomerPhone = normalizePhoneForSubmit(customerPhoneInput);
     const normalizedCustomerPhoneDisplay = normalizedCustomerPhone
         ? formatPhoneInput(normalizedCustomerPhone)
         : "";
     const shouldShowBookingValidation = Boolean(
-        selectedSpecialist || selectedService || selectedSlot || normalizedCustomerName || customerPhone,
+        selectedSpecialist || selectedService || selectedSlot || normalizedCustomerName || customerPhoneInput,
     );
-    const shouldShowCustomerValidation = Boolean(selectedSlot || normalizedCustomerName || customerPhone);
+    const shouldShowCustomerValidation = Boolean(selectedSlot || normalizedCustomerName || customerPhoneInput);
     const bookingFormErrors = {
         service: selectedService
             ? null
@@ -1474,7 +1478,7 @@ export default function CalendarPage() {
                                 };
     const customerStepState = normalizedCustomerName && normalizedCustomerPhone
         ? "ready"
-        : normalizedCustomerName || customerPhone
+        : normalizedCustomerName || customerPhoneInput
             ? "review"
             : "empty";
     const bookingNextAction = !selectedService
@@ -1911,14 +1915,14 @@ export default function CalendarPage() {
         }
         setSelectedSlot(null);
         setCustomerName(normalizeHumanText(focusedCaseQuery.data?.customer_name));
-        setCustomerPhone(formatPhoneInput(focusedCaseQuery.data?.customer_phone));
+        setCustomerPhoneInput(formatPhoneInput(focusedCaseQuery.data?.customer_phone));
         setNotes("");
         setBookingComposerOpen(keepComposerOpen);
     };
 
     const applyCasePrefill = () => {
         setCustomerName(normalizeHumanText(focusedCaseQuery.data?.customer_name));
-        setCustomerPhone(formatPhoneInput(focusedCaseQuery.data?.customer_phone));
+        setCustomerPhoneInput(formatPhoneInput(focusedCaseQuery.data?.customer_phone));
     };
 
     const handleQueueModeChange = (nextMode: BookingQueueMode) => {
@@ -3490,28 +3494,28 @@ export default function CalendarPage() {
                                     </span>
                                     <input
                                         type="tel"
-                                        value={customerPhone}
-                                        onChange={(event) => setCustomerPhone(formatPhoneInput(event.target.value))}
+                                        value={customerPhoneInput}
+                                        onChange={(event) => setCustomerPhoneInput(event.target.value)}
                                         placeholder="+7 700 123 45 67"
                                         inputMode="tel"
                                         autoComplete="tel"
-                                        maxLength={20}
+                                        maxLength={32}
                                         className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(shouldShowCustomerValidation && bookingFormErrors.customerPhone) ? "border-destructive/60" : "border-border/60"}`}
                                         data-testid="calendar-booking-customer-phone"
                                     />
-                                    {customerPhone ? (
+                                    {customerPhoneInput ? (
                                         normalizedCustomerPhoneDisplay ? (
                                             <p className="text-xs text-emerald-700">
                                                 Сохраним номер как {normalizedCustomerPhoneDisplay}.
                                             </p>
                                         ) : (
-                                            <p className="text-xs text-destructive">
-                                                Номер пока не распознан. Нужен формат +7 700 123 45 67.
+                                            <p className="text-xs text-muted-foreground">
+                                                Можно писать как удобно: +7, 8, со скобками или без. Сохраним номер, когда он станет полным.
                                             </p>
                                         )
                                     ) : (
                                         <p className="text-xs text-muted-foreground">
-                                            Номер нужен, чтобы быстро подтвердить запись и связаться при переносе.
+                                            Можно ввести +7 700 123 45 67, 8 700 123 45 67 или вставить номер как есть.
                                         </p>
                                     )}
                                     {shouldShowCustomerValidation && bookingFormErrors.customerPhone && (

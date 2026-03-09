@@ -108,8 +108,12 @@ function buildMockDateTime(date: string, hours: number, minutes: number) {
 }
 
 function normalizeMockCalendarPhone(value: unknown): string | null {
-    const digits = String(value ?? '').replace(/\D/g, '');
+    const rawValue = String(value ?? '').trim();
+    const digits = rawValue.replace(/\D/g, '');
     if (digits.length === 10) {
+        if (rawValue.startsWith('+') || /^7(?:[\s().-]|$)/.test(rawValue) || /^8(?:[\s().-]|$)/.test(rawValue)) {
+            return null;
+        }
         return `+7${digits}`;
     }
     if (digits.length === 11 && digits.startsWith('7')) {
@@ -871,6 +875,38 @@ test.describe('calendar operator workflow', () => {
         await expect(statusSelect).toHaveValue('no_show');
         await expect(page.getByTestId('calendar-filter-draft-banner')).toHaveCount(0);
         await expect(visibleCards).toHaveCount(1);
+    });
+
+    test('phone field keeps raw typing and deletion natural while still showing normalized preview', async ({ page }) => {
+        test.skip(!useRouteMocks, 'calendar operator lane is deterministic only');
+
+        await installCalendarOperatorMocks(page);
+        await ensureCalendarReady(page, `${baseURL}/calendar`);
+
+        await openCalendarSecondaryPanel(page, 'scheduling');
+        await page.getByTestId('calendar-schedule-service').selectOption('Маникюр');
+        await page.getByTestId('calendar-schedule-specialist').selectOption(SPECIALIST_ID);
+        await page.getByTestId('calendar-booking-date').fill(formatMockDate(new Date()));
+        await expect(page.getByTestId('calendar-slot-10-00')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('calendar-slot-10-00').click({ force: true });
+
+        const phoneInput = page.getByTestId('calendar-booking-customer-phone');
+        await phoneInput.fill('8 (701) 555-44-33');
+        await expect(phoneInput).toHaveValue('8 (701) 555-44-33');
+        await expect(page.getByText(`Сохраним номер как ${formatPhoneForUi('+77015554433')}.`)).toBeVisible({ timeout: 15000 });
+
+        await phoneInput.press('Backspace');
+        await expect(phoneInput).toHaveValue('8 (701) 555-44-3');
+        await expect(page.getByText('Можно писать как удобно: +7, 8, со скобками или без. Сохраним номер, когда он станет полным.')).toBeVisible({ timeout: 15000 });
+
+        await phoneInput.press('Control+A');
+        await phoneInput.press('Backspace');
+        await expect(phoneInput).toHaveValue('');
+        await expect(page.getByText('Можно ввести +7 700 123 45 67, 8 700 123 45 67 или вставить номер как есть.')).toBeVisible({ timeout: 15000 });
+
+        await phoneInput.fill('+7 701 555 44 33');
+        await expect(phoneInput).toHaveValue('+7 701 555 44 33');
+        await expect(page.getByText(`Сохраним номер как ${formatPhoneForUi('+77015554433')}.`)).toBeVisible({ timeout: 15000 });
     });
 
     test('operator can recover from dependent resets, clear the draft, and create a booking again', async ({ page }) => {

@@ -564,7 +564,20 @@
     - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/calendar-operator.spec.ts --project chromium` (`6 passed`)
     - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium` (`14 passed, 1 skipped`)
 
-- last_updated: 2026-03-09T12:36:48+05:00
+- Wave38 Part B completed locally:
+  - replaced the Calendar phone field with a raw editable value plus normalized preview so typing, deletion, and paste no longer reformat the operator input on every keystroke;
+  - aligned frontend, Playwright mocks, and backend normalization so incomplete prefixed numbers stay invalid instead of silently normalizing into wrong `+7...` payloads;
+  - extended `console-web/e2e/calendar-operator.spec.ts` with a dedicated phone-ergonomics proof and kept the full `inspect_case` lane green after the normalization change;
+  - visual inspection is clean for valid/partial/empty phone states at `1280px` and `1024px`: `/tmp/wave38-part-b-phone-full-1280.png`, `/tmp/wave38-part-b-phone-partial-1280.png`, `/tmp/wave38-part-b-phone-empty-1024.png`;
+  - local evidence:
+    - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file e2e/calendar-operator.spec.ts --file e2e/inspect_case.spec.ts` (`pass`)
+    - `cd console-web && npm run build` (`pass`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/calendar-operator.spec.ts --project chromium` (`7 passed`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium` (`14 passed, 1 skipped`)
+    - `cd truffles-api && pytest -q tests/test_calendar_bookings_router.py` (`10 passed`)
+    - `cd truffles-api && ruff check app/routers/calendar.py tests/test_calendar_bookings_router.py` (`pass`)
+
+- last_updated: 2026-03-09T12:58:24+05:00
 
 - Wave37 recovery TP activated after post-merge operator evidence:
   - fetched `origin/main`, confirmed the current worktree branch was behind merged `main`, and switched to `feat/2026-03-08-inbox-calendar-ux-reconstruction-wave37-a1` from `origin/main` so the follow-up starts from the real merged state rather than the old Wave36 branch tip;

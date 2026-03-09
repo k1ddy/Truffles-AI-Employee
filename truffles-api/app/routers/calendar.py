@@ -237,6 +237,8 @@ def _normalize_calendar_customer_phone(
         raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is invalid")
     digits = re.sub(r"\D+", "", cleaned)
     if len(digits) == 10:
+        if cleaned.startswith("+") or re.match(r"^7(?:[\s().-]|$)", cleaned) or re.match(r"^8(?:[\s().-]|$)", cleaned):
+            raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is invalid")
         digits = f"7{digits}"
     elif len(digits) == 11 and digits[0] in {"7", "8"}:
         digits = f"7{digits[-10:]}"

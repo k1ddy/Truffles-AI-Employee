@@ -389,3 +389,61 @@ async def test_create_booking_rejects_invalid_customer_phone(monkeypatch):
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "customer_phone",
+    [
+        "8 (700) 123-45-6",
+        "+7 700 123 45 6",
+        "7 700 123 45 6",
+    ],
+)
+async def test_create_booking_rejects_partial_prefixed_customer_phone(monkeypatch, customer_phone):
+    client_id = uuid4()
+    specialist_id = uuid4()
+    branch_id = uuid4()
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=uuid4(), name="Manager"),
+    )
+    specialist = SimpleNamespace(
+        id=specialist_id,
+        client_id=client_id,
+        branch_id=branch_id,
+        branch=None,
+        name="Spec",
+    )
+
+    class _SchedulingServiceGuard:
+        def __init__(self, _db):
+            pass
+
+        def create_appointment(self, **_kwargs):  # pragma: no cover
+            raise AssertionError("create_appointment must not run for partial prefixed phone")
+
+    db = SimpleNamespace(
+        query=lambda model: _QueryStub(rows=[specialist]) if model is calendar_router.Specialist else _QueryStub(rows=[]),
+    )
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceGuard)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await calendar_router.create_booking(
+            request=SimpleNamespace(),
+            data=calendar_router.BookingCreate(
+                specialist_id=str(specialist_id),
+                start_at=datetime(2026, 3, 6, 10, 0, tzinfo=timezone.utc),
+                end_at=datetime(2026, 3, 6, 11, 0, tzinfo=timezone.utc),
+                customer_name="Айгуль",
+                customer_phone=customer_phone,
+                service_type="Маникюр",
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"
