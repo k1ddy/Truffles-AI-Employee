@@ -310,10 +310,33 @@
     - `cd truffles-api && pytest -q tests/test_calendar_bookings_router.py` (`10 passed`)
     - `cd truffles-api && ruff check app/routers/calendar.py tests/test_calendar_bookings_router.py` (`pass`)
 
+- `2026-03-09` — `Wave38 Part C` completed locally:
+  - added bounded Calendar lifecycle contract for existing bookings: `PATCH /calendar/bookings/{booking_id}` plus body-based `POST /calendar/bookings/{booking_id}/cancel`, backend service helpers for update/cancel lifecycle guardrails, synced OpenAPI, and regenerated console API types;
+  - wired the Calendar action panel and booking composer so operators can open an existing booking in edit mode, keep current data prefilled, reset stale slot choices deterministically when specialist/date/service changes, and cancel active bookings with explicit reason input;
+  - kept lifecycle fail-closed for non-active statuses: no-show/completed/cancelled bookings now surface explicit disabled copy instead of dead or misleading controls;
+  - local evidence:
+    - `cd truffles-api && pytest -q tests/test_calendar_bookings_router.py tests/test_console_openapi_calendar_contract.py` (`38 passed`)
+    - `cd truffles-api && ruff check app/routers/calendar.py app/services/appointment_service.py tests/test_calendar_bookings_router.py tests/test_console_openapi_calendar_contract.py` (`pass`)
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+    - `cd console-web && npm run generate:api` (`pass`)
+
+- `2026-03-09` — `Wave38 Part D` completed locally:
+  - extended `console-web/e2e/calendar-operator.spec.ts` into a full Calendar operator acceptance lane covering draft/apply/reset filters, phone typing/deletion/paste ergonomics, edit/reschedule, cancel, blocked non-active lifecycle, follow-up safety, and medium-width layout;
+  - kept the broader `inspect_case` deterministic lane green after the lifecycle additions;
+  - recorded fresh visual acceptance artifacts for the mandatory states: `/tmp/wave38-operator-captures/wave38-filters-applied-1280.png`, `/tmp/wave38-operator-captures/wave38-phone-partial-1280.png`, `/tmp/wave38-operator-captures/wave38-phone-valid-1280.png`, `/tmp/wave38-operator-captures/wave38-edit-open-1280.png`, `/tmp/wave38-operator-captures/wave38-cancel-panel-1280.png`, `/tmp/wave38-operator-captures/wave38-no-show-disabled-1280.png`, `/tmp/wave38-operator-captures/wave38-medium-width-1024.png`;
+  - visual inspection is clean: no clipped buttons, no raw technical labels, edit/cancel surfaces stay readable, and `1024px` keeps the composer within screen bounds;
+  - local evidence:
+    - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/lib/calendar-bookings.ts --file e2e/calendar-operator.spec.ts --file e2e/inspect_case.spec.ts` (`pass`)
+    - `cd console-web && npm run build` (`pass`)
+    - `cd console-web && npm run generate:api` (`pass`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/calendar-operator.spec.ts --project chromium` (`10 passed`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium` (`14 passed, 1 skipped`)
+    - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+
 ## Evidence
 - New TP: `docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave38-a1.md`
 - Synced canon pointers in `STATE.md`, master TP, backlog, session log, and session index
-- `Wave38 Part A/B` local evidence in `console-web/src/app/calendar/page.tsx`, `console-web/e2e/calendar-operator.spec.ts`, `console-web/e2e/inspect_case.spec.ts`, `truffles-api/app/routers/calendar.py`, `truffles-api/tests/test_calendar_bookings_router.py`, `/tmp/wave38-part-a-filters-draft-1280.png`, `/tmp/wave38-part-a-filters-applied-1280.png`, `/tmp/wave38-part-a-filters-draft-1024.png`, `/tmp/wave38-part-b-phone-full-1280.png`, `/tmp/wave38-part-b-phone-partial-1280.png`, `/tmp/wave38-part-b-phone-empty-1024.png`
+- `Wave38 Part A-D` local evidence in `console-web/src/app/calendar/page.tsx`, `console-web/src/lib/calendar-bookings.ts`, `console-web/src/types/api.generated.ts`, `console-web/e2e/calendar-operator.spec.ts`, `console-web/e2e/inspect_case.spec.ts`, `truffles-api/app/routers/calendar.py`, `truffles-api/app/services/appointment_service.py`, `truffles-api/tests/test_calendar_bookings_router.py`, `truffles-api/tests/test_console_openapi_calendar_contract.py`, `contracts/console_api/openapi.v1.yaml`, `/tmp/wave38-part-a-filters-draft-1280.png`, `/tmp/wave38-part-a-filters-applied-1280.png`, `/tmp/wave38-part-a-filters-draft-1024.png`, `/tmp/wave38-part-b-phone-full-1280.png`, `/tmp/wave38-part-b-phone-partial-1280.png`, `/tmp/wave38-part-b-phone-empty-1024.png`, `/tmp/wave38-operator-captures/wave38-filters-applied-1280.png`, `/tmp/wave38-operator-captures/wave38-phone-partial-1280.png`, `/tmp/wave38-operator-captures/wave38-phone-valid-1280.png`, `/tmp/wave38-operator-captures/wave38-edit-open-1280.png`, `/tmp/wave38-operator-captures/wave38-cancel-panel-1280.png`, `/tmp/wave38-operator-captures/wave38-no-show-disabled-1280.png`, `/tmp/wave38-operator-captures/wave38-medium-width-1024.png`
 - One-web-search record with MDN sources
 - Future closeout evidence for this block must include Playwright artifacts, visual captures, router/OpenAPI checks, and PR link(s)
 
@@ -348,7 +371,7 @@
 - `Expiry/trigger to stop deferral`: if `Wave38` still cannot make filters deterministic or booking edit/cancel reliable with current APIs, open the bounded API follow-up immediately instead of weakening the operator contract.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: execute `Wave38 Part C` next (booking lifecycle completion), then `Part D` operator proof + visual acceptance; only after those close decide whether a bounded Calendar API follow-up is needed or whether work can return to `UX-08` / `UX-20` / `UX-26`.
-- `First deterministic check command`: `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "Wave38|edit/reschedule/cancel|calendar-operator.spec.ts|CaseBookingsPanel|PATCH /calendar/bookings" docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave38-a1.md STATE.md docs/CONSOLE_AUDIT/UX_BACKLOG.md`
-- `Blocked-by conditions`: any attempt to skip explicit filter-state architecture, keep destructive phone formatting, ship edit/cancel without backend contract and proof, or move to other backlog work before `Wave38` closes.
+- `Next block objective`: update `PR #960` with the full `Wave38 Part C/D` closeout, then merge and run post-merge canon/main closeout before any return to `UX-08` / `UX-20` / `UX-26`.
+- `First deterministic check command`: `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && git status --short && SESSION_AGENT=a1 scripts/session_check.sh`
+- `Blocked-by conditions`: any attempt to skip PR update/merge, leave OpenAPI/types unsynced, weaken the lifecycle proof, or move to other backlog work before `Wave38` lands on `main`.
 - `Owner role for closure`: Brain / Top Architect.

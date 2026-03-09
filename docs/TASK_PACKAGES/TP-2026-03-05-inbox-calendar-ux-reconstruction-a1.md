@@ -43,10 +43,10 @@
 
 ## Final closure status
 - Historical closure from `2026-03-07` is no longer the effective acceptance state.
-- `Wave37` merged via `PR #959`, but post-merge operator evidence on `2026-03-09` showed that Calendar still fails three operator basics: filters do not yet behave as one explicit applied-state contract, phone input still fights normal typing/deletion, and existing bookings still lack a full edit/cancel lifecycle.
-- Effective program status is therefore reopened for Calendar-only acceptance through `Wave38`; this is a forward fix from merged `main`, not a rollback of `Wave36`/`Wave37`.
-- Routing v2 remains blocked exactly as before; the only active product gap is to make `Записи` fully operable and provably misuse-resistant across create, edit, and cancel flows.
-- Owner-approved post-closeout maturity analysis remains valid for queue-state/routing sequencing, but no return to the non-Calendar backlog is allowed before `Wave38` closes.
+- `Wave37` merged via `PR #959`, and `Wave38` is the forward-fix block on top of that merged state; there is no rollback of `Wave36`/`Wave37`.
+- `Wave38` local closeout is now complete in `feat/2026-03-09-inbox-calendar-ux-reconstruction-wave38-a1`: Calendar filters use one explicit applied-state contract, phone entry is raw-editable and normalization-safe, and created bookings now support bounded edit/reschedule/cancel lifecycle with proof.
+- Routing v2 remains blocked exactly as before; the only remaining step before any return to non-Calendar backlog work is merge/closeout of `PR #960`.
+- Owner-approved post-closeout maturity analysis remains valid for queue-state/routing sequencing, but no return to the non-Calendar backlog is allowed before `Wave38` merges and is canonized on `main`.
 
 ## Canon refs
 - `AGENTS.md`
@@ -90,9 +90,9 @@
   - Связь записи с заявкой стала явной через `appointments.case_id`.
   - Runtime слой уже улучшен до `SSE-first + polling fallback`, есть wave4 release runbook.
 - `Remaining product gaps (fact)`:
-  - Calendar acceptance remains reopened even after merged `Wave37`: operators still report filter-state desynchronization, destructive phone-entry behavior, and a missing edit/cancel lifecycle for existing bookings.
-  - `Wave38` is now the only valid active product block before any return to the non-Calendar backlog.
-  - Accepted non-routing residual sequencing from `Wave23`/`Wave24` still stands, but it is gated behind `Wave38` closure.
+  - Product implementation gap from merged `Wave37` is locally closed by `Wave38`, but the closeout still needs merge and post-merge canon sync through `PR #960`.
+  - `Wave38` remains the only valid active product block until that merge/closeout happens.
+  - Accepted non-routing residual sequencing from `Wave23`/`Wave24` still stands, but it stays gated behind `Wave38` merge.
 
 ## Post-closeout maturity analysis (mandatory)
 - `Primary blocker`: queue state is still split across browser storage, route context, and strict server query params, so there is no single reproducible operator view contract for `Заявки` and `Записи`.

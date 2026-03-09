@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { isAuthGateVisible, loginThroughKeycloak } from './support/keycloak-auth';
 
@@ -6,6 +8,7 @@ const consoleHostPattern = /localhost:3000|localhost:3100|192\.168\.5\.27:3000|c
 const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
 const useRouteMocks = process.env.INSPECT_CASE_USE_MOCKS !== '0';
+const captureDir = process.env.CALENDAR_OPERATOR_CAPTURE_DIR?.trim() || '';
 
 const COMPANY_ID = '11111111-1111-4111-8111-111111111111';
 const CLIENT_ID = '22222222-2222-4222-8222-222222222222';
@@ -42,6 +45,7 @@ type MockBooking = {
     customer_name: string | null;
     customer_phone: string | null;
     service_type: string | null;
+    notes?: string | null;
     status: string;
     no_show_followup_done?: boolean;
     no_show_followup_result?: 'contacted' | 'rebooked' | null;
@@ -229,6 +233,17 @@ function buildSlotsForRequest(date: string, specialistId: string) {
     ];
 }
 
+async function maybeCapture(page: Page, name: string) {
+    if (!captureDir) {
+        return;
+    }
+    mkdirSync(captureDir, { recursive: true });
+    await page.screenshot({
+        path: join(captureDir, `${name}.png`),
+        fullPage: true,
+    });
+}
+
 async function installCalendarOperatorMocks(page: Page, options: CalendarOperatorMockOptions = {}) {
     const viewerRole = options.viewerRole ?? 'owner';
     const today = formatMockDate(new Date());
@@ -285,6 +300,7 @@ async function installCalendarOperatorMocks(page: Page, options: CalendarOperato
             customer_name: 'Айгуль',
             customer_phone: '+77001234567',
             service_type: 'Маникюр',
+            notes: 'Позвонить за час',
             status: 'PENDING_CONFIRMATION',
             no_show_followup_done: false,
             no_show_followup_result: null,
@@ -310,6 +326,7 @@ async function installCalendarOperatorMocks(page: Page, options: CalendarOperato
             customer_name: 'Динара',
             customer_phone: '+77015554433',
             service_type: 'Педикюр',
+            notes: null,
             status: 'NO_SHOW',
             no_show_followup_done: false,
             no_show_followup_result: null,
@@ -335,6 +352,7 @@ async function installCalendarOperatorMocks(page: Page, options: CalendarOperato
             customer_name: 'Динара',
             customer_phone: '+77015554433',
             service_type: 'Педикюр',
+            notes: null,
             status: 'CONFIRMED',
             no_show_followup_done: false,
             no_show_followup_result: null,
@@ -606,6 +624,69 @@ async function installCalendarOperatorMocks(page: Page, options: CalendarOperato
             await toJsonResponse(route, { success: true, booking: deepClone(newBooking), case_effects: [] });
             return;
         }
+        const updateMatch = pathname.match(/\/calendar\/bookings\/([^/]+)$/);
+        if (method === 'PATCH' && updateMatch) {
+            const booking = bookingStore.find((item) => item.id === updateMatch[1]);
+            if (!booking) {
+                await toErrorResponse(route, 404, 'BOOKING_NOT_FOUND', 'Booking not found');
+                return;
+            }
+            if (!['HOLD', 'PENDING_CONFIRMATION', 'CONFIRMED', 'RESCHEDULE_REQUESTED', 'CHECKED_IN'].includes(String(booking.status || '').toUpperCase())) {
+                await toErrorResponse(route, 409, 'BOOKING_UPDATE_DENIED', 'Booking edit is not allowed');
+                return;
+            }
+            const payload = route.request().postDataJSON() as {
+                specialist_id?: string;
+                start_at?: string;
+                end_at?: string;
+                customer_name?: string;
+                customer_phone?: string;
+                service_type?: string;
+                notes?: string;
+            } | null;
+            const customerName = String(payload?.customer_name ?? '').trim();
+            const normalizedPhone = normalizeMockCalendarPhone(payload?.customer_phone);
+            const serviceType = String(payload?.service_type ?? '').trim();
+            const specialist = specialists.find((item) => item.id === payload?.specialist_id);
+            if (!specialist || !payload?.start_at || !payload?.end_at || customerName.length < 2 || !normalizedPhone || !serviceType) {
+                await toErrorResponse(route, 400, 'VALIDATION_ERROR', 'Проверьте услугу, время и данные клиента.');
+                return;
+            }
+            booking.specialist_id = specialist.id;
+            booking.specialist_name = specialist.name;
+            booking.start_at = payload.start_at;
+            booking.end_at = payload.end_at;
+            booking.customer_name = customerName;
+            booking.customer_phone = normalizedPhone;
+            booking.service_type = serviceType;
+            booking.notes = String(payload?.notes ?? '').trim() || null;
+            booking.status = 'PENDING_CONFIRMATION';
+            booking.needs_action = true;
+            booking.attention_reason = 'Нужно подтвердить визит';
+            await toJsonResponse(route, {
+                success: true,
+                booking: deepClone(booking),
+                case_effects: [],
+            });
+            return;
+        }
+        const cancelMatch = pathname.match(/\/calendar\/bookings\/([^/]+)\/cancel$/);
+        if (method === 'POST' && cancelMatch) {
+            const booking = bookingStore.find((item) => item.id === cancelMatch[1]);
+            if (!booking) {
+                await toErrorResponse(route, 404, 'BOOKING_NOT_FOUND', 'Booking not found');
+                return;
+            }
+            if (!['HOLD', 'PENDING_CONFIRMATION', 'CONFIRMED', 'RESCHEDULE_REQUESTED', 'CHECKED_IN'].includes(String(booking.status || '').toUpperCase())) {
+                await toErrorResponse(route, 409, 'BOOKING_CANCEL_DENIED', 'Booking cancellation is not allowed');
+                return;
+            }
+            booking.status = 'CANCELLED';
+            booking.needs_action = false;
+            booking.attention_reason = null;
+            await toJsonResponse(route, { success: true, booking: deepClone(booking), case_effects: [] });
+            return;
+        }
         const statusMatch = pathname.match(/\/calendar\/bookings\/([^/]+)\/status$/);
         if (method === 'POST' && statusMatch) {
             const booking = bookingStore.find((item) => item.id === statusMatch[1]);
@@ -875,6 +956,7 @@ test.describe('calendar operator workflow', () => {
         await expect(statusSelect).toHaveValue('no_show');
         await expect(page.getByTestId('calendar-filter-draft-banner')).toHaveCount(0);
         await expect(visibleCards).toHaveCount(1);
+        await maybeCapture(page, 'wave38-filters-applied-1280');
     });
 
     test('phone field keeps raw typing and deletion natural while still showing normalized preview', async ({ page }) => {
@@ -898,6 +980,7 @@ test.describe('calendar operator workflow', () => {
         await phoneInput.press('Backspace');
         await expect(phoneInput).toHaveValue('8 (701) 555-44-3');
         await expect(page.getByText('Можно писать как удобно: +7, 8, со скобками или без. Сохраним номер, когда он станет полным.')).toBeVisible({ timeout: 15000 });
+        await maybeCapture(page, 'wave38-phone-partial-1280');
 
         await phoneInput.press('Control+A');
         await phoneInput.press('Backspace');
@@ -907,6 +990,7 @@ test.describe('calendar operator workflow', () => {
         await phoneInput.fill('+7 701 555 44 33');
         await expect(phoneInput).toHaveValue('+7 701 555 44 33');
         await expect(page.getByText(`Сохраним номер как ${formatPhoneForUi('+77015554433')}.`)).toBeVisible({ timeout: 15000 });
+        await maybeCapture(page, 'wave38-phone-valid-1280');
     });
 
     test('operator can recover from dependent resets, clear the draft, and create a booking again', async ({ page }) => {
@@ -1026,6 +1110,71 @@ test.describe('calendar operator workflow', () => {
         await expect(panel).toContainText('Клиента переписали', { timeout: 15000 });
     });
 
+    test('operator can edit an active booking, change the slot, and save coherent client data', async ({ page }) => {
+        test.skip(!useRouteMocks, 'calendar operator lane is deterministic only');
+
+        await installCalendarOperatorMocks(page);
+        await ensureCalendarReady(page, `${baseURL}/calendar`);
+        await page.getByTestId('calendar-queue-lane-all').click({ force: true });
+
+        const panel = await openCalendarBookingActionsByText(page, 'Айгуль');
+        await panel.getByTestId('calendar-booking-edit').click({ force: true });
+        const composer = page.getByTestId('calendar-booking-composer');
+        await expect(composer).toBeVisible({ timeout: 15000 });
+        await expect(composer).toContainText('Изменить запись');
+        await expect(page.getByTestId('calendar-booking-customer-name')).toHaveValue('Айгуль');
+        await expect(page.getByTestId('calendar-booking-customer-phone')).toHaveValue('+7 700 123 45 67');
+        await maybeCapture(page, 'wave38-edit-open-1280');
+
+        await page.getByTestId('calendar-schedule-specialist').selectOption(SECOND_SPECIALIST_ID);
+        await expect(page.getByTestId('calendar-booking-summary')).toContainText('Время: Не выбрано', { timeout: 15000 });
+        await expect(page.getByTestId('calendar-booking-next-step')).toContainText('4. Выберите время', { timeout: 15000 });
+        await expect(page.getByTestId('calendar-slot-14-00')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('calendar-slot-14-00').click({ force: true });
+        await page.getByTestId('calendar-booking-customer-name').fill('Айгуль Ж.');
+        await page.getByTestId('calendar-booking-customer-phone').fill('8 (702) 111-22-33');
+        await page.getByLabel('Примечания').fill('Перенесли по просьбе клиента');
+        await page.getByTestId('calendar-booking-submit').click({ force: true });
+
+        await expect(page.getByText('Запись обновлена')).toBeVisible({ timeout: 15000 });
+        const updatedCard = page.getByTestId('calendar-booking-card').filter({ hasText: 'Айгуль Ж.' }).first();
+        await expect(updatedCard).toContainText('14:00 - 15:00', { timeout: 15000 });
+        await expect(updatedCard).toContainText('Мастер Алина');
+        await expect(updatedCard).toContainText('+7 702 111 22 33');
+    });
+
+    test('operator can cancel an active booking with reason and still find it in the queue', async ({ page }) => {
+        test.skip(!useRouteMocks, 'calendar operator lane is deterministic only');
+
+        await installCalendarOperatorMocks(page);
+        await ensureCalendarReady(page, `${baseURL}/calendar`);
+        await page.getByTestId('calendar-queue-lane-all').click({ force: true });
+
+        const panel = await openCalendarBookingActionsByText(page, 'Мастер Алина');
+        await panel.getByTestId('calendar-booking-cancel-reason').fill('Клиент отменил визит');
+        await maybeCapture(page, 'wave38-cancel-panel-1280');
+        await panel.getByTestId('calendar-booking-cancel-submit').click({ force: true });
+
+        await expect(page.getByText('Запись отменена')).toBeVisible({ timeout: 15000 });
+        const cancelledCard = page.getByTestId('calendar-booking-card').filter({ hasText: 'Мастер Алина' }).first();
+        await expect(cancelledCard).toContainText('отменена', { timeout: 15000 });
+    });
+
+    test('operator sees edit and cancel explicitly blocked for non-active bookings', async ({ page }) => {
+        test.skip(!useRouteMocks, 'calendar operator lane is deterministic only');
+
+        await installCalendarOperatorMocks(page);
+        await ensureCalendarReady(page, `${baseURL}/calendar`);
+        await page.getByTestId('calendar-queue-lane-all').click({ force: true });
+
+        const panel = await openCalendarBookingActionsByText(page, 'Динара');
+        await expect(panel.getByTestId('calendar-booking-edit-disabled')).toBeVisible({ timeout: 15000 });
+        await expect(panel.getByTestId('calendar-booking-cancel-disabled')).toBeVisible({ timeout: 15000 });
+        await expect(panel.getByTestId('calendar-booking-edit')).toHaveCount(0);
+        await expect(panel.getByTestId('calendar-booking-cancel-submit')).toHaveCount(0);
+        await maybeCapture(page, 'wave38-no-show-disabled-1280');
+    });
+
     test('medium-width calendar keeps filters and booking composer inside the screen bounds', async ({ page }) => {
         test.skip(!useRouteMocks, 'calendar operator lane is deterministic only');
         await page.setViewportSize({ width: 1024, height: 1180 });
@@ -1054,5 +1203,6 @@ test.describe('calendar operator workflow', () => {
         const composerBox = await composer.boundingBox();
         expect(composerBox).not.toBeNull();
         expect((composerBox?.x ?? 0) + (composerBox?.width ?? 0)).toBeLessThanOrEqual(1024);
+        await maybeCapture(page, 'wave38-medium-width-1024');
     });
 });

@@ -2701,8 +2701,8 @@ test('calendar hides technical follow-up owners and keeps operator-safe labels',
 
     const bookingPanel = await openCalendarBookingActionsByText(page, 'Динара');
     await expect(bookingPanel).toBeVisible({ timeout: 20000 });
-    await expect(bookingPanel).toContainText('2. Что решили после неявки', { timeout: 15000 });
-    await expect(bookingPanel).toContainText('3. Кто отвечает за звонок', { timeout: 15000 });
+    await expect(bookingPanel).toContainText('Что решили после неявки', { timeout: 15000 });
+    await expect(bookingPanel).toContainText('Кто отвечает за звонок', { timeout: 15000 });
     await expect(bookingPanel).toContainText('За звонок отвечает: Служебный аккаунт', { timeout: 15000 });
     await expect(bookingPanel.getByTestId('calendar-follow-up-governance-owner')).toBeVisible({ timeout: 20000 });
     const governanceOptions = await bookingPanel.getByTestId('calendar-follow-up-governance-owner').locator('option').allTextContents();

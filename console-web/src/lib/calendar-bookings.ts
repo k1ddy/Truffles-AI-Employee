@@ -9,6 +9,7 @@ export interface Booking {
     customer_name: string | null;
     customer_phone: string | null;
     service_type: string | null;
+    notes?: string | null;
     status: string;
     no_show_followup_done?: boolean;
     no_show_followup_result?: "contacted" | "rebooked" | null;
@@ -40,6 +41,20 @@ export interface BookingCreateRequest {
 
 export interface BookingStatusUpdateRequest {
     status: "COMPLETED" | "NO_SHOW";
+    reason?: string;
+}
+
+export interface BookingUpdateRequest {
+    specialist_id: string;
+    start_at: string;
+    end_at: string;
+    customer_name: string;
+    customer_phone: string;
+    service_type: string;
+    notes?: string;
+}
+
+export interface BookingCancelRequest {
     reason?: string;
 }
 
@@ -129,6 +144,16 @@ export async function updateBookingStatus(bookingId: string, data: BookingStatus
     return response.data;
 }
 
+export async function updateBooking(bookingId: string, data: BookingUpdateRequest): Promise<BookingActionResponse> {
+    const response = await api.patch(`/calendar/bookings/${bookingId}`, data);
+    return response.data;
+}
+
+export async function cancelBooking(bookingId: string, data: BookingCancelRequest = {}): Promise<BookingActionResponse> {
+    const response = await api.post(`/calendar/bookings/${bookingId}/cancel`, data);
+    return response.data;
+}
+
 export async function registerNoShowFollowUp(
     bookingId: string,
     data: BookingNoShowFollowUpRequest = {},
@@ -154,6 +179,14 @@ export function getVisitActionOptions(status: string): Array<{ status: BookingSt
         ];
     }
     return [];
+}
+
+export function canEditBooking(status: string): boolean {
+    return ["HOLD", "PENDING_CONFIRMATION", "CONFIRMED", "RESCHEDULE_REQUESTED", "CHECKED_IN"].includes(status.toUpperCase());
+}
+
+export function canCancelBooking(status: string): boolean {
+    return canEditBooking(status);
 }
 
 export function bookingNeedsAttention(booking: Booking): boolean {

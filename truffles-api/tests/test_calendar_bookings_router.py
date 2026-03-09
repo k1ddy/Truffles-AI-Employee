@@ -85,6 +85,7 @@ async def test_list_bookings_includes_case_linkage_and_conversation_filter(monke
 
     monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
     monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceStub)
 
     response = await calendar_router.list_bookings(
@@ -182,6 +183,7 @@ async def test_list_bookings_accepts_cursor_lane_and_case_filters(monkeypatch):
     db = SimpleNamespace(query=_query_side_effect)
     monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
     monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceStub)
 
     response = await calendar_router.list_bookings(
@@ -241,6 +243,7 @@ async def test_create_booking_normalizes_operator_grade_fields(monkeypatch):
 
     monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
     monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceStub)
     monkeypatch.setattr(calendar_router, "schedule_default_reminders", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -447,3 +450,276 @@ async def test_create_booking_rejects_partial_prefixed_customer_phone(monkeypatc
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_update_booking_normalizes_operator_grade_fields(monkeypatch):
+    client_id = uuid4()
+    agent_id = uuid4()
+    specialist_id = uuid4()
+    branch_id = uuid4()
+    booking_id = uuid4()
+    captured = {}
+
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=agent_id, name="Manager"),
+    )
+    specialist = SimpleNamespace(
+        id=specialist_id,
+        client_id=client_id,
+        branch_id=branch_id,
+        branch=None,
+        name="Spec",
+    )
+
+    class _DbStub:
+        def __init__(self):
+            self.committed = False
+            self.refreshed = []
+
+        def query(self, model):
+            if model is calendar_router.Specialist:
+                return _QueryStub(rows=[specialist])
+            return _QueryStub(rows=[])
+
+        def commit(self):
+            self.committed = True
+
+        def refresh(self, booking):
+            self.refreshed.append(booking)
+
+    class _SchedulingServiceStub:
+        def __init__(self, _db):
+            pass
+
+        def update_appointment(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(id=booking_id, branch=None, notes=kwargs["notes"], status="PENDING_CONFIRMATION")
+
+    db = _DbStub()
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceStub)
+    monkeypatch.setattr(calendar_router, "enqueue_appointment_sync", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        calendar_router,
+        "_build_booking_response",
+        lambda _db, _booking: calendar_router.BookingResponse(
+            id=str(booking_id),
+            specialist_id=str(specialist_id),
+            specialist_name="Spec",
+            start_at="2026-03-06T14:00:00+00:00",
+            end_at="2026-03-06T15:00:00+00:00",
+            customer_name=captured["customer_name"],
+            customer_phone=captured["customer_phone"],
+            service_type=captured["service_type"],
+            notes=captured["notes"],
+            status="PENDING_CONFIRMATION",
+            created_at="2026-03-06T09:00:00+00:00",
+        ),
+    )
+
+    response = await calendar_router.update_booking(
+        request=SimpleNamespace(),
+        booking_id=str(booking_id),
+        data=calendar_router.BookingUpdate(
+            specialist_id=str(specialist_id),
+            start_at=datetime(2026, 3, 6, 14, 0, tzinfo=timezone.utc),
+            end_at=datetime(2026, 3, 6, 15, 0, tzinfo=timezone.utc),
+            customer_name="  Айгуль  ",
+            customer_phone="8 (701) 555-44-33",
+            service_type="  Маникюр  ",
+            notes="  Перенесли по просьбе клиента  ",
+        ),
+        db=db,
+    )
+
+    assert response.success is True
+    assert captured["appointment_id"] == booking_id
+    assert captured["client_id"] == client_id
+    assert captured["specialist_id"] == specialist_id
+    assert captured["customer_name"] == "Айгуль"
+    assert captured["customer_phone"] == "+77015554433"
+    assert captured["service_type"] == "Маникюр"
+    assert captured["notes"] == "Перенесли по просьбе клиента"
+    assert captured["actor_id"] == agent_id
+    assert captured["actor_type"] == "agent"
+    assert captured["channel"] == "console"
+    assert captured["commit"] is False
+    assert response.booking.notes == "Перенесли по просьбе клиента"
+    assert db.committed is True
+    assert len(db.refreshed) == 1
+
+
+@pytest.mark.asyncio
+async def test_update_booking_maps_lifecycle_denied_error(monkeypatch):
+    client_id = uuid4()
+    specialist_id = uuid4()
+    branch_id = uuid4()
+    booking_id = uuid4()
+
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=uuid4(), name="Manager"),
+    )
+    specialist = SimpleNamespace(
+        id=specialist_id,
+        client_id=client_id,
+        branch_id=branch_id,
+        branch=None,
+        name="Spec",
+    )
+
+    class _DbStub:
+        def query(self, model):
+            if model is calendar_router.Specialist:
+                return _QueryStub(rows=[specialist])
+            return _QueryStub(rows=[])
+
+    class _SchedulingServiceStub:
+        def __init__(self, _db):
+            pass
+
+        def update_appointment(self, **_kwargs):
+            raise calendar_router.AppointmentLifecycleActionDeniedError("update", "COMPLETED")
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceStub)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await calendar_router.update_booking(
+            request=SimpleNamespace(),
+            booking_id=str(booking_id),
+            data=calendar_router.BookingUpdate(
+                specialist_id=str(specialist_id),
+                start_at=datetime(2026, 3, 6, 14, 0, tzinfo=timezone.utc),
+                end_at=datetime(2026, 3, 6, 15, 0, tzinfo=timezone.utc),
+                customer_name="Айгуль",
+                customer_phone="+77015554433",
+                service_type="Маникюр",
+            ),
+            db=_DbStub(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "BOOKING_UPDATE_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_cancel_booking_passes_reason_and_actor_context(monkeypatch):
+    client_id = uuid4()
+    agent_id = uuid4()
+    booking_id = uuid4()
+    captured = {}
+
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=agent_id, name="Manager"),
+    )
+
+    class _DbStub:
+        def __init__(self):
+            self.committed = False
+            self.refreshed = []
+
+        def query(self, _model):
+            return _QueryStub(rows=[])
+
+        def commit(self):
+            self.committed = True
+
+        def refresh(self, booking):
+            self.refreshed.append(booking)
+
+    class _SchedulingServiceStub:
+        def __init__(self, _db):
+            pass
+
+        def cancel_appointment(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(id=booking_id, branch=None, notes="Cancel: Клиент отменил визит", status="CANCELLED")
+
+    db = _DbStub()
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceStub)
+    monkeypatch.setattr(
+        calendar_router,
+        "_build_booking_response",
+        lambda _db, _booking: calendar_router.BookingResponse(
+            id=str(booking_id),
+            specialist_id=str(uuid4()),
+            specialist_name="Spec",
+            start_at="2026-03-06T10:00:00+00:00",
+            end_at="2026-03-06T11:00:00+00:00",
+            customer_name="Айгуль",
+            customer_phone="+77015554433",
+            service_type="Маникюр",
+            notes="Cancel: Клиент отменил визит",
+            status="CANCELLED",
+            created_at="2026-03-06T09:00:00+00:00",
+        ),
+    )
+
+    response = await calendar_router.cancel_booking(
+        request=SimpleNamespace(),
+        booking_id=str(booking_id),
+        data=calendar_router.BookingCancelRequest(reason="  Клиент отменил визит  "),
+        db=db,
+    )
+
+    assert response.success is True
+    assert captured["appointment_id"] == booking_id
+    assert captured["client_id"] == client_id
+    assert captured["reason"] == "Клиент отменил визит"
+    assert captured["actor_id"] == agent_id
+    assert captured["actor_type"] == "agent"
+    assert captured["channel"] == "console"
+    assert captured["commit"] is False
+    assert db.committed is True
+    assert len(db.refreshed) == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_booking_maps_lifecycle_denied_error(monkeypatch):
+    client_id = uuid4()
+    booking_id = uuid4()
+
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=uuid4(), name="Manager"),
+    )
+
+    class _DbStub:
+        def query(self, _model):
+            return _QueryStub(rows=[])
+
+    class _SchedulingServiceStub:
+        def __init__(self, _db):
+            pass
+
+        def cancel_appointment(self, **_kwargs):
+            raise calendar_router.AppointmentLifecycleActionDeniedError("cancel", "NO_SHOW")
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceStub)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await calendar_router.cancel_booking(
+            request=SimpleNamespace(),
+            booking_id=str(booking_id),
+            data=calendar_router.BookingCancelRequest(),
+            db=_DbStub(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "BOOKING_CANCEL_DENIED"

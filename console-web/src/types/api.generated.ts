@@ -2566,6 +2566,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/calendar/bookings/{booking_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Booking
+         * @description Update an existing booking.
+         */
+        patch: operations["update_booking_console_v1_calendar_bookings__booking_id__patch"];
+        trace?: never;
+    };
     "/console/v1/calendar/bookings/{booking_id}/status": {
         parameters: {
             query?: never;
@@ -2722,6 +2742,11 @@ export interface components {
             /** Case Effects */
             case_effects?: components["schemas"]["BookingCaseEffect"][];
         };
+        /** BookingCancelRequest */
+        BookingCancelRequest: {
+            /** Reason */
+            reason?: string | null;
+        };
         /** BookingCaseEffect */
         BookingCaseEffect: {
             /** Case Id */
@@ -2799,6 +2824,8 @@ export interface components {
             customer_phone?: string | null;
             /** Service Type */
             service_type?: string | null;
+            /** Notes */
+            notes?: string | null;
             /** Status */
             status: string;
             /**
@@ -2847,6 +2874,29 @@ export interface components {
             status: string;
             /** Reason */
             reason?: string | null;
+        };
+        /** BookingUpdate */
+        BookingUpdate: {
+            /** Specialist Id */
+            specialist_id: string;
+            /**
+             * Start At
+             * Format: date-time
+             */
+            start_at: string;
+            /**
+             * End At
+             * Format: date-time
+             */
+            end_at: string;
+            /** Customer Name */
+            customer_name: string;
+            /** Customer Phone */
+            customer_phone: string;
+            /** Service Type */
+            service_type: string;
+            /** Notes */
+            notes?: string | null;
         };
         /** BookingsListResponse */
         BookingsListResponse: {
@@ -17276,16 +17326,53 @@ export interface operations {
     };
     cancel_booking_console_v1_calendar_bookings__booking_id__cancel_post: {
         parameters: {
-            query?: {
-                reason?: string | null;
-            };
+            query?: never;
             header?: never;
             path: {
                 booking_id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_booking_console_v1_calendar_bookings__booking_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                booking_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -577,7 +577,30 @@
     - `cd truffles-api && pytest -q tests/test_calendar_bookings_router.py` (`10 passed`)
     - `cd truffles-api && ruff check app/routers/calendar.py tests/test_calendar_bookings_router.py` (`pass`)
 
-- last_updated: 2026-03-09T12:58:24+05:00
+- Wave38 Part C completed locally:
+  - completed the missing booking lifecycle for existing records: Calendar now exposes `Изменить запись` / `Отменить запись`, the composer reopens in edit mode with current data prefilled, and specialist/date/service changes reset stale slot state deterministically instead of silently reusing wrong combinations;
+  - added bounded backend contract for that lifecycle: `PATCH /calendar/bookings/{booking_id}`, body-based cancel request, service-layer lifecycle guards, synced OpenAPI, and regenerated `console-web/src/types/api.generated.ts`;
+  - non-active statuses now fail closed in UI and API: `NO_SHOW` / `COMPLETED` / `CANCELLED` bookings show explicit disabled copy instead of misleading edit/cancel controls;
+  - local evidence:
+    - `cd truffles-api && pytest -q tests/test_calendar_bookings_router.py tests/test_console_openapi_calendar_contract.py` (`38 passed`)
+    - `cd truffles-api && ruff check app/routers/calendar.py app/services/appointment_service.py tests/test_calendar_bookings_router.py tests/test_console_openapi_calendar_contract.py` (`pass`)
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+    - `cd console-web && npm run generate:api` (`pass`)
+
+- Wave38 Part D completed locally:
+  - expanded `console-web/e2e/calendar-operator.spec.ts` into a full acceptance lane for the rebuilt Calendar operator workflow: filters `draft/apply/reset`, phone typing/deletion/paste, edit/reschedule, cancel, blocked non-active lifecycle, no-show follow-up safety, and medium-width layout;
+  - kept the broader `console-web/e2e/inspect_case.spec.ts` lane green after lifecycle copy/layout changes;
+  - recorded fresh visual acceptance artifacts in `/tmp/wave38-operator-captures`: `wave38-filters-applied-1280.png`, `wave38-phone-partial-1280.png`, `wave38-phone-valid-1280.png`, `wave38-edit-open-1280.png`, `wave38-cancel-panel-1280.png`, `wave38-no-show-disabled-1280.png`, `wave38-medium-width-1024.png`;
+  - inspected representative captures and confirmed: no clipped controls, no raw technical labels, readable edit/cancel surfaces, and the `1024px` composer stays within bounds;
+  - local evidence:
+    - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/lib/calendar-bookings.ts --file e2e/calendar-operator.spec.ts --file e2e/inspect_case.spec.ts` (`pass`)
+    - `cd console-web && npm run build` (`pass`)
+    - `cd console-web && npm run generate:api` (`pass`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/calendar-operator.spec.ts --project chromium` (`10 passed`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium` (`14 passed, 1 skipped`)
+    - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+
+- last_updated: 2026-03-09T14:02:00+05:00
 
 - Wave37 recovery TP activated after post-merge operator evidence:
   - fetched `origin/main`, confirmed the current worktree branch was behind merged `main`, and switched to `feat/2026-03-08-inbox-calendar-ux-reconstruction-wave37-a1` from `origin/main` so the follow-up starts from the real merged state rather than the old Wave36 branch tip;
