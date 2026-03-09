@@ -72,11 +72,17 @@ interface TimeSlot {
     available: boolean;
 }
 
-type CalendarSecondaryPanelSection = "filters" | "saved_views" | "scheduling";
+type CalendarSecondaryPanelSection = "filters" | "saved_views";
 type FollowUpOwnerOption = {
     id: string;
     name: string;
     isTechnical: boolean;
+};
+type CalendarServiceOption = {
+    name: string;
+    duration_min: number;
+    price: number;
+    specialistCount: number;
 };
 type NoShowFollowUpDraft = {
     result: "contacted" | "rebooked";
@@ -95,7 +101,6 @@ const CALENDAR_STATUS_FILTER_LABELS: Record<BookingStatusFilter, string> = {
 const CALENDAR_SECONDARY_PANEL_TABS: Array<{ id: CalendarSecondaryPanelSection; label: string }> = [
     { id: "filters", label: "Уточнить список" },
     { id: "saved_views", label: "Виды и ссылка" },
-    { id: "scheduling", label: "Новая запись" },
 ];
 
 const TECHNICAL_AGENT_NAME_PATTERNS = [
@@ -196,6 +201,61 @@ function formatDueAtLabel(value: string | null | undefined): string | null {
         hour: "2-digit",
         minute: "2-digit",
     });
+}
+
+function formatContactTaskOwnerChipLabel(value: string): string {
+    return `За звонок отвечает: ${value}`;
+}
+
+function formatContactTaskDueChipLabel(value: string | null): string {
+    return value ? `Позвонить до: ${value}` : "Срок звонка не задан";
+}
+
+function getContactTaskResultLabel(value: string | null | undefined): string {
+    return value === "rebooked"
+        ? "Результат звонка: клиента переписали"
+        : "Результат звонка: с клиентом связались";
+}
+
+function formatBookingQuickDateLabel(value: string, today: string, tomorrow: string): string {
+    if (value === today) {
+        return "Сегодня";
+    }
+    if (value === tomorrow) {
+        return "Завтра";
+    }
+    const parsed = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) {
+        return value;
+    }
+    return parsed.toLocaleDateString("ru-RU", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+    });
+}
+
+function buildBookingQuickDates(startDate: string, count = 5): string[] {
+    const parsed = new Date(`${startDate}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) {
+        return [startDate];
+    }
+    return Array.from({ length: count }, (_, index) => {
+        const next = new Date(parsed);
+        next.setDate(parsed.getDate() + index);
+        return formatDate(next);
+    });
+}
+
+function getSlotPeriodLabel(startTime: string): "Утро" | "День" | "Вечер" {
+    const hours = Number.parseInt(startTime.split(":")[0] ?? "", 10);
+    if (Number.isNaN(hours) || hours < 12) {
+        return "Утро";
+    }
+    if (hours < 17) {
+        return "День";
+    }
+    return "Вечер";
 }
 
 function normalizeHumanText(value: string | null | undefined): string {
@@ -501,11 +561,11 @@ export default function CalendarPage() {
         defaultSelectedDate && defaultSelectedDate >= today ? defaultSelectedDate : today,
     );
     const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
-    const [selectedService, setSelectedService] = useState<{ name: string; duration_min: number; price: number } | null>(null);
+    const [selectedService, setSelectedService] = useState<CalendarServiceOption | null>(null);
     const [customerName, setCustomerName] = useState("");
     const [customerPhone, setCustomerPhone] = useState("");
     const [notes, setNotes] = useState("");
-    const [showForm, setShowForm] = useState(false);
+    const [bookingComposerOpen, setBookingComposerOpen] = useState(false);
     const [statusUpdateBookingId, setStatusUpdateBookingId] = useState<string | null>(null);
     const [followUpBookingId, setFollowUpBookingId] = useState<string | null>(null);
     const [followUpGovernanceBookingId, setFollowUpGovernanceBookingId] = useState<string | null>(null);
@@ -706,8 +766,12 @@ export default function CalendarPage() {
         lastSavedQueueStateRef.current = "";
         setFollowUpGovernanceDrafts({});
         setNoShowFollowUpDrafts({});
+        setSelectedSpecialist("");
+        setSelectedService(null);
         setSelectedDate(defaultSelectedDate);
         setBookingDate(defaultSelectedDate && defaultSelectedDate >= today ? defaultSelectedDate : today);
+        setSelectedSlot(null);
+        setBookingComposerOpen(false);
         setQueueMode(defaultQueueMode);
         setQueueLane(defaultQueueLane);
         setQueueStatusFilter("all");
@@ -1011,18 +1075,104 @@ export default function CalendarPage() {
         retry: 1,
     });
 
-    const specialists = specialistsData?.items ?? [];
-    const currentSpecialist = specialists.find(s => s.id === selectedSpecialist);
-    const specialistHasConfiguredServices = Boolean(currentSpecialist && currentSpecialist.services.length > 0);
-    const duration = selectedService?.duration_min || 60;
+    const specialists = useMemo(
+        () => specialistsData?.items ?? [],
+        [specialistsData?.items],
+    );
+    const activeSpecialists = useMemo(
+        () => specialists.filter((specialist) => specialist.is_active),
+        [specialists],
+    );
+    const serviceCatalog = useMemo<CalendarServiceOption[]>(() => {
+        const services = new Map<string, CalendarServiceOption>();
+        activeSpecialists.forEach((specialist) => {
+            specialist.services.forEach((service) => {
+                const serviceName = normalizeHumanText(service.name);
+                if (!serviceName) {
+                    return;
+                }
+                const existing = services.get(serviceName);
+                if (!existing) {
+                    services.set(serviceName, {
+                        name: serviceName,
+                        duration_min: service.duration_min,
+                        price: service.price,
+                        specialistCount: 1,
+                    });
+                    return;
+                }
+                services.set(serviceName, {
+                    ...existing,
+                    duration_min: Math.min(existing.duration_min, service.duration_min),
+                    price: Math.min(existing.price, service.price),
+                    specialistCount: existing.specialistCount + 1,
+                });
+            });
+        });
+        return [...services.values()].sort((left, right) => left.name.localeCompare(right.name, "ru"));
+    }, [activeSpecialists]);
+    const specialistsForSelectedService = useMemo(
+        () => selectedService
+            ? activeSpecialists.filter((specialist) =>
+                specialist.services.some((service) => normalizeHumanText(service.name) === selectedService.name))
+            : [],
+        [activeSpecialists, selectedService],
+    );
+    const currentSpecialist = activeSpecialists.find((specialist) => specialist.id === selectedSpecialist);
+    const selectedSpecialistService = useMemo(
+        () => currentSpecialist?.services.find((service) => normalizeHumanText(service.name) === selectedService?.name) ?? null,
+        [currentSpecialist, selectedService],
+    );
+    const selectedServicePrice = selectedSpecialistService?.price ?? selectedService?.price ?? null;
+    const selectedServiceDuration = selectedSpecialistService?.duration_min ?? selectedService?.duration_min ?? 60;
+    const bookingDateSuggestion = selectedDate && selectedDate >= today ? selectedDate : today;
 
-    const { data: slotsData, isLoading: slotsLoading } = useQuery({
-        queryKey: ["slots", selectedSpecialist, bookingDate, duration],
-        queryFn: () => fetchSlots(selectedSpecialist, bookingDate, duration),
-        enabled: !!session && canReadCalendar && !!selectedSpecialist && !!bookingDate && specialistHasConfiguredServices && !!selectedService,
+    const {
+        data: slotsData,
+        isLoading: slotsLoading,
+        isError: slotsError,
+        error: slotsErrorData,
+        refetch: refetchSlots,
+    } = useQuery({
+        queryKey: ["slots", selectedSpecialist, bookingDate, selectedServiceDuration],
+        queryFn: () => fetchSlots(selectedSpecialist, bookingDate, selectedServiceDuration),
+        enabled: !!session && canReadCalendar && !!selectedSpecialist && !!bookingDate && !!selectedService,
+        retry: 1,
     });
 
-    const slots = slotsData?.slots ?? [];
+    const slots = useMemo(
+        () => slotsData?.slots ?? [],
+        [slotsData?.slots],
+    );
+    const groupedSlots = useMemo(() => {
+        const groups = new Map<"Утро" | "День" | "Вечер", TimeSlot[]>();
+        slots.forEach((slot) => {
+            const period = getSlotPeriodLabel(slot.start_time);
+            const current = groups.get(period) ?? [];
+            current.push(slot);
+            groups.set(period, current);
+        });
+        return [
+            { label: "Утро" as const, slots: groups.get("Утро") ?? [] },
+            { label: "День" as const, slots: groups.get("День") ?? [] },
+            { label: "Вечер" as const, slots: groups.get("Вечер") ?? [] },
+        ].filter((group) => group.slots.length > 0);
+    }, [slots]);
+    const bookingQuickDates = useMemo(
+        () => buildBookingQuickDates(bookingDateSuggestion, 5),
+        [bookingDateSuggestion],
+    );
+
+    useEffect(() => {
+        if (!selectedService || !selectedSpecialist) {
+            return;
+        }
+        const stillAvailable = specialistsForSelectedService.some((specialist) => specialist.id === selectedSpecialist);
+        if (!stillAvailable) {
+            setSelectedSpecialist("");
+            setSelectedSlot(null);
+        }
+    }, [selectedService, selectedSpecialist, specialistsForSelectedService]);
 
     const { data: bookingsData, isLoading: bookingsLoading } = useQuery({
         queryKey: [
@@ -1130,13 +1280,13 @@ export default function CalendarPage() {
         followUpOwnerFilterLabel
             ? {
                 key: "owner",
-                label: `Кто связывается: ${followUpOwnerFilterLabel}`,
+                label: `Звонок: ${followUpOwnerFilterLabel}`,
             }
             : null,
         followUpOverdueOnly
             ? {
                 key: "overdue",
-                label: "Только просроченные",
+                label: "Только просроченные звонки",
             }
             : null,
         selectedSavedView
@@ -1147,10 +1297,10 @@ export default function CalendarPage() {
             : null,
     ].filter((chip): chip is { key: string; label: string } => Boolean(chip));
     const schedulingSummary = [
-        selectedSpecialist
-            ? specialists.find((specialist) => specialist.id === selectedSpecialist)?.name ?? selectedSpecialist
-            : null,
         selectedService?.name ?? null,
+        selectedSpecialist
+            ? activeSpecialists.find((specialist) => specialist.id === selectedSpecialist)?.name ?? selectedSpecialist
+            : null,
         bookingDate
             ? formatDateLabel(bookingDate)
             : null,
@@ -1163,27 +1313,40 @@ export default function CalendarPage() {
             : null;
     const schedulingSummaryLabel = schedulingSummary.length > 0
         ? schedulingSummary.join(" · ")
-        : "Выберите мастера, услугу, день и время для новой записи.";
+        : "Выберите услугу, мастера, день и время для новой записи.";
     const prefilledCaseName = normalizeHumanText(focusedCaseQuery.data?.customer_name);
     const prefilledCasePhone = formatPhoneInput(focusedCaseQuery.data?.customer_phone);
     const hasCasePrefill = Boolean(prefilledCaseName || prefilledCasePhone);
     const normalizedCustomerName = normalizeHumanText(customerName);
     const normalizedCustomerPhone = normalizePhoneForSubmit(customerPhone);
+    const normalizedCustomerPhoneDisplay = normalizedCustomerPhone
+        ? formatPhoneInput(normalizedCustomerPhone)
+        : "";
     const shouldShowBookingValidation = Boolean(
         selectedSpecialist || selectedService || selectedSlot || normalizedCustomerName || customerPhone,
     );
     const shouldShowCustomerValidation = Boolean(selectedSlot || normalizedCustomerName || customerPhone);
     const bookingFormErrors = {
-        specialist: selectedSpecialist ? null : "Выберите мастера.",
-        service: !selectedSpecialist
+        service: selectedService
             ? null
-            : !specialistHasConfiguredServices
-                ? "У выбранного мастера пока не настроены услуги. Выберите другого мастера или сначала настройте услуги."
-                : selectedService
+            : "Выберите услугу.",
+        specialist: !selectedService
+            ? null
+            : specialistsForSelectedService.length === 0
+                ? "Для этой услуги пока нет доступных мастеров."
+                : selectedSpecialist
                     ? null
-                    : "Выберите услугу, чтобы показать корректные слоты.",
-        bookingDate: bookingDate ? null : "Выберите день новой записи.",
-        slot: selectedSlot ? null : "Выберите свободный слот.",
+                    : "Выберите мастера.",
+        bookingDate: !selectedService || !selectedSpecialist
+            ? null
+            : bookingDate
+                ? null
+                : "Выберите день новой записи.",
+        slot: !selectedService || !selectedSpecialist || !bookingDate
+            ? null
+            : selectedSlot
+                ? null
+                : "Выберите свободное время.",
         customerName: !normalizedCustomerName
             ? "Укажите имя клиента."
             : normalizedCustomerName.length < 2
@@ -1195,14 +1358,120 @@ export default function CalendarPage() {
     };
     const bookingFormErrorList = Object.values(bookingFormErrors).filter((value): value is string => Boolean(value));
     const visibleBookingFormErrorList = [
-        shouldShowBookingValidation ? bookingFormErrors.specialist : null,
-        selectedSpecialist ? bookingFormErrors.service : null,
+        shouldShowBookingValidation ? bookingFormErrors.service : null,
+        selectedService ? bookingFormErrors.specialist : null,
         shouldShowBookingValidation ? bookingFormErrors.bookingDate : null,
-        selectedService ? bookingFormErrors.slot : null,
+        selectedSpecialist ? bookingFormErrors.slot : null,
         shouldShowCustomerValidation ? bookingFormErrors.customerName : null,
         shouldShowCustomerValidation ? bookingFormErrors.customerPhone : null,
     ].filter((value): value is string => Boolean(value));
     const bookingFormReady = bookingFormErrorList.length === 0 && canWriteCalendar;
+    const bookingSlotState = !selectedService
+        ? {
+            kind: "blocked" as const,
+            title: "Сначала выберите услугу",
+            description: "Услуга задаёт длительность визита и помогает показать правильное свободное время.",
+        }
+        : specialistsForSelectedService.length === 0
+            ? {
+                kind: "blocked" as const,
+                title: "Для этой услуги пока нет доступных мастеров",
+                description: "Выберите другую услугу или сначала настройте услуги у мастеров.",
+            }
+            : !selectedSpecialist
+                ? {
+                    kind: "blocked" as const,
+                    title: "Выберите мастера",
+                    description: "Покажем свободное время только для мастеров, которые делают эту услугу.",
+                }
+                : !bookingDate
+                    ? {
+                        kind: "blocked" as const,
+                        title: "Выберите день",
+                        description: "После выбора дня покажем свободное время для этого мастера.",
+                    }
+                    : slotsLoading
+                        ? {
+                            kind: "loading" as const,
+                            title: "Ищем свободное время",
+                            description: "Собираем доступные слоты для выбранных услуги, мастера и дня.",
+                        }
+                        : slotsError
+                            ? {
+                                kind: "error" as const,
+                                title: "Не удалось загрузить свободное время",
+                                description: getApiErrorMessage(slotsErrorData, "Повторите попытку или выберите другой день."),
+                            }
+                            : slots.length === 0
+                                ? {
+                                    kind: "empty" as const,
+                                    title: `На ${formatVerboseDateLabel(bookingDate)} свободного времени нет`,
+                                    description: "Выберите другой день или другого мастера — рабочий список сверху не изменится.",
+                                }
+                                : {
+                                    kind: "ready" as const,
+                                    title: `Свободное время на ${formatVerboseDateLabel(bookingDate)}`,
+                                    description: "Выберите удобный слот, затем подтвердите данные клиента.",
+                                };
+    const customerStepState = normalizedCustomerName && normalizedCustomerPhone
+        ? "ready"
+        : normalizedCustomerName || customerPhone
+            ? "review"
+            : "empty";
+    const bookingNextAction = !selectedService
+        ? {
+            title: "1. Выберите услугу",
+            description: "От услуги зависит длительность визита и список мастеров.",
+        }
+        : specialistsForSelectedService.length === 0
+            ? {
+                title: "Выберите другую услугу",
+                description: "Для текущей услуги пока нет доступных мастеров.",
+            }
+            : !selectedSpecialist
+                ? {
+                    title: "2. Выберите мастера",
+                    description: "Покажем только тех специалистов, которые делают выбранную услугу.",
+                }
+                : !bookingDate
+                    ? {
+                        title: "3. Выберите день",
+                        description: "Можно взять ближайший день из быстрых кнопок или указать дату вручную.",
+                    }
+                    : bookingSlotState.kind === "loading"
+                        ? {
+                            title: "Ищем свободное время",
+                            description: "Подождите несколько секунд, пока загрузятся слоты.",
+                        }
+                        : bookingSlotState.kind === "error"
+                            ? {
+                                title: "Повторите поиск времени",
+                                description: "Попробуйте ещё раз или переключитесь на другой день.",
+                            }
+                            : bookingSlotState.kind === "empty"
+                                ? {
+                                    title: "Выберите другой день",
+                                    description: "На текущий день времени нет — переключитесь на следующий или выберите другого мастера.",
+                                }
+                                : !selectedSlot
+                                    ? {
+                                        title: "4. Выберите время",
+                                        description: "Нажмите на удобный слот, чтобы перейти к данным клиента.",
+                                    }
+                                    : !normalizedCustomerName
+                                        ? {
+                                            title: "5. Заполните имя клиента",
+                                            description: "Укажите, как обращаться к клиенту при звонке и подтверждении записи.",
+                                        }
+                                        : !normalizedCustomerPhone
+                                            ? {
+                                                title: "Добавьте телефон клиента",
+                                                description: "Номер нужен, чтобы быстро связаться и подтвердить запись.",
+                                            }
+                                            : {
+                                                title: "Подтвердите и создайте запись",
+                                                description: "Все обязательные данные заполнены. Проверьте сводку справа и сохраните запись.",
+                                            };
     const bookingActionsBooking = bookingActionsBookingId
         ? bookings.find((booking) => booking.id === bookingActionsBookingId) ?? null
         : null;
@@ -1423,7 +1692,7 @@ export default function CalendarPage() {
             toast.success("Запись создана!");
             queryClient.invalidateQueries({ queryKey: ["slots"] });
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
-            resetForm();
+            resetForm({ keepComposerOpen: false, resetSelections: false });
         },
         onError: (error: unknown) => {
             const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
@@ -1564,12 +1833,23 @@ export default function CalendarPage() {
         },
     });
 
-    const resetForm = () => {
+    const resetForm = ({
+        keepComposerOpen = true,
+        resetSelections = true,
+    }: {
+        keepComposerOpen?: boolean;
+        resetSelections?: boolean;
+    } = {}) => {
+        if (resetSelections) {
+            setSelectedService(null);
+            setSelectedSpecialist("");
+            setBookingDate(bookingDateSuggestion);
+        }
         setSelectedSlot(null);
         setCustomerName(normalizeHumanText(focusedCaseQuery.data?.customer_name));
         setCustomerPhone(formatPhoneInput(focusedCaseQuery.data?.customer_phone));
         setNotes("");
-        setShowForm(false);
+        setBookingComposerOpen(keepComposerOpen);
     };
 
     const applyCasePrefill = () => {
@@ -1606,6 +1886,19 @@ export default function CalendarPage() {
         setBookingActionsBookingId(null);
         setSecondaryPanelSection(section);
         setSecondaryPanelOpen(true);
+    };
+
+    const openBookingComposer = () => {
+        setBookingActionsBookingId(null);
+        setSecondaryPanelOpen(false);
+        if (!bookingDate || bookingDate < today) {
+            setBookingDate(bookingDateSuggestion);
+        }
+        setBookingComposerOpen(true);
+    };
+
+    const closeBookingComposer = () => {
+        setBookingComposerOpen(false);
     };
 
     const closeSecondaryPanel = () => {
@@ -1658,7 +1951,6 @@ export default function CalendarPage() {
     const handleSlotClick = (slot: TimeSlot) => {
         if (!slot.available || !canWriteCalendar) return;
         setSelectedSlot(slot);
-        setShowForm(true);
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -1804,7 +2096,7 @@ export default function CalendarPage() {
                         </button>
                         <button
                             type="button"
-                            onClick={() => openSecondaryPanel("scheduling")}
+                            onClick={openBookingComposer}
                             className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"
                             data-testid="calendar-scheduling-panel-toggle"
                         >
@@ -2021,7 +2313,7 @@ export default function CalendarPage() {
                             </p>
                             <button
                                 type="button"
-                                onClick={() => openSecondaryPanel("scheduling")}
+                                onClick={openBookingComposer}
                                 className="text-xs font-semibold text-primary"
                             >
                                 Открыть
@@ -2030,7 +2322,7 @@ export default function CalendarPage() {
                         <p className="mt-3 text-sm text-foreground/90">
                             {schedulingSummaryLabel}
                         </p>
-                        {showForm && selectedSlot && (
+                        {selectedSlot && (
                             <p className="mt-2 text-xs text-amber-700">
                                 Выбрано время для новой записи. Осталось подтвердить данные клиента.
                             </p>
@@ -2104,7 +2396,7 @@ export default function CalendarPage() {
                                                 className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-background hover:text-foreground"
                                                 data-testid="calendar-booking-open-actions"
                                             >
-                                                Что сделать
+                                                Открыть действия
                                             </button>
                                         )}
                                     </div>
@@ -2120,10 +2412,10 @@ export default function CalendarPage() {
                                     {isNoShow && (
                                         <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
                                             <span className="rounded bg-muted px-2 py-0.5 font-semibold text-foreground/80">
-                                                Кто связывается: {followUpOwnerLabel}
+                                                {formatContactTaskOwnerChipLabel(followUpOwnerLabel)}
                                             </span>
                                             <span className={`rounded px-2 py-0.5 font-semibold ${booking.follow_up_overdue ? "bg-red-100 text-red-900" : "bg-slate-100 text-slate-700"}`}>
-                                                {followUpDueLabel ? `Связаться до: ${followUpDueLabel}` : "Срок связи не задан"}
+                                                {formatContactTaskDueChipLabel(followUpDueLabel)}
                                             </span>
                                             {booking.follow_up_overdue && !booking.no_show_followup_done && (
                                                 <span className="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-900">
@@ -2132,9 +2424,7 @@ export default function CalendarPage() {
                                             )}
                                             {booking.no_show_followup_done && (
                                                 <span className="rounded bg-green-100 px-2 py-0.5 font-semibold text-green-800">
-                                                    {booking.no_show_followup_result === "rebooked"
-                                                        ? "После неявки: клиента переписали"
-                                                        : "После неявки: с клиентом связались"}
+                                                    {getContactTaskResultLabel(booking.no_show_followup_result)}
                                                 </span>
                                             )}
                                         </div>
@@ -2178,7 +2468,7 @@ export default function CalendarPage() {
                             <div className="space-y-1">
                                 <p className="text-sm font-semibold">Боковая панель календаря</p>
                                 <p className="text-xs text-muted-foreground">
-                                    Здесь собраны уточняющие действия: фильтры списка, сохранённые виды и создание новой записи.
+                                    Здесь собраны уточняющие действия: фильтры списка и сохранённые виды.
                                 </p>
                             </div>
                             <button
@@ -2217,7 +2507,7 @@ export default function CalendarPage() {
                                             Уточнить список
                                         </p>
                                         <p className="mt-1 text-xs text-muted-foreground">
-                                            Поиск, статус и ответственный за связь собраны отдельно, чтобы основной экран не расползался.
+                                            Поиск, статус визита и задачи по звонкам вынесены сюда, чтобы основной экран оставался быстрым и понятным.
                                         </p>
                                     </div>
                                     <button
@@ -2262,7 +2552,7 @@ export default function CalendarPage() {
                                     {canReadTeam && (
                                         <label className="space-y-1">
                                             <span className="text-xs font-medium text-muted-foreground">
-                                                Кто связывается
+                                                Кто отвечает за звонок
                                             </span>
                                             <select
                                                 value={followUpOwnerId}
@@ -2270,7 +2560,7 @@ export default function CalendarPage() {
                                                 className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                                 data-testid="calendar-follow-up-owner-filter"
                                             >
-                                                <option value="">Все ответственные</option>
+                                                <option value="">Все, кто звонит клиентам</option>
                                                 {followUpOwnerOptions.map((agent) => (
                                                     <option key={agent.id} value={agent.id}>
                                                         {agent.name}
@@ -2287,12 +2577,12 @@ export default function CalendarPage() {
                                             className="h-4 w-4 rounded border-border/60"
                                             data-testid="calendar-follow-up-overdue-filter"
                                         />
-                                        <span className="break-words">Показывать только просроченные задачи по связи</span>
+                                        <span className="break-words">Только просроченные задачи по звонкам</span>
                                     </label>
                                 </div>
                                 {hiddenTechnicalFollowUpOwnersCount > 0 && (
                                     <p className="mt-3 text-xs text-muted-foreground">
-                                        Служебные учётные записи скрыты из выбора: {hiddenTechnicalFollowUpOwnersCount}
+                                        Служебные учётные записи не показываем оператору: {hiddenTechnicalFollowUpOwnersCount}
                                     </p>
                                 )}
                                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -2374,7 +2664,7 @@ export default function CalendarPage() {
                                                 disabled={savedViewMutationPending}
                                                 data-testid="calendar-saved-view-update"
                                             >
-                                                Сохранить targeting
+                                                Сохранить доступ
                                             </button>
                                         )}
                                         {selectedSavedView && canMutateSelectedSavedView && (
@@ -2462,7 +2752,7 @@ export default function CalendarPage() {
                                             )}
                                             {selectedSavedView.is_default && (
                                                 <span className="rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary">
-                                                    default
+                                                    по умолчанию
                                                 </span>
                                             )}
                                             {isTeamSavedView(selectedSavedView) && selectedSavedView.is_applicable === false && (
@@ -2477,7 +2767,7 @@ export default function CalendarPage() {
                                             )}
                                             {selectedTeamTargetingDirty && (
                                                 <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-900">
-                                                    targeting изменён
+                                                    доступ изменён
                                                 </span>
                                             )}
                                         </div>
@@ -2546,7 +2836,7 @@ export default function CalendarPage() {
                                             <div className="grid gap-2 sm:grid-cols-3">
                                                 <label className="space-y-1">
                                                     <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                                        Scope
+                                                        Кому доступен вид
                                                     </span>
                                                     <select
                                                         value={saveViewScopeDraft}
@@ -2628,7 +2918,7 @@ export default function CalendarPage() {
                                         </label>
                                         <div className="text-xs text-muted-foreground">
                                             {saveViewScopeDraft === "team"
-                                                ? `Командных пресетов в этом targeting: ${matchingScopeSavedViewCount}`
+                                                ? `Командных пресетов с таким доступом: ${matchingScopeSavedViewCount}`
                                                 : `Личных видов: ${matchingScopeSavedViewCount}`}
                                         </div>
                                         <div className="flex flex-wrap items-center gap-2">
@@ -2662,362 +2952,522 @@ export default function CalendarPage() {
                                 )}
                             </div>
                         )}
-
-                        {secondaryPanelSection === "scheduling" && (
-                            <div className="space-y-4" data-testid="calendar-scheduling-panel">
-                                <div className="rounded-xl border border-border/60 bg-card/80 p-4">
-                                    <div className="space-y-1">
-                                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                            Новая запись
-                                        </p>
-                                        <p className="text-xs text-muted-foreground">
-                                            Здесь выбираются мастер, услуга, день и время для новой записи. Рабочий список сверху не меняется от этих действий.
-                                        </p>
-                                    </div>
-                                    <div className="mt-4 grid gap-3 md:grid-cols-4">
-                                        <div className={`rounded-xl border p-3 ${selectedSpecialist ? "border-primary/30 bg-primary/5" : "border-border/60 bg-background/80"}`}>
-                                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                                                1. Мастер
-                                            </p>
-                                            <p className="mt-2 text-sm font-semibold text-foreground">
-                                                {currentSpecialist?.name ?? "Не выбран"}
-                                            </p>
-                                        </div>
-                                        <div className={`rounded-xl border p-3 ${selectedService ? "border-primary/30 bg-primary/5" : "border-border/60 bg-background/80"}`}>
-                                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                                                2. Услуга
-                                            </p>
-                                            <p className="mt-2 text-sm font-semibold text-foreground">
-                                                {selectedService?.name ?? "Не выбрана"}
-                                            </p>
-                                        </div>
-                                        <div className={`rounded-xl border p-3 ${selectedSlot ? "border-primary/30 bg-primary/5" : "border-border/60 bg-background/80"}`}>
-                                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                                                3. Время
-                                            </p>
-                                            <p className="mt-2 text-sm font-semibold text-foreground">
-                                                {selectedSlot ? `${formatDateLabel(bookingDate)} · ${selectedSlot.start_time}` : "Не выбрано"}
-                                            </p>
-                                        </div>
-                                        <div className={`rounded-xl border p-3 ${(normalizedCustomerName && normalizedCustomerPhone) ? "border-primary/30 bg-primary/5" : "border-border/60 bg-background/80"}`}>
-                                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                                                4. Клиент
-                                            </p>
-                                            <p className="mt-2 text-sm font-semibold text-foreground">
-                                                {(normalizedCustomerName && normalizedCustomerPhone) ? "Готово к записи" : "Нужно заполнить"}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                                    <div className="space-y-4">
-                                        <div className="rounded-xl border border-border/60 bg-card/80 p-4">
-                                            <div className="space-y-1">
-                                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                                    1. Кто принимает клиента
-                                                </p>
-                                                <p className="text-xs text-muted-foreground">
-                                                    Сначала выберите мастера. Это сузит услуги и свободные слоты.
-                                                </p>
-                                            </div>
-                                            <label className="mt-4 block space-y-1">
-                                                <span className="text-sm font-medium text-muted-foreground">
-                                                    Мастер
-                                                </span>
-                                                <select
-                                                    value={selectedSpecialist}
-                                                    onChange={(event) => {
-                                                        setSelectedSpecialist(event.target.value);
-                                                        setSelectedSlot(null);
-                                                        setSelectedService(null);
-                                                        setShowForm(false);
-                                                    }}
-                                                    className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(shouldShowBookingValidation && bookingFormErrors.specialist) ? "border-destructive/60" : "border-border/60"}`}
-                                                    data-testid="calendar-schedule-specialist"
-                                                >
-                                                    <option value="">Выберите мастера</option>
-                                                    {specialists.map((specialist) => (
-                                                        <option key={specialist.id} value={specialist.id}>
-                                                            {specialist.name} {specialist.branch_name ? `(${specialist.branch_name})` : ""}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                {shouldShowBookingValidation && bookingFormErrors.specialist && (
-                                                    <p className="text-xs text-destructive">{bookingFormErrors.specialist}</p>
-                                                )}
-                                            </label>
-                                        </div>
-
-                                        <div className="rounded-xl border border-border/60 bg-card/80 p-4">
-                                            <div className="space-y-1">
-                                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                                    2. Что делаем
-                                                </p>
-                                                <p className="text-xs text-muted-foreground">
-                                                    Услуга обязательна: она задаёт длительность и защищает от неверной записи.
-                                                </p>
-                                            </div>
-                                            {!selectedSpecialist ? (
-                                                <p className="mt-4 rounded-lg border border-dashed border-border/60 bg-background/70 px-3 py-3 text-sm text-muted-foreground">
-                                                    Сначала выберите мастера.
-                                                </p>
-                                            ) : !specialistHasConfiguredServices ? (
-                                                <div className="mt-4 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-3 text-sm text-destructive" data-testid="calendar-schedule-service-missing">
-                                                    У выбранного мастера пока не настроены услуги. Без этого запись не открываем, чтобы не создавать неверные данные.
-                                                </div>
-                                            ) : (
-                                                <label className="mt-4 block space-y-1">
-                                                    <span className="text-sm font-medium text-muted-foreground">
-                                                        Услуга
-                                                    </span>
-                                                    <select
-                                                        value={selectedService?.name || ""}
-                                                        onChange={(event) => {
-                                                            const service = currentSpecialist?.services.find((item) => item.name === event.target.value) ?? null;
-                                                            setSelectedService(service);
-                                                            setSelectedSlot(null);
-                                                            setShowForm(false);
-                                                        }}
-                                                        className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(selectedSpecialist && bookingFormErrors.service) ? "border-destructive/60" : "border-border/60"}`}
-                                                        data-testid="calendar-schedule-service"
-                                                    >
-                                                        <option value="">Выберите услугу</option>
-                                                        {currentSpecialist?.services.map((service, index) => (
-                                                            <option key={index} value={service.name}>
-                                                                {service.name} · {service.duration_min} мин · {service.price}₸
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    {selectedSpecialist && bookingFormErrors.service && (
-                                                        <p className="text-xs text-destructive">{bookingFormErrors.service}</p>
-                                                    )}
-                                                </label>
-                                            )}
-                                        </div>
-
-                                        <div className="rounded-xl border border-border/60 bg-card/80 p-4">
-                                            <div className="flex flex-wrap items-start justify-between gap-3">
-                                                <div className="space-y-1">
-                                                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                                        3. Когда приходит клиент
-                                                    </p>
-                                                    <p className="text-xs text-muted-foreground">
-                                                        Рабочий список сверху остаётся на своём дне. Здесь выбирается только дата новой записи.
-                                                    </p>
-                                                </div>
-                                                <label className="w-full max-w-[220px] space-y-1">
-                                                    <span className="text-sm font-medium text-muted-foreground">
-                                                        День новой записи
-                                                    </span>
-                                                    <input
-                                                        id="calendar-booking-date"
-                                                        type="date"
-                                                        value={bookingDate}
-                                                        onChange={(event) => {
-                                                            setBookingDate(event.target.value);
-                                                            setSelectedSlot(null);
-                                                            setShowForm(false);
-                                                        }}
-                                                        min={today}
-                                                        className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(shouldShowBookingValidation && bookingFormErrors.bookingDate) ? "border-destructive/60" : "border-border/60"}`}
-                                                        data-testid="calendar-booking-date"
-                                                    />
-                                                </label>
-                                            </div>
-
-                                            {!selectedSpecialist ? (
-                                                <p className="mt-4 rounded-lg border border-dashed border-border/60 bg-background/70 px-3 py-3 text-sm text-muted-foreground">
-                                                    Сначала выберите мастера.
-                                                </p>
-                                            ) : !selectedService ? (
-                                                <p className="mt-4 rounded-lg border border-dashed border-border/60 bg-background/70 px-3 py-3 text-sm text-muted-foreground">
-                                                    Сначала выберите услугу, чтобы показать свободные слоты с правильной длительностью.
-                                                </p>
-                                            ) : slotsLoading ? (
-                                                <div className="mt-4 grid grid-cols-4 gap-2 animate-pulse md:grid-cols-6">
-                                                    {[...Array(12)].map((_, index) => (
-                                                        <div key={index} className="h-12 rounded bg-muted/70"></div>
-                                                    ))}
-                                                </div>
-                                            ) : slots.length === 0 ? (
-                                                <p className="mt-4 py-8 text-center text-muted-foreground">
-                                                    На {formatVerboseDateLabel(bookingDate)} свободных слотов нет. Выберите другой день или мастера.
-                                                </p>
-                                            ) : (
-                                                <>
-                                                    <h2 className="mt-4 text-lg font-semibold">
-                                                        Доступные слоты на {formatVerboseDateLabel(bookingDate)}
-                                                    </h2>
-                                                    <div className="mt-4 grid grid-cols-4 gap-2 md:grid-cols-6">
-                                                        {slots.map((slot, index) => (
-                                                            <button
-                                                                key={index}
-                                                                type="button"
-                                                                onClick={() => handleSlotClick(slot)}
-                                                                disabled={!slot.available}
-                                                                className={`rounded-lg px-2 py-3 text-sm font-medium transition-colors ${
-                                                                    slot.available
-                                                                        ? selectedSlot?.start === slot.start
-                                                                            ? "bg-primary text-primary-foreground"
-                                                                            : "border border-green-200 bg-green-50 text-green-800 hover:bg-green-100"
-                                                                        : "cursor-not-allowed bg-muted text-muted-foreground"
-                                                                }`}
-                                                            >
-                                                                {slot.start_time}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                    <div className="mt-4 flex flex-wrap gap-4 text-xs text-muted-foreground">
-                                                        <span className="flex items-center gap-1">
-                                                            <span className="h-3 w-3 rounded border border-green-200 bg-green-100"></span>
-                                                            Свободно
-                                                        </span>
-                                                        <span className="flex items-center gap-1">
-                                                            <span className="h-3 w-3 rounded bg-muted"></span>
-                                                            Занято
-                                                        </span>
-                                                        <span className="flex items-center gap-1">
-                                                            <span className="h-3 w-3 rounded bg-primary"></span>
-                                                            Выбрано
-                                                        </span>
-                                                    </div>
-                                                    {selectedService && bookingFormErrors.slot && (
-                                                        <p className="mt-3 text-xs text-destructive">{bookingFormErrors.slot}</p>
-                                                    )}
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-4">
-                                        <div className="rounded-xl border border-border/60 bg-card/80 p-4">
-                                            <div className="space-y-1">
-                                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                                    4. Кого записываем
-                                                </p>
-                                                <p className="text-xs text-muted-foreground">
-                                                    Подтвердите контакт клиента и только потом отправляйте запись.
-                                                </p>
-                                            </div>
-
-                                            <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-                                                <div className="rounded-lg bg-muted p-3 text-sm" data-testid="calendar-booking-summary">
-                                                    <p><strong>Мастер:</strong> {currentSpecialist?.name ?? "Не выбран"}</p>
-                                                    <p><strong>Услуга:</strong> {selectedService ? `${selectedService.name} · ${selectedService.price}₸` : "Не выбрана"}</p>
-                                                    <p><strong>День:</strong> {bookingDate ? formatDateLabel(bookingDate) : "Не выбран"}</p>
-                                                    <p><strong>Время:</strong> {selectedSlot ? `${selectedSlot.start_time} - ${selectedSlot.end_time}` : "Не выбрано"}</p>
-                                                </div>
-
-                                                {hasCasePrefill && (
-                                                    <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-3 text-sm">
-                                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                                            <div>
-                                                                <p className="font-semibold text-foreground">Есть данные из заявки</p>
-                                                                <p className="text-xs text-muted-foreground">
-                                                                    Можно одним нажатием подставить имя и телефон из текущей заявки.
-                                                                </p>
-                                                            </div>
-                                                            <button
-                                                                type="button"
-                                                                onClick={applyCasePrefill}
-                                                                className="rounded border border-primary/30 bg-background px-3 py-1.5 text-xs font-semibold text-primary"
-                                                                data-testid="calendar-booking-prefill-case"
-                                                            >
-                                                                Подставить из заявки
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                )}
-
-                                                {shouldShowBookingValidation && visibleBookingFormErrorList.length > 0 && (
-                                                    <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 text-sm text-destructive" data-testid="calendar-booking-error-summary">
-                                                        <p className="font-semibold">Что нужно исправить перед записью:</p>
-                                                        <ul className="mt-2 list-disc pl-5">
-                                                            {visibleBookingFormErrorList.map((error) => (
-                                                                <li key={error}>{error}</li>
-                                                            ))}
-                                                        </ul>
-                                                    </div>
-                                                )}
-
-                                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                                                    <label className="space-y-1">
-                                                        <span className="text-sm font-medium text-muted-foreground">
-                                                            Имя клиента
-                                                        </span>
-                                                        <input
-                                                            type="text"
-                                                            value={customerName}
-                                                            onChange={(event) => setCustomerName(event.target.value)}
-                                                            placeholder="Например, Айгуль С."
-                                                            className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(shouldShowCustomerValidation && bookingFormErrors.customerName) ? "border-destructive/60" : "border-border/60"}`}
-                                                            data-testid="calendar-booking-customer-name"
-                                                        />
-                                                        {shouldShowCustomerValidation && bookingFormErrors.customerName && (
-                                                            <p className="text-xs text-destructive">{bookingFormErrors.customerName}</p>
-                                                        )}
-                                                    </label>
-                                                    <label className="space-y-1">
-                                                        <span className="text-sm font-medium text-muted-foreground">
-                                                            Телефон
-                                                        </span>
-                                                        <input
-                                                            type="tel"
-                                                            value={customerPhone}
-                                                            onChange={(event) => setCustomerPhone(formatPhoneInput(event.target.value))}
-                                                            placeholder="+7 700 123 45 67"
-                                                            className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(shouldShowCustomerValidation && bookingFormErrors.customerPhone) ? "border-destructive/60" : "border-border/60"}`}
-                                                            data-testid="calendar-booking-customer-phone"
-                                                        />
-                                                        {shouldShowCustomerValidation && bookingFormErrors.customerPhone && (
-                                                            <p className="text-xs text-destructive">{bookingFormErrors.customerPhone}</p>
-                                                        )}
-                                                    </label>
-                                                </div>
-
-                                                <label className="space-y-1">
-                                                    <span className="text-sm font-medium text-muted-foreground">
-                                                        Примечания
-                                                    </span>
-                                                    <textarea
-                                                        value={notes}
-                                                        onChange={(event) => setNotes(event.target.value)}
-                                                        placeholder="Что важно учесть по клиенту или записи"
-                                                        rows={3}
-                                                        className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                                    />
-                                                </label>
-
-                                                <div className="flex flex-wrap gap-3">
-                                                    <button
-                                                        type="submit"
-                                                        disabled={!bookingFormReady || createMutation.isPending}
-                                                        className="btn-primary disabled:opacity-50"
-                                                        data-testid="calendar-booking-submit"
-                                                    >
-                                                        {createMutation.isPending ? "Создаём..." : "Записать клиента"}
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={resetForm}
-                                                        className="btn-ghost"
-                                                        data-testid="calendar-booking-reset"
-                                                    >
-                                                        Очистить форму
-                                                    </button>
-                                                </div>
-                                            </form>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
             )}
 
-            {bookingActionsBooking && (() => {
+            {bookingComposerOpen && (
+    <div className="fixed inset-0 z-40" data-testid="calendar-booking-composer-overlay">
+        <div
+            className="absolute inset-0 bg-foreground/20"
+            onClick={closeBookingComposer}
+            aria-hidden="true"
+        />
+        <div
+            className="absolute inset-y-0 right-0 flex h-full w-full max-w-[1080px] flex-col gap-4 overflow-y-auto bg-background p-4 shadow-xl"
+            data-testid="calendar-booking-composer"
+        >
+            <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                    <p className="text-sm font-semibold">Новая запись</p>
+                    <p className="text-xs text-muted-foreground">
+                        Здесь оператор проходит один понятный путь: услуга, мастер, день, время, клиент, подтверждение.
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    onClick={closeBookingComposer}
+                    className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                    data-testid="calendar-booking-composer-close"
+                >
+                    Закрыть
+                </button>
+            </div>
+
+            <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                            Что уже выбрано
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                            Следующий шаг всегда виден. Если время не показано, ниже есть явная причина.
+                        </p>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => resetForm({ keepComposerOpen: true, resetSelections: true })}
+                        className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                        data-testid="calendar-booking-reset"
+                    >
+                        Очистить всё
+                    </button>
+                </div>
+                    <div className="mt-4 grid gap-3 md:grid-cols-5">
+                    <div className={`rounded-xl border p-3 ${selectedService ? "border-primary/30 bg-primary/5" : "border-border/60 bg-background/80"}`}>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            1. Услуга
+                        </p>
+                        <p className="mt-2 text-sm font-semibold text-foreground">
+                            {selectedService?.name ?? "Не выбрана"}
+                        </p>
+                    </div>
+                    <div className={`rounded-xl border p-3 ${selectedSpecialist ? "border-primary/30 bg-primary/5" : "border-border/60 bg-background/80"}`}>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            2. Мастер
+                        </p>
+                        <p className="mt-2 text-sm font-semibold text-foreground">
+                            {currentSpecialist?.name ?? "Не выбран"}
+                        </p>
+                    </div>
+                    <div className={`rounded-xl border p-3 ${bookingDate ? "border-primary/30 bg-primary/5" : "border-border/60 bg-background/80"}`}>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            3. День
+                        </p>
+                        <p className="mt-2 text-sm font-semibold text-foreground">
+                            {bookingDate ? formatDateLabel(bookingDate) : "Не выбран"}
+                        </p>
+                    </div>
+                    <div className={`rounded-xl border p-3 ${selectedSlot ? "border-primary/30 bg-primary/5" : "border-border/60 bg-background/80"}`}>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            4. Время
+                        </p>
+                        <p className="mt-2 text-sm font-semibold text-foreground">
+                            {selectedSlot ? `${selectedSlot.start_time} - ${selectedSlot.end_time}` : "Не выбрано"}
+                        </p>
+                    </div>
+                    <div className={`rounded-xl border p-3 ${customerStepState === "ready" ? "border-primary/30 bg-primary/5" : customerStepState === "review" ? "border-amber-300 bg-amber-50" : "border-border/60 bg-background/80"}`}>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            5. Клиент
+                        </p>
+                        <p className="mt-2 text-sm font-semibold text-foreground">
+                            {customerStepState === "ready"
+                                ? "Готово к подтверждению"
+                                : customerStepState === "review"
+                                    ? "Проверьте контакт"
+                                    : "Нужно заполнить"}
+                        </p>
+                    </div>
+                </div>
+                <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-4" data-testid="calendar-booking-next-step">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                        Что делать дальше
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-foreground">
+                        {bookingNextAction.title}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                        {bookingNextAction.description}
+                    </p>
+                </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]" data-testid="calendar-scheduling-panel">
+                <div className="space-y-4">
+                    <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                        <div className="space-y-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                1. Что нужно сделать
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                Сначала выберите услугу. После этого мы покажем только подходящих мастеров и корректное время.
+                            </p>
+                        </div>
+                        {serviceCatalog.length === 0 ? (
+                            <div className="mt-4 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-3 text-sm text-destructive">
+                                Пока нет ни одной настроенной услуги. Без этого запись создавать нельзя.
+                            </div>
+                        ) : (
+                            <label className="mt-4 block space-y-1">
+                                <span className="text-sm font-medium text-muted-foreground">
+                                    Услуга
+                                </span>
+                                <select
+                                    value={selectedService?.name ?? ""}
+                                    onChange={(event) => {
+                                        const nextService = serviceCatalog.find((service) => service.name === event.target.value) ?? null;
+                                        const currentSpecialistStillAvailable = nextService
+                                            ? activeSpecialists.some((specialist) =>
+                                                specialist.id === selectedSpecialist
+                                                && specialist.services.some((service) => normalizeHumanText(service.name) === nextService.name))
+                                            : false;
+                                        setSelectedService(nextService);
+                                        if (!currentSpecialistStillAvailable) {
+                                            setSelectedSpecialist("");
+                                        }
+                                        setSelectedSlot(null);
+                                    }}
+                                    className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(shouldShowBookingValidation && bookingFormErrors.service) ? "border-destructive/60" : "border-border/60"}`}
+                                    data-testid="calendar-schedule-service"
+                                >
+                                    <option value="">Выберите услугу</option>
+                                    {serviceCatalog.map((service) => (
+                                        <option key={service.name} value={service.name}>
+                                            {service.name} · от {service.duration_min} мин · от {service.price}₸ · {service.specialistCount} маст.
+                                        </option>
+                                    ))}
+                                </select>
+                                {shouldShowBookingValidation && bookingFormErrors.service && (
+                                    <p className="text-xs text-destructive">{bookingFormErrors.service}</p>
+                                )}
+                            </label>
+                        )}
+                    </div>
+
+                    <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                        <div className="space-y-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                2. Кто принимает клиента
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                В списке остаются только мастера, которые умеют делать выбранную услугу.
+                            </p>
+                        </div>
+                        {!selectedService ? (
+                            <p className="mt-4 rounded-lg border border-dashed border-border/60 bg-background/70 px-3 py-3 text-sm text-muted-foreground">
+                                Сначала выберите услугу.
+                            </p>
+                        ) : specialistsForSelectedService.length === 0 ? (
+                            <div className="mt-4 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-3 text-sm text-destructive" data-testid="calendar-schedule-specialist-missing">
+                                Для выбранной услуги пока нет доступных мастеров.
+                            </div>
+                        ) : (
+                            <label className="mt-4 block space-y-1">
+                                <span className="text-sm font-medium text-muted-foreground">
+                                    Мастер
+                                </span>
+                                <select
+                                    value={selectedSpecialist}
+                                    onChange={(event) => {
+                                        setSelectedSpecialist(event.target.value);
+                                        setSelectedSlot(null);
+                                    }}
+                                    className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(selectedService && bookingFormErrors.specialist) ? "border-destructive/60" : "border-border/60"}`}
+                                    data-testid="calendar-schedule-specialist"
+                                >
+                                    <option value="">Выберите мастера</option>
+                                    {specialistsForSelectedService.map((specialist) => {
+                                        const matchedService = specialist.services.find((service) => normalizeHumanText(service.name) === selectedService?.name);
+                                        return (
+                                            <option key={specialist.id} value={specialist.id}>
+                                                {specialist.name} {matchedService ? `· ${matchedService.duration_min} мин · ${matchedService.price}₸` : ""}
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                                {selectedService && bookingFormErrors.specialist && (
+                                    <p className="text-xs text-destructive">{bookingFormErrors.specialist}</p>
+                                )}
+                            </label>
+                        )}
+                    </div>
+
+                    <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                        <div className="space-y-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                3. Когда приходит клиент
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                Выберите день, а затем свободное время. Если времени нет, ниже будет явная причина и следующий шаг.
+                            </p>
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            {bookingQuickDates.map((dateValue) => (
+                                <button
+                                    key={dateValue}
+                                    type="button"
+                                    onClick={() => {
+                                        setBookingDate(dateValue);
+                                        setSelectedSlot(null);
+                                    }}
+                                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                                        bookingDate === dateValue
+                                            ? "border-primary/40 bg-primary/10 text-primary"
+                                            : "border-border/60 text-muted-foreground hover:text-foreground"
+                                    }`}
+                                    data-testid={`calendar-booking-quick-date-${dateValue}`}
+                                >
+                                    {formatBookingQuickDateLabel(dateValue, today, tomorrow)}
+                                </button>
+                            ))}
+                        </div>
+                        <label className="mt-4 block space-y-1">
+                            <span className="text-sm font-medium text-muted-foreground">
+                                День новой записи
+                            </span>
+                            <input
+                                id="calendar-booking-date"
+                                type="date"
+                                value={bookingDate}
+                                onChange={(event) => {
+                                    setBookingDate(event.target.value);
+                                    setSelectedSlot(null);
+                                }}
+                                min={today}
+                                className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(shouldShowBookingValidation && bookingFormErrors.bookingDate) ? "border-destructive/60" : "border-border/60"}`}
+                                data-testid="calendar-booking-date"
+                            />
+                            {shouldShowBookingValidation && bookingFormErrors.bookingDate && (
+                                <p className="text-xs text-destructive">{bookingFormErrors.bookingDate}</p>
+                            )}
+                        </label>
+
+                        <div className="mt-4 rounded-xl border border-border/60 bg-background/80 p-4" data-testid="calendar-slot-state">
+                            <div className="space-y-1">
+                                <p className="text-sm font-semibold text-foreground">{bookingSlotState.title}</p>
+                                <p className="text-xs text-muted-foreground">{bookingSlotState.description}</p>
+                            </div>
+
+                            {bookingSlotState.kind === "loading" && (
+                                <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                                    {[...Array(8)].map((_, index) => (
+                                        <div key={index} className="h-12 animate-pulse rounded-lg bg-muted/70" />
+                                    ))}
+                                </div>
+                            )}
+
+                            {bookingSlotState.kind === "error" && (
+                                <div className="mt-4 flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            void refetchSlots();
+                                        }}
+                                        className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary"
+                                        data-testid="calendar-booking-retry-slots"
+                                    >
+                                        Повторить
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setBookingDate(formatDate(new Date(new Date(`${bookingDate}T00:00:00`).getTime() + 24 * 60 * 60 * 1000)));
+                                            setSelectedSlot(null);
+                                        }}
+                                        className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                    >
+                                        Попробовать другой день
+                                    </button>
+                                </div>
+                            )}
+
+                            {bookingSlotState.kind === "empty" && (
+                                <div className="mt-4 flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setBookingDate(formatDate(new Date(new Date(`${bookingDate}T00:00:00`).getTime() + 24 * 60 * 60 * 1000)));
+                                            setSelectedSlot(null);
+                                        }}
+                                        className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary"
+                                        data-testid="calendar-booking-next-day"
+                                    >
+                                        Следующий день
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedSpecialist("")}
+                                        className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                    >
+                                        Выбрать другого мастера
+                                    </button>
+                                </div>
+                            )}
+
+                            {bookingSlotState.kind === "ready" && (
+                                <div className="mt-4 space-y-4">
+                                    {groupedSlots.map((group) => (
+                                        <div key={group.label} className="space-y-2">
+                                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                                {group.label}
+                                            </p>
+                                            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                                                {group.slots.map((slot) => (
+                                                    <button
+                                                        key={slot.start}
+                                                        type="button"
+                                                        onClick={() => handleSlotClick(slot)}
+                                                        disabled={!slot.available}
+                                                        className={`rounded-xl border px-3 py-3 text-left text-sm font-medium transition-colors ${
+                                                            slot.available
+                                                                ? selectedSlot?.start === slot.start
+                                                                    ? "border-primary bg-primary text-primary-foreground"
+                                                                    : "border-green-200 bg-green-50 text-green-900 hover:bg-green-100"
+                                                                : "cursor-not-allowed border-border/60 bg-muted text-muted-foreground"
+                                                        }`}
+                                                        data-testid={`calendar-slot-${slot.start_time.replace(':', '-')}`}
+                                                    >
+                                                        <span className="block text-base font-semibold">{slot.start_time}</span>
+                                                        <span className="mt-1 block text-xs opacity-80">до {slot.end_time}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {selectedSpecialist && bookingFormErrors.slot && (
+                                        <p className="text-xs text-destructive">{bookingFormErrors.slot}</p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="space-y-4">
+                    <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                        <div className="space-y-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                4. Кого записываем
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                Проверьте контакт клиента и только потом подтверждайте запись.
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+                            <div className="rounded-lg bg-muted p-3 text-sm" data-testid="calendar-booking-summary">
+                                <p><strong>Услуга:</strong> {selectedService ? `${selectedService.name}${selectedServicePrice ? ` · ${selectedServicePrice}₸` : ""}` : "Не выбрана"}</p>
+                                <p><strong>Мастер:</strong> {currentSpecialist?.name ?? "Не выбран"}</p>
+                                <p><strong>День:</strong> {bookingDate ? formatDateLabel(bookingDate) : "Не выбран"}</p>
+                                <p><strong>Время:</strong> {selectedSlot ? `${selectedSlot.start_time} - ${selectedSlot.end_time}` : "Не выбрано"}</p>
+                            </div>
+
+                            {hasCasePrefill && (
+                                <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-3 text-sm">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div>
+                                            <p className="font-semibold text-foreground">Есть данные из заявки</p>
+                                            <p className="text-xs text-muted-foreground">
+                                                Можно одним нажатием подставить имя и телефон из текущей заявки.
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={applyCasePrefill}
+                                            className="rounded border border-primary/30 bg-background px-3 py-1.5 text-xs font-semibold text-primary"
+                                            data-testid="calendar-booking-prefill-case"
+                                        >
+                                            Подставить из заявки
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {shouldShowBookingValidation && visibleBookingFormErrorList.length > 0 && (
+                                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 text-sm text-destructive" data-testid="calendar-booking-error-summary">
+                                    <p className="font-semibold">Что нужно исправить перед записью:</p>
+                                    <ul className="mt-2 list-disc pl-5">
+                                        {visibleBookingFormErrorList.map((error) => (
+                                            <li key={error}>{error}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                <label className="space-y-1">
+                                    <span className="text-sm font-medium text-muted-foreground">
+                                        Имя клиента
+                                    </span>
+                                    <input
+                                        type="text"
+                                        value={customerName}
+                                        onChange={(event) => setCustomerName(event.target.value)}
+                                        placeholder="Например, Айгуль С."
+                                        maxLength={80}
+                                        autoComplete="name"
+                                        className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(shouldShowCustomerValidation && bookingFormErrors.customerName) ? "border-destructive/60" : "border-border/60"}`}
+                                        data-testid="calendar-booking-customer-name"
+                                    />
+                                    <p className="text-xs text-muted-foreground">
+                                        Как к клиенту обратиться в звонке или подтверждении записи.
+                                    </p>
+                                    {shouldShowCustomerValidation && bookingFormErrors.customerName && (
+                                        <p className="text-xs text-destructive">{bookingFormErrors.customerName}</p>
+                                    )}
+                                </label>
+                                <label className="space-y-1">
+                                    <span className="text-sm font-medium text-muted-foreground">
+                                        Телефон
+                                    </span>
+                                    <input
+                                        type="tel"
+                                        value={customerPhone}
+                                        onChange={(event) => setCustomerPhone(formatPhoneInput(event.target.value))}
+                                        placeholder="+7 700 123 45 67"
+                                        inputMode="tel"
+                                        autoComplete="tel"
+                                        maxLength={20}
+                                        className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(shouldShowCustomerValidation && bookingFormErrors.customerPhone) ? "border-destructive/60" : "border-border/60"}`}
+                                        data-testid="calendar-booking-customer-phone"
+                                    />
+                                    {customerPhone ? (
+                                        normalizedCustomerPhoneDisplay ? (
+                                            <p className="text-xs text-emerald-700">
+                                                Сохраним номер как {normalizedCustomerPhoneDisplay}.
+                                            </p>
+                                        ) : (
+                                            <p className="text-xs text-destructive">
+                                                Номер пока не распознан. Нужен формат +7 700 123 45 67.
+                                            </p>
+                                        )
+                                    ) : (
+                                        <p className="text-xs text-muted-foreground">
+                                            Номер нужен, чтобы быстро подтвердить запись и связаться при переносе.
+                                        </p>
+                                    )}
+                                    {shouldShowCustomerValidation && bookingFormErrors.customerPhone && (
+                                        <p className="text-xs text-destructive">{bookingFormErrors.customerPhone}</p>
+                                    )}
+                                </label>
+                            </div>
+
+                            <label className="space-y-1">
+                                <span className="text-sm font-medium text-muted-foreground">
+                                    Примечания
+                                </span>
+                                <textarea
+                                    value={notes}
+                                    onChange={(event) => setNotes(event.target.value)}
+                                    placeholder="Что важно учесть по клиенту или записи"
+                                    rows={3}
+                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Необязательно. Оставьте только то, что поможет коллеге быстро понять контекст записи.
+                                </p>
+                            </label>
+
+                            <div className="flex flex-wrap gap-3">
+                                <button
+                                    type="submit"
+                                    disabled={!bookingFormReady || createMutation.isPending}
+                                    className="btn-primary disabled:opacity-50"
+                                    data-testid="calendar-booking-submit"
+                                >
+                                    {createMutation.isPending ? "Создаём..." : "Подтвердить и создать запись"}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={closeBookingComposer}
+                                    className="btn-ghost"
+                                    data-testid="calendar-booking-cancel"
+                                >
+                                    Вернуться к списку
+                                </button>
+                            </div>
+                            <p className="text-xs text-muted-foreground" data-testid="calendar-booking-submit-hint">
+                                {bookingNextAction.description}
+                            </p>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+)}
+
+{bookingActionsBooking && (() => {
                 const booking = bookingActionsBooking;
                 const isNoShow = booking.status.toUpperCase() === "NO_SHOW";
                 const currentDueInput = formatDateTimeLocalInput(booking.follow_up_due_at);
@@ -3073,9 +3523,9 @@ export default function CalendarPage() {
                         >
                             <div className="flex items-start justify-between gap-3">
                                 <div className="space-y-1">
-                                    <p className="text-sm font-semibold">Работа с записью</p>
+                                    <p className="text-sm font-semibold">Действия по записи</p>
                                     <p className="text-xs text-muted-foreground">
-                                        Здесь оператор меняет статус визита, фиксирует связь после неявки и назначает ответственного.
+                                        Здесь оператор фиксирует результат визита, выбирает итог разговора после неявки и назначает, кто звонит клиенту.
                                     </p>
                                 </div>
                                 <button
@@ -3112,10 +3562,10 @@ export default function CalendarPage() {
                                 {isNoShow && (
                                     <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
                                         <span className="rounded bg-muted px-2 py-0.5 font-semibold text-foreground/80">
-                                            Кто связывается: {followUpOwnerLabel}
+                                            {formatContactTaskOwnerChipLabel(followUpOwnerLabel)}
                                         </span>
                                         <span className={`rounded px-2 py-0.5 font-semibold ${booking.follow_up_overdue ? "bg-red-100 text-red-900" : "bg-slate-100 text-slate-700"}`}>
-                                            {followUpDueLabel ? `Связаться до: ${followUpDueLabel}` : "Срок связи не задан"}
+                                            {formatContactTaskDueChipLabel(followUpDueLabel)}
                                         </span>
                                         {booking.follow_up_overdue && !booking.no_show_followup_done && (
                                             <span className="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-900">
@@ -3140,7 +3590,10 @@ export default function CalendarPage() {
                             {canWriteCalendar && visitActions.length > 0 && (
                                 <div className="rounded-xl border border-border/60 bg-card/80 p-4">
                                     <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                        Статус визита
+                                        1. Что с визитом
+                                    </p>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        Выберите итог визита, чтобы список сразу показал корректный следующий шаг.
                                     </p>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         {visitActions.map((action) => {
@@ -3164,15 +3617,16 @@ export default function CalendarPage() {
                             {canWriteCalendar && isNoShow && (
                                 <div className="rounded-xl border border-border/60 bg-card/80 p-4">
                                     <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                        Связь после неявки
+                                        2. Что решили после неявки
+                                    </p>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        Зафиксируйте итог разговора с клиентом. Если клиента переписали, обязательно привяжите новую запись.
                                     </p>
                                     <div className="mt-3 space-y-3">
                                         {booking.no_show_followup_done ? (
                                             <>
                                                 <span className="rounded-md bg-green-100 px-2.5 py-1.5 text-xs font-medium text-green-800">
-                                                    {booking.no_show_followup_result === "rebooked"
-                                                        ? "После неявки: клиента переписали"
-                                                        : "После неявки: с клиентом связались"}
+                                                    {getContactTaskResultLabel(booking.no_show_followup_result)}
                                                 </span>
                                                 {rebookedBookingLabel && (
                                                     <span className="rounded-md bg-muted px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
@@ -3183,7 +3637,7 @@ export default function CalendarPage() {
                                         ) : (
                                             <div className="space-y-3">
                                                 <p className="text-xs text-muted-foreground">
-                                                    Сначала зафиксируйте результат связи. Если клиента переписали, обязательно привяжите новую запись.
+                                                    Сначала выберите итог разговора. Если клиента переписали, обязательно привяжите новую запись.
                                                 </p>
                                                 <div className="flex flex-wrap gap-2">
                                                     <button
@@ -3294,7 +3748,7 @@ export default function CalendarPage() {
                                 <div className="rounded-xl border border-border/60 bg-card/80 p-4" data-testid="calendar-follow-up-governance-card">
                                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                            Ответственный и срок связи
+                                            3. Кто отвечает за звонок
                                         </p>
                                         {booking.follow_up_overdue && (
                                             <span className="rounded bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-900">
@@ -3302,10 +3756,13 @@ export default function CalendarPage() {
                                             </span>
                                         )}
                                     </div>
+                                    <p className="mb-3 text-xs text-muted-foreground">
+                                        Назначьте ответственного и крайний срок, чтобы просроченные звонки не терялись в очереди.
+                                    </p>
                                     <div className="grid gap-2 sm:grid-cols-2">
                                         <label className="space-y-1">
                                             <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                                Кто связывается
+                                                Кто звонит клиенту
                                             </span>
                                             <select
                                                 value={followUpGovernanceDraft.ownerAgentId}
@@ -3314,7 +3771,7 @@ export default function CalendarPage() {
                                                 disabled={governancePending}
                                                 data-testid="calendar-follow-up-governance-owner"
                                             >
-                                                <option value="">Без владельца</option>
+                                                <option value="">Пока не назначено</option>
                                                 {followUpOwnerOptions.map((agent) => (
                                                     <option key={agent.id} value={agent.id}>
                                                         {agent.name}
@@ -3324,7 +3781,7 @@ export default function CalendarPage() {
                                         </label>
                                         <label className="space-y-1">
                                             <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                                Срок связи
+                                                Позвонить до
                                             </span>
                                             <input
                                                 type="datetime-local"
@@ -3343,7 +3800,7 @@ export default function CalendarPage() {
                                             className="rounded border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
                                             disabled={governancePending}
                                         >
-                                            Назначить мне
+                                            Назначить звонок мне
                                         </button>
                                         <button
                                             type="button"
@@ -3356,7 +3813,7 @@ export default function CalendarPage() {
                                             disabled={!followUpGovernanceDirty || governancePending}
                                             data-testid="calendar-follow-up-governance-save"
                                         >
-                                            {governancePending ? "Сохраняем..." : "Сохранить изменения"}
+                                            {governancePending ? "Сохраняем..." : "Сохранить ответственного и срок"}
                                         </button>
                                         {followUpGovernanceDirty && (
                                             <button

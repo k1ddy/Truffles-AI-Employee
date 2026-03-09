@@ -2,11 +2,11 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave36-a1.md
-- branch: feat/2026-03-08-inbox-calendar-ux-reconstruction-wave36-a1
+- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave37-a1.md
+- branch: feat/2026-03-08-inbox-calendar-ux-reconstruction-wave37-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Полностью пересобрать `Записи` как operator-grade surface: plain-language copy, sanitized follow-up ownership, guided booking composer, strong inline validation, visual inspections after each major phase, and valid/invalid interaction proof.
+- scope: Reopen Calendar acceptance after merged Wave36 without rollback: focused create-booking flow, explicit time discoverability, plain operator language, strong guardrails, and full valid/invalid workflow proof.
 - done:
   - Wave32 docs-only audit started and canonized:
     - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md` and artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-08-inbox-calendar-ux-logic-audit-a1.md`;
@@ -489,6 +489,20 @@
       - `cd console-web && npm run build` (`pass`)
       - `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "inspect first case|manager history modes hide queue views and keep owner scope role-gated|manage and apply action macro|action feedback hides raw sync reason codes and keeps reopen internal-only|booking no-show reopens resolved case and preserves case-booking semantics"` (`5 passed`)
       - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
+- Wave37 Part B completed locally:
+  - cleaned the remaining Calendar operator copy in `console-web/src/app/calendar/page.tsx`: filters now speak in contact-task language, no-show cards/panels say `за звонок отвечает` / `позвонить до`, the booking action panel is grouped into three explicit action steps, and the booking composer shows `Что делать дальше` plus a clearer customer step state;
+  - tightened guardrails around customer input: the phone field now keeps the common operator format `8 (701) 555-44-33` intact long enough to show the normalized preview, while the composer submit hint and inline helper text explain why creation is blocked before submit;
+  - reran visual inspection for the rebuilt filters/composer states and confirmed no new overflow or clipped controls at `1024px`, `1280px`, `1440px`.
+- Wave37 Part C completed locally:
+  - added `console-web/e2e/calendar-operator.spec.ts` as the dedicated deterministic Calendar acceptance lane covering reset/re-entry, dependent-state resets, case prefill, empty-day fallback, slot retry after error, safe follow-up completion, and medium-width layout bounds;
+  - reran the full mixed `inspect_case` lane to keep the broader Inbox/Calendar workflow matrix green on top of the new dedicated Calendar lane;
+  - refreshed the visual checklist to include the booking action panel, resulting in queue/filters/composer/action artifacts at `1024px`, `1280px`, `1440px`: `/tmp/wave37-part-a-calendar-*.png`;
+  - local evidence:
+    - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file e2e/inspect_case.spec.ts --file e2e/calendar-operator.spec.ts` (`pass`)
+    - `cd console-web && npm run build` (`pass`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/calendar-operator.spec.ts --project chromium` (`5 passed`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium` (`14 passed, 1 skipped`)
+    - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
   - Wave35 TP activated before implementation:
     - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave35-a1.md` as the bounded acceptance closeout block after Wave33/Wave34;
     - switched the active session/task-package pointer from Wave34 to Wave35 and updated the master Inbox/Calendar execution map accordingly;
@@ -532,4 +546,22 @@
       - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "calendar secondary panels isolate filters and booking actions|calendar hides technical follow-up owners and keeps operator-safe labels|guided booking composer blocks invalid submit until service name phone and slot are coherent, then creates booking|no-show rebook path requires linked booking selection before submit|medium-width inbox and calendar keep primary queue surfaces visible|booking no-show reopens resolved case and preserves case-booking semantics"` (`6 passed`)
       - `cd truffles-api && pytest -q tests/test_calendar_bookings_router.py tests/test_calendar_noshow_followup_router.py tests/test_console_openapi_calendar_contract.py` (`42 passed`)
       - `cd truffles-api && ruff check app/routers/calendar.py tests/test_calendar_bookings_router.py tests/test_calendar_noshow_followup_router.py tests/test_console_openapi_calendar_contract.py` (`pass`)
-- last_updated: 2026-03-08T16:37:05+05:00
+- last_updated: 2026-03-08T19:47:38+05:00
+
+- Wave37 recovery TP activated after post-merge operator evidence:
+  - fetched `origin/main`, confirmed the current worktree branch was behind merged `main`, and switched to `feat/2026-03-08-inbox-calendar-ux-reconstruction-wave37-a1` from `origin/main` so the follow-up starts from the real merged state rather than the old Wave36 branch tip;
+  - recorded the new factual blocker: merged Calendar still fails the primary booking job because time selection is hidden behind implicit prerequisites (`selectedSpecialist && bookingDate && specialistHasConfiguredServices && selectedService`), while the current proof never asserted operator discoverability of that state;
+  - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave37-a1.md` as the forward-fix contract with mandatory split `Part A booking entry + slot discoverability`, `Part B guardrails/copy/actions`, `Part C operator proof + visual acceptance`;
+  - synced `STATE.md`, `STRUCTURE.md`, `docs/CONSOLE_AUDIT/UX_BACKLOG.md`, the master TP, and session pointers so `Wave37` is now the only valid active block and `Wave36` is treated as a merged-but-invalidated acceptance claim, not a final closeout.
+- Wave37 Part A completed locally:
+  - rebuilt `console-web/src/app/calendar/page.tsx` around a focused booking composer instead of the old mixed scheduling sheet, switched the booking order to `услуга -> мастер -> день -> время -> клиент`, and added explicit slot-state feedback (`blocked/loading/empty/error/ready`) with deterministic dependent-state resets;
+  - updated `console-web/e2e/inspect_case.spec.ts` so the deterministic harness understands the new scheduling surface, closes conflicting panels before opening the composer, and no longer treats the specialist select as inline-visible before a service is chosen;
+  - hardened the route-mock login harness for the current shell bootstrap: reloading the mocked cases landing page when it stalls in `Загрузка профиля...`, which restored the full deterministic `inspect_case` lane on `next start`;
+  - recorded visual inspection artifacts for queue, filters, initial composer, service-selected state, ready slots, empty-state, and validation-state at `1024px`, `1280px`, and `1440px`: `/tmp/wave37-part-a-calendar-*.png`;
+  - local evidence:
+    - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file e2e/inspect_case.spec.ts` (`pass`)
+    - `cd console-web && npm run build` (`pass`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "calendar booking flow explains why time is hidden until service and specialist are selected|guided booking composer blocks invalid submit until service name phone and slot are coherent, then creates booking|calendar secondary panels isolate filters and booking actions|medium-width inbox and calendar keep primary queue surfaces visible"` (`4 passed`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "inspect first case|manager history modes hide queue views and keep owner scope role-gated|role-gated owner scope is normalized before first queue request|manage and apply action macro"` (`4 passed`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium` (`14 passed, 1 skipped`)
+    - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)

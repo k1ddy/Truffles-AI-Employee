@@ -206,12 +206,23 @@ async function openCalendarSecondaryPanel(
     page: import('@playwright/test').Page,
     section: 'filters' | 'saved_views' | 'scheduling',
 ) {
+    if (section === 'scheduling') {
+        const secondaryPanel = page.getByTestId('calendar-secondary-panel');
+        if (await secondaryPanel.isVisible().catch(() => false)) {
+            await closeCalendarSecondaryPanel(page);
+        }
+        const composer = page.getByTestId('calendar-booking-composer');
+        if (!(await composer.isVisible().catch(() => false))) {
+            await page.getByTestId('calendar-scheduling-panel-toggle').click({ force: true });
+            await expect(composer).toBeVisible({ timeout: 15000 });
+        }
+        return;
+    }
     const panel = page.getByTestId('calendar-secondary-panel');
     if (!(await panel.isVisible().catch(() => false))) {
         const toggleBySection: Record<typeof section, string> = {
             filters: 'calendar-secondary-panel-toggle',
             saved_views: 'calendar-saved-views-panel-toggle',
-            scheduling: 'calendar-scheduling-panel-toggle',
         };
         await page.getByTestId(toggleBySection[section]).click({ force: true });
         await expect(panel).toBeVisible({ timeout: 15000 });
@@ -224,6 +235,14 @@ async function closeCalendarSecondaryPanel(page: import('@playwright/test').Page
     if (await panel.isVisible().catch(() => false)) {
         await page.getByTestId('calendar-secondary-panel-close').click({ force: true });
         await expect(panel).toHaveCount(0);
+    }
+}
+
+async function closeCalendarBookingComposer(page: import('@playwright/test').Page) {
+    const composer = page.getByTestId('calendar-booking-composer');
+    if (await composer.isVisible().catch(() => false)) {
+        await page.getByTestId('calendar-booking-composer-close').click({ force: true });
+        await expect(composer).toHaveCount(0);
     }
 }
 
@@ -1916,12 +1935,30 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     }
 
     if (useRouteMocks) {
-        await resolveTenantSelection(page);
         const retryButton = page.getByRole('button', { name: /повторить/i });
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-            if (await retryButton.isVisible().catch(() => false)) {
-                await retryButton.click();
-                await page.waitForTimeout(250);
+        const loginButton = page.getByTestId('login-button').or(page.getByRole('button', { name: /войти через sso/i })).first();
+        const loadingProfile = page.getByText('Загрузка профиля...');
+        for (let cycle = 0; cycle < 3; cycle += 1) {
+            await resolveTenantSelection(page);
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                if (await retryButton.isVisible().catch(() => false)) {
+                    await retryButton.click();
+                    await page.waitForTimeout(250);
+                }
+            }
+            if (await casesTitle.isVisible().catch(() => false)) {
+                return;
+            }
+            const shouldReload = await loginButton.isVisible().catch(() => false)
+                || await loadingProfile.isVisible().catch(() => false);
+            if (shouldReload) {
+                await gotoWithRetry(page, baseURL);
+            }
+        }
+        if (!(await casesTitle.isVisible().catch(() => false))) {
+            const fallbackCaseTable = page.getByTestId('cases-table');
+            if (await fallbackCaseTable.isVisible().catch(() => false)) {
+                return;
             }
         }
         await expect(casesTitle).toBeVisible({ timeout: 20000 });
@@ -2564,9 +2601,12 @@ test('calendar secondary panels isolate filters and booking actions', async ({ p
     await expect(page.getByTestId('calendar-queue-status-filter')).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId('calendar-follow-up-overdue-filter')).toBeVisible({ timeout: 20000 });
     await openCalendarSecondaryPanel(page, 'scheduling');
+    await expect(page.getByTestId('calendar-booking-composer')).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId('calendar-scheduling-panel')).toBeVisible({ timeout: 20000 });
-    await expect(page.getByTestId('calendar-schedule-specialist')).toBeVisible({ timeout: 20000 });
-    await closeCalendarSecondaryPanel(page);
+    await expect(page.getByTestId('calendar-slot-state')).toContainText('Сначала выберите услугу', { timeout: 15000 });
+    await expect(page.getByTestId('calendar-schedule-specialist')).toHaveCount(0);
+    await expect(page.getByText('В списке остаются только мастера, которые умеют делать выбранную услугу.')).toBeVisible({ timeout: 15000 });
+    await closeCalendarBookingComposer(page);
 
     await page.getByTestId('calendar-booking-open-actions').first().click({ force: true });
     const bookingPanel = page.getByTestId('calendar-booking-panel');
@@ -2644,23 +2684,25 @@ test('calendar hides technical follow-up owners and keeps operator-safe labels',
     await openCalendarSecondaryPanel(page, 'filters');
     const ownerFilter = page.getByTestId('calendar-follow-up-owner-filter');
     const ownerOptions = await ownerFilter.locator('option').allTextContents();
-    expect(ownerOptions).toEqual(expect.arrayContaining(['Все ответственные', 'Manager', 'Manager Two', 'Coordinator Dana']));
+    expect(ownerOptions).toEqual(expect.arrayContaining(['Все, кто звонит клиентам', 'Manager', 'Manager Two', 'Coordinator Dana']));
     expect(ownerOptions).not.toContain('admin console');
     expect(ownerOptions).not.toContain('ci-console');
-    await expect(page.getByText('Служебные учётные записи скрыты из выбора: 2')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('Служебные учётные записи не показываем оператору: 2')).toBeVisible({ timeout: 15000 });
     await closeCalendarSecondaryPanel(page);
 
     const noShowCard = page.getByTestId('calendar-booking-card').filter({ hasText: 'Динара' }).first();
-    await expect(noShowCard).toContainText('Кто связывается: Служебный аккаунт', { timeout: 15000 });
+    await expect(noShowCard).toContainText('За звонок отвечает: Служебный аккаунт', { timeout: 15000 });
     await expect(noShowCard).not.toContainText('admin console');
     await expect(noShowCard).not.toContainText('ci-console');
 
     const bookingPanel = await openCalendarBookingActionsByText(page, 'Динара');
     await expect(bookingPanel).toBeVisible({ timeout: 20000 });
-    await expect(bookingPanel).toContainText('Кто связывается: Служебный аккаунт', { timeout: 15000 });
+    await expect(bookingPanel).toContainText('2. Что решили после неявки', { timeout: 15000 });
+    await expect(bookingPanel).toContainText('3. Кто отвечает за звонок', { timeout: 15000 });
+    await expect(bookingPanel).toContainText('За звонок отвечает: Служебный аккаунт', { timeout: 15000 });
     await expect(bookingPanel.getByTestId('calendar-follow-up-governance-owner')).toBeVisible({ timeout: 20000 });
     const governanceOptions = await bookingPanel.getByTestId('calendar-follow-up-governance-owner').locator('option').allTextContents();
-    expect(governanceOptions).toEqual(expect.arrayContaining(['Без владельца', 'Manager', 'Manager Two', 'Coordinator Dana']));
+    expect(governanceOptions).toEqual(expect.arrayContaining(['Пока не назначено', 'Manager', 'Manager Two', 'Coordinator Dana']));
     expect(governanceOptions).not.toContain('admin console');
     expect(governanceOptions).not.toContain('ci-console');
 
@@ -2690,38 +2732,76 @@ test('guided booking composer blocks invalid submit until service name phone and
     await expect(bookingCards).toHaveCount(3, { timeout: 15000 });
     const initialBookingCount = 3;
     await openCalendarSecondaryPanel(page, 'scheduling');
+    await expect(page.getByTestId('calendar-booking-composer')).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId('calendar-scheduling-panel')).toBeVisible({ timeout: 20000 });
 
     const submitButton = page.getByTestId('calendar-booking-submit');
     await expect(submitButton).toBeDisabled();
-
-    await page.getByTestId('calendar-schedule-specialist').selectOption(SPECIALIST_ID);
-    await expect(page.getByText('Сначала выберите услугу, чтобы показать свободные слоты с правильной длительностью.')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('calendar-slot-state')).toContainText('Сначала выберите услугу', { timeout: 15000 });
+    await expect(page.getByTestId('calendar-booking-next-step')).toContainText('1. Выберите услугу', { timeout: 15000 });
 
     await page.getByTestId('calendar-schedule-service').selectOption('Маникюр');
-    await expect(page.getByRole('button', { name: '10:00', exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('calendar-slot-state')).toContainText('Выберите мастера', { timeout: 15000 });
+    await expect(page.getByTestId('calendar-booking-next-step')).toContainText('2. Выберите мастера', { timeout: 15000 });
+
+    await page.getByTestId('calendar-schedule-specialist').selectOption(SPECIALIST_ID);
+    await expect(page.getByTestId('calendar-slot-state')).toContainText('Свободное время на', { timeout: 15000 });
+    await expect(page.getByTestId('calendar-slot-10-00')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('calendar-booking-next-step')).toContainText('4. Выберите время', { timeout: 15000 });
 
     await page.getByTestId('calendar-booking-customer-name').fill('A');
     await page.getByTestId('calendar-booking-customer-phone').fill('123');
-    await page.getByRole('button', { name: '10:00', exact: true }).click({ force: true });
+    await page.getByTestId('calendar-slot-10-00').click({ force: true });
 
     const errorSummary = page.getByTestId('calendar-booking-error-summary');
     await expect(errorSummary).toContainText('Имя должно содержать минимум 2 символа.', { timeout: 15000 });
     await expect(errorSummary).toContainText('Укажите телефон в формате +7 700 123 45 67.', { timeout: 15000 });
+    await expect(page.getByText('Номер пока не распознан. Нужен формат +7 700 123 45 67.')).toBeVisible({ timeout: 15000 });
     await expect(submitButton).toBeDisabled();
 
     await page.getByTestId('calendar-booking-customer-name').fill('Мадина С.');
     await page.getByTestId('calendar-booking-customer-phone').fill('8 (701) 555-44-33');
+    await expect(page.getByText('Сохраним номер как +7 701 555 44 33.')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('calendar-booking-next-step')).toContainText('Подтвердите и создайте запись', { timeout: 15000 });
     await expect(submitButton).toBeEnabled({ timeout: 15000 });
 
     await submitButton.click({ force: true });
 
     await expect(page.getByText('Запись создана!')).toBeVisible({ timeout: 15000 });
-    await closeCalendarSecondaryPanel(page);
+    await expect(page.getByTestId('calendar-booking-composer')).toHaveCount(0, { timeout: 15000 });
     await expect(bookingCards).toHaveCount(initialBookingCount + 1, { timeout: 15000 });
     const createdCard = page.getByTestId('calendar-booking-card').filter({ hasText: 'Мадина С.' }).first();
     await expect(createdCard).toContainText('+7 701 555 44 33', { timeout: 15000 });
     await expect(createdCard).toContainText('Маникюр', { timeout: 15000 });
+});
+
+test('calendar booking flow explains why time is hidden until service and specialist are selected', async ({ page }) => {
+    test.skip(!useRouteMocks, 'Wave37 booking discoverability proof is covered in deterministic mock lane only');
+    test.setTimeout(90000);
+
+    await installConsoleMocks(page);
+    await ensureLoggedIn(page);
+    await gotoWithRetry(page, `${baseURL}/calendar`);
+    await expect(page.getByTestId('calendar-page')).toBeVisible({ timeout: 20000 });
+
+    await openCalendarSecondaryPanel(page, 'scheduling');
+    const composer = page.getByTestId('calendar-booking-composer');
+    const slotState = page.getByTestId('calendar-slot-state');
+    await expect(composer).toBeVisible({ timeout: 20000 });
+    await expect(slotState).toContainText('Сначала выберите услугу', { timeout: 15000 });
+    await expect(slotState).toContainText('Услуга задаёт длительность визита', { timeout: 15000 });
+    await expect(page.getByTestId('calendar-booking-next-step')).toContainText('1. Выберите услугу', { timeout: 15000 });
+
+    await page.getByTestId('calendar-schedule-service').selectOption('Маникюр');
+    await expect(slotState).toContainText('Выберите мастера', { timeout: 15000 });
+    await expect(page.getByTestId('calendar-booking-next-step')).toContainText('2. Выберите мастера', { timeout: 15000 });
+
+    await page.getByTestId('calendar-schedule-specialist').selectOption(SPECIALIST_ID);
+    await expect(slotState).toContainText('Свободное время на', { timeout: 15000 });
+    await expect(page.getByTestId('calendar-slot-10-00')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('calendar-booking-next-step')).toContainText('4. Выберите время', { timeout: 15000 });
+
+    await closeCalendarBookingComposer(page);
 });
 
 test('no-show rebook path requires linked booking selection before submit', async ({ page }) => {
@@ -2854,8 +2934,9 @@ test('medium-width inbox and calendar keep primary queue surfaces visible', asyn
         expect(secondaryPanelOverflow.scrollWidth).toBeLessThanOrEqual(secondaryPanelOverflow.clientWidth + 2);
 
         await openCalendarSecondaryPanel(page, 'scheduling');
+        await expect(page.getByTestId('calendar-booking-composer')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('calendar-scheduling-panel')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByTestId('calendar-schedule-specialist')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId('calendar-schedule-service')).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId('calendar-booking-submit')).toBeVisible({ timeout: 15000 });
 
         const schedulingPanelOverflow = await page.getByTestId('calendar-scheduling-panel').evaluate((element) => ({
@@ -2864,7 +2945,7 @@ test('medium-width inbox and calendar keep primary queue surfaces visible', asyn
         }));
         expect(schedulingPanelOverflow.scrollWidth).toBeLessThanOrEqual(schedulingPanelOverflow.clientWidth + 2);
 
-        await closeCalendarSecondaryPanel(page);
+        await closeCalendarBookingComposer(page);
     }
 });
 
