@@ -348,6 +348,7 @@ async function installCalendarOperatorMocks(page: Page, options: CalendarOperato
             created_at: '2026-03-05T09:30:00+05:00',
         },
     ];
+    let currentQueueState: Record<string, unknown> | null = null;
 
     await page.route('**/api/auth/session**', async (route) => {
         if (route.request().method() !== 'GET') {
@@ -444,21 +445,22 @@ async function installCalendarOperatorMocks(page: Page, options: CalendarOperato
         const method = route.request().method();
         if (method === 'GET') {
             await toJsonResponse(route, {
-                found: false,
+                found: currentQueueState !== null,
                 surface: 'calendar',
-                query_state: null,
-                updated_at: null,
+                query_state: deepClone(currentQueueState),
+                updated_at: currentQueueState ? '2026-03-08T15:05:00+05:00' : null,
                 version: 1,
             });
             return;
         }
         if (method === 'PUT') {
             const payload = route.request().postDataJSON() as Record<string, unknown> | null;
+            currentQueueState = deepClone(payload?.query_state ?? null);
             await toJsonResponse(route, {
                 success: true,
                 found: true,
                 surface: 'calendar',
-                query_state: deepClone(payload?.query_state ?? null),
+                query_state: deepClone(currentQueueState),
                 updated_at: '2026-03-08T15:05:00+05:00',
                 version: Number(payload?.version ?? 1),
             });
@@ -663,6 +665,10 @@ async function installCalendarOperatorMocks(page: Page, options: CalendarOperato
         }
         await route.fallback();
     });
+
+    return {
+        getCurrentQueueState: () => deepClone(currentQueueState),
+    };
 }
 
 async function gotoWithRetry(page: Page, url: string, attempts = 3) {
@@ -809,6 +815,64 @@ async function openCalendarBookingActionsByText(page: Page, text: string) {
 }
 
 test.describe('calendar operator workflow', () => {
+    test('calendar filters stay in draft until apply and reset back to the applied state', async ({ page }) => {
+        test.skip(!useRouteMocks, 'calendar operator lane is deterministic only');
+
+        const today = formatMockDate(new Date());
+        const mocks = await installCalendarOperatorMocks(page);
+        await ensureCalendarReady(page, `${baseURL}/calendar`);
+        const visibleCards = page.getByTestId('calendar-booking-card');
+        await expect(visibleCards).toHaveCount(2, { timeout: 15000 });
+        await expect.poll(() => mocks.getCurrentQueueState()).toBeNull();
+
+        await openCalendarSecondaryPanel(page, 'filters');
+        const searchInput = page.getByTestId('calendar-queue-search');
+        const statusSelect = page.getByTestId('calendar-queue-status-filter');
+
+        await searchInput.fill('Динара');
+        await statusSelect.selectOption('no_show');
+        await expect(page.getByTestId('calendar-filter-draft-banner')).toBeVisible({ timeout: 15000 });
+        await expect(page).not.toHaveURL(/q=/);
+        await expect(page.getByText('Найти: Динара')).toHaveCount(0);
+        await expect(visibleCards).toHaveCount(2);
+        await page.waitForTimeout(400);
+        await expect.poll(() => mocks.getCurrentQueueState()).toBeNull();
+
+        await page.getByTestId('calendar-filters-reset').click({ force: true });
+        await expect(searchInput).toHaveValue('');
+        await expect(statusSelect).toHaveValue('all');
+        await expect(page.getByTestId('calendar-filter-draft-banner')).toHaveCount(0);
+
+        await searchInput.fill('Динара');
+        await statusSelect.selectOption('no_show');
+        await page.getByTestId('calendar-filters-apply').click({ force: true });
+        await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe('Динара');
+        await expect.poll(() => new URL(page.url()).searchParams.get('status')).toBe('no_show');
+        await expect.poll(() => mocks.getCurrentQueueState()).toEqual({
+            follow_up_overdue_only: false,
+            follow_up_owner_id: null,
+            query: 'Динара',
+            queue_lane: 'attention',
+            queue_mode: 'ops',
+            selected_date: today,
+            status_filter: 'no_show',
+        });
+
+        await closeCalendarSecondaryPanel(page);
+        await expect(page.getByText('Найти: Динара')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText('Статус: Не пришёл')).toBeVisible({ timeout: 15000 });
+        await expect(visibleCards).toHaveCount(1);
+
+        await openCalendarSecondaryPanel(page, 'filters');
+        await searchInput.fill('Айгуль');
+        await expect(page.getByTestId('calendar-filter-draft-banner')).toBeVisible({ timeout: 15000 });
+        await page.getByTestId('calendar-filters-reset').click({ force: true });
+        await expect(searchInput).toHaveValue('Динара');
+        await expect(statusSelect).toHaveValue('no_show');
+        await expect(page.getByTestId('calendar-filter-draft-banner')).toHaveCount(0);
+        await expect(visibleCards).toHaveCount(1);
+    });
+
     test('operator can recover from dependent resets, clear the draft, and create a booking again', async ({ page }) => {
         test.skip(!useRouteMocks, 'calendar operator lane is deterministic only');
 

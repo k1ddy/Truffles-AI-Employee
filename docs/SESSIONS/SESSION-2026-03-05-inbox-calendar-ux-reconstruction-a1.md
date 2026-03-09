@@ -2,11 +2,11 @@
 
 - status: active
 - owner: Top Architect | Brain | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave37-a1.md
-- branch: feat/2026-03-08-inbox-calendar-ux-reconstruction-wave37-a1
+- task_package: docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave38-a1.md
+- branch: feat/2026-03-09-inbox-calendar-ux-reconstruction-wave38-a1
 - worktree: /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1
 - base_ref: origin/main
-- scope: Reopen Calendar acceptance after merged Wave36 without rollback: focused create-booking flow, explicit time discoverability, plain operator language, strong guardrails, and full valid/invalid workflow proof.
+- scope: Close the remaining Calendar post-merge operator gaps after Wave37: deterministic filter-state contract, natural phone input, and full edit/reschedule/cancel lifecycle with valid/invalid proof.
 - done:
   - Wave32 docs-only audit started and canonized:
     - created `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave32-a1.md` and artifact `docs/CONSOLE_AUDIT/artifacts/2026-03-08-inbox-calendar-ux-logic-audit-a1.md`;
@@ -546,7 +546,25 @@
       - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium --grep "calendar secondary panels isolate filters and booking actions|calendar hides technical follow-up owners and keeps operator-safe labels|guided booking composer blocks invalid submit until service name phone and slot are coherent, then creates booking|no-show rebook path requires linked booking selection before submit|medium-width inbox and calendar keep primary queue surfaces visible|booking no-show reopens resolved case and preserves case-booking semantics"` (`6 passed`)
       - `cd truffles-api && pytest -q tests/test_calendar_bookings_router.py tests/test_calendar_noshow_followup_router.py tests/test_console_openapi_calendar_contract.py` (`42 passed`)
       - `cd truffles-api && ruff check app/routers/calendar.py tests/test_calendar_bookings_router.py tests/test_calendar_noshow_followup_router.py tests/test_console_openapi_calendar_contract.py` (`pass`)
-- last_updated: 2026-03-08T19:47:38+05:00
+- Wave38 TP opened after post-merge operator evidence:
+  - switched the active session to `feat/2026-03-09-inbox-calendar-ux-reconstruction-wave38-a1` on top of merged `origin/main` so the next block starts from real shipped state;
+  - created `docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave38-a1.md` with mandatory split `Part A filter-state contract`, `Part B phone/composer hardening`, `Part C booking lifecycle completion`, `Part D operator proof + visual acceptance`;
+  - recorded the new factual blocker cluster: Calendar filters still lack an explicit `draft -> applied` contract, the booking phone field still rewrites operator text destructively, and existing bookings still lack edit/cancel lifecycle in the operator UI;
+  - synced `STATE.md`, `STRUCTURE.md`, `docs/CONSOLE_AUDIT/UX_BACKLOG.md`, the master TP, `Wave37` history, and session pointers so `Wave38` is now the only valid active block before any return to backlog work;
+  - no product implementation for `Wave38` started in this step; this update is TP/canon only.
+
+- Wave38 Part A completed locally:
+  - rebuilt `console-web/src/app/calendar/page.tsx` so Calendar filters use explicit draft/apply semantics: the filter panel now edits its own draft state, while queue chips/list/URL/server persistence stay on the applied snapshot until `Применить`;
+  - added `Сбросить изменения` plus a pending-draft banner so operators can see when edits are still only in the panel;
+  - extended `console-web/e2e/calendar-operator.spec.ts` with deterministic proof that draft edits do not leak into `/queue-state/current` before apply, and that reset returns to the current applied state;
+  - visual inspection is clean at `1280px` and `1024px`: `/tmp/wave38-part-a-filters-draft-1280.png`, `/tmp/wave38-part-a-filters-applied-1280.png`, `/tmp/wave38-part-a-filters-draft-1024.png`;
+  - local evidence:
+    - `cd console-web && npm run lint -- --file src/app/calendar/page.tsx --file e2e/calendar-operator.spec.ts` (`pass`)
+    - `cd console-web && npm run build` (`pass`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/calendar-operator.spec.ts --project chromium` (`6 passed`)
+    - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium` (`14 passed, 1 skipped`)
+
+- last_updated: 2026-03-09T12:36:48+05:00
 
 - Wave37 recovery TP activated after post-merge operator evidence:
   - fetched `origin/main`, confirmed the current worktree branch was behind merged `main`, and switched to `feat/2026-03-08-inbox-calendar-ux-reconstruction-wave37-a1` from `origin/main` so the follow-up starts from the real merged state rather than the old Wave36 branch tip;

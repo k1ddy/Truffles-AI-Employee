@@ -288,6 +288,8 @@
     - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium`
     - `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && SESSION_AGENT=a1 scripts/session_check.sh`
 
+- `2026-03-09` — merged via `PR #959`, but post-merge operator evidence reopened Calendar under `Wave38` for three remaining gaps: explicit filter-state synchronization, natural phone-input ergonomics, and full booking edit/cancel lifecycle completion. `Wave37` is now historical merged scope, not the active acceptance block.
+
 ## Evidence
 - New `Wave37` TP and synced canon pointers
 - visual inspection artifacts for every mandatory state and width

@@ -89,6 +89,10 @@ type NoShowFollowUpDraft = {
     rebookedAppointmentId: string;
     note: string;
 };
+type CalendarFilterDraft = Pick<
+    CalendarQueueStateSnapshot,
+    "queueSearch" | "queueStatusFilter" | "followUpOwnerId" | "followUpOverdueOnly"
+>;
 
 const CALENDAR_STATUS_FILTER_LABELS: Record<BookingStatusFilter, string> = {
     all: "Все статусы",
@@ -256,6 +260,22 @@ function getSlotPeriodLabel(startTime: string): "Утро" | "День" | "Ве�
         return "День";
     }
     return "Вечер";
+}
+
+function buildCalendarFilterDraft(snapshot: CalendarQueueStateSnapshot): CalendarFilterDraft {
+    return {
+        queueSearch: snapshot.queueSearch,
+        queueStatusFilter: snapshot.queueStatusFilter,
+        followUpOwnerId: snapshot.followUpOwnerId,
+        followUpOverdueOnly: snapshot.followUpOverdueOnly,
+    };
+}
+
+function calendarFilterDraftChanged(
+    applied: CalendarFilterDraft,
+    draft: CalendarFilterDraft,
+): boolean {
+    return JSON.stringify(applied) !== JSON.stringify(draft);
 }
 
 function normalizeHumanText(value: string | null | undefined): string {
@@ -576,6 +596,10 @@ export default function CalendarPage() {
     const [queueSearch, setQueueSearch] = useState("");
     const [followUpOwnerId, setFollowUpOwnerId] = useState("");
     const [followUpOverdueOnly, setFollowUpOverdueOnly] = useState(false);
+    const [draftQueueStatusFilter, setDraftQueueStatusFilter] = useState<BookingStatusFilter>("all");
+    const [draftQueueSearch, setDraftQueueSearch] = useState("");
+    const [draftFollowUpOwnerId, setDraftFollowUpOwnerId] = useState("");
+    const [draftFollowUpOverdueOnly, setDraftFollowUpOverdueOnly] = useState(false);
     const [followUpGovernanceDrafts, setFollowUpGovernanceDrafts] = useState<Record<string, { ownerAgentId: string; dueAt: string }>>({});
     const [activeSavedViewId, setActiveSavedViewId] = useState<string | null>(null);
     const [saveViewDraftName, setSaveViewDraftName] = useState("");
@@ -702,6 +726,23 @@ export default function CalendarPage() {
         }),
         [followUpOverdueOnly, followUpOwnerId, queueLane, queueMode, queueSearch, queueStatusFilter, selectedDate],
     );
+    const appliedFilterDraft = useMemo<CalendarFilterDraft>(
+        () => buildCalendarFilterDraft(currentQueueSnapshot),
+        [currentQueueSnapshot],
+    );
+    const currentFilterDraft = useMemo<CalendarFilterDraft>(
+        () => ({
+            queueSearch: draftQueueSearch,
+            queueStatusFilter: draftQueueStatusFilter,
+            followUpOwnerId: draftFollowUpOwnerId,
+            followUpOverdueOnly: draftFollowUpOverdueOnly,
+        }),
+        [draftFollowUpOverdueOnly, draftFollowUpOwnerId, draftQueueSearch, draftQueueStatusFilter],
+    );
+    const queueFiltersDirty = useMemo(
+        () => calendarFilterDraftChanged(appliedFilterDraft, currentFilterDraft),
+        [appliedFilterDraft, currentFilterDraft],
+    );
     const currentQueueFingerprint = useMemo(
         () => getCalendarQueueStateFingerprint(currentQueueSnapshot),
         [currentQueueSnapshot],
@@ -778,6 +819,10 @@ export default function CalendarPage() {
         setQueueSearch("");
         setFollowUpOwnerId("");
         setFollowUpOverdueOnly(false);
+        setDraftQueueStatusFilter("all");
+        setDraftQueueSearch("");
+        setDraftFollowUpOwnerId("");
+        setDraftFollowUpOverdueOnly(false);
         setActiveSavedViewId(null);
         setSaveViewDraftName("");
         setSaveViewComposerOpen(false);
@@ -857,13 +902,27 @@ export default function CalendarPage() {
                     includeNonApplicableTeam: false,
                 })
                 : null;
-        setSelectedDate(queueSnapshot?.selectedDate ?? defaultSelectedDate);
-        setQueueMode(queueSnapshot?.queueMode ?? defaultQueueMode);
-        setQueueLane(queueSnapshot?.queueLane ?? defaultQueueLane);
-        setQueueStatusFilter(queueSnapshot?.queueStatusFilter ?? "all");
-        setQueueSearch(queueSnapshot?.queueSearch ?? "");
-        setFollowUpOwnerId(queueSnapshot?.followUpOwnerId ?? "");
-        setFollowUpOverdueOnly(queueSnapshot?.followUpOverdueOnly ?? false);
+        const nextSnapshot = queueSnapshot ?? {
+            selectedDate: defaultSelectedDate,
+            queueMode: defaultQueueMode,
+            queueLane: defaultQueueLane,
+            queueStatusFilter: "all" as BookingStatusFilter,
+            queueSearch: "",
+            followUpOwnerId: "",
+            followUpOverdueOnly: false,
+        };
+        const nextDraft = buildCalendarFilterDraft(nextSnapshot);
+        setSelectedDate(nextSnapshot.selectedDate);
+        setQueueMode(nextSnapshot.queueMode);
+        setQueueLane(nextSnapshot.queueLane);
+        setQueueStatusFilter(nextSnapshot.queueStatusFilter);
+        setQueueSearch(nextSnapshot.queueSearch);
+        setFollowUpOwnerId(nextSnapshot.followUpOwnerId);
+        setFollowUpOverdueOnly(nextSnapshot.followUpOverdueOnly);
+        setDraftQueueStatusFilter(nextDraft.queueStatusFilter);
+        setDraftQueueSearch(nextDraft.queueSearch);
+        setDraftFollowUpOwnerId(nextDraft.followUpOwnerId);
+        setDraftFollowUpOverdueOnly(nextDraft.followUpOverdueOnly);
         setActiveSavedViewId(matchedSavedView?.id ?? null);
         setSaveViewDraftName("");
         setSaveViewComposerOpen(false);
@@ -1490,6 +1549,7 @@ export default function CalendarPage() {
             savedViewId?: string | null;
         } = {},
     ) => {
+        const nextDraft = buildCalendarFilterDraft(snapshot);
         setSelectedDate(snapshot.selectedDate);
         setQueueMode(snapshot.queueMode);
         setQueueLane(snapshot.queueLane);
@@ -1497,6 +1557,10 @@ export default function CalendarPage() {
         setQueueSearch(snapshot.queueSearch);
         setFollowUpOwnerId(snapshot.followUpOwnerId);
         setFollowUpOverdueOnly(snapshot.followUpOverdueOnly);
+        setDraftQueueStatusFilter(nextDraft.queueStatusFilter);
+        setDraftQueueSearch(nextDraft.queueSearch);
+        setDraftFollowUpOwnerId(nextDraft.followUpOwnerId);
+        setDraftFollowUpOverdueOnly(nextDraft.followUpOverdueOnly);
         setActiveSavedViewId(savedViewId);
         setFollowUpGovernanceDrafts({});
         setSaveViewDraftName("");
@@ -1882,8 +1946,25 @@ export default function CalendarPage() {
         toast.success("Календарь обновлён");
     };
 
+    const resetQueueFilterDraft = () => {
+        setDraftQueueSearch(queueSearch);
+        setDraftQueueStatusFilter(queueStatusFilter);
+        setDraftFollowUpOwnerId(followUpOwnerId);
+        setDraftFollowUpOverdueOnly(followUpOverdueOnly);
+    };
+
+    const applyQueueFilterDraft = () => {
+        setQueueSearch(draftQueueSearch);
+        setQueueStatusFilter(draftQueueStatusFilter);
+        setFollowUpOwnerId(draftFollowUpOwnerId);
+        setFollowUpOverdueOnly(draftFollowUpOverdueOnly);
+    };
+
     const openSecondaryPanel = (section: CalendarSecondaryPanelSection) => {
         setBookingActionsBookingId(null);
+        if (section === "filters") {
+            resetQueueFilterDraft();
+        }
         setSecondaryPanelSection(section);
         setSecondaryPanelOpen(true);
     };
@@ -1903,13 +1984,6 @@ export default function CalendarPage() {
 
     const closeSecondaryPanel = () => {
         setSecondaryPanelOpen(false);
-    };
-
-    const clearQueueFilters = () => {
-        setQueueSearch("");
-        setQueueStatusFilter("all");
-        setFollowUpOwnerId("");
-        setFollowUpOverdueOnly(false);
     };
 
     const openBookingActionsPanel = (bookingId: string) => {
@@ -2507,15 +2581,17 @@ export default function CalendarPage() {
                                             Уточнить список
                                         </p>
                                         <p className="mt-1 text-xs text-muted-foreground">
-                                            Поиск, статус визита и задачи по звонкам вынесены сюда, чтобы основной экран оставался быстрым и понятным.
+                                            Изменения в этой панели не трогают список сразу. Они применятся к очереди, ссылке и сохранённому состоянию только после кнопки «Применить».
                                         </p>
                                     </div>
                                     <button
                                         type="button"
-                                        onClick={clearQueueFilters}
+                                        onClick={resetQueueFilterDraft}
                                         className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                        disabled={!queueFiltersDirty}
+                                        data-testid="calendar-filters-reset"
                                     >
-                                        Сбросить фильтры
+                                        Сбросить изменения
                                     </button>
                                 </div>
                                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -2525,8 +2601,8 @@ export default function CalendarPage() {
                                         </span>
                                         <input
                                             type="text"
-                                            value={queueSearch}
-                                            onChange={(event) => setQueueSearch(event.target.value)}
+                                            value={draftQueueSearch}
+                                            onChange={(event) => setDraftQueueSearch(event.target.value)}
                                             placeholder="Клиент, телефон, услуга, мастер или ID"
                                             className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                             data-testid="calendar-queue-search"
@@ -2537,8 +2613,8 @@ export default function CalendarPage() {
                                             Статус визита
                                         </span>
                                         <select
-                                            value={queueStatusFilter}
-                                            onChange={(event) => setQueueStatusFilter(event.target.value as BookingStatusFilter)}
+                                            value={draftQueueStatusFilter}
+                                            onChange={(event) => setDraftQueueStatusFilter(event.target.value as BookingStatusFilter)}
                                             className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                             data-testid="calendar-queue-status-filter"
                                         >
@@ -2555,8 +2631,8 @@ export default function CalendarPage() {
                                                 Кто отвечает за звонок
                                             </span>
                                             <select
-                                                value={followUpOwnerId}
-                                                onChange={(event) => setFollowUpOwnerId(event.target.value)}
+                                                value={draftFollowUpOwnerId}
+                                                onChange={(event) => setDraftFollowUpOwnerId(event.target.value)}
                                                 className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                                 data-testid="calendar-follow-up-owner-filter"
                                             >
@@ -2572,14 +2648,22 @@ export default function CalendarPage() {
                                     <label className="flex min-h-[48px] items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm text-muted-foreground">
                                         <input
                                             type="checkbox"
-                                            checked={followUpOverdueOnly}
-                                            onChange={(event) => setFollowUpOverdueOnly(event.target.checked)}
+                                            checked={draftFollowUpOverdueOnly}
+                                            onChange={(event) => setDraftFollowUpOverdueOnly(event.target.checked)}
                                             className="h-4 w-4 rounded border-border/60"
                                             data-testid="calendar-follow-up-overdue-filter"
                                         />
                                         <span className="break-words">Только просроченные задачи по звонкам</span>
                                     </label>
                                 </div>
+                                {queueFiltersDirty && (
+                                    <div
+                                        className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                                        data-testid="calendar-filter-draft-banner"
+                                    >
+                                        Изменения пока только в панели. Основной список и ссылка обновятся после кнопки «Применить».
+                                    </div>
+                                )}
                                 {hiddenTechnicalFollowUpOwnersCount > 0 && (
                                     <p className="mt-3 text-xs text-muted-foreground">
                                         Служебные учётные записи не показываем оператору: {hiddenTechnicalFollowUpOwnersCount}
@@ -2597,6 +2681,20 @@ export default function CalendarPage() {
                                             Дополнительные фильтры не заданы
                                         </span>
                                     )}
+                                </div>
+                                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-4">
+                                    <p className="text-xs text-muted-foreground">
+                                        Сейчас в списке применён только тот набор уточнений, который виден в плашках выше.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={applyQueueFilterDraft}
+                                        className="rounded-full border border-primary/30 bg-primary/5 px-4 py-2 text-xs font-semibold text-primary disabled:cursor-not-allowed disabled:border-border/60 disabled:bg-muted disabled:text-muted-foreground"
+                                        disabled={!queueFiltersDirty}
+                                        data-testid="calendar-filters-apply"
+                                    >
+                                        Применить
+                                    </button>
                                 </div>
                             </div>
                         )}
