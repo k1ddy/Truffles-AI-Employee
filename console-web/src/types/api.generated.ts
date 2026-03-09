@@ -2546,6 +2546,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/calendar/operator-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Calendar Operator Event
+         * @description Record bounded operator-side Calendar telemetry for replay and failure-family review.
+         */
+        post: operations["record_calendar_operator_event_console_v1_calendar_operator_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/calendar/bookings/{booking_id}/cancel": {
         parameters: {
             query?: never;
@@ -2742,10 +2762,25 @@ export interface components {
             /** Case Effects */
             case_effects?: components["schemas"]["BookingCaseEffect"][];
         };
+        /** BookingBlockedAction */
+        BookingBlockedAction: {
+            /**
+             * Action Id
+             * @enum {string}
+             */
+            action_id: "edit_booking" | "cancel_booking" | "mark_completed" | "mark_no_show" | "record_follow_up_contacted" | "record_follow_up_rebooked" | "manage_follow_up_governance" | "open_case_from_booking";
+            /**
+             * Reason Code
+             * @enum {string}
+             */
+            reason_code: "permission_required" | "active_status_only" | "open_no_show_required" | "follow_up_already_closed" | "case_link_required";
+        };
         /** BookingCancelRequest */
         BookingCancelRequest: {
             /** Reason */
             reason?: string | null;
+            /** Version */
+            version: number;
         };
         /** BookingCaseEffect */
         BookingCaseEffect: {
@@ -2792,6 +2827,8 @@ export interface components {
             owner_agent_id?: string | null;
             /** Due At */
             due_at?: string | null;
+            /** Version */
+            version: number;
         };
         /** BookingNoShowFollowUpRequest */
         BookingNoShowFollowUpRequest: {
@@ -2805,6 +2842,8 @@ export interface components {
             rebooked_appointment_id?: string | null;
             /** Note */
             note?: string | null;
+            /** Version */
+            version: number;
         };
         /** BookingResponse */
         BookingResponse: {
@@ -2865,6 +2904,17 @@ export interface components {
             needs_action: boolean;
             /** Attention Reason */
             attention_reason?: string | null;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Allowed Actions */
+            allowed_actions?: ("edit_booking" | "cancel_booking" | "mark_completed" | "mark_no_show" | "record_follow_up_contacted" | "record_follow_up_rebooked" | "manage_follow_up_governance" | "open_case_from_booking")[];
+            /** Blocked Actions */
+            blocked_actions?: components["schemas"]["BookingBlockedAction"][];
+            /** Last Actor Type */
+            last_actor_type?: string | null;
             /** Created At */
             created_at: string;
         };
@@ -2874,6 +2924,8 @@ export interface components {
             status: string;
             /** Reason */
             reason?: string | null;
+            /** Version */
+            version: number;
         };
         /** BookingUpdate */
         BookingUpdate: {
@@ -2897,6 +2949,8 @@ export interface components {
             service_type: string;
             /** Notes */
             notes?: string | null;
+            /** Version */
+            version: number;
         };
         /** BookingsListResponse */
         BookingsListResponse: {
@@ -2909,6 +2963,31 @@ export interface components {
              * @default false
              */
             has_more: boolean;
+        };
+        /** CalendarOperatorEventRequest */
+        CalendarOperatorEventRequest: {
+            /**
+             * Event Type
+             * @enum {string}
+             */
+            event_type: "filter_apply" | "filter_reset" | "double_submit_blocked";
+            /**
+             * Action Id
+             * @enum {string}
+             */
+            action_id: "apply_filters" | "reset_filters" | "create_booking" | "edit_booking" | "reschedule_booking" | "cancel_booking" | "mark_completed" | "mark_no_show" | "record_follow_up_contacted" | "record_follow_up_rebooked" | "manage_follow_up_governance";
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "filter_panel" | "booking_panel" | "follow_up_panel" | "follow_up_governance" | "composer";
+            /** Booking Id */
+            booking_id?: string | null;
+        };
+        /** CalendarOperatorEventResponse */
+        CalendarOperatorEventResponse: {
+            /** Success */
+            success: boolean;
         };
         /** CapabilitiesPayload */
         "CapabilitiesPayload-Input": {
@@ -17311,6 +17390,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BookingActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_calendar_operator_event_console_v1_calendar_operator_events_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarOperatorEventRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarOperatorEventResponse"];
                 };
             };
             /** @description Validation Error */

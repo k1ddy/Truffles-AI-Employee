@@ -245,7 +245,14 @@ async function closeCalendarSecondaryPanel(page: import('@playwright/test').Page
 async function closeCalendarBookingComposer(page: import('@playwright/test').Page) {
     const composer = page.getByTestId('calendar-booking-composer');
     if (await composer.isVisible().catch(() => false)) {
+        const dialogPromise = page.waitForEvent('dialog', { timeout: 500 })
+            .then(async (dialog) => {
+                await dialog.accept();
+                return dialog;
+            })
+            .catch(() => null);
         await page.getByTestId('calendar-booking-composer-close').click({ force: true });
+        await dialogPromise;
         await expect(composer).toHaveCount(0);
     }
 }
@@ -253,9 +260,16 @@ async function closeCalendarBookingComposer(page: import('@playwright/test').Pag
 async function closeCalendarBookingPanel(page: import('@playwright/test').Page) {
     const panel = page.getByTestId('calendar-booking-panel');
     if (await panel.isVisible().catch(() => false)) {
+        const dialogPromise = page.waitForEvent('dialog', { timeout: 500 })
+            .then(async (dialog) => {
+                await dialog.accept();
+                return dialog;
+            })
+            .catch(() => null);
         await page.getByTestId('calendar-booking-panel-close').evaluate((element) => {
             (element as HTMLButtonElement).click();
         });
+        await dialogPromise;
         await expect.poll(() => panel.isVisible().catch(() => false)).toBe(false);
     }
 }
@@ -567,7 +581,7 @@ async function installConsoleMocks(
             },
         });
     });
-    await page.route('**/api/proxy/me', async (route) => {
+    await page.route('**/api/proxy/me**', async (route) => {
         if (route.request().method() !== 'GET') {
             await route.fallback();
             return;
@@ -812,6 +826,7 @@ async function installConsoleMocks(
         case_id: CASE_ID,
         needs_action: true,
         attention_reason: 'Нужно подтвердить визит',
+        version: 1,
         created_at: '2026-03-05T09:20:00+05:00',
     } as Record<string, unknown>;
     const noShowBookingState = {
@@ -837,6 +852,7 @@ async function installConsoleMocks(
         case_id: CASE_ID,
         needs_action: true,
         attention_reason: 'Связаться после неявки',
+        version: 3,
         created_at: '2026-03-05T09:25:00+05:00',
     } as Record<string, unknown>;
     const linkedFutureBookingState = {
@@ -862,6 +878,7 @@ async function installConsoleMocks(
         case_id: CASE_ID,
         needs_action: false,
         attention_reason: null,
+        version: 2,
         created_at: '2026-03-05T09:30:00+05:00',
     } as Record<string, unknown>;
     const bookingStore = [bookingState, noShowBookingState, linkedFutureBookingState];
@@ -1602,6 +1619,7 @@ async function installConsoleMocks(
                 case_id: payload?.case_id ?? null,
                 needs_action: true,
                 attention_reason: 'Нужно подтвердить визит',
+                version: 1,
                 created_at: '2026-03-05T09:40:00+05:00',
                 notes: payload?.notes ?? '',
             } as Record<string, unknown>;
@@ -1625,13 +1643,18 @@ async function installConsoleMocks(
             await toErrorResponse(route, 404, 'NOT_FOUND', 'booking not found');
             return;
         }
-        const payload = route.request().postDataJSON() as { status?: 'COMPLETED' | 'NO_SHOW' } | null;
+        const payload = route.request().postDataJSON() as { status?: 'COMPLETED' | 'NO_SHOW'; version?: number } | null;
+        if (Number(payload?.version ?? 0) !== Number(booking.version ?? 0)) {
+            await toErrorResponse(route, 409, 'BOOKING_VERSION_CONFLICT', 'booking version conflict');
+            return;
+        }
         booking.status = payload?.status === 'NO_SHOW' ? 'NO_SHOW' : 'COMPLETED';
         booking.needs_action = booking.status === 'NO_SHOW';
         booking.attention_reason = booking.status === 'NO_SHOW' ? 'Связаться после неявки' : null;
         booking.no_show_followup_done = false;
         booking.no_show_followup_result = null;
         booking.no_show_followup_rebooked_appointment_id = null;
+        booking.version = Number(booking.version ?? 0) + 1;
         const caseEffects = [] as Array<{
             case_id: string;
             action: 'reopened_for_booking_attention' | 'linked_rebooked_booking';
@@ -1669,7 +1692,12 @@ async function installConsoleMocks(
             result?: 'contacted' | 'rebooked';
             rebooked_appointment_id?: string;
             note?: string;
+            version?: number;
         } | null;
+        if (Number(payload?.version ?? 0) !== Number(booking.version ?? 0)) {
+            await toErrorResponse(route, 409, 'BOOKING_VERSION_CONFLICT', 'booking version conflict');
+            return;
+        }
         if (payload?.result === 'rebooked' && !payload?.rebooked_appointment_id) {
             await toErrorResponse(route, 400, 'INVALID_PARAM', 'rebooked_appointment_id is required');
             return;
@@ -1687,6 +1715,7 @@ async function installConsoleMocks(
         booking.no_show_followup_closed_by = 'Manager';
         booking.needs_action = false;
         booking.attention_reason = null;
+        booking.version = Number(booking.version ?? 0) + 1;
         const caseEffects = [] as Array<{
             case_id: string;
             action: 'reopened_for_booking_attention' | 'linked_rebooked_booking';
@@ -1718,11 +1747,17 @@ async function installConsoleMocks(
         const payload = route.request().postDataJSON() as {
             owner_agent_id?: string | null;
             due_at?: string | null;
+            version?: number;
         } | null;
+        if (Number(payload?.version ?? 0) !== Number(booking.version ?? 0)) {
+            await toErrorResponse(route, 409, 'BOOKING_VERSION_CONFLICT', 'booking version conflict');
+            return;
+        }
         booking.follow_up_owner_id = payload?.owner_agent_id ?? null;
         booking.follow_up_owner_name = getAgentDisplayName(booking.follow_up_owner_id);
         booking.follow_up_due_at = payload?.due_at ?? null;
         booking.follow_up_overdue = false;
+        booking.version = Number(booking.version ?? 0) + 1;
         await toJsonResponse(route, {
             success: true,
             booking: deepClone(booking),
@@ -2825,6 +2860,7 @@ test('no-show rebook path requires linked booking selection before submit', asyn
             },
             body: JSON.stringify({
                 result: 'rebooked',
+                version: 3,
             }),
         });
         return {

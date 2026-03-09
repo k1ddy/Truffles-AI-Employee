@@ -333,6 +333,11 @@
     - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/inspect_case.spec.ts --project chromium` (`14 passed, 1 skipped`)
     - `SESSION_AGENT=a1 scripts/session_check.sh` (`Session OK`)
 
+- `2026-03-09` — `Wave38` merged via `PR #960` and handed off to `Wave39`:
+  - fetched `origin/main` and confirmed merge commit `f1103dfd`;
+  - closeout is now factual merged behavior, not local-only evidence;
+  - remaining residual risk was reclassified as `Calendar action safety envelope` and moved into `docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave39-a1.md` instead of reopening the same `Wave38` defect cluster.
+
 ## Evidence
 - New TP: `docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave38-a1.md`
 - Synced canon pointers in `STATE.md`, master TP, backlog, session log, and session index
@@ -371,7 +376,7 @@
 - `Expiry/trigger to stop deferral`: if `Wave38` still cannot make filters deterministic or booking edit/cancel reliable with current APIs, open the bounded API follow-up immediately instead of weakening the operator contract.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: update `PR #960` with the full `Wave38 Part C/D` closeout, then merge and run post-merge canon/main closeout before any return to `UX-08` / `UX-20` / `UX-26`.
-- `First deterministic check command`: `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && git status --short && SESSION_AGENT=a1 scripts/session_check.sh`
-- `Blocked-by conditions`: any attempt to skip PR update/merge, leave OpenAPI/types unsynced, weaken the lifecycle proof, or move to other backlog work before `Wave38` lands on `main`.
+- `Next block objective`: implement `Wave39` as the post-merge Calendar action-safety envelope on top of merged `Wave38`, starting with the canonical action registry and role/status/action matrix.
+- `First deterministic check command`: `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "allowed_actions|BOOKING_VERSION_CONFLICT|If-Match|ETag" console-web/src/app/calendar/page.tsx console-web/src/lib/calendar-bookings.ts truffles-api/app/routers/calendar.py truffles-api/app/services/appointment_service.py && SESSION_AGENT=a1 scripts/session_check.sh`
+- `Blocked-by conditions`: any stale canon claiming `Wave38` is still unmerged, any attempt to skip server-owned action truth/versioning, or any move to non-Calendar backlog work before the action-safety envelope exists.
 - `Owner role for closure`: Brain / Top Architect.

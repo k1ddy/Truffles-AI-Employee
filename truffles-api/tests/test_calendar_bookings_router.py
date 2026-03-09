@@ -31,6 +31,133 @@ class _QueryStub:
         return self._scalar
 
 
+@pytest.mark.parametrize(
+    ("role", "status", "no_show_followup_done", "case_id", "expected_allowed", "expected_blocked"),
+    [
+        (
+            "manager",
+            "CONFIRMED",
+            False,
+            "case-1",
+            [
+                "edit_booking",
+                "cancel_booking",
+                "mark_completed",
+                "mark_no_show",
+                "open_case_from_booking",
+            ],
+            [
+                ("record_follow_up_contacted", "open_no_show_required"),
+                ("record_follow_up_rebooked", "open_no_show_required"),
+                ("manage_follow_up_governance", "permission_required"),
+            ],
+        ),
+        (
+            "owner",
+            "NO_SHOW",
+            False,
+            "case-1",
+            [
+                "record_follow_up_contacted",
+                "record_follow_up_rebooked",
+                "manage_follow_up_governance",
+                "open_case_from_booking",
+            ],
+            [
+                ("edit_booking", "active_status_only"),
+                ("cancel_booking", "active_status_only"),
+                ("mark_completed", "active_status_only"),
+                ("mark_no_show", "active_status_only"),
+            ],
+        ),
+        (
+            "owner",
+            "NO_SHOW",
+            True,
+            "case-1",
+            ["open_case_from_booking"],
+            [
+                ("edit_booking", "active_status_only"),
+                ("cancel_booking", "active_status_only"),
+                ("mark_completed", "active_status_only"),
+                ("mark_no_show", "active_status_only"),
+                ("record_follow_up_contacted", "follow_up_already_closed"),
+                ("record_follow_up_rebooked", "follow_up_already_closed"),
+                ("manage_follow_up_governance", "follow_up_already_closed"),
+            ],
+        ),
+        (
+            "manager",
+            "COMPLETED",
+            False,
+            "case-1",
+            ["open_case_from_booking"],
+            [
+                ("edit_booking", "active_status_only"),
+                ("cancel_booking", "active_status_only"),
+                ("mark_completed", "active_status_only"),
+                ("mark_no_show", "active_status_only"),
+                ("record_follow_up_contacted", "open_no_show_required"),
+                ("record_follow_up_rebooked", "open_no_show_required"),
+                ("manage_follow_up_governance", "permission_required"),
+            ],
+        ),
+        (
+            "manager",
+            "CONFIRMED",
+            False,
+            None,
+            [
+                "edit_booking",
+                "cancel_booking",
+                "mark_completed",
+                "mark_no_show",
+            ],
+            [
+                ("record_follow_up_contacted", "open_no_show_required"),
+                ("record_follow_up_rebooked", "open_no_show_required"),
+                ("manage_follow_up_governance", "permission_required"),
+                ("open_case_from_booking", "case_link_required"),
+            ],
+        ),
+        (
+            "consultant_bot",
+            "CONFIRMED",
+            False,
+            "case-1",
+            [],
+            [
+                ("edit_booking", "permission_required"),
+                ("cancel_booking", "permission_required"),
+                ("mark_completed", "permission_required"),
+                ("mark_no_show", "permission_required"),
+                ("record_follow_up_contacted", "permission_required"),
+                ("record_follow_up_rebooked", "permission_required"),
+                ("manage_follow_up_governance", "permission_required"),
+                ("open_case_from_booking", "permission_required"),
+            ],
+        ),
+    ],
+)
+def test_build_booking_action_fields_matches_role_status_matrix(
+    role,
+    status,
+    no_show_followup_done,
+    case_id,
+    expected_allowed,
+    expected_blocked,
+):
+    allowed_actions, blocked_actions = calendar_router._build_booking_action_fields(
+        context=SimpleNamespace(role=role),
+        booking=SimpleNamespace(status=status),
+        no_show_followup_done=no_show_followup_done,
+        case_id=case_id,
+    )
+
+    assert allowed_actions == expected_allowed
+    assert [(payload.action_id, payload.reason_code) for payload in blocked_actions] == expected_blocked
+
+
 @pytest.mark.asyncio
 async def test_list_bookings_includes_case_linkage_and_conversation_filter(monkeypatch):
     client_id = uuid4()
@@ -64,6 +191,7 @@ async def test_list_bookings_includes_case_linkage_and_conversation_filter(monke
 
     context = SimpleNamespace(
         client=SimpleNamespace(id=client_id),
+        role="manager",
         branch_restricted=False,
         allowed_branch_ids=set(),
     )
@@ -165,6 +293,7 @@ async def test_list_bookings_accepts_cursor_lane_and_case_filters(monkeypatch):
 
     context = SimpleNamespace(
         client=SimpleNamespace(id=client_id),
+        role="manager",
         branch_restricted=False,
         allowed_branch_ids=set(),
     )
@@ -248,8 +377,8 @@ async def test_create_booking_normalizes_operator_grade_fields(monkeypatch):
     monkeypatch.setattr(calendar_router, "schedule_default_reminders", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: calendar_router.BookingResponse(
+        "_build_booking_response_for_context",
+        lambda **_kwargs: calendar_router.BookingResponse(
             id=str(booking_id),
             specialist_id=str(specialist_id),
             specialist_name="Spec",
@@ -506,8 +635,8 @@ async def test_update_booking_normalizes_operator_grade_fields(monkeypatch):
     monkeypatch.setattr(calendar_router, "enqueue_appointment_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: calendar_router.BookingResponse(
+        "_build_booking_response_for_context",
+        lambda **_kwargs: calendar_router.BookingResponse(
             id=str(booking_id),
             specialist_id=str(specialist_id),
             specialist_name="Spec",
@@ -533,6 +662,7 @@ async def test_update_booking_normalizes_operator_grade_fields(monkeypatch):
             customer_phone="8 (701) 555-44-33",
             service_type="  Маникюр  ",
             notes="  Перенесли по просьбе клиента  ",
+            version=4,
         ),
         db=db,
     )
@@ -548,6 +678,7 @@ async def test_update_booking_normalizes_operator_grade_fields(monkeypatch):
     assert captured["actor_id"] == agent_id
     assert captured["actor_type"] == "agent"
     assert captured["channel"] == "console"
+    assert captured["expected_version"] == 4
     assert captured["commit"] is False
     assert response.booking.notes == "Перенесли по просьбе клиента"
     assert db.committed is True
@@ -602,12 +733,70 @@ async def test_update_booking_maps_lifecycle_denied_error(monkeypatch):
                 customer_name="Айгуль",
                 customer_phone="+77015554433",
                 service_type="Маникюр",
+                version=1,
             ),
             db=_DbStub(),
         )
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.code == "BOOKING_UPDATE_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_update_booking_maps_version_conflict_error(monkeypatch):
+    client_id = uuid4()
+    specialist_id = uuid4()
+    branch_id = uuid4()
+    booking_id = uuid4()
+
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=uuid4(), name="Manager"),
+    )
+    specialist = SimpleNamespace(
+        id=specialist_id,
+        client_id=client_id,
+        branch_id=branch_id,
+        branch=None,
+        name="Spec",
+    )
+
+    class _DbStub:
+        def query(self, model):
+            if model is calendar_router.Specialist:
+                return _QueryStub(rows=[specialist])
+            return _QueryStub(rows=[])
+
+    class _SchedulingServiceStub:
+        def __init__(self, _db):
+            pass
+
+        def update_appointment(self, **_kwargs):
+            raise calendar_router.AppointmentVersionConflictError(3, 4)
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceStub)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await calendar_router.update_booking(
+            request=SimpleNamespace(),
+            booking_id=str(booking_id),
+            data=calendar_router.BookingUpdate(
+                specialist_id=str(specialist_id),
+                start_at=datetime(2026, 3, 6, 14, 0, tzinfo=timezone.utc),
+                end_at=datetime(2026, 3, 6, 15, 0, tzinfo=timezone.utc),
+                customer_name="Айгуль",
+                customer_phone="+77015554433",
+                service_type="Маникюр",
+                version=3,
+            ),
+            db=_DbStub(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "BOOKING_VERSION_CONFLICT"
 
 
 @pytest.mark.asyncio
@@ -652,8 +841,8 @@ async def test_cancel_booking_passes_reason_and_actor_context(monkeypatch):
     monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceStub)
     monkeypatch.setattr(
         calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: calendar_router.BookingResponse(
+        "_build_booking_response_for_context",
+        lambda **_kwargs: calendar_router.BookingResponse(
             id=str(booking_id),
             specialist_id=str(uuid4()),
             specialist_name="Spec",
@@ -671,7 +860,7 @@ async def test_cancel_booking_passes_reason_and_actor_context(monkeypatch):
     response = await calendar_router.cancel_booking(
         request=SimpleNamespace(),
         booking_id=str(booking_id),
-        data=calendar_router.BookingCancelRequest(reason="  Клиент отменил визит  "),
+        data=calendar_router.BookingCancelRequest(reason="  Клиент отменил визит  ", version=3),
         db=db,
     )
 
@@ -682,9 +871,48 @@ async def test_cancel_booking_passes_reason_and_actor_context(monkeypatch):
     assert captured["actor_id"] == agent_id
     assert captured["actor_type"] == "agent"
     assert captured["channel"] == "console"
+    assert captured["expected_version"] == 3
     assert captured["commit"] is False
     assert db.committed is True
     assert len(db.refreshed) == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_booking_maps_version_conflict_error(monkeypatch):
+    client_id = uuid4()
+    booking_id = uuid4()
+
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=uuid4(), name="Manager"),
+    )
+
+    class _DbStub:
+        def query(self, _model):
+            return _QueryStub(rows=[])
+
+    class _SchedulingServiceStub:
+        def __init__(self, _db):
+            pass
+
+        def cancel_appointment(self, **_kwargs):
+            raise calendar_router.AppointmentVersionConflictError(2, 3)
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "SchedulingService", _SchedulingServiceStub)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await calendar_router.cancel_booking(
+            request=SimpleNamespace(),
+            booking_id=str(booking_id),
+            data=calendar_router.BookingCancelRequest(version=2),
+            db=_DbStub(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "BOOKING_VERSION_CONFLICT"
 
 
 @pytest.mark.asyncio
@@ -717,7 +945,7 @@ async def test_cancel_booking_maps_lifecycle_denied_error(monkeypatch):
         await calendar_router.cancel_booking(
             request=SimpleNamespace(),
             booking_id=str(booking_id),
-            data=calendar_router.BookingCancelRequest(),
+            data=calendar_router.BookingCancelRequest(version=1),
             db=_DbStub(),
         )
 
