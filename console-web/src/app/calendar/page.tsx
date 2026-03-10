@@ -9,23 +9,27 @@ import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
     bookingNeedsAttention,
-    canCancelBooking,
-    canEditBooking,
     cancelBooking,
     collectBookingCaseEffectMessages,
     createBooking,
     fetchBookings,
     getBookingAttentionLabel,
-    getVisitActionOptions,
+    recordCalendarOperatorEvent,
     registerNoShowFollowUp,
     updateBooking,
     type BookingQueueLane,
     type BookingQueueMode,
+    type CalendarOperatorEventRequest,
     type BookingStatusFilter,
     type BookingStatusUpdateRequest,
     updateBookingFollowUpGovernance,
     updateBookingStatus,
 } from "@/lib/calendar-bookings";
+import {
+    buildCalendarBookingActionAvailabilityMap,
+    getCalendarActorClassForRole,
+    getCalendarVisitActionOptions,
+} from "@/lib/calendar-action-registry";
 import {
     buildCalendarWorkspaceScope,
     buildInboxWorkspaceScope,
@@ -58,6 +62,17 @@ import {
     type QueueSavedView,
     queueStateApi,
 } from "@/lib/api-client";
+import {
+    useCalendarFiltersMachine,
+} from "./_lib/useCalendarFiltersMachine";
+import { useBookingActionPanelMachine } from "./_lib/useBookingActionPanelMachine";
+import {
+    type NoShowFollowUpDraft,
+    useBookingFollowUpMachine,
+} from "./_lib/useBookingFollowUpMachine";
+import {
+    useBookingComposerMachine,
+} from "./_lib/useBookingComposerMachine";
 
 interface Specialist {
     id: string;
@@ -88,15 +103,6 @@ type CalendarServiceOption = {
     price: number;
     specialistCount: number;
 };
-type NoShowFollowUpDraft = {
-    result: "contacted" | "rebooked";
-    rebookedAppointmentId: string;
-    note: string;
-};
-type CalendarFilterDraft = Pick<
-    CalendarQueueStateSnapshot,
-    "queueSearch" | "queueStatusFilter" | "followUpOwnerId" | "followUpOverdueOnly"
->;
 
 const CALENDAR_STATUS_FILTER_LABELS: Record<BookingStatusFilter, string> = {
     all: "Все статусы",
@@ -266,22 +272,6 @@ function getSlotPeriodLabel(startTime: string): "Утро" | "День" | "Ве�
     return "Вечер";
 }
 
-function buildCalendarFilterDraft(snapshot: CalendarQueueStateSnapshot): CalendarFilterDraft {
-    return {
-        queueSearch: snapshot.queueSearch,
-        queueStatusFilter: snapshot.queueStatusFilter,
-        followUpOwnerId: snapshot.followUpOwnerId,
-        followUpOverdueOnly: snapshot.followUpOverdueOnly,
-    };
-}
-
-function calendarFilterDraftChanged(
-    applied: CalendarFilterDraft,
-    draft: CalendarFilterDraft,
-): boolean {
-    return JSON.stringify(applied) !== JSON.stringify(draft);
-}
-
 function normalizeHumanText(value: string | null | undefined): string {
     return (value || "").trim().replace(/\s+/g, " ");
 }
@@ -392,6 +382,10 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
     return (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
         || (error as Error)?.message
         || fallback;
+}
+
+function getApiErrorCode(error: unknown): string | undefined {
+    return (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
 }
 
 async function copyText(text: string): Promise<void> {
@@ -537,6 +531,14 @@ export default function CalendarPage() {
     const canReadTeam = canAccessConsole(role, "team", "read");
     const canManageTeamPresets = canAccessConsole(role, "team", "write");
     const canManageFollowUpGovernance = canManageTeamPresets;
+    const calendarActorClass = useMemo(() => getCalendarActorClassForRole(role), [role]);
+    const calendarActionPermissions = useMemo(
+        () => ({
+            canWriteCalendar,
+            canManageFollowUpGovernance,
+        }),
+        [canManageFollowUpGovernance, canWriteCalendar],
+    );
     const selectedBranchId = meData?.selected_branch_id ?? meData?.agent?.branch_id ?? "";
     const selectableBranches = useMemo(
         () => (meData?.branches ?? []).filter((branch) => !!branch.id),
@@ -597,35 +599,105 @@ export default function CalendarPage() {
         [urlQueueState, urlSavedViewId],
     );
 
-    // Form state
-    const [selectedSpecialist, setSelectedSpecialist] = useState<string>("");
-    const [selectedDate, setSelectedDate] = useState<string>(defaultSelectedDate);
-    const [bookingDate, setBookingDate] = useState<string>(
-        defaultSelectedDate && defaultSelectedDate >= today ? defaultSelectedDate : today,
-    );
-    const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
-    const [selectedService, setSelectedService] = useState<CalendarServiceOption | null>(null);
-    const [customerName, setCustomerName] = useState("");
-    const [customerPhoneInput, setCustomerPhoneInput] = useState("");
-    const [notes, setNotes] = useState("");
-    const [bookingComposerOpen, setBookingComposerOpen] = useState(false);
-    const [bookingComposerMode, setBookingComposerMode] = useState<"create" | "edit">("create");
-    const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
-    const [statusUpdateBookingId, setStatusUpdateBookingId] = useState<string | null>(null);
-    const [followUpBookingId, setFollowUpBookingId] = useState<string | null>(null);
-    const [followUpGovernanceBookingId, setFollowUpGovernanceBookingId] = useState<string | null>(null);
-    const [noShowFollowUpDrafts, setNoShowFollowUpDrafts] = useState<Record<string, NoShowFollowUpDraft>>({});
-    const [queueMode, setQueueMode] = useState<BookingQueueMode>(defaultQueueMode);
-    const [queueLane, setQueueLane] = useState<BookingQueueLane>(defaultQueueLane);
-    const [queueStatusFilter, setQueueStatusFilter] = useState<BookingStatusFilter>("all");
-    const [queueSearch, setQueueSearch] = useState("");
-    const [followUpOwnerId, setFollowUpOwnerId] = useState("");
-    const [followUpOverdueOnly, setFollowUpOverdueOnly] = useState(false);
-    const [draftQueueStatusFilter, setDraftQueueStatusFilter] = useState<BookingStatusFilter>("all");
-    const [draftQueueSearch, setDraftQueueSearch] = useState("");
-    const [draftFollowUpOwnerId, setDraftFollowUpOwnerId] = useState("");
-    const [draftFollowUpOverdueOnly, setDraftFollowUpOverdueOnly] = useState(false);
-    const [followUpGovernanceDrafts, setFollowUpGovernanceDrafts] = useState<Record<string, { ownerAgentId: string; dueAt: string }>>({});
+    const calendarFiltersMachine = useCalendarFiltersMachine({
+        selectedDate: defaultSelectedDate,
+        queueMode: defaultQueueMode,
+        queueLane: defaultQueueLane,
+        queueStatusFilter: "all",
+        queueSearch: "",
+        followUpOwnerId: "",
+        followUpOverdueOnly: false,
+    });
+    const {
+        snapshot: currentQueueSnapshot,
+        draft: currentFilterDraft,
+        queueFiltersDirty,
+        hydrate: hydrateCalendarQueueSnapshot,
+        setSelectedDate,
+        setQueueMode: setCalendarQueueMode,
+        setQueueLane,
+        updateDraft: updateCalendarFilterDraft,
+        resetDraft: resetQueueFilterDraft,
+        applyDraft: applyQueueFilterDraft,
+    } = calendarFiltersMachine;
+    const {
+        selectedDate,
+        queueMode,
+        queueLane,
+        queueStatusFilter,
+        queueSearch,
+        followUpOwnerId,
+        followUpOverdueOnly,
+    } = currentQueueSnapshot;
+    const {
+        queueSearch: draftQueueSearch,
+        queueStatusFilter: draftQueueStatusFilter,
+        followUpOwnerId: draftFollowUpOwnerId,
+        followUpOverdueOnly: draftFollowUpOverdueOnly,
+    } = currentFilterDraft;
+    const bookingComposerMachine = useBookingComposerMachine<CalendarServiceOption, TimeSlot>({
+        initialBookingDate: defaultSelectedDate && defaultSelectedDate >= today ? defaultSelectedDate : today,
+        initialCustomerName: "",
+        initialCustomerPhoneInput: "",
+        getServiceKey: (service) => service?.name ?? "",
+        getSlotKey: (slot) => slot ? `${slot.start}|${slot.end}` : "",
+    });
+    const {
+        isOpen: bookingComposerOpen,
+        mode: bookingComposerMode,
+        editingBookingId,
+        selectedService,
+        selectedSpecialist,
+        bookingDate,
+        selectedSlot,
+        customerName,
+        customerPhoneInput,
+        notes,
+        isDirty: bookingComposerDirty,
+        openCreate: openCreateBookingComposer,
+        openEdit: openEditBookingComposerState,
+        reset: resetBookingComposer,
+        setService: setSelectedService,
+        setSpecialist: setSelectedSpecialist,
+        setBookingDate,
+        setSlot: setSelectedSlot,
+        setCustomerName,
+        setCustomerPhoneInput,
+        setNotes,
+        applyCasePrefillIfEmpty,
+        restoreBaseline: restoreBookingComposerBaseline,
+    } = bookingComposerMachine;
+    const bookingActionPanelMachine = useBookingActionPanelMachine();
+    const {
+        bookingId: bookingActionsBookingId,
+        cancelReasonDraft,
+        statusUpdateBookingId,
+        cancelBookingId,
+        isDirty: bookingActionsDirty,
+        open: openBookingActionsPanelState,
+        close: closeBookingActionsPanelState,
+        setCancelReasonDraft,
+        setStatusUpdatePending,
+        clearStatusUpdatePending,
+        setCancelPending,
+        clearCancelPending,
+    } = bookingActionPanelMachine;
+    const bookingFollowUpMachine = useBookingFollowUpMachine();
+    const {
+        followUpBookingId,
+        followUpGovernanceBookingId,
+        noShowFollowUpDrafts,
+        followUpGovernanceDrafts,
+        setFollowUpPending,
+        clearFollowUpPending,
+        setGovernancePending,
+        clearGovernancePending,
+        setNoShowDraft,
+        clearNoShowDraft,
+        setGovernanceDraft,
+        clearBooking: clearBookingFollowUpDrafts,
+        clearAll: clearAllFollowUpDrafts,
+    } = bookingFollowUpMachine;
     const [activeSavedViewId, setActiveSavedViewId] = useState<string | null>(null);
     const [saveViewDraftName, setSaveViewDraftName] = useState("");
     const [saveViewComposerOpen, setSaveViewComposerOpen] = useState(false);
@@ -638,9 +710,6 @@ export default function CalendarPage() {
     const [selectedTeamTargetRoleDraft, setSelectedTeamTargetRoleDraft] = useState<ConsoleRole | "">("");
     const [secondaryPanelOpen, setSecondaryPanelOpen] = useState(false);
     const [secondaryPanelSection, setSecondaryPanelSection] = useState<CalendarSecondaryPanelSection>("filters");
-    const [bookingActionsBookingId, setBookingActionsBookingId] = useState<string | null>(null);
-    const [cancelReasonDraft, setCancelReasonDraft] = useState("");
-    const [cancelBookingId, setCancelBookingId] = useState<string | null>(null);
 
     const currentQueueStateQuery = useQuery({
         queryKey: ["queue-state", "calendar", calendarWorkspaceScope, focusedCaseId, focusedConversationId],
@@ -741,35 +810,6 @@ export default function CalendarPage() {
         () => urlSavedViewQuery.data ?? savedViews.find((view) => view.id === urlSavedViewId) ?? null,
         [savedViews, urlSavedViewId, urlSavedViewQuery.data],
     );
-    const currentQueueSnapshot = useMemo<CalendarQueueStateSnapshot>(
-        () => ({
-            selectedDate,
-            queueMode,
-            queueLane,
-            queueStatusFilter,
-            queueSearch,
-            followUpOwnerId,
-            followUpOverdueOnly,
-        }),
-        [followUpOverdueOnly, followUpOwnerId, queueLane, queueMode, queueSearch, queueStatusFilter, selectedDate],
-    );
-    const appliedFilterDraft = useMemo<CalendarFilterDraft>(
-        () => buildCalendarFilterDraft(currentQueueSnapshot),
-        [currentQueueSnapshot],
-    );
-    const currentFilterDraft = useMemo<CalendarFilterDraft>(
-        () => ({
-            queueSearch: draftQueueSearch,
-            queueStatusFilter: draftQueueStatusFilter,
-            followUpOwnerId: draftFollowUpOwnerId,
-            followUpOverdueOnly: draftFollowUpOverdueOnly,
-        }),
-        [draftFollowUpOverdueOnly, draftFollowUpOwnerId, draftQueueSearch, draftQueueStatusFilter],
-    );
-    const queueFiltersDirty = useMemo(
-        () => calendarFilterDraftChanged(appliedFilterDraft, currentFilterDraft),
-        [appliedFilterDraft, currentFilterDraft],
-    );
     const currentQueueFingerprint = useMemo(
         () => getCalendarQueueStateFingerprint(currentQueueSnapshot),
         [currentQueueSnapshot],
@@ -832,24 +872,24 @@ export default function CalendarPage() {
     useEffect(() => {
         restoredCalendarScopeRef.current = null;
         lastSavedQueueStateRef.current = "";
-        setFollowUpGovernanceDrafts({});
-        setNoShowFollowUpDrafts({});
-        setSelectedSpecialist("");
-        setSelectedService(null);
-        setSelectedDate(defaultSelectedDate);
-        setBookingDate(defaultSelectedDate && defaultSelectedDate >= today ? defaultSelectedDate : today);
-        setSelectedSlot(null);
-        setBookingComposerOpen(false);
-        setQueueMode(defaultQueueMode);
-        setQueueLane(defaultQueueLane);
-        setQueueStatusFilter("all");
-        setQueueSearch("");
-        setFollowUpOwnerId("");
-        setFollowUpOverdueOnly(false);
-        setDraftQueueStatusFilter("all");
-        setDraftQueueSearch("");
-        setDraftFollowUpOwnerId("");
-        setDraftFollowUpOverdueOnly(false);
+        clearAllFollowUpDrafts();
+        closeBookingActionsPanelState();
+        resetBookingComposer({
+            keepOpen: false,
+            resetSelections: true,
+            bookingDate: defaultSelectedDate && defaultSelectedDate >= today ? defaultSelectedDate : today,
+            customerName: "",
+            customerPhoneInput: "",
+        });
+        hydrateCalendarQueueSnapshot({
+            selectedDate: defaultSelectedDate,
+            queueMode: defaultQueueMode,
+            queueLane: defaultQueueLane,
+            queueStatusFilter: "all",
+            queueSearch: "",
+            followUpOwnerId: "",
+            followUpOverdueOnly: false,
+        });
         setActiveSavedViewId(null);
         setSaveViewDraftName("");
         setSaveViewComposerOpen(false);
@@ -860,7 +900,18 @@ export default function CalendarPage() {
         setSaveViewDefaultTouched(false);
         setSelectedTeamTargetBranchIdDraft("");
         setSelectedTeamTargetRoleDraft("");
-    }, [calendarWorkspaceScope, defaultQueueLane, defaultQueueMode, defaultSelectedDate, today, urlQueueStateKey]);
+    }, [
+        calendarWorkspaceScope,
+        clearAllFollowUpDrafts,
+        closeBookingActionsPanelState,
+        defaultQueueLane,
+        defaultQueueMode,
+        defaultSelectedDate,
+        hydrateCalendarQueueSnapshot,
+        resetBookingComposer,
+        today,
+        urlQueueStateKey,
+    ]);
 
     useEffect(() => {
         if (!calendarWorkspaceScope) {
@@ -938,18 +989,7 @@ export default function CalendarPage() {
             followUpOwnerId: "",
             followUpOverdueOnly: false,
         };
-        const nextDraft = buildCalendarFilterDraft(nextSnapshot);
-        setSelectedDate(nextSnapshot.selectedDate);
-        setQueueMode(nextSnapshot.queueMode);
-        setQueueLane(nextSnapshot.queueLane);
-        setQueueStatusFilter(nextSnapshot.queueStatusFilter);
-        setQueueSearch(nextSnapshot.queueSearch);
-        setFollowUpOwnerId(nextSnapshot.followUpOwnerId);
-        setFollowUpOverdueOnly(nextSnapshot.followUpOverdueOnly);
-        setDraftQueueStatusFilter(nextDraft.queueStatusFilter);
-        setDraftQueueSearch(nextDraft.queueSearch);
-        setDraftFollowUpOwnerId(nextDraft.followUpOwnerId);
-        setDraftFollowUpOverdueOnly(nextDraft.followUpOverdueOnly);
+        hydrateCalendarQueueSnapshot(nextSnapshot);
         setActiveSavedViewId(matchedSavedView?.id ?? null);
         setSaveViewDraftName("");
         setSaveViewComposerOpen(false);
@@ -958,15 +998,13 @@ export default function CalendarPage() {
         setSaveViewTargetRoleDraft("");
         setSaveViewDefaultDraft(false);
         setSaveViewDefaultTouched(false);
-        if (source === "server" && queueSnapshot) {
-            lastSavedQueueStateRef.current = JSON.stringify({
-                surface: "calendar",
-                case_id: focusedCaseId || undefined,
-                conversation_id: focusedConversationId || undefined,
-                version: 1,
-                query_state: buildCalendarQueueStatePayload(queueSnapshot),
-            });
-        }
+        lastSavedQueueStateRef.current = JSON.stringify({
+            surface: "calendar",
+            case_id: focusedCaseId || undefined,
+            conversation_id: focusedConversationId || undefined,
+            version: 1,
+            query_state: buildCalendarQueueStatePayload(nextSnapshot),
+        });
         restoredCalendarScopeRef.current = restoreKey;
     }, [
         calendarWorkspaceScope,
@@ -984,6 +1022,7 @@ export default function CalendarPage() {
         savedViews,
         savedViewsQuery.isError,
         savedViewsQuery.isFetched,
+        hydrateCalendarQueueSnapshot,
         urlSavedView,
         urlSavedViewId,
         urlSavedViewQuery.isError,
@@ -1020,14 +1059,10 @@ export default function CalendarPage() {
         if (bookingPrefillScopeRef.current === scopeKey) {
             return;
         }
-        if (!normalizeHumanText(customerName) && prefillName) {
-            setCustomerName(prefillName);
-        }
-        if (!normalizePhoneForSubmit(customerPhoneInput) && prefillPhone) {
-            setCustomerPhoneInput(prefillPhone);
-        }
+        applyCasePrefillIfEmpty(prefillName, prefillPhone);
         bookingPrefillScopeRef.current = scopeKey;
     }, [
+        applyCasePrefillIfEmpty,
         customerName,
         customerPhoneInput,
         focusedCaseId,
@@ -1258,7 +1293,7 @@ export default function CalendarPage() {
             setSelectedSpecialist("");
             setSelectedSlot(null);
         }
-    }, [selectedService, selectedSpecialist, specialistsForSelectedService]);
+    }, [selectedService, selectedSlot, selectedSpecialist, setSelectedSlot, setSelectedSpecialist, specialistsForSelectedService]);
 
     const { data: bookingsData, isLoading: bookingsLoading } = useQuery({
         queryKey: [
@@ -1576,20 +1611,55 @@ export default function CalendarPage() {
         : "Здесь оператор проходит один понятный путь: услуга, мастер, день, время, клиент, подтверждение.";
     const bookingResetLabel = bookingComposerMode === "edit" ? "Вернуть данные записи" : "Очистить всё";
     const bookingSubmitLabel = bookingComposerMode === "edit" ? "Сохранить изменения" : "Подтвердить и создать запись";
+    const bookingActionsNoShowDraft = bookingActionsBooking
+        ? noShowFollowUpDrafts[bookingActionsBooking.id]
+        : null;
+    const bookingActionsGovernanceDraft = bookingActionsBooking
+        ? followUpGovernanceDrafts[bookingActionsBooking.id]
+        : null;
+    const bookingActionsDefaultDueInput = formatDateTimeLocalInput(bookingActionsBooking?.follow_up_due_at);
+    const bookingActionsNoShowDirty = Boolean(
+        bookingActionsNoShowDraft
+        && (
+            bookingActionsNoShowDraft.result !== "contacted"
+            || bookingActionsNoShowDraft.rebookedAppointmentId
+            || bookingActionsNoShowDraft.note
+        ),
+    );
+    const bookingActionsGovernanceDirty = Boolean(
+        bookingActionsBooking
+        && bookingActionsGovernanceDraft
+        && (
+            bookingActionsGovernanceDraft.ownerAgentId !== (bookingActionsBooking.follow_up_owner_id ?? "")
+            || bookingActionsGovernanceDraft.dueAt !== bookingActionsDefaultDueInput
+        ),
+    );
+    const bookingActionPanelHasUnsavedChanges = bookingActionsDirty || bookingActionsNoShowDirty || bookingActionsGovernanceDirty;
 
     useEffect(() => {
         if (bookingActionsBookingId && !bookingActionsBooking) {
-            setBookingActionsBookingId(null);
+            closeBookingActionsPanelState();
         }
-    }, [bookingActionsBooking, bookingActionsBookingId]);
+    }, [bookingActionsBooking, bookingActionsBookingId, closeBookingActionsPanelState]);
 
     useEffect(() => {
         if (editingBookingId && !editingBooking) {
-            setEditingBookingId(null);
-            setBookingComposerMode("create");
-            setBookingComposerOpen(false);
+            resetBookingComposer({
+                keepOpen: false,
+                resetSelections: true,
+                bookingDate: bookingDateSuggestion,
+                customerName: normalizeHumanText(focusedCaseQuery.data?.customer_name),
+                customerPhoneInput: formatPhoneInput(focusedCaseQuery.data?.customer_phone),
+            });
         }
-    }, [editingBooking, editingBookingId]);
+    }, [
+        bookingDateSuggestion,
+        editingBooking,
+        editingBookingId,
+        focusedCaseQuery.data?.customer_name,
+        focusedCaseQuery.data?.customer_phone,
+        resetBookingComposer,
+    ]);
 
     const applyCalendarQueueSnapshot = (
         snapshot: CalendarQueueStateSnapshot,
@@ -1599,20 +1669,9 @@ export default function CalendarPage() {
             savedViewId?: string | null;
         } = {},
     ) => {
-        const nextDraft = buildCalendarFilterDraft(snapshot);
-        setSelectedDate(snapshot.selectedDate);
-        setQueueMode(snapshot.queueMode);
-        setQueueLane(snapshot.queueLane);
-        setQueueStatusFilter(snapshot.queueStatusFilter);
-        setQueueSearch(snapshot.queueSearch);
-        setFollowUpOwnerId(snapshot.followUpOwnerId);
-        setFollowUpOverdueOnly(snapshot.followUpOverdueOnly);
-        setDraftQueueStatusFilter(nextDraft.queueStatusFilter);
-        setDraftQueueSearch(nextDraft.queueSearch);
-        setDraftFollowUpOwnerId(nextDraft.followUpOwnerId);
-        setDraftFollowUpOverdueOnly(nextDraft.followUpOverdueOnly);
+        hydrateCalendarQueueSnapshot(snapshot);
         setActiveSavedViewId(savedViewId);
-        setFollowUpGovernanceDrafts({});
+        clearAllFollowUpDrafts();
         setSaveViewDraftName("");
         setSaveViewComposerOpen(false);
         setSaveViewScopeDraft("personal");
@@ -1766,6 +1825,30 @@ export default function CalendarPage() {
         toast.success(`Применён вид «${savedView.name}»`);
     };
 
+    const handleResetQueueFilterDraft = () => {
+        if (!queueFiltersDirty) {
+            return;
+        }
+        resetQueueFilterDraft();
+        emitCalendarOperatorEvent({
+            event_type: "filter_reset",
+            action_id: "reset_filters",
+            surface: "filter_panel",
+        });
+    };
+
+    const handleApplyQueueFilterDraft = () => {
+        if (!queueFiltersDirty) {
+            return;
+        }
+        applyQueueFilterDraft();
+        emitCalendarOperatorEvent({
+            event_type: "filter_apply",
+            action_id: "apply_filters",
+            surface: "filter_panel",
+        });
+    };
+
     const handleUpdateSavedView = () => {
         if (!selectedSavedView || !canMutateSelectedSavedView) {
             return;
@@ -1799,17 +1882,45 @@ export default function CalendarPage() {
         deleteSavedViewMutation.mutate(selectedSavedView.id);
     };
 
+    const invalidateCalendarBookingQueries = () => {
+        queryClient.invalidateQueries({ queryKey: ["slots"] });
+        queryClient.invalidateQueries({ queryKey: ["bookings"] });
+        if (focusedCaseId) {
+            queryClient.invalidateQueries({ queryKey: ["case", focusedCaseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
+        }
+    };
+
+    const emitCalendarOperatorEvent = (payload: CalendarOperatorEventRequest) => {
+        if (!session || !canReadCalendar) {
+            return;
+        }
+        void recordCalendarOperatorEvent(payload).catch(() => undefined);
+    };
+
+    const emitCalendarDoubleSubmitBlocked = (
+        actionId: Exclude<CalendarOperatorEventRequest["action_id"], "apply_filters" | "reset_filters">,
+        surface: Exclude<CalendarOperatorEventRequest["surface"], "filter_panel">,
+        bookingId?: string,
+    ) => {
+        emitCalendarOperatorEvent({
+            event_type: "double_submit_blocked",
+            action_id: actionId,
+            surface,
+            booking_id: bookingId,
+        });
+    };
+
     // Create booking mutation
     const createMutation = useMutation({
         mutationFn: createBooking,
         onSuccess: () => {
             toast.success("Запись создана!");
-            queryClient.invalidateQueries({ queryKey: ["slots"] });
-            queryClient.invalidateQueries({ queryKey: ["bookings"] });
+            invalidateCalendarBookingQueries();
             resetForm({ keepComposerOpen: false, resetSelections: false });
         },
         onError: (error: unknown) => {
-            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            const code = getApiErrorCode(error);
             if (code === "BOOKING_CONFLICT") {
                 toast.error("Это время уже занято. Выберите другой слот.");
             } else {
@@ -1828,24 +1939,24 @@ export default function CalendarPage() {
             customer_phone: string;
             service_type: string;
             notes?: string;
+            version: number;
         }) => {
             const { bookingId, ...data } = payload;
             return updateBooking(bookingId, data);
         },
         onSuccess: () => {
             toast.success("Запись обновлена");
-            queryClient.invalidateQueries({ queryKey: ["slots"] });
-            queryClient.invalidateQueries({ queryKey: ["bookings"] });
-            if (focusedCaseId) {
-                queryClient.invalidateQueries({ queryKey: ["case", focusedCaseId] });
-                queryClient.invalidateQueries({ queryKey: ["cases"] });
-            }
+            invalidateCalendarBookingQueries();
             resetForm({ keepComposerOpen: false, resetSelections: true });
         },
         onError: (error: unknown) => {
-            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            const code = getApiErrorCode(error);
             if (code === "BOOKING_CONFLICT") {
                 toast.error("Это время уже занято. Выберите другой слот.");
+            } else if (code === "BOOKING_VERSION_CONFLICT") {
+                toast.error("Запись уже изменили в другом окне. Обновите список и откройте её заново.");
+                invalidateCalendarBookingQueries();
+                resetForm({ keepComposerOpen: false, resetSelections: true });
             } else if (code === "BOOKING_UPDATE_DENIED") {
                 toast.error("Эту запись больше нельзя менять из-за её текущего статуса.");
             } else {
@@ -1855,37 +1966,39 @@ export default function CalendarPage() {
     });
 
     const cancelMutation = useMutation({
-        mutationFn: async (payload: { bookingId: string; reason?: string }) => {
-            setCancelBookingId(payload.bookingId);
-            return cancelBooking(payload.bookingId, { reason: payload.reason });
+        mutationFn: async (payload: { bookingId: string; reason?: string; version: number }) =>
+            cancelBooking(payload.bookingId, { reason: payload.reason, version: payload.version }),
+        onMutate: ({ bookingId }) => {
+            setCancelPending(bookingId);
         },
         onSuccess: () => {
             toast.success("Запись отменена");
-            queryClient.invalidateQueries({ queryKey: ["bookings"] });
-            if (focusedCaseId) {
-                queryClient.invalidateQueries({ queryKey: ["case", focusedCaseId] });
-                queryClient.invalidateQueries({ queryKey: ["cases"] });
-            }
+            invalidateCalendarBookingQueries();
             setCancelReasonDraft("");
-            closeBookingActionsPanel();
+            discardBookingActionsPanel();
         },
         onError: (error: unknown) => {
-            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            const code = getApiErrorCode(error);
             if (code === "BOOKING_CANCEL_DENIED") {
                 toast.error("Эту запись больше нельзя отменить из-за её текущего статуса.");
+            } else if (code === "BOOKING_VERSION_CONFLICT") {
+                toast.error("Запись уже изменилась. Обновите список и проверьте текущий статус.");
+                invalidateCalendarBookingQueries();
+                discardBookingActionsPanel();
             } else {
                 toast.error("Не удалось отменить запись");
             }
         },
         onSettled: () => {
-            setCancelBookingId(null);
+            clearCancelPending();
         },
     });
 
     const statusMutation = useMutation({
-        mutationFn: async (payload: { bookingId: string; status: BookingStatusUpdateRequest["status"] }) => {
-            setStatusUpdateBookingId(payload.bookingId);
-            return updateBookingStatus(payload.bookingId, { status: payload.status });
+        mutationFn: async (payload: { bookingId: string; status: BookingStatusUpdateRequest["status"]; version: number }) =>
+            updateBookingStatus(payload.bookingId, { status: payload.status, version: payload.version }),
+        onMutate: ({ bookingId }) => {
+            setStatusUpdatePending(bookingId);
         },
         onSuccess: (data, variables) => {
             const labels: Record<BookingStatusUpdateRequest["status"], string> = {
@@ -1895,16 +2008,16 @@ export default function CalendarPage() {
             const effectMessages = collectBookingCaseEffectMessages(data);
             const suffix = effectMessages.length > 0 ? ` ${effectMessages.join(" ")}` : "";
             toast.success(`${labels[variables.status]}.${suffix}`.trim());
-            queryClient.invalidateQueries({ queryKey: ["bookings"] });
-            if (focusedCaseId) {
-                queryClient.invalidateQueries({ queryKey: ["case", focusedCaseId] });
-                queryClient.invalidateQueries({ queryKey: ["cases"] });
-            }
+            invalidateCalendarBookingQueries();
         },
         onError: (error: unknown) => {
-            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            const code = getApiErrorCode(error);
             if (code === "BOOKING_STATUS_TRANSITION_DENIED") {
                 toast.error("Недопустимый переход статуса для этой записи");
+            } else if (code === "BOOKING_VERSION_CONFLICT") {
+                toast.error("Статус уже изменили в другом окне. Список обновлён.");
+                invalidateCalendarBookingQueries();
+                discardBookingActionsPanel();
             } else if (code === "INVALID_STATUS") {
                 toast.error("Некорректный статус визита");
             } else {
@@ -1912,7 +2025,7 @@ export default function CalendarPage() {
             }
         },
         onSettled: () => {
-            setStatusUpdateBookingId(null);
+            clearStatusUpdatePending();
         },
     });
 
@@ -1922,13 +2035,16 @@ export default function CalendarPage() {
             result: "contacted" | "rebooked";
             rebookedAppointmentId?: string;
             note?: string;
-        }) => {
-            setFollowUpBookingId(payload.bookingId);
-            return registerNoShowFollowUp(payload.bookingId, {
+            version: number;
+        }) =>
+            registerNoShowFollowUp(payload.bookingId, {
                 result: payload.result,
                 rebooked_appointment_id: payload.rebookedAppointmentId,
                 note: payload.note,
-            });
+                version: payload.version,
+            }),
+        onMutate: ({ bookingId }) => {
+            setFollowUpPending(bookingId);
         },
         onSuccess: (data, variables) => {
             const effectMessages = collectBookingCaseEffectMessages(data);
@@ -1938,21 +2054,21 @@ export default function CalendarPage() {
             } else {
                 toast.success(`Связь после неявки закрыта: с клиентом связались.${suffix}`.trim());
             }
-            queryClient.invalidateQueries({ queryKey: ["bookings"] });
-            if (focusedCaseId) {
-                queryClient.invalidateQueries({ queryKey: ["case", focusedCaseId] });
-                queryClient.invalidateQueries({ queryKey: ["cases"] });
-            }
-            setNoShowFollowUpDrafts((current) => {
-                const next = { ...current };
-                delete next[variables.bookingId];
-                return next;
-            });
+            invalidateCalendarBookingQueries();
+            clearNoShowDraft(variables.bookingId);
         },
         onError: (error: unknown) => {
-            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            const code = getApiErrorCode(error);
             if (code === "BOOKING_STATUS_REQUIRED") {
                 toast.error("Связь после неявки доступна только для статуса «Не пришёл»");
+            } else if (code === "FOLLOW_UP_ALREADY_CLOSED") {
+                toast.error("Результат связи уже зафиксирован. Обновите карточку, чтобы увидеть текущее состояние.");
+                invalidateCalendarBookingQueries();
+                discardBookingActionsPanel();
+            } else if (code === "BOOKING_VERSION_CONFLICT") {
+                toast.error("Карточка устарела. Список обновлён, откройте запись снова.");
+                invalidateCalendarBookingQueries();
+                discardBookingActionsPanel();
             } else if (code === "INVALID_PARAM") {
                 const message = getApiErrorMessage(error, "Проверьте данные результата связи");
                 if (message.includes("rebooked_appointment_id")) {
@@ -1965,7 +2081,7 @@ export default function CalendarPage() {
             }
         },
         onSettled: () => {
-            setFollowUpBookingId(null);
+            clearFollowUpPending();
         },
     });
 
@@ -1974,30 +2090,31 @@ export default function CalendarPage() {
             bookingId: string;
             ownerAgentId: string;
             dueAt: string;
-        }) => {
-            setFollowUpGovernanceBookingId(payload.bookingId);
-            return updateBookingFollowUpGovernance(payload.bookingId, {
+            version: number;
+        }) =>
+            updateBookingFollowUpGovernance(payload.bookingId, {
                 owner_agent_id: payload.ownerAgentId || null,
                 due_at: payload.dueAt ? new Date(payload.dueAt).toISOString() : null,
-            });
+                version: payload.version,
+            }),
+        onMutate: ({ bookingId }) => {
+            setGovernancePending(bookingId);
         },
         onSuccess: (data, variables) => {
             toast.success("Ответственный и срок связи обновлены");
-            queryClient.invalidateQueries({ queryKey: ["bookings"] });
-            if (focusedCaseId) {
-                queryClient.invalidateQueries({ queryKey: ["case", focusedCaseId] });
-                queryClient.invalidateQueries({ queryKey: ["cases"] });
-            }
-            setFollowUpGovernanceDrafts((current) => {
-                const next = { ...current };
-                delete next[variables.bookingId];
-                return next;
-            });
+            invalidateCalendarBookingQueries();
+            clearBookingFollowUpDrafts(variables.bookingId);
         },
         onError: (error: unknown) => {
-            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            const code = getApiErrorCode(error);
             if (code === "FOLLOW_UP_ALREADY_CLOSED") {
                 toast.error("Задача по связи уже закрыта");
+                invalidateCalendarBookingQueries();
+                discardBookingActionsPanel();
+            } else if (code === "BOOKING_VERSION_CONFLICT") {
+                toast.error("Карточка уже изменилась. Обновите список и назначьте заново.");
+                invalidateCalendarBookingQueries();
+                discardBookingActionsPanel();
             } else if (code === "BOOKING_STATUS_REQUIRED") {
                 toast.error("Назначение ответственного доступно только после неявки");
             } else if (code === "ACCESS_DENIED") {
@@ -2007,7 +2124,7 @@ export default function CalendarPage() {
             }
         },
         onSettled: () => {
-            setFollowUpGovernanceBookingId(null);
+            clearGovernancePending();
         },
     });
 
@@ -2018,18 +2135,13 @@ export default function CalendarPage() {
         keepComposerOpen?: boolean;
         resetSelections?: boolean;
     } = {}) => {
-        if (resetSelections) {
-            setSelectedService(null);
-            setSelectedSpecialist("");
-            setBookingDate(bookingDateSuggestion);
-        }
-        setSelectedSlot(null);
-        setCustomerName(normalizeHumanText(focusedCaseQuery.data?.customer_name));
-        setCustomerPhoneInput(formatPhoneInput(focusedCaseQuery.data?.customer_phone));
-        setNotes("");
-        setBookingComposerMode("create");
-        setEditingBookingId(null);
-        setBookingComposerOpen(keepComposerOpen);
+        resetBookingComposer({
+            keepOpen: keepComposerOpen,
+            resetSelections,
+            bookingDate: bookingDateSuggestion,
+            customerName: normalizeHumanText(focusedCaseQuery.data?.customer_name),
+            customerPhoneInput: formatPhoneInput(focusedCaseQuery.data?.customer_phone),
+        });
     };
 
     const applyCasePrefill = () => {
@@ -2038,16 +2150,8 @@ export default function CalendarPage() {
     };
 
     const handleQueueModeChange = (nextMode: BookingQueueMode) => {
-        setQueueMode(nextMode);
-        if (nextMode === "history") {
-            setQueueLane("all");
-            return;
-        }
-        if (!selectedDate) {
-            setSelectedDate(today);
-            setSelectedSlot(null);
-        } else if (selectedDate < today) {
-            setSelectedDate(today);
+        setCalendarQueueMode(nextMode, today);
+        if (nextMode !== "history" && (!selectedDate || selectedDate < today)) {
             setSelectedSlot(null);
         }
     };
@@ -2062,22 +2166,8 @@ export default function CalendarPage() {
         toast.success("Календарь обновлён");
     };
 
-    const resetQueueFilterDraft = () => {
-        setDraftQueueSearch(queueSearch);
-        setDraftQueueStatusFilter(queueStatusFilter);
-        setDraftFollowUpOwnerId(followUpOwnerId);
-        setDraftFollowUpOverdueOnly(followUpOverdueOnly);
-    };
-
-    const applyQueueFilterDraft = () => {
-        setQueueSearch(draftQueueSearch);
-        setQueueStatusFilter(draftQueueStatusFilter);
-        setFollowUpOwnerId(draftFollowUpOwnerId);
-        setFollowUpOverdueOnly(draftFollowUpOverdueOnly);
-    };
-
     const openSecondaryPanel = (section: CalendarSecondaryPanelSection) => {
-        setBookingActionsBookingId(null);
+        closeBookingActionsPanel();
         if (section === "filters") {
             resetQueueFilterDraft();
         }
@@ -2086,14 +2176,14 @@ export default function CalendarPage() {
     };
 
     const openBookingComposer = () => {
-        setBookingActionsBookingId(null);
+        closeBookingActionsPanel();
         setSecondaryPanelOpen(false);
-        setBookingComposerMode("create");
-        setEditingBookingId(null);
-        if (!bookingDate || bookingDate < today) {
-            setBookingDate(bookingDateSuggestion);
-        }
-        setBookingComposerOpen(true);
+        openCreateBookingComposer({
+            bookingDate: (!bookingDate || bookingDate < today) ? bookingDateSuggestion : bookingDate,
+            customerName: normalizeHumanText(focusedCaseQuery.data?.customer_name),
+            customerPhoneInput: formatPhoneInput(focusedCaseQuery.data?.customer_phone),
+            preserveSelections: true,
+        });
     };
 
     const openEditBookingComposer = (booking: (typeof bookings)[number]) => {
@@ -2114,20 +2204,23 @@ export default function CalendarPage() {
         const nextDate = booking.start_at.slice(0, 10);
 
         setSecondaryPanelOpen(false);
-        setBookingActionsBookingId(null);
-        setBookingComposerMode("edit");
-        setEditingBookingId(booking.id);
-        setSelectedService(nextService);
-        setSelectedSpecialist(booking.specialist_id);
-        setBookingDate(nextDate || bookingDateSuggestion);
-        setSelectedSlot(nextSlot);
-        setCustomerName(normalizeHumanText(booking.customer_name));
-        setCustomerPhoneInput(formatPhoneInput(booking.customer_phone));
-        setNotes(booking.notes ?? "");
-        setBookingComposerOpen(true);
+        closeBookingActionsPanel();
+        openEditBookingComposerState({
+            editingBookingId: booking.id,
+            selectedService: nextService,
+            selectedSpecialist: booking.specialist_id,
+            bookingDate: nextDate || bookingDateSuggestion,
+            selectedSlot: nextSlot,
+            customerName: normalizeHumanText(booking.customer_name),
+            customerPhoneInput: formatPhoneInput(booking.customer_phone),
+            notes: booking.notes ?? "",
+        });
     };
 
     const closeBookingComposer = () => {
+        if (bookingComposerDirty && !window.confirm("Закрыть форму и потерять несохранённые изменения записи?")) {
+            return;
+        }
         resetForm({ keepComposerOpen: false, resetSelections: true });
     };
 
@@ -2137,40 +2230,35 @@ export default function CalendarPage() {
 
     const openBookingActionsPanel = (bookingId: string) => {
         setSecondaryPanelOpen(false);
-        setCancelReasonDraft("");
-        setBookingActionsBookingId(bookingId);
+        openBookingActionsPanelState(bookingId);
+    };
+
+    const discardBookingActionsPanel = () => {
+        if (bookingActionsBookingId) {
+            clearBookingFollowUpDrafts(bookingActionsBookingId);
+        }
+        closeBookingActionsPanelState();
     };
 
     const closeBookingActionsPanel = () => {
-        setCancelReasonDraft("");
-        setBookingActionsBookingId(null);
+        if (bookingActionPanelHasUnsavedChanges && !window.confirm("Закрыть действия по записи и потерять несохранённые изменения?")) {
+            return;
+        }
+        discardBookingActionsPanel();
     };
 
     const setFollowUpGovernanceDraft = (
         bookingId: string,
         patch: Partial<{ ownerAgentId: string; dueAt: string }>,
     ) => {
-        setFollowUpGovernanceDrafts((current) => ({
-            ...current,
-            [bookingId]: {
-                ownerAgentId: patch.ownerAgentId ?? current[bookingId]?.ownerAgentId ?? "",
-                dueAt: patch.dueAt ?? current[bookingId]?.dueAt ?? "",
-            },
-        }));
+        setGovernanceDraft(bookingId, patch);
     };
 
     const setNoShowFollowUpDraft = (
         bookingId: string,
         patch: Partial<NoShowFollowUpDraft>,
     ) => {
-        setNoShowFollowUpDrafts((current) => ({
-            ...current,
-            [bookingId]: {
-                result: patch.result ?? current[bookingId]?.result ?? "contacted",
-                rebookedAppointmentId: patch.rebookedAppointmentId ?? current[bookingId]?.rebookedAppointmentId ?? "",
-                note: patch.note ?? current[bookingId]?.note ?? "",
-            },
-        }));
+        setNoShowDraft(bookingId, patch);
     };
 
     const handleSlotClick = (slot: TimeSlot) => {
@@ -2180,6 +2268,14 @@ export default function CalendarPage() {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        if (createMutation.isPending || updateMutation.isPending) {
+            emitCalendarDoubleSubmitBlocked(
+                bookingComposerMode === "edit" ? "edit_booking" : "create_booking",
+                "composer",
+                editingBookingId ?? undefined,
+            );
+            return;
+        }
         if (!selectedSlot || !selectedSpecialist || !selectedService || !canWriteCalendar || !bookingFormReady) {
             toast.error(bookingFormErrorList[0] ?? "Проверьте данные записи");
             return;
@@ -2200,6 +2296,13 @@ export default function CalendarPage() {
             case_id: focusedCaseId || undefined,
         };
         if (bookingComposerMode === "edit" && editingBookingId) {
+            const editingBooking = bookings.find((booking) => booking.id === editingBookingId);
+            if (!editingBooking) {
+                toast.error("Не удалось найти актуальную запись. Обновите список и откройте её заново.");
+                invalidateCalendarBookingQueries();
+                resetForm({ keepComposerOpen: false, resetSelections: true });
+                return;
+            }
             updateMutation.mutate({
                 bookingId: editingBookingId,
                 specialist_id: payload.specialist_id,
@@ -2209,10 +2312,71 @@ export default function CalendarPage() {
                 customer_phone: normalizedCustomerPhone ?? "",
                 service_type: payload.service_type,
                 notes: payload.notes,
+                version: editingBooking.version,
             });
             return;
         }
         createMutation.mutate(payload);
+    };
+
+    const handleVisitStatusSubmit = (bookingId: string, status: BookingStatusUpdateRequest["status"], version: number) => {
+        if (statusMutation.isPending && statusUpdateBookingId === bookingId) {
+            emitCalendarDoubleSubmitBlocked(
+                status === "COMPLETED" ? "mark_completed" : "mark_no_show",
+                "booking_panel",
+                bookingId,
+            );
+            return;
+        }
+        statusMutation.mutate({ bookingId, status, version });
+    };
+
+    const handleCancelBookingSubmit = (bookingId: string, version: number) => {
+        if (cancelMutation.isPending && cancelBookingId === bookingId) {
+            emitCalendarDoubleSubmitBlocked("cancel_booking", "booking_panel", bookingId);
+            return;
+        }
+        cancelMutation.mutate({ bookingId, reason: cancelReasonDraft || undefined, version });
+    };
+
+    const handleFollowUpSubmit = (
+        bookingId: string,
+        version: number,
+        draft: NoShowFollowUpDraft,
+    ) => {
+        if (followUpMutation.isPending && followUpBookingId === bookingId) {
+            emitCalendarDoubleSubmitBlocked(
+                draft.result === "rebooked" ? "record_follow_up_rebooked" : "record_follow_up_contacted",
+                "follow_up_panel",
+                bookingId,
+            );
+            return;
+        }
+        followUpMutation.mutate({
+            bookingId,
+            result: draft.result,
+            rebookedAppointmentId: draft.rebookedAppointmentId || undefined,
+            note: draft.note || undefined,
+            version,
+        });
+    };
+
+    const handleFollowUpGovernanceSubmit = (
+        bookingId: string,
+        version: number,
+        ownerAgentId: string,
+        dueAt: string,
+    ) => {
+        if (followUpGovernanceMutation.isPending && followUpGovernanceBookingId === bookingId) {
+            emitCalendarDoubleSubmitBlocked("manage_follow_up_governance", "follow_up_governance", bookingId);
+            return;
+        }
+        followUpGovernanceMutation.mutate({
+            bookingId,
+            ownerAgentId,
+            dueAt,
+            version,
+        });
     };
 
     const buildCaseHref = (caseId: string) =>
@@ -2591,10 +2755,14 @@ export default function CalendarPage() {
                                 id: booking.follow_up_owner_id,
                             });
                             const followUpDueLabel = formatDueAtLabel(booking.follow_up_due_at);
-                            const visitActions = getVisitActionOptions(booking.status);
+                            const bookingActionMap = buildCalendarBookingActionAvailabilityMap(booking, calendarActionPermissions, calendarActorClass);
+                            const visitActions = getCalendarVisitActionOptions(booking, calendarActionPermissions, calendarActorClass);
                             const hasBookingActionSurface = visitActions.length > 0
-                                || (canWriteCalendar && isNoShow && !booking.no_show_followup_done)
-                                || (canManageFollowUpGovernance && isNoShow && !booking.no_show_followup_done);
+                                || bookingActionMap.edit_booking.visible
+                                || bookingActionMap.cancel_booking.visible
+                                || bookingActionMap.record_follow_up_contacted.visible
+                                || bookingActionMap.record_follow_up_rebooked.visible
+                                || bookingActionMap.manage_follow_up_governance.visible;
                             return (
                                 <div
                                     key={booking.id}
@@ -2669,7 +2837,7 @@ export default function CalendarPage() {
                                         </div>
                                     )}
 
-                                    {booking.case_id && (
+                                    {booking.case_id && bookingActionMap.open_case_from_booking.visible && (
                                         <div className="mt-3 flex flex-wrap items-center gap-2">
                                             <Link
                                                 href={buildCaseHref(booking.case_id)}
@@ -2751,7 +2919,7 @@ export default function CalendarPage() {
                                     </div>
                                     <button
                                         type="button"
-                                        onClick={resetQueueFilterDraft}
+                                        onClick={handleResetQueueFilterDraft}
                                         className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
                                         disabled={!queueFiltersDirty}
                                         data-testid="calendar-filters-reset"
@@ -2767,7 +2935,7 @@ export default function CalendarPage() {
                                         <input
                                             type="text"
                                             value={draftQueueSearch}
-                                            onChange={(event) => setDraftQueueSearch(event.target.value)}
+                                            onChange={(event) => updateCalendarFilterDraft({ queueSearch: event.target.value })}
                                             placeholder="Клиент, телефон, услуга, мастер или ID"
                                             className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                             data-testid="calendar-queue-search"
@@ -2779,7 +2947,7 @@ export default function CalendarPage() {
                                         </span>
                                         <select
                                             value={draftQueueStatusFilter}
-                                            onChange={(event) => setDraftQueueStatusFilter(event.target.value as BookingStatusFilter)}
+                                            onChange={(event) => updateCalendarFilterDraft({ queueStatusFilter: event.target.value as BookingStatusFilter })}
                                             className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                             data-testid="calendar-queue-status-filter"
                                         >
@@ -2797,7 +2965,7 @@ export default function CalendarPage() {
                                             </span>
                                             <select
                                                 value={draftFollowUpOwnerId}
-                                                onChange={(event) => setDraftFollowUpOwnerId(event.target.value)}
+                                                onChange={(event) => updateCalendarFilterDraft({ followUpOwnerId: event.target.value })}
                                                 className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                                                 data-testid="calendar-follow-up-owner-filter"
                                             >
@@ -2814,7 +2982,7 @@ export default function CalendarPage() {
                                         <input
                                             type="checkbox"
                                             checked={draftFollowUpOverdueOnly}
-                                            onChange={(event) => setDraftFollowUpOverdueOnly(event.target.checked)}
+                                            onChange={(event) => updateCalendarFilterDraft({ followUpOverdueOnly: event.target.checked })}
                                             className="h-4 w-4 rounded border-border/60"
                                             data-testid="calendar-follow-up-overdue-filter"
                                         />
@@ -2853,7 +3021,7 @@ export default function CalendarPage() {
                                     </p>
                                     <button
                                         type="button"
-                                        onClick={applyQueueFilterDraft}
+                                        onClick={handleApplyQueueFilterDraft}
                                         className="rounded-full border border-primary/30 bg-primary/5 px-4 py-2 text-xs font-semibold text-primary disabled:cursor-not-allowed disabled:border-border/60 disabled:bg-muted disabled:text-muted-foreground"
                                         disabled={!queueFiltersDirty}
                                         data-testid="calendar-filters-apply"
@@ -3259,7 +3427,13 @@ export default function CalendarPage() {
                     </div>
                     <button
                         type="button"
-                        onClick={() => resetForm({ keepComposerOpen: true, resetSelections: true })}
+                        onClick={() => {
+                            if (bookingComposerMode === "edit") {
+                                restoreBookingComposerBaseline(true);
+                                return;
+                            }
+                            resetForm({ keepComposerOpen: true, resetSelections: true });
+                        }}
                         className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
                         data-testid="calendar-booking-reset"
                     >
@@ -3354,11 +3528,7 @@ export default function CalendarPage() {
                                                 specialist.id === selectedSpecialist
                                                 && specialist.services.some((service) => normalizeHumanText(service.name) === nextService.name))
                                             : false;
-                                        setSelectedService(nextService);
-                                        if (!currentSpecialistStillAvailable) {
-                                            setSelectedSpecialist("");
-                                        }
-                                        setSelectedSlot(null);
+                                        setSelectedService(nextService, !currentSpecialistStillAvailable);
                                     }}
                                     className={`w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${(shouldShowBookingValidation && bookingFormErrors.service) ? "border-destructive/60" : "border-border/60"}`}
                                     data-testid="calendar-schedule-service"
@@ -3595,7 +3765,7 @@ export default function CalendarPage() {
                             </p>
                         </div>
 
-                        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+                        <form onSubmit={handleSubmit} className="mt-4 space-y-4" data-testid="calendar-booking-form">
                             <div className="rounded-lg bg-muted p-3 text-sm" data-testid="calendar-booking-summary">
                                 <p><strong>Услуга:</strong> {selectedService ? `${selectedService.name}${selectedServicePrice ? ` · ${selectedServicePrice}₸` : ""}` : "Не выбрана"}</p>
                                 <p><strong>Мастер:</strong> {currentSpecialist?.name ?? "Не выбран"}</p>
@@ -3759,7 +3929,6 @@ export default function CalendarPage() {
                 const followUpGovernanceDirty = followUpGovernanceDraft.ownerAgentId !== (booking.follow_up_owner_id ?? "")
                     || followUpGovernanceDraft.dueAt !== currentDueInput;
                 const governancePending = followUpGovernanceMutation.isPending && followUpGovernanceBookingId === booking.id;
-                const visitActions = getVisitActionOptions(booking.status);
                 const followUpOwnerLabel = getFollowUpOwnerDisplayLabel({
                     name: booking.follow_up_owner_name,
                     id: booking.follow_up_owner_id,
@@ -3786,8 +3955,13 @@ export default function CalendarPage() {
                     })()
                     : null;
                 const followUpSubmitBlocked = noShowFollowUpDraft.result === "rebooked" && !noShowFollowUpDraft.rebookedAppointmentId;
-                const canEditCurrentBooking = canEditBooking(booking.status);
-                const canCancelCurrentBooking = canCancelBooking(booking.status);
+                const bookingActionMap = buildCalendarBookingActionAvailabilityMap(booking, calendarActionPermissions, calendarActorClass);
+                const visitActions = getCalendarVisitActionOptions(booking, calendarActionPermissions, calendarActorClass);
+                const editBookingAction = bookingActionMap.edit_booking;
+                const cancelBookingAction = bookingActionMap.cancel_booking;
+                const canEditCurrentBooking = editBookingAction.state === "enabled";
+                const canCancelCurrentBooking = cancelBookingAction.state === "enabled";
+                const canShowFollowUpGovernance = bookingActionMap.manage_follow_up_governance.visible;
                 const cancelPending = cancelMutation.isPending && cancelBookingId === booking.id;
                 return (
                     <div className="fixed inset-0 z-50" data-testid="calendar-booking-panel-overlay">
@@ -3887,7 +4061,7 @@ export default function CalendarPage() {
                                         </div>
                                     ) : (
                                         <p className="mt-3 rounded-lg border border-border/60 bg-background/80 px-3 py-3 text-xs text-muted-foreground" data-testid="calendar-booking-edit-disabled">
-                                            Для статуса «{getBookingStatusLabel(booking.status)}» редактирование недоступно. Историю визита уже нужно сохранять без скрытого переписывания.
+                                            {editBookingAction.blockedReason ?? `Для статуса «${getBookingStatusLabel(booking.status)}» редактирование недоступно.`}
                                         </p>
                                     )}
                                 </div>
@@ -3906,9 +4080,9 @@ export default function CalendarPage() {
                                             const isPending = statusMutation.isPending && statusUpdateBookingId === booking.id;
                                             return (
                                                 <button
-                                                    key={`${booking.id}-${action.status}`}
+                                                    key={`${booking.id}-${action.actionId}`}
                                                     type="button"
-                                                    onClick={() => statusMutation.mutate({ bookingId: booking.id, status: action.status })}
+                                                    onClick={() => handleVisitStatusSubmit(booking.id, action.status, booking.version)}
                                                     disabled={isPending}
                                                     className="rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium hover:bg-background disabled:opacity-50"
                                                 >
@@ -3946,7 +4120,7 @@ export default function CalendarPage() {
                                             <div className="flex flex-wrap gap-2">
                                                 <button
                                                     type="button"
-                                                    onClick={() => cancelMutation.mutate({ bookingId: booking.id, reason: cancelReasonDraft || undefined })}
+                                                    onClick={() => handleCancelBookingSubmit(booking.id, booking.version)}
                                                     disabled={cancelPending}
                                                     className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs font-semibold text-destructive disabled:opacity-50"
                                                     data-testid="calendar-booking-cancel-submit"
@@ -3957,7 +4131,7 @@ export default function CalendarPage() {
                                         </div>
                                     ) : (
                                         <p className="mt-3 rounded-lg border border-border/60 bg-background/80 px-3 py-3 text-xs text-muted-foreground" data-testid="calendar-booking-cancel-disabled">
-                                            Для статуса «{getBookingStatusLabel(booking.status)}» отмена недоступна. Историю визита нужно оставлять неизменной.
+                                            {cancelBookingAction.blockedReason ?? `Для статуса «${getBookingStatusLabel(booking.status)}» отмена недоступна.`}
                                         </p>
                                     )}
                                 </div>
@@ -4055,14 +4229,7 @@ export default function CalendarPage() {
                                                 <div className="flex flex-wrap gap-2">
                                                     <button
                                                         type="button"
-                                                        onClick={() =>
-                                                            followUpMutation.mutate({
-                                                                bookingId: booking.id,
-                                                                result: noShowFollowUpDraft.result,
-                                                                rebookedAppointmentId: noShowFollowUpDraft.rebookedAppointmentId || undefined,
-                                                                note: noShowFollowUpDraft.note || undefined,
-                                                            })
-                                                        }
+                                                        onClick={() => handleFollowUpSubmit(booking.id, booking.version, noShowFollowUpDraft)}
                                                         disabled={followUpSubmitBlocked || (followUpMutation.isPending && followUpBookingId === booking.id)}
                                                         className="rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary disabled:opacity-50"
                                                         data-testid="calendar-follow-up-submit"
@@ -4074,13 +4241,7 @@ export default function CalendarPage() {
                                                     {(noShowFollowUpDraft.note || noShowFollowUpDraft.rebookedAppointmentId || noShowFollowUpDraft.result !== "contacted") && (
                                                         <button
                                                             type="button"
-                                                            onClick={() => {
-                                                                setNoShowFollowUpDrafts((current) => {
-                                                                    const next = { ...current };
-                                                                    delete next[booking.id];
-                                                                    return next;
-                                                                });
-                                                            }}
+                                                            onClick={() => clearNoShowDraft(booking.id)}
                                                             className="rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-background"
                                                         >
                                                             Сбросить
@@ -4093,7 +4254,7 @@ export default function CalendarPage() {
                                 </div>
                             )}
 
-                            {canManageFollowUpGovernance && isNoShow && !booking.no_show_followup_done && (
+                            {canShowFollowUpGovernance && (
                                 <div className="rounded-xl border border-border/60 bg-card/80 p-4" data-testid="calendar-follow-up-governance-card">
                                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
@@ -4153,11 +4314,12 @@ export default function CalendarPage() {
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => followUpGovernanceMutation.mutate({
-                                                bookingId: booking.id,
-                                                ownerAgentId: followUpGovernanceDraft.ownerAgentId,
-                                                dueAt: followUpGovernanceDraft.dueAt,
-                                            })}
+                                            onClick={() => handleFollowUpGovernanceSubmit(
+                                                booking.id,
+                                                booking.version,
+                                                followUpGovernanceDraft.ownerAgentId,
+                                                followUpGovernanceDraft.dueAt,
+                                            )}
                                             className="rounded border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary disabled:opacity-50"
                                             disabled={!followUpGovernanceDirty || governancePending}
                                             data-testid="calendar-follow-up-governance-save"
@@ -4167,13 +4329,7 @@ export default function CalendarPage() {
                                         {followUpGovernanceDirty && (
                                             <button
                                                 type="button"
-                                                onClick={() => {
-                                                    setFollowUpGovernanceDrafts((current) => {
-                                                        const next = { ...current };
-                                                        delete next[booking.id];
-                                                        return next;
-                                                    });
-                                                }}
+                                                onClick={() => clearBookingFollowUpDrafts(booking.id)}
                                                 className="rounded border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
                                                 disabled={governancePending}
                                             >

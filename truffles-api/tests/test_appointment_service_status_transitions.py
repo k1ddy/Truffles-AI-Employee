@@ -17,7 +17,9 @@ from app.services.appointment_service import (
 
 def _query_with_first(result):
     query = Mock()
-    query.filter.return_value.first.return_value = result
+    query.filter.return_value = query
+    query.with_for_update.return_value = query
+    query.first.return_value = result
     return query
 
 
@@ -67,6 +69,7 @@ def test_update_appointment_status_rejects_unknown_target_status():
             appointment_id=appointment.id,
             client_id=appointment.client_id,
             target_status="INVALID_STATUS",
+            expected_version=appointment.version,
             actor_id=uuid4(),
             commit=False,
         )
@@ -92,6 +95,7 @@ def test_update_appointment_status_rejects_invalid_transition():
             appointment_id=appointment.id,
             client_id=appointment.client_id,
             target_status="COMPLETED",
+            expected_version=appointment.version,
             actor_id=uuid4(),
             commit=False,
         )
@@ -118,6 +122,7 @@ def test_update_appointment_status_creates_visit_and_audit():
             appointment_id=appointment.id,
             client_id=client_id,
             target_status="COMPLETED",
+            expected_version=appointment.version,
             actor_id=uuid4(),
             reason="Пришел и обслужен",
             commit=False,
@@ -175,6 +180,7 @@ def test_update_appointment_status_idempotent_keeps_version_and_marks_audit():
             appointment_id=appointment.id,
             client_id=client_id,
             target_status="COMPLETED",
+            expected_version=appointment.version,
             actor_id=uuid4(),
             commit=False,
         )

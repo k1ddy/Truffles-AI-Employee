@@ -14,7 +14,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.logging_config import get_logger
+from app.logging_config import (
+    get_logger,
+    record_calendar_booking_action_denied,
+    record_calendar_booking_double_submit_blocked,
+    record_calendar_booking_version_conflict,
+    record_calendar_filter_apply,
+    record_calendar_filter_reset,
+    record_calendar_followup_invalid,
+)
 from app.models.agent import Agent
 from app.models.appointment import Appointment
 from app.models.appointment_audit import AppointmentAudit
@@ -30,11 +38,21 @@ from app.services.appointment_service import (
     AppointmentLifecycleActionDeniedError,
     AppointmentNotFoundError,
     AppointmentStatusValidationError,
+    AppointmentVersionConflictError,
     InvalidAppointmentTransitionError,
     SchedulingService,
     SpecialistNotFoundError,
 )
 from app.services.audit_service import record_audit_event
+from app.services.calendar_action_contract import (
+    BOOKING_ACTION_ORDER,
+    CalendarActorClass,
+    CalendarBlockedActionPayload,
+    CalendarBookingActionId,
+    CalendarBookingBlockedReasonCode,
+    build_calendar_booking_action_contract,
+    get_calendar_actor_class_for_role,
+)
 from app.services.calendar_sync_service import enqueue_appointment_sync
 from app.services.console_auth import (
     ConsoleAuthContext,
@@ -140,26 +158,36 @@ class BookingUpdate(BaseModel):
     customer_phone: str = Field(min_length=7, max_length=32)
     service_type: str = Field(min_length=1, max_length=255)
     notes: Optional[str] = None
+    version: int = Field(ge=1)
 
 
 class BookingCancelRequest(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=500)
+    version: int = Field(ge=1)
 
 
 class BookingStatusUpdateRequest(BaseModel):
     status: str = Field(min_length=3, max_length=32)
     reason: Optional[str] = Field(default=None, max_length=500)
+    version: int = Field(ge=1)
 
 
 class BookingNoShowFollowUpRequest(BaseModel):
     result: Literal["contacted", "rebooked"] = "contacted"
     rebooked_appointment_id: Optional[str] = None
     note: Optional[str] = Field(default=None, max_length=500)
+    version: int = Field(ge=1)
 
 
 class BookingFollowUpGovernanceRequest(BaseModel):
     owner_agent_id: Optional[str] = None
     due_at: Optional[datetime] = None
+    version: int = Field(ge=1)
+
+
+class BookingBlockedAction(BaseModel):
+    action_id: CalendarBookingActionId
+    reason_code: CalendarBookingBlockedReasonCode
 
 
 class BookingResponse(BaseModel):
@@ -187,6 +215,10 @@ class BookingResponse(BaseModel):
     case_id: Optional[str] = None
     needs_action: bool = False
     attention_reason: Optional[str] = None
+    version: int = 1
+    allowed_actions: List[CalendarBookingActionId] = Field(default_factory=list)
+    blocked_actions: List[BookingBlockedAction] = Field(default_factory=list)
+    last_actor_type: Optional[str] = None
     created_at: str
 
 
@@ -206,6 +238,44 @@ class BookingActionResponse(BaseModel):
     success: bool
     booking: BookingResponse
     case_effects: List[BookingCaseEffect] = Field(default_factory=list)
+
+
+CalendarOperatorEventType = Literal[
+    "filter_apply",
+    "filter_reset",
+    "double_submit_blocked",
+]
+CalendarOperatorEventActionId = Literal[
+    "apply_filters",
+    "reset_filters",
+    "create_booking",
+    "edit_booking",
+    "reschedule_booking",
+    "cancel_booking",
+    "mark_completed",
+    "mark_no_show",
+    "record_follow_up_contacted",
+    "record_follow_up_rebooked",
+    "manage_follow_up_governance",
+]
+CalendarOperatorEventSurface = Literal[
+    "filter_panel",
+    "booking_panel",
+    "follow_up_panel",
+    "follow_up_governance",
+    "composer",
+]
+
+
+class CalendarOperatorEventRequest(BaseModel):
+    event_type: CalendarOperatorEventType
+    action_id: CalendarOperatorEventActionId
+    surface: CalendarOperatorEventSurface
+    booking_id: Optional[str] = None
+
+
+class CalendarOperatorEventResponse(BaseModel):
+    success: bool
 
 
 # ==================== Specialists ====================
@@ -402,11 +472,16 @@ def _resolve_booking_for_context(
     context: ConsoleAuthContext,
     db: Session,
     booking_id: UUID,
+    *,
+    for_update: bool = False,
 ) -> Appointment:
-    booking = db.query(Appointment).filter(
+    query = db.query(Appointment).filter(
         Appointment.id == booking_id,
         Appointment.client_id == context.client.id,
-    ).first()
+    )
+    if for_update and hasattr(query, "with_for_update"):
+        query = query.with_for_update()
+    booking = query.first()
     if not booking:
         raise ConsoleAPIError(404, "BOOKING_NOT_FOUND", "Booking not found")
     if context.branch_restricted and booking.branch_id not in context.allowed_branch_ids:
@@ -439,6 +514,336 @@ def _serialize_no_show_followup_state(audit_row: Optional[AppointmentAudit]) -> 
         "closed_by": closed_by,
         "rebooked_appointment_id": rebooked_appointment_id,
     }
+
+
+def _serialize_booking_blocked_actions(
+    blocked_actions: list[CalendarBlockedActionPayload],
+) -> list[BookingBlockedAction]:
+    blocked_map = {
+        payload["action_id"]: BookingBlockedAction(
+            action_id=payload["action_id"],
+            reason_code=payload["reason_code"],
+        )
+        for payload in blocked_actions
+    }
+    return [
+        blocked_map[action_id]
+        for action_id in BOOKING_ACTION_ORDER
+        if action_id in blocked_map
+    ]
+
+
+def _latest_actor_type_for_booking(db: Session, booking_id: UUID) -> Optional[str]:
+    latest_audit = (
+        db.query(AppointmentAudit)
+        .filter(AppointmentAudit.appointment_id == booking_id)
+        .order_by(AppointmentAudit.created_at.desc())
+        .first()
+    )
+    actor_type = getattr(latest_audit, "actor_type", None)
+    return actor_type or None
+
+
+def _latest_actor_type_by_appointment(
+    db: Session,
+    appointment_ids: list[UUID],
+) -> dict[UUID, Optional[str]]:
+    latest_actor_type_map: dict[UUID, Optional[str]] = {}
+    if not appointment_ids:
+        return latest_actor_type_map
+    rows = (
+        db.query(AppointmentAudit)
+        .filter(AppointmentAudit.appointment_id.in_(appointment_ids))
+        .order_by(
+            AppointmentAudit.appointment_id.asc(),
+            AppointmentAudit.created_at.desc(),
+        )
+        .all()
+    )
+    for row in rows:
+        appointment_id = getattr(row, "appointment_id", None)
+        if not appointment_id or appointment_id in latest_actor_type_map:
+            continue
+        latest_actor_type_map[appointment_id] = getattr(row, "actor_type", None) or None
+    return latest_actor_type_map
+
+
+def _build_booking_action_fields(
+    *,
+    context: ConsoleAuthContext,
+    booking: Appointment,
+    no_show_followup_done: bool,
+    case_id: Optional[str],
+) -> tuple[list[CalendarBookingActionId], list[BookingBlockedAction]]:
+    contract = build_calendar_booking_action_contract(
+        role=context.role,
+        status=booking.status,
+        no_show_followup_done=no_show_followup_done,
+        case_id=case_id,
+    )
+    return contract["allowed_actions"], _serialize_booking_blocked_actions(contract["blocked_actions"])
+
+
+def _enrich_booking_response_for_context(
+    *,
+    context: ConsoleAuthContext,
+    booking: Appointment,
+    booking_response: BookingResponse,
+    no_show_followup_done: bool,
+    case_id: Optional[str],
+    last_actor_type: Optional[str],
+) -> BookingResponse:
+    allowed_actions, blocked_actions = _build_booking_action_fields(
+        context=context,
+        booking=booking,
+        no_show_followup_done=no_show_followup_done,
+        case_id=case_id,
+    )
+    return booking_response.model_copy(
+        update={
+            "version": int(getattr(booking, "version", 1) or 1),
+            "allowed_actions": allowed_actions,
+            "blocked_actions": blocked_actions,
+            "last_actor_type": last_actor_type,
+            "case_id": case_id,
+        }
+    )
+
+
+def _build_booking_response_for_context(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    booking: Appointment,
+) -> BookingResponse:
+    booking_response = _build_booking_response(db, booking)
+    return _enrich_booking_response_for_context(
+        context=context,
+        booking=booking,
+        booking_response=booking_response,
+        no_show_followup_done=booking_response.no_show_followup_done,
+        case_id=booking_response.case_id,
+        last_actor_type=booking_response.last_actor_type,
+    )
+
+
+def _raise_booking_version_conflict(
+    *,
+    expected_version: int,
+    current_version: int,
+    db: Optional[Session] = None,
+    context: Optional[ConsoleAuthContext] = None,
+    action_id: Optional[str] = None,
+    booking: Optional[Appointment] = None,
+) -> None:
+    if db is not None and context is not None and action_id:
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id,
+            outcome="version_conflict",
+            booking=booking,
+            old_status=getattr(booking, "status", None),
+            new_status=getattr(booking, "status", None),
+            blocked_reason_code="version_conflict",
+            version_conflict=True,
+            linked_case_id=str(getattr(booking, "case_id", "")) or None,
+            payload={
+                "expected_version": expected_version,
+                "current_version": current_version,
+            },
+        )
+        _commit_if_supported(db)
+    raise ConsoleAPIError(
+        409,
+        "BOOKING_VERSION_CONFLICT",
+        "Booking was changed by another action. Refresh the card and try again.",
+        details={
+            "expected_version": expected_version,
+            "current_version": current_version,
+        },
+    )
+
+
+def _assert_booking_version(
+    *,
+    booking: Appointment,
+    expected_version: int,
+    db: Optional[Session] = None,
+    context: Optional[ConsoleAuthContext] = None,
+    action_id: Optional[str] = None,
+) -> int:
+    current_version = int(getattr(booking, "version", 1) or 1)
+    if expected_version != current_version:
+        _raise_booking_version_conflict(
+            expected_version=expected_version,
+            current_version=current_version,
+            db=db,
+            context=context,
+            action_id=action_id,
+            booking=booking,
+        )
+    return current_version
+
+
+def _record_booking_router_mutation(
+    *,
+    db: Session,
+    booking: Appointment,
+    context: ConsoleAuthContext,
+    action: str,
+    payload: Optional[dict[str, Any]] = None,
+    now: Optional[datetime] = None,
+) -> int:
+    resolved_now = now or datetime.now(timezone.utc)
+    prev_version = int(getattr(booking, "version", 1) or 1)
+    booking.version = prev_version + 1
+    booking.updated_at = resolved_now
+    db.add(booking)
+    db.add(
+        AppointmentAudit(
+            appointment_id=booking.id,
+            actor_type="agent",
+            actor_id=context.agent.id,
+            channel="console",
+            action=action,
+            prev_status=booking.status,
+            new_status=booking.status,
+            prev_version=prev_version,
+            new_version=booking.version,
+            payload=payload or {},
+            correlation_id=str(booking.conversation_id) if getattr(booking, "conversation_id", None) else None,
+        )
+    )
+    return int(booking.version or prev_version + 1)
+
+
+def _calendar_client_slug(context: ConsoleAuthContext) -> str | None:
+    return getattr(getattr(context, "client", None), "slug", None)
+
+
+def _calendar_branch_id(context: ConsoleAuthContext, booking: Optional[Appointment] = None) -> Optional[UUID]:
+    booking_branch_id = getattr(booking, "branch_id", None) if booking is not None else None
+    return (
+        booking_branch_id
+        or getattr(context, "effective_branch_id", None)
+        or getattr(context, "selected_branch_id", None)
+        or getattr(getattr(context, "agent", None), "branch_id", None)
+    )
+
+
+def _commit_if_supported(db: Session) -> None:
+    commit = getattr(db, "commit", None)
+    if callable(commit):
+        commit()
+
+
+def _can_record_audit_event(db: Session) -> bool:
+    return callable(getattr(db, "add", None))
+
+
+def _record_calendar_action_observation(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    action_id: str,
+    outcome: Literal["applied", "denied", "version_conflict", "invalid"],
+    booking: Optional[Appointment],
+    old_status: Optional[str],
+    new_status: Optional[str],
+    blocked_reason_code: Optional[str] = None,
+    version_conflict: bool = False,
+    linked_case_id: Optional[str] = None,
+    payload: Optional[dict[str, Any]] = None,
+) -> None:
+    actor_class = get_calendar_actor_class_for_role(getattr(context, "role", None))
+    normalized_old_status = (old_status or "").strip().upper() or None
+    normalized_new_status = (new_status or "").strip().upper() or None
+    normalized_reason_code = (blocked_reason_code or "").strip() or None
+    if _can_record_audit_event(db):
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type=f"calendar_booking_action_{outcome}",
+            entity_type="appointment",
+            entity_id=getattr(booking, "id", None),
+            payload={
+                "action_id": action_id,
+                "actor_class": actor_class,
+                "booking_id": str(getattr(booking, "id", "")) or None,
+                "old_status": normalized_old_status,
+                "new_status": normalized_new_status,
+                "blocked_reason_code": normalized_reason_code,
+                "version_conflict": version_conflict,
+                "linked_case_id": linked_case_id,
+                **(payload or {}),
+            },
+            client_id=context.client.id,
+            branch_id=_calendar_branch_id(context, booking),
+        )
+
+    client_slug = _calendar_client_slug(context)
+    if outcome == "denied" and normalized_reason_code:
+        record_calendar_booking_action_denied(
+            client_slug,
+            action_id=action_id,
+            actor_class=actor_class,
+            status=normalized_old_status,
+            reason_code=normalized_reason_code,
+        )
+    elif outcome == "version_conflict":
+        record_calendar_booking_version_conflict(
+            client_slug,
+            action_id=action_id,
+            actor_class=actor_class,
+        )
+    elif outcome == "invalid" and normalized_reason_code:
+        record_calendar_followup_invalid(
+            client_slug,
+            action_id=action_id,
+            actor_class=actor_class,
+            reason_code=normalized_reason_code,
+        )
+
+
+def _record_calendar_operator_event_observation(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    event_type: CalendarOperatorEventType,
+    action_id: CalendarOperatorEventActionId,
+    surface: CalendarOperatorEventSurface,
+    booking_id: Optional[str] = None,
+) -> None:
+    actor_class = get_calendar_actor_class_for_role(getattr(context, "role", None))
+    client_slug = _calendar_client_slug(context)
+    if event_type == "filter_apply":
+        record_calendar_filter_apply(client_slug, actor_class=actor_class)
+    elif event_type == "filter_reset":
+        record_calendar_filter_reset(client_slug, actor_class=actor_class)
+    elif event_type == "double_submit_blocked":
+        record_calendar_booking_double_submit_blocked(
+            client_slug,
+            action_id=action_id,
+            actor_class=actor_class,
+            surface=surface,
+        )
+    if _can_record_audit_event(db):
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type=f"calendar_operator_{event_type}",
+            entity_type="appointment" if booking_id else "calendar_queue",
+            entity_id=_parse_uuid(booking_id, field_name="booking_id") if booking_id else None,
+            payload={
+                "action_id": action_id,
+                "actor_class": actor_class,
+                "surface": surface,
+                "booking_id": booking_id,
+            },
+            client_id=context.client.id,
+            branch_id=_calendar_branch_id(context),
+        )
 
 
 def _can_manage_follow_up_governance(context: ConsoleAuthContext) -> bool:
@@ -649,6 +1054,18 @@ def _validate_or_link_rebooked_booking_case(
     if not changed:
         return [], False
 
+    _record_booking_router_mutation(
+        db=db,
+        booking=rebooked_booking,
+        context=context,
+        action="case_link_update",
+        payload={
+            "source_booking_id": str(source_booking.id),
+            "case_id": str(source_case_id) if source_case_id else None,
+            "conversation_id": str(source_conversation_id) if source_conversation_id else None,
+        },
+    )
+
     record_audit_event(
         db,
         actor=context.agent,
@@ -758,6 +1175,7 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         booking=booking,
         followup_done=bool(no_show_followup_state["done"]),
     )
+    last_actor_type = _latest_actor_type_for_booking(db, booking.id)
     return BookingResponse(
         id=str(booking.id),
         specialist_id=str(booking.specialist_id),
@@ -786,6 +1204,8 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
             followup_done=bool(no_show_followup_state["done"]),
         ),
         attention_reason=attention_reason,
+        version=int(getattr(booking, "version", 1) or 1),
+        last_actor_type=last_actor_type,
         created_at=booking.created_at.isoformat(),
     )
 
@@ -1144,13 +1564,41 @@ async def create_booking(
                 "time": f"{data.start_at} - {data.end_at}"
             }}
         )
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id="create_booking",
+            outcome="applied",
+            booking=booking,
+            old_status=None,
+            new_status=getattr(booking, "status", None),
+            linked_case_id=str(case_uuid) if case_uuid else None,
+        )
+        _commit_if_supported(db)
         
         return BookingActionResponse(
             success=True,
-            booking=_build_booking_response(db, booking),
+            booking=_build_booking_response_for_context(
+                db=db,
+                context=context,
+                booking=booking,
+            ),
         )
         
     except AppointmentConflictError as e:
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id="create_booking",
+            outcome="denied",
+            booking=None,
+            old_status=None,
+            new_status=None,
+            blocked_reason_code="slot_conflict",
+            linked_case_id=str(case_uuid) if case_uuid else None,
+            payload={"reason": str(e)},
+        )
+        _commit_if_supported(db)
         raise ConsoleAPIError(
             409,
             "BOOKING_CONFLICT",
@@ -1281,6 +1729,7 @@ async def list_bookings(
             if row.appointment_id in no_show_followup_map:
                 continue
             no_show_followup_map[row.appointment_id] = _serialize_no_show_followup_state(row)
+    latest_actor_type_map = _latest_actor_type_by_appointment(db, appointment_ids)
 
     conversation_ids = {b.conversation_id for b in bookings if b.conversation_id and not b.case_id}
     case_map = _latest_case_ids_by_conversation(
@@ -1291,41 +1740,50 @@ async def list_bookings(
     
     return BookingsListResponse(
         items=[
-            BookingResponse(
-                id=str(booking.id),
-                specialist_id=str(booking.specialist_id),
-                specialist_name=specialists_map.get(booking.specialist_id, "Unknown"),
-                start_at=booking.start_at.isoformat(),
-                end_at=booking.end_at.isoformat(),
-                customer_name=booking.customer_name,
-                customer_phone=booking.customer_phone,
-                service_type=services_map.get(booking.id),
-                notes=getattr(booking, "notes", None),
-                status=booking.status,
+            _enrich_booking_response_for_context(
+                context=context,
+                booking=booking,
+                booking_response=BookingResponse(
+                    id=str(booking.id),
+                    specialist_id=str(booking.specialist_id),
+                    specialist_name=specialists_map.get(booking.specialist_id, "Unknown"),
+                    start_at=booking.start_at.isoformat(),
+                    end_at=booking.end_at.isoformat(),
+                    customer_name=booking.customer_name,
+                    customer_phone=booking.customer_phone,
+                    service_type=services_map.get(booking.id),
+                    notes=getattr(booking, "notes", None),
+                    status=booking.status,
+                    no_show_followup_done=bool(followup_state.get("done", False)),
+                    no_show_followup_result=followup_state.get("result"),
+                    no_show_followup_closed_at=followup_state.get("closed_at"),
+                    no_show_followup_closed_by=followup_state.get("closed_by"),
+                    no_show_followup_rebooked_appointment_id=followup_state.get("rebooked_appointment_id"),
+                    follow_up_owner_id=str(getattr(booking, "follow_up_owner_id", None)) if getattr(booking, "follow_up_owner_id", None) else None,
+                    follow_up_owner_name=follow_up_owner_map.get(getattr(booking, "follow_up_owner_id", None)),
+                    follow_up_due_at=getattr(booking, "follow_up_due_at", None).isoformat() if getattr(booking, "follow_up_due_at", None) else None,
+                    follow_up_overdue=_booking_follow_up_overdue(
+                        booking=booking,
+                        followup_done=bool(followup_state.get("done", False)),
+                    ),
+                    google_event_id=sync_map.get(booking.id),
+                    conversation_id=str(booking.conversation_id) if booking.conversation_id else None,
+                    case_id=str(linked_case_id) if linked_case_id else None,
+                    needs_action=_booking_needs_action(
+                        booking.status,
+                        followup_done=bool(followup_state.get("done", False)),
+                    ),
+                    attention_reason=_booking_attention_reason(
+                        booking.status,
+                        followup_done=bool(followup_state.get("done", False)),
+                    ),
+                    version=int(getattr(booking, "version", 1) or 1),
+                    last_actor_type=latest_actor_type_map.get(booking.id),
+                    created_at=booking.created_at.isoformat(),
+                ),
                 no_show_followup_done=bool(followup_state.get("done", False)),
-                no_show_followup_result=followup_state.get("result"),
-                no_show_followup_closed_at=followup_state.get("closed_at"),
-                no_show_followup_closed_by=followup_state.get("closed_by"),
-                no_show_followup_rebooked_appointment_id=followup_state.get("rebooked_appointment_id"),
-                follow_up_owner_id=str(getattr(booking, "follow_up_owner_id", None)) if getattr(booking, "follow_up_owner_id", None) else None,
-                follow_up_owner_name=follow_up_owner_map.get(getattr(booking, "follow_up_owner_id", None)),
-                follow_up_due_at=getattr(booking, "follow_up_due_at", None).isoformat() if getattr(booking, "follow_up_due_at", None) else None,
-                follow_up_overdue=_booking_follow_up_overdue(
-                    booking=booking,
-                    followup_done=bool(followup_state.get("done", False)),
-                ),
-                google_event_id=sync_map.get(booking.id),
-                conversation_id=str(booking.conversation_id) if booking.conversation_id else None,
                 case_id=str(linked_case_id) if linked_case_id else None,
-                needs_action=_booking_needs_action(
-                    booking.status,
-                    followup_done=bool(followup_state.get("done", False)),
-                ),
-                attention_reason=_booking_attention_reason(
-                    booking.status,
-                    followup_done=bool(followup_state.get("done", False)),
-                ),
-                created_at=booking.created_at.isoformat(),
+                last_actor_type=latest_actor_type_map.get(booking.id),
             )
             for booking in bookings
             for followup_state in [no_show_followup_map.get(booking.id, {})]
@@ -1337,6 +1795,37 @@ async def list_bookings(
         cursor=next_cursor,
         has_more=has_more,
     )
+
+
+@router.post("/operator-events", response_model=CalendarOperatorEventResponse)
+async def record_calendar_operator_event(
+    request: Request,
+    data: CalendarOperatorEventRequest,
+    db: Session = Depends(get_db),
+):
+    """Record bounded operator-side Calendar telemetry for replay and failure-family review."""
+    context = get_console_context(request, db)
+    require_console_permission(context, "calendar", "read")
+
+    if data.event_type == "filter_apply" and data.action_id != "apply_filters":
+        raise ConsoleAPIError(400, "INVALID_PARAM", "filter_apply requires action_id=apply_filters")
+    if data.event_type == "filter_reset" and data.action_id != "reset_filters":
+        raise ConsoleAPIError(400, "INVALID_PARAM", "filter_reset requires action_id=reset_filters")
+    if data.event_type == "double_submit_blocked" and data.action_id in {"apply_filters", "reset_filters"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "double_submit_blocked requires a mutation action_id")
+    if data.event_type == "double_submit_blocked" and data.action_id != "create_booking" and not data.booking_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "booking_id is required for double_submit_blocked")
+
+    _record_calendar_operator_event_observation(
+        db=db,
+        context=context,
+        event_type=data.event_type,
+        action_id=data.action_id,
+        surface=data.surface,
+        booking_id=data.booking_id,
+    )
+    db.commit()
+    return CalendarOperatorEventResponse(success=True)
 
 
 @router.post("/bookings/{booking_id}/cancel", response_model=BookingActionResponse)
@@ -1354,10 +1843,12 @@ async def cancel_booking(
 
     try:
         booking_uuid = _parse_uuid(booking_id, field_name="booking_id")
-        _resolve_booking_for_context(context, db, booking_uuid)
+        current_booking = _resolve_booking_for_context(context, db, booking_uuid)
+        previous_status = getattr(current_booking, "status", None)
         booking = service.cancel_appointment(
             appointment_id=booking_uuid,
             client_id=context.client.id,
+            expected_version=data.version,
             reason=_normalize_optional_text(data.reason),
             actor_id=context.agent.id,
             actor_type="agent",
@@ -1380,22 +1871,58 @@ async def cancel_booking(
                     commit=False,
                 )
 
-        db.commit()
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id="cancel_booking",
+            outcome="applied",
+            booking=booking,
+            old_status=previous_status,
+            new_status=getattr(booking, "status", None),
+            linked_case_id=str(getattr(booking, "case_id", "")) or None,
+            payload={"reason": _normalize_optional_text(data.reason)},
+        )
+        _commit_if_supported(db)
         db.refresh(booking)
 
         return BookingActionResponse(
             success=True,
-            booking=_build_booking_response(db, booking),
+            booking=_build_booking_response_for_context(
+                db=db,
+                context=context,
+                booking=booking,
+            ),
         )
 
     except AppointmentNotFoundError:
         raise ConsoleAPIError(404, "BOOKING_NOT_FOUND", "Booking not found")
     except AppointmentLifecycleActionDeniedError as exc:
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id="cancel_booking",
+            outcome="denied",
+            booking=current_booking if "current_booking" in locals() else None,
+            old_status=exc.current_status,
+            new_status=exc.current_status,
+            blocked_reason_code="active_status_only",
+            linked_case_id=str(getattr(current_booking, "case_id", "")) or None if "current_booking" in locals() else None,
+        )
+        _commit_if_supported(db)
         raise ConsoleAPIError(
             409,
             "BOOKING_CANCEL_DENIED",
             "Booking cancellation is not allowed",
             details={"status": exc.current_status},
+        )
+    except AppointmentVersionConflictError as exc:
+        _raise_booking_version_conflict(
+            expected_version=exc.expected_version,
+            current_version=exc.current_version,
+            db=db,
+            context=context,
+            action_id="cancel_booking",
+            booking=current_booking if "current_booking" in locals() else None,
         )
 
 
@@ -1411,7 +1938,11 @@ async def update_booking(
     require_console_permission(context, "calendar", "write")
 
     booking_uuid = _parse_uuid(booking_id, field_name="booking_id")
-    _resolve_booking_for_context(context, db, booking_uuid)
+    current_booking = _resolve_booking_for_context(context, db, booking_uuid)
+    previous_status = getattr(current_booking, "status", None)
+    previous_specialist_id = str(getattr(current_booking, "specialist_id", "")) or None
+    previous_start_at = getattr(current_booking, "start_at", None)
+    previous_end_at = getattr(current_booking, "end_at", None)
 
     specialist_uuid = _parse_uuid(data.specialist_id, field_name="specialist_id")
     specialist = db.query(Specialist).filter(
@@ -1430,6 +1961,15 @@ async def update_booking(
 
     service = SchedulingService(db)
     try:
+        action_id = (
+            "reschedule_booking"
+            if (
+                previous_specialist_id != str(specialist_uuid)
+                or previous_start_at != data.start_at
+                or previous_end_at != data.end_at
+            )
+            else "edit_booking"
+        )
         booking = service.update_appointment(
             appointment_id=booking_uuid,
             client_id=context.client.id,
@@ -1440,6 +1980,7 @@ async def update_booking(
             customer_phone=customer_phone,
             service_type=service_type,
             notes=notes,
+            expected_version=data.version,
             actor_id=context.agent.id,
             actor_type="agent",
             channel="console",
@@ -1455,17 +1996,44 @@ async def update_booking(
                     action="update",
                     commit=False,
                 )
-        db.commit()
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id,
+            outcome="applied",
+            booking=booking,
+            old_status=previous_status,
+            new_status=booking.status,
+            linked_case_id=str(getattr(booking, "case_id", "")) or None,
+        )
+        _commit_if_supported(db)
         db.refresh(booking)
         return BookingActionResponse(
             success=True,
-            booking=_build_booking_response(db, booking),
+            booking=_build_booking_response_for_context(
+                db=db,
+                context=context,
+                booking=booking,
+            ),
         )
     except AppointmentNotFoundError:
         raise ConsoleAPIError(404, "BOOKING_NOT_FOUND", "Booking not found")
     except SpecialistNotFoundError:
         raise ConsoleAPIError(404, "SPECIALIST_NOT_FOUND", "Specialist not found")
     except AppointmentConflictError as exc:
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id if "action_id" in locals() else "edit_booking",
+            outcome="denied",
+            booking=current_booking,
+            old_status=previous_status,
+            new_status=previous_status,
+            blocked_reason_code="slot_conflict",
+            linked_case_id=str(getattr(current_booking, "case_id", "")) or None,
+            payload={"reason": str(exc)},
+        )
+        _commit_if_supported(db)
         raise ConsoleAPIError(
             409,
             "BOOKING_CONFLICT",
@@ -1473,11 +2041,32 @@ async def update_booking(
             details={"reason": str(exc)},
         )
     except AppointmentLifecycleActionDeniedError as exc:
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id if "action_id" in locals() else "edit_booking",
+            outcome="denied",
+            booking=current_booking,
+            old_status=exc.current_status,
+            new_status=exc.current_status,
+            blocked_reason_code="active_status_only",
+            linked_case_id=str(getattr(current_booking, "case_id", "")) or None,
+        )
+        _commit_if_supported(db)
         raise ConsoleAPIError(
             409,
             "BOOKING_UPDATE_DENIED",
             "Booking edit is not allowed",
             details={"status": exc.current_status},
+        )
+    except AppointmentVersionConflictError as exc:
+        _raise_booking_version_conflict(
+            expected_version=exc.expected_version,
+            current_version=exc.current_version,
+            db=db,
+            context=context,
+            action_id=action_id if "action_id" in locals() else "edit_booking",
+            booking=current_booking,
         )
 
 
@@ -1495,14 +2084,17 @@ async def update_booking_status(
     service = SchedulingService(db)
 
     booking_uuid = _parse_uuid(booking_id, field_name="booking_id")
-    _resolve_booking_for_context(context, db, booking_uuid)
+    current_booking = _resolve_booking_for_context(context, db, booking_uuid)
+    previous_status = getattr(current_booking, "status", None)
     reason = _normalize_optional_text(data.reason)
+    action_id = "mark_completed" if (data.status or "").upper() == "COMPLETED" else "mark_no_show"
 
     try:
         booking = service.update_appointment_status(
             appointment_id=booking_uuid,
             client_id=context.client.id,
             target_status=data.status,
+            expected_version=data.version,
             actor_id=context.agent.id,
             actor_type="agent",
             channel="console",
@@ -1519,6 +2111,19 @@ async def update_booking_status(
             details={"status": exc.status},
         )
     except InvalidAppointmentTransitionError as exc:
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id,
+            outcome="denied",
+            booking=current_booking,
+            old_status=exc.current_status,
+            new_status=exc.current_status,
+            blocked_reason_code="active_status_only",
+            linked_case_id=str(getattr(current_booking, "case_id", "")) or None,
+            payload={"target_status": exc.target_status},
+        )
+        _commit_if_supported(db)
         raise ConsoleAPIError(
             409,
             "BOOKING_STATUS_TRANSITION_DENIED",
@@ -1528,19 +2133,53 @@ async def update_booking_status(
                 "to": exc.target_status,
             },
         )
+    except AppointmentVersionConflictError as exc:
+        _raise_booking_version_conflict(
+            expected_version=exc.expected_version,
+            current_version=exc.current_version,
+            db=db,
+            context=context,
+            action_id=action_id,
+            booking=current_booking,
+        )
 
     case_effects: list[BookingCaseEffect] = []
     if (booking.status or "").upper() == "NO_SHOW":
+        follow_up_defaults_changed = False
         if getattr(booking, "follow_up_owner_id", None) is None:
             booking.follow_up_owner_id = context.agent.id
+            follow_up_defaults_changed = True
         if getattr(booking, "follow_up_due_at", None) is None:
             booking.follow_up_due_at = datetime.now(timezone.utc) + _DEFAULT_NO_SHOW_FOLLOW_UP_WINDOW
+            follow_up_defaults_changed = True
+        if follow_up_defaults_changed:
+            _record_booking_router_mutation(
+                db=db,
+                booking=booking,
+                context=context,
+                action="no_show_follow_up_defaults",
+                payload={
+                    "follow_up_owner_id": str(booking.follow_up_owner_id) if booking.follow_up_owner_id else None,
+                    "follow_up_due_at": booking.follow_up_due_at.isoformat() if booking.follow_up_due_at else None,
+                },
+            )
         case_effects = _maybe_reopen_linked_case_for_booking_attention(
             db=db,
             context=context,
             booking=booking,
         )
 
+    _record_calendar_action_observation(
+        db=db,
+        context=context,
+        action_id=action_id,
+        outcome="applied",
+        booking=booking,
+        old_status=previous_status,
+        new_status=booking.status,
+        linked_case_id=str(getattr(booking, "case_id", "")) or None,
+        payload={"reason": reason},
+    )
     db.commit()
     db.refresh(booking)
 
@@ -1557,7 +2196,11 @@ async def update_booking_status(
     )
     return BookingActionResponse(
         success=True,
-        booking=_build_booking_response(db, booking),
+        booking=_build_booking_response_for_context(
+            db=db,
+            context=context,
+            booking=booking,
+        ),
         case_effects=case_effects,
     )
 
@@ -1574,8 +2217,29 @@ async def register_booking_no_show_followup(
     require_console_permission(context, "calendar", "write")
 
     booking_uuid = _parse_uuid(booking_id, field_name="booking_id")
-    booking = _resolve_booking_for_context(context, db, booking_uuid)
+    booking = _resolve_booking_for_context(context, db, booking_uuid, for_update=True)
+    result = (data.result or "contacted").strip().lower()
+    action_id = "record_follow_up_rebooked" if result == "rebooked" else "record_follow_up_contacted"
+    _assert_booking_version(
+        booking=booking,
+        expected_version=data.version,
+        db=db,
+        context=context,
+        action_id=action_id,
+    )
     if (booking.status or "").upper() != "NO_SHOW":
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id,
+            outcome="invalid",
+            booking=booking,
+            old_status=booking.status,
+            new_status=booking.status,
+            blocked_reason_code="booking_status_required",
+            linked_case_id=str(getattr(booking, "case_id", "")) or None,
+        )
+        _commit_if_supported(db)
         raise ConsoleAPIError(
             409,
             "BOOKING_STATUS_REQUIRED",
@@ -1583,16 +2247,39 @@ async def register_booking_no_show_followup(
             details={"current_status": booking.status, "required_status": "NO_SHOW"},
         )
 
-    result = (data.result or "contacted").strip().lower()
     note = _normalize_optional_text(data.note)
     rebooked_appointment_id = _normalize_optional_text(data.rebooked_appointment_id)
     if result == "rebooked" and not rebooked_appointment_id:
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id,
+            outcome="invalid",
+            booking=booking,
+            old_status=booking.status,
+            new_status=booking.status,
+            blocked_reason_code="rebook_link_required",
+            linked_case_id=str(getattr(booking, "case_id", "")) or None,
+        )
+        _commit_if_supported(db)
         raise ConsoleAPIError(
             400,
             "INVALID_PARAM",
             "rebooked_appointment_id is required when result=rebooked",
         )
     if result != "rebooked" and rebooked_appointment_id:
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id,
+            outcome="invalid",
+            booking=booking,
+            old_status=booking.status,
+            new_status=booking.status,
+            blocked_reason_code="unexpected_rebook_link",
+            linked_case_id=str(getattr(booking, "case_id", "")) or None,
+        )
+        _commit_if_supported(db)
         raise ConsoleAPIError(
             400,
             "INVALID_PARAM",
@@ -1634,77 +2321,60 @@ async def register_booking_no_show_followup(
         .order_by(AppointmentAudit.created_at.desc())
         .first()
     )
+    followup_state = _serialize_no_show_followup_state(existing_followup)
 
     now = datetime.now(timezone.utc)
+    payload: dict[str, Any] = {
+        "action": "contact_rebook",
+        "source": "calendar_console",
+        "result": result,
+        "follow_up_closed_at": now.isoformat(),
+        "follow_up_closed_by": str(context.agent.id),
+    }
+    if note:
+        payload["note"] = note
+    if rebooked_appointment_id:
+        payload["rebooked_appointment_id"] = rebooked_appointment_id
+
     followup_changed = False
-    if existing_followup:
-        existing_payload = (
+    if followup_state["done"]:
+        current_payload = (
             dict(existing_followup.payload)
-            if isinstance(existing_followup.payload, dict)
+            if existing_followup and isinstance(existing_followup.payload, dict)
             else {}
         )
-        updated_payload = dict(existing_payload)
-        changed = False
-
-        if updated_payload.get("action") != "contact_rebook":
-            updated_payload["action"] = "contact_rebook"
-            changed = True
-        if updated_payload.get("source") != "calendar_console":
-            updated_payload["source"] = "calendar_console"
-            changed = True
-        if not updated_payload.get("follow_up_closed_at"):
-            if existing_followup.created_at:
-                updated_payload["follow_up_closed_at"] = existing_followup.created_at.isoformat()
-            else:
-                updated_payload["follow_up_closed_at"] = now.isoformat()
-            changed = True
-        if not updated_payload.get("follow_up_closed_by"):
-            updated_payload["follow_up_closed_by"] = str(existing_followup.actor_id or context.agent.id)
-            changed = True
-        if not updated_payload.get("result"):
-            updated_payload["result"] = result
-            changed = True
-        if note and updated_payload.get("note") != note:
-            updated_payload["note"] = note
-            changed = True
-        if result == "rebooked":
-            if updated_payload.get("result") != "rebooked":
-                updated_payload["result"] = "rebooked"
-                changed = True
-            if updated_payload.get("rebooked_appointment_id") != rebooked_appointment_id:
-                updated_payload["rebooked_appointment_id"] = rebooked_appointment_id
-                changed = True
-
-        if changed:
-            existing_followup.payload = updated_payload
-            followup_changed = True
-    else:
-        payload: dict[str, Any] = {
-            "action": "contact_rebook",
-            "source": "calendar_console",
+        requested_signature = {
             "result": result,
-            "follow_up_closed_at": now.isoformat(),
-            "follow_up_closed_by": str(context.agent.id),
+            "note": note,
+            "rebooked_appointment_id": rebooked_appointment_id,
         }
-        if note:
-            payload["note"] = note
-        if rebooked_appointment_id:
-            payload["rebooked_appointment_id"] = rebooked_appointment_id
-
-        db.add(
-            AppointmentAudit(
-                appointment_id=booking.id,
-                actor_type="agent",
-                actor_id=context.agent.id,
-                channel="console",
-                action="no_show_followup",
-                prev_status=booking.status,
+        current_signature = {
+            "result": current_payload.get("result") or followup_state["result"],
+            "note": current_payload.get("note"),
+            "rebooked_appointment_id": current_payload.get("rebooked_appointment_id"),
+        }
+        if current_signature != requested_signature:
+            _record_calendar_action_observation(
+                db=db,
+                context=context,
+                action_id=action_id,
+                outcome="invalid",
+                booking=booking,
+                old_status=booking.status,
                 new_status=booking.status,
-                prev_version=int(booking.version or 0),
-                new_version=int(booking.version or 0),
-                payload=payload,
-                created_at=now,
+                blocked_reason_code="follow_up_already_closed",
+                linked_case_id=str(getattr(booking, "case_id", "")) or None,
             )
+            _commit_if_supported(db)
+            raise ConsoleAPIError(409, "FOLLOW_UP_ALREADY_CLOSED", "No-show follow-up is already closed")
+    else:
+        _record_booking_router_mutation(
+            db=db,
+            booking=booking,
+            context=context,
+            action="no_show_followup",
+            payload=payload,
+            now=now,
         )
         followup_changed = True
 
@@ -1719,7 +2389,21 @@ async def register_booking_no_show_followup(
         )
 
     if followup_changed or rebook_link_changed:
-        db.commit()
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id,
+            outcome="applied",
+            booking=booking,
+            old_status=booking.status,
+            new_status=booking.status,
+            linked_case_id=str(getattr(booking, "case_id", "")) or None,
+            payload={
+                "result": result,
+                "rebooked_appointment_id": rebooked_appointment_id,
+            },
+        )
+        _commit_if_supported(db)
     if rebooked_booking is not None:
         db.refresh(rebooked_booking)
 
@@ -1737,7 +2421,11 @@ async def register_booking_no_show_followup(
     )
     return BookingActionResponse(
         success=True,
-        booking=_build_booking_response(db, booking),
+        booking=_build_booking_response_for_context(
+            db=db,
+            context=context,
+            booking=booking,
+        ),
         case_effects=case_effects,
     )
 
@@ -1752,11 +2440,45 @@ async def update_booking_follow_up_governance(
     """Update no-show follow-up owner/due governance for a booking."""
     context = get_console_context(request, db)
     require_console_permission(context, "calendar", "write")
-    _require_follow_up_governance_permission(context)
+    try:
+        _require_follow_up_governance_permission(context)
+    except ConsoleAPIError:
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id="manage_follow_up_governance",
+            outcome="denied",
+            booking=None,
+            old_status=None,
+            new_status=None,
+            blocked_reason_code="permission_required",
+        )
+        _commit_if_supported(db)
+        raise
 
     booking_uuid = _parse_uuid(booking_id, field_name="booking_id")
-    booking = _resolve_booking_for_context(context, db, booking_uuid)
+    booking = _resolve_booking_for_context(context, db, booking_uuid, for_update=True)
+    action_id = "manage_follow_up_governance"
+    _assert_booking_version(
+        booking=booking,
+        expected_version=data.version,
+        db=db,
+        context=context,
+        action_id=action_id,
+    )
     if (booking.status or "").upper() != "NO_SHOW":
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id,
+            outcome="invalid",
+            booking=booking,
+            old_status=booking.status,
+            new_status=booking.status,
+            blocked_reason_code="booking_status_required",
+            linked_case_id=str(getattr(booking, "case_id", "")) or None,
+        )
+        _commit_if_supported(db)
         raise ConsoleAPIError(
             409,
             "BOOKING_STATUS_REQUIRED",
@@ -1775,12 +2497,37 @@ async def update_booking_follow_up_governance(
     )
     followup_state = _serialize_no_show_followup_state(existing_followup)
     if followup_state["done"]:
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id,
+            outcome="invalid",
+            booking=booking,
+            old_status=booking.status,
+            new_status=booking.status,
+            blocked_reason_code="follow_up_already_closed",
+            linked_case_id=str(getattr(booking, "case_id", "")) or None,
+        )
+        _commit_if_supported(db)
         raise ConsoleAPIError(409, "FOLLOW_UP_ALREADY_CLOSED", "No-show follow-up is already closed")
 
-    body_fields = data.model_dump(exclude_unset=True)
+    body_fields = data.model_dump(exclude_unset=True, exclude={"version"})
     if not body_fields:
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id,
+            outcome="invalid",
+            booking=booking,
+            old_status=booking.status,
+            new_status=booking.status,
+            blocked_reason_code="governance_fields_required",
+            linked_case_id=str(getattr(booking, "case_id", "")) or None,
+        )
+        _commit_if_supported(db)
         raise ConsoleAPIError(400, "INVALID_PARAM", "At least one governance field is required")
 
+    changes: dict[str, Any] = {}
     owner_agent_uuid: Optional[UUID] = None
     if "owner_agent_id" in body_fields:
         owner_agent_id = data.owner_agent_id.strip() if data.owner_agent_id else None
@@ -1791,15 +2538,51 @@ async def update_booking_follow_up_governance(
                 db=db,
                 owner_agent_id=owner_agent_uuid,
             )
-        booking.follow_up_owner_id = owner_agent_uuid
+        if booking.follow_up_owner_id != owner_agent_uuid:
+            booking.follow_up_owner_id = owner_agent_uuid
+            changes["follow_up_owner_id"] = str(owner_agent_uuid) if owner_agent_uuid else None
 
     if "due_at" in body_fields:
         normalized_due_at = _normalize_follow_up_due_at(data.due_at)
         if normalized_due_at and normalized_due_at <= datetime.now(timezone.utc) - timedelta(days=30):
+            _record_calendar_action_observation(
+                db=db,
+                context=context,
+                action_id=action_id,
+                outcome="invalid",
+                booking=booking,
+                old_status=booking.status,
+                new_status=booking.status,
+                blocked_reason_code="due_at_too_far_past",
+                linked_case_id=str(getattr(booking, "case_id", "")) or None,
+            )
+            _commit_if_supported(db)
             raise ConsoleAPIError(400, "INVALID_PARAM", "due_at is too far in the past")
-        booking.follow_up_due_at = normalized_due_at
+        current_due_at = _normalize_follow_up_due_at(getattr(booking, "follow_up_due_at", None))
+        if current_due_at != normalized_due_at:
+            booking.follow_up_due_at = normalized_due_at
+            changes["follow_up_due_at"] = normalized_due_at.isoformat() if normalized_due_at else None
 
-    db.add(booking)
+    if changes:
+        _record_booking_router_mutation(
+            db=db,
+            booking=booking,
+            context=context,
+            action="follow_up_governance",
+            payload=changes,
+        )
+        _record_calendar_action_observation(
+            db=db,
+            context=context,
+            action_id=action_id,
+            outcome="applied",
+            booking=booking,
+            old_status=booking.status,
+            new_status=booking.status,
+            linked_case_id=str(getattr(booking, "case_id", "")) or None,
+            payload=changes,
+        )
+
     db.commit()
     db.refresh(booking)
 
@@ -1816,7 +2599,11 @@ async def update_booking_follow_up_governance(
     )
     return BookingActionResponse(
         success=True,
-        booking=_build_booking_response(db, booking),
+        booking=_build_booking_response_for_context(
+            db=db,
+            context=context,
+            booking=booking,
+        ),
         case_effects=[],
     )
 

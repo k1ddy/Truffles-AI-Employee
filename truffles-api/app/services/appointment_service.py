@@ -71,6 +71,15 @@ class AppointmentLifecycleActionDeniedError(Exception):
         self.current_status = current_status
 
 
+class AppointmentVersionConflictError(Exception):
+    """Raised when a lifecycle mutation uses a stale booking version."""
+
+    def __init__(self, expected_version: int, current_version: int):
+        super().__init__(f"Version conflict: expected {expected_version}, current {current_version}")
+        self.expected_version = expected_version
+        self.current_version = current_version
+
+
 @dataclass
 class TimeSlot:
     start: datetime
@@ -124,14 +133,23 @@ class SchedulingService:
             Specialist.is_active == True,
         ).first()
 
-    def _get_appointment(self, appointment_id: UUID, client_id: UUID) -> Appointment:
-        appointment = self.db.query(Appointment).filter(
+    def _get_appointment(self, appointment_id: UUID, client_id: UUID, *, for_update: bool = False) -> Appointment:
+        query = self.db.query(Appointment).filter(
             Appointment.id == appointment_id,
             Appointment.client_id == client_id,
-        ).first()
+        )
+        if for_update and hasattr(query, "with_for_update"):
+            query = query.with_for_update()
+        appointment = query.first()
         if not appointment:
             raise AppointmentNotFoundError(f"Appointment {appointment_id} not found")
         return appointment
+
+    def _assert_expected_version(self, *, appointment: Appointment, expected_version: int) -> int:
+        current_version = int(appointment.version or 0)
+        if expected_version != current_version:
+            raise AppointmentVersionConflictError(expected_version, current_version)
+        return current_version
 
     def _assert_lifecycle_action_allowed(self, *, appointment: Appointment, action: str) -> str:
         normalized_status = self.normalize_visit_status(appointment.status)
@@ -412,6 +430,7 @@ class SchedulingService:
         self,
         appointment_id: UUID,
         client_id: UUID,
+        expected_version: int,
         reason: Optional[str] = None,
         *,
         actor_id: Optional[UUID] = None,
@@ -419,7 +438,8 @@ class SchedulingService:
         channel: str = "console",
         commit: bool = True,
     ) -> Appointment:
-        appointment = self._get_appointment(appointment_id, client_id)
+        appointment = self._get_appointment(appointment_id, client_id, for_update=True)
+        self._assert_expected_version(appointment=appointment, expected_version=expected_version)
         self._assert_lifecycle_action_allowed(appointment=appointment, action="cancel")
 
         prev_status = appointment.status
@@ -469,6 +489,7 @@ class SchedulingService:
         customer_phone: Optional[str] = None,
         service_type: Optional[str] = None,
         notes: Optional[str] = None,
+        expected_version: int,
         actor_id: Optional[UUID] = None,
         actor_type: str = "agent",
         channel: str = "console",
@@ -476,7 +497,8 @@ class SchedulingService:
         correlation_id: Optional[str] = None,
         commit: bool = True,
     ) -> Appointment:
-        appointment = self._get_appointment(appointment_id, client_id)
+        appointment = self._get_appointment(appointment_id, client_id, for_update=True)
+        self._assert_expected_version(appointment=appointment, expected_version=expected_version)
         normalized_current = self._assert_lifecycle_action_allowed(appointment=appointment, action="update")
         specialist = self._get_specialist(specialist_id)
         if not specialist:
@@ -619,6 +641,7 @@ class SchedulingService:
         appointment_id: UUID,
         client_id: UUID,
         target_status: str,
+        expected_version: int,
         actor_id: Optional[UUID] = None,
         actor_type: str = "agent",
         channel: str = "console",
@@ -631,12 +654,8 @@ class SchedulingService:
         if normalized_target not in self.VISIT_STATUSES:
             raise AppointmentStatusValidationError(target_status)
 
-        appointment = self.db.query(Appointment).filter(
-            Appointment.id == appointment_id,
-            Appointment.client_id == client_id,
-        ).first()
-        if not appointment:
-            raise AppointmentNotFoundError(f"Appointment {appointment_id} not found")
+        appointment = self._get_appointment(appointment_id, client_id, for_update=True)
+        self._assert_expected_version(appointment=appointment, expected_version=expected_version)
 
         normalized_current = self.normalize_visit_status(appointment.status)
         if not self.can_transition_to_visit_status(normalized_current, normalized_target):

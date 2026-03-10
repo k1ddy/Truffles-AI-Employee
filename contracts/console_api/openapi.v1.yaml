@@ -7292,6 +7292,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/calendar/operator-events:
+    post:
+      tags:
+      - Calendar
+      summary: Record Calendar Operator Event
+      description: Record bounded operator-side Calendar telemetry for replay and
+        failure-family review.
+      operationId: record_calendar_operator_event_console_v1_calendar_operator_events_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalendarOperatorEventRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarOperatorEventResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/calendar/bookings/{booking_id}/cancel:
     post:
       tags:
@@ -7570,6 +7597,34 @@ components:
       - success
       - booking
       title: BookingActionResponse
+    BookingBlockedAction:
+      properties:
+        action_id:
+          type: string
+          enum:
+          - edit_booking
+          - cancel_booking
+          - mark_completed
+          - mark_no_show
+          - record_follow_up_contacted
+          - record_follow_up_rebooked
+          - manage_follow_up_governance
+          - open_case_from_booking
+          title: Action Id
+        reason_code:
+          type: string
+          enum:
+          - permission_required
+          - active_status_only
+          - open_no_show_required
+          - follow_up_already_closed
+          - case_link_required
+          title: Reason Code
+      type: object
+      required:
+      - action_id
+      - reason_code
+      title: BookingBlockedAction
     BookingCancelRequest:
       properties:
         reason:
@@ -7578,7 +7633,13 @@ components:
             maxLength: 500
           - type: 'null'
           title: Reason
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
       type: object
+      required:
+      - version
       title: BookingCancelRequest
     BookingCaseEffect:
       properties:
@@ -7665,7 +7726,13 @@ components:
             format: date-time
           - type: 'null'
           title: Due At
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
       type: object
+      required:
+      - version
       title: BookingFollowUpGovernanceRequest
     BookingNoShowFollowUpRequest:
       properties:
@@ -7687,7 +7754,13 @@ components:
             maxLength: 500
           - type: 'null'
           title: Note
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
       type: object
+      required:
+      - version
       title: BookingNoShowFollowUpRequest
     BookingResponse:
       properties:
@@ -7796,6 +7869,34 @@ components:
           - type: string
           - type: 'null'
           title: Attention Reason
+        version:
+          type: integer
+          title: Version
+          default: 1
+        allowed_actions:
+          items:
+            type: string
+            enum:
+            - edit_booking
+            - cancel_booking
+            - mark_completed
+            - mark_no_show
+            - record_follow_up_contacted
+            - record_follow_up_rebooked
+            - manage_follow_up_governance
+            - open_case_from_booking
+          type: array
+          title: Allowed Actions
+        blocked_actions:
+          items:
+            $ref: '#/components/schemas/BookingBlockedAction'
+          type: array
+          title: Blocked Actions
+        last_actor_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Actor Type
         created_at:
           type: string
           title: Created At
@@ -7822,9 +7923,14 @@ components:
             maxLength: 500
           - type: 'null'
           title: Reason
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
       type: object
       required:
       - status
+      - version
       title: BookingStatusUpdateRequest
     BookingUpdate:
       properties:
@@ -7859,6 +7965,10 @@ components:
           - type: string
           - type: 'null'
           title: Notes
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
       type: object
       required:
       - specialist_id
@@ -7867,6 +7977,7 @@ components:
       - customer_name
       - customer_phone
       - service_type
+      - version
       title: BookingUpdate
     BookingsListResponse:
       properties:
@@ -7888,6 +7999,59 @@ components:
       required:
       - items
       title: BookingsListResponse
+    CalendarOperatorEventRequest:
+      properties:
+        event_type:
+          type: string
+          enum:
+          - filter_apply
+          - filter_reset
+          - double_submit_blocked
+          title: Event Type
+        action_id:
+          type: string
+          enum:
+          - apply_filters
+          - reset_filters
+          - create_booking
+          - edit_booking
+          - reschedule_booking
+          - cancel_booking
+          - mark_completed
+          - mark_no_show
+          - record_follow_up_contacted
+          - record_follow_up_rebooked
+          - manage_follow_up_governance
+          title: Action Id
+        surface:
+          type: string
+          enum:
+          - filter_panel
+          - booking_panel
+          - follow_up_panel
+          - follow_up_governance
+          - composer
+          title: Surface
+        booking_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Booking Id
+      type: object
+      required:
+      - event_type
+      - action_id
+      - surface
+      title: CalendarOperatorEventRequest
+    CalendarOperatorEventResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+      type: object
+      required:
+      - success
+      title: CalendarOperatorEventResponse
     CapabilitiesPayload-Input:
       properties:
         domain_slug:

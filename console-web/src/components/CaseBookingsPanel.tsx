@@ -8,11 +8,14 @@ import {
     bookingNeedsAttention,
     fetchBookings,
     getBookingAttentionLabel,
-    getVisitActionOptions,
     registerNoShowFollowUp,
     updateBookingStatus,
     type Booking,
 } from "@/lib/calendar-bookings";
+import {
+    buildCalendarBookingActionAvailabilityMap,
+    getCalendarVisitActionOptions,
+} from "@/lib/calendar-action-registry";
 import {
     getBookingStatusColor,
     getBookingStatusLabel,
@@ -58,8 +61,8 @@ export default function CaseBookingsPanel({
     });
 
     const statusMutation = useMutation({
-        mutationFn: async (payload: { bookingId: string; status: "COMPLETED" | "NO_SHOW" }) =>
-            updateBookingStatus(payload.bookingId, { status: payload.status }),
+        mutationFn: async (payload: { bookingId: string; status: "COMPLETED" | "NO_SHOW"; version: number }) =>
+            updateBookingStatus(payload.bookingId, { status: payload.status, version: payload.version }),
         onSuccess: (response) => {
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
@@ -68,14 +71,19 @@ export default function CaseBookingsPanel({
             const suffix = effectMessages.length > 0 ? ` ${effectMessages.join(" ")}` : "";
             toast.success(`Статус записи обновлен: ${getBookingStatusLabel(response.booking.status)}.${suffix}`.trim());
         },
-        onError: () => {
-            toast.error("Не удалось обновить статус записи");
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "BOOKING_VERSION_CONFLICT") {
+                toast.error("Запись уже изменилась. Обновите блок заявки.");
+            } else {
+                toast.error("Не удалось обновить статус записи");
+            }
         },
     });
 
     const followUpMutation = useMutation({
-        mutationFn: async (payload: { bookingId: string; result: "contacted" | "rebooked" }) =>
-            registerNoShowFollowUp(payload.bookingId, { result: payload.result }),
+        mutationFn: async (payload: { bookingId: string; result: "contacted" | "rebooked"; version: number }) =>
+            registerNoShowFollowUp(payload.bookingId, { result: payload.result, version: payload.version }),
         onSuccess: (response) => {
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
@@ -85,8 +93,15 @@ export default function CaseBookingsPanel({
             const suffix = effectMessages.length > 0 ? ` ${effectMessages.join(" ")}` : "";
             toast.success(`После неявки: ${label}.${suffix}`.trim());
         },
-        onError: () => {
-            toast.error("Не удалось сохранить результат после неявки");
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "BOOKING_VERSION_CONFLICT") {
+                toast.error("Карточка устарела. Обновите блок заявки.");
+            } else if (code === "FOLLOW_UP_ALREADY_CLOSED") {
+                toast.error("Результат связи уже зафиксирован.");
+            } else {
+                toast.error("Не удалось сохранить результат после неявки");
+            }
         },
     });
 
@@ -175,8 +190,8 @@ export default function CaseBookingsPanel({
                                 canWriteCalendar={canWriteCalendar}
                                 statusPending={statusPending}
                                 followUpPending={followUpPending}
-                                onUpdateStatus={(status) => statusMutation.mutate({ bookingId: booking.id, status })}
-                                onCloseNoShow={(result) => followUpMutation.mutate({ bookingId: booking.id, result })}
+                                onUpdateStatus={(status) => statusMutation.mutate({ bookingId: booking.id, status, version: booking.version })}
+                                onCloseNoShow={(result) => followUpMutation.mutate({ bookingId: booking.id, result, version: booking.version })}
                             />
                         );
                     })}
@@ -203,6 +218,13 @@ function BookingCard({
     onUpdateStatus: (status: "COMPLETED" | "NO_SHOW") => void;
     onCloseNoShow: (result: "contacted" | "rebooked") => void;
 }) {
+    const calendarActionPermissions = {
+        canWriteCalendar,
+        canManageFollowUpGovernance: false,
+    };
+    const bookingActionMap = buildCalendarBookingActionAvailabilityMap(booking, calendarActionPermissions);
+    const visitActions = getCalendarVisitActionOptions(booking, calendarActionPermissions);
+    const showNoShowFollowUpActions = bookingActionMap.record_follow_up_contacted.visible || bookingActionMap.record_follow_up_rebooked.visible;
     return (
         <div className="rounded-lg border border-border/60 p-3" data-testid="case-booking-card">
             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -231,11 +253,11 @@ function BookingCard({
                     </span>
                 </div>
             ) : null}
-            {canWriteCalendar && getVisitActionOptions(booking.status).length > 0 ? (
+            {canWriteCalendar && visitActions.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-2">
-                    {getVisitActionOptions(booking.status).map((action) => (
+                    {visitActions.map((action) => (
                         <button
-                            key={`${booking.id}-${action.status}`}
+                            key={`${booking.id}-${action.actionId}`}
                             type="button"
                             onClick={() => onUpdateStatus(action.status)}
                             disabled={statusPending}
@@ -259,7 +281,7 @@ function BookingCard({
                                 </span>
                             ) : null}
                         </>
-                    ) : (
+                    ) : showNoShowFollowUpActions ? (
                         <>
                             <button
                                 type="button"
@@ -278,7 +300,7 @@ function BookingCard({
                                 Перезаписали
                             </button>
                         </>
-                    )}
+                    ) : null}
                 </div>
             ) : null}
         </div>
