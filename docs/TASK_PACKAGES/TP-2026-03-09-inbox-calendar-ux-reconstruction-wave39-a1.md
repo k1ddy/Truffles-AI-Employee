@@ -391,6 +391,13 @@
   - opened `PR #961` against `main`: `https://github.com/k1ddy/Truffles-AI-Employee/pull/961`;
   - the next required step is merge closeout plus the bounded post-merge replay on `main`.
 
+
+- `2026-03-11` — `Wave39 post-merge closeout` completed on `main`:
+  - synced `/home/zhan/truffles-main` to `origin/main` and verified merged `Wave39` landed as `710f8faa` (`PR #961`);
+  - ran the bounded merged-main replay: backend transition/calendar/openapi lanes all stayed green, and the merged Calendar operator Playwright lanes stayed green without route-mock drift;
+  - confirmed the required failure families (`denied`, `version_conflict`, `double_submit_blocked`, `filter_apply`, `filter_reset`) remain observable on merged `main`;
+  - `UX-38` is now closed and the next valid backlog block returns to `UX-08` (`runtime health / outbox pressure`).
+
 ## Evidence
 - merged `Wave38` confirmation: `git fetch origin --prune && git log --oneline --decorate -5 origin/main` -> `f1103dfd Merge pull request #960 from k1ddy/feat/2026-03-09-inbox-calendar-ux-reconstruction-wave38-a1`
 - contract-gap confirmation: `rg -n "allowed_actions|If-Match|ETag|VERSION_CONFLICT|BOOKING_VERSION_CONFLICT" console-web/src/app/calendar/page.tsx console-web/src/lib/calendar-bookings.ts truffles-api/app/routers/calendar.py truffles-api/app/services/appointment_service.py` -> no matches on `2026-03-09`
@@ -413,7 +420,7 @@
 - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 npx playwright test e2e/inspect_case.spec.ts --project chromium --workers=1` -> `14 passed, 1 skipped`
 - visual captures: `/tmp/wave39-part-e-operator-captures/wave39-queue-default-1280.png`, `/tmp/wave39-part-e-operator-captures/wave39-queue-default-1440.png`, `/tmp/wave39-part-e-operator-captures/wave39-filters-draft-1280.png`, `/tmp/wave39-part-e-operator-captures/wave39-filters-applied-1280.png`, `/tmp/wave39-part-e-operator-captures/wave39-phone-invalid-1280.png`, `/tmp/wave39-part-e-operator-captures/wave39-phone-valid-1280.png`, `/tmp/wave39-part-e-operator-captures/wave39-edit-open-1280.png`, `/tmp/wave39-part-e-operator-captures/wave39-cancel-panel-1280.png`, `/tmp/wave39-part-e-operator-captures/wave39-no-show-disabled-1280.png`, `/tmp/wave39-part-e-operator-captures/wave39-completed-blocked-1280.png`, `/tmp/wave39-part-e-operator-captures/wave39-cancelled-blocked-1280.png`, `/tmp/wave39-part-e-operator-captures/wave39-follow-up-guarded-1280.png`, `/tmp/wave39-part-e-operator-captures/wave39-medium-width-1024.png`
 - PR opened: `PR #961` -> `https://github.com/k1ddy/Truffles-AI-Employee/pull/961`
-- future closeout evidence for this block must include the bounded post-merge replay evidence on `main`
+- post-merge closeout evidence on `main`: `710f8faa`, `cd /home/zhan/truffles-main/truffles-api && pytest -q tests/test_appointment_service_status_transitions.py tests/test_calendar_bookings_router.py tests/test_calendar_noshow_followup_router.py tests/test_console_openapi_calendar_contract.py` (`68 passed`), `cd /home/zhan/truffles-main/truffles-api && ruff check app/routers/calendar.py app/logging_config.py app/services/calendar_action_contract.py app/services/appointment_service.py tests/test_appointment_service_status_transitions.py tests/test_calendar_bookings_router.py tests/test_calendar_noshow_followup_router.py tests/test_console_openapi_calendar_contract.py` (`pass`), `cd /home/zhan/truffles-main/truffles-api && python3 scripts/generate_openapi.py --check` (`pass`), `cd /home/zhan/truffles-main/console-web && npm run generate:api` (`pass`), `cd /home/zhan/truffles-main/console-web && npm run lint -- --file src/app/calendar/page.tsx --file src/lib/calendar-bookings.ts --file e2e/calendar-operator.spec.ts --file e2e/inspect_case.spec.ts` (`pass`), `cd /home/zhan/truffles-main/console-web && npm run build` (`pass`), `cd /home/zhan/truffles-main/console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 CALENDAR_OPERATOR_CAPTURE_DIR=/tmp/wave39-postmerge-operator-captures npx playwright test e2e/calendar-operator.spec.ts --project chromium` (`18 passed`), `cd /home/zhan/truffles-main/console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 npx playwright test e2e/inspect_case.spec.ts --project chromium --workers=1` (`14 passed, 1 skipped`)
 
 ## Release safety (mandatory)
 - **Rollout:** local-first implementation only; merge only after the full deterministic matrix is green. After merge, run one bounded post-merge replay on `main` and watch failure families for `24h` before declaring Calendar ready for backlog switch.
@@ -447,7 +454,7 @@
 - `Expiry/trigger to stop deferral`: if `Wave39` cannot enforce safe actions with current owner/customer data contracts, open the bounded API follow-up immediately instead of weakening the operator contract.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: merge `PR #961` from the now-green local Part A-E state, then run one bounded post-merge replay on `main` to confirm the same failure families stay observable without route-mock drift.
-- `First deterministic check command`: `cd /home/zhan/worktrees/2026-03-05-inbox-calendar-ux-reconstruction-a1 && rg -n "operator-events|double_submit_blocked|record_calendar_filter_apply|wave39-part-e-operator-captures" truffles-api/app/routers/calendar.py truffles-api/app/logging_config.py console-web/src/app/calendar/page.tsx console-web/e2e/calendar-operator.spec.ts docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave39-a1.md STATE.md && ls -1 /tmp/wave39-part-e-operator-captures && SESSION_AGENT=a1 scripts/session_check.sh`
-- `Blocked-by conditions`: any regression in the full `Wave39` matrix proof, any missing observability hook for version-conflict/denied/double-submit/filter families, any OpenAPI/type drift, or any missing post-merge replay precondition on `main`.
+- `Next block objective`: open `UX-08` (`runtime health / outbox pressure`) now that `Wave39` is merged and replay-closed, without reopening Calendar routing or operator-safety work.
+- `First deterministic check command`: `cd /home/zhan/truffles-main && rg -n "UX-08|runtime health|outbox pressure" docs/CONSOLE_AUDIT/UX_BACKLOG.md STATE.md docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-a1.md && git log --oneline -1`
+- `Blocked-by conditions`: any reopened failure family in merged-main runtime replay, or any owner decision to keep Calendar as the active backlog despite the green `Wave39` closeout evidence.
 - `Owner role for closure`: Brain / Top Architect.
