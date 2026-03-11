@@ -1,6 +1,6 @@
 # SESSION 2026-03-05-inbox-calendar-ux-reconstruction-a1 — Inbox+Calendar UX Reconstruction
 
-- status: active
+- status: done
 - owner: Top Architect | Brain | Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave39-a1.md
 - branch: feat/2026-03-09-inbox-calendar-ux-reconstruction-wave39-a1
@@ -687,4 +687,10 @@
   - opened `PR #961`: `https://github.com/k1ddy/Truffles-AI-Employee/pull/961`;
   - next required step: merge closeout plus bounded post-merge replay on `main`.
 
-- last_updated: 2026-03-09T19:05:00+05:00
+
+- Wave39 merged and replay-closed on main:
+  - `PR #961` merged as `710f8faa` on `2026-03-10`;
+  - bounded post-merge replay on `/home/zhan/truffles-main` stayed green for backend transition/calendar/openapi lanes plus `calendar-operator.spec.ts` and `inspect_case.spec.ts`;
+  - Calendar `UX-38` is now closed and follow-up work moved back to the shared backlog sequence (`UX-08` -> `UX-20` -> `UX-26`).
+
+- last_updated: 2026-03-11T05:02:05+05:00

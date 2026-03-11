@@ -1,0 +1,23 @@
+# SESSION 2026-03-11-wave39-postmerge-closeout-a1 — Wave39 Post-Merge Closeout
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave39-a1.md
+- branch: docs/2026-03-11-wave39-postmerge-closeout-a1
+- worktree: /home/zhan/worktrees/2026-03-11-wave39-postmerge-closeout-a1
+- base_ref: origin/main
+- scope: Run the bounded merged-main replay for Wave39, close Calendar action-safety canon, and hand execution back to the shared backlog.
+- done:
+  - Synced `/home/zhan/truffles-main` to `origin/main` while preserving prior local changes in stash `pre-sync-main-2026-03-11-wave39-closeout`.
+  - Verified `PR #961` merged as `710f8faa`.
+  - Ran merged-main backend replay: `pytest` transition/calendar/openapi lane (`68 passed`), `ruff`, and `python3 scripts/generate_openapi.py --check`.
+  - Ran merged-main frontend replay: `npm run generate:api`, targeted `lint`, `npm run build`, `calendar-operator.spec.ts` (`18 passed`), and `inspect_case.spec.ts` (`14 passed, 1 skipped`).
+  - Updated canon to close `UX-38` and return next execution to `UX-08` / `UX-20` / `UX-26`.
+- next:
+  - Land this docs-only closeout branch, then start `UX-08` from a fresh implementation worktree.
+- evidence:
+  - `PR #961`
+  - `710f8faa`
+  - `/tmp/wave39-postmerge-operator-captures`
+  - stash `pre-sync-main-2026-03-11-wave39-closeout` in `/home/zhan/truffles-main`
+- last_updated: 2026-03-11T05:02:05+05:00
