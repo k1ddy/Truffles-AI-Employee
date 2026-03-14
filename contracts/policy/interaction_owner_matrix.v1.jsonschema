@@ -1,0 +1,406 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.local/contracts/policy/interaction_owner_matrix.v1.jsonschema",
+  "title": "Interaction Owner Matrix v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "matrix_id",
+    "source",
+    "global_invariants",
+    "row_status_legend",
+    "admission_rules",
+    "rows"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "interaction_owner_matrix.v1"
+    },
+    "matrix_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "parent_verdict_tp",
+        "owner_matrix_tp",
+        "redesign_reset_tp",
+        "canon_sync_tp"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "parent_verdict_tp": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner_matrix_tp": {
+          "type": "string",
+          "minLength": 1
+        },
+        "redesign_reset_tp": {
+          "type": "string",
+          "minLength": 1
+        },
+        "canon_sync_tp": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "global_invariants": {
+      "type": "object",
+      "required": [
+        "resume_axis_field",
+        "interaction_target_field",
+        "interaction_relation_field",
+        "owner_field",
+        "one_interaction_owner_per_inbound",
+        "relation_source",
+        "allowed_degrade_requirements",
+        "forbidden_global_compressions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "resume_axis_field": {
+          "type": "string",
+          "const": "expected_reply_type"
+        },
+        "interaction_target_field": {
+          "type": "string",
+          "const": "pending_question_target"
+        },
+        "interaction_relation_field": {
+          "type": "string",
+          "const": "active_question_relation"
+        },
+        "owner_field": {
+          "type": "string",
+          "const": "interaction_owner"
+        },
+        "one_interaction_owner_per_inbound": {
+          "type": "boolean",
+          "const": true
+        },
+        "relation_source": {
+          "type": "string",
+          "enum": [
+            "semantic_owner_or_boundary_validation_only"
+          ]
+        },
+        "allowed_degrade_requirements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "preserve_relation",
+              "preserve_resume_after_grounding_boundary",
+              "emit_reason_code",
+              "emit_decision_meta",
+              "emit_decision_trace"
+            ]
+          }
+        },
+        "forbidden_global_compressions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "generic_booking_prompt_without_relation_evidence",
+              "generic_master_truth_as_live_availability_success",
+              "reopen_service_choice_after_grounded_service_on_pricing_interrupt",
+              "silent_loss_of_active_pending_question_contract"
+            ]
+          }
+        }
+      }
+    },
+    "row_status_legend": {
+      "type": "object",
+      "required": [
+        "closed",
+        "closed_bounded",
+        "open"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "closed": {
+          "type": "string",
+          "minLength": 1
+        },
+        "closed_bounded": {
+          "type": "string",
+          "minLength": 1
+        },
+        "open": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "admission_rules": {
+      "type": "object",
+      "required": [
+        "one_child_tp_per_row",
+        "child_tp_must_name_matrix_row",
+        "guarded_rerun_requires"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "one_child_tp_per_row": {
+          "type": "boolean",
+          "const": true
+        },
+        "child_tp_must_name_matrix_row": {
+          "type": "boolean",
+          "const": true
+        },
+        "guarded_rerun_requires": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "string",
+            "enum": [
+              "semantic_contract_output",
+              "owner_arbitration_boundary",
+              "degrade_path",
+              "adjacent_negative_row"
+            ]
+          }
+        }
+      }
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/row"
+      }
+    }
+  },
+  "$defs": {
+    "semanticAxes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expected_reply_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pending_question_target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "active_question_relation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subject_kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capability": {
+          "type": "string",
+          "minLength": 1
+        },
+        "temporal_scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolution_mode": {
+          "type": "string",
+          "minLength": 1
+        },
+        "next_question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "runtimeMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tool_action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "info_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "expected_reply_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interaction_target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interaction_relation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "require_booking_active": {
+          "type": "boolean"
+        },
+        "require_missing_service_query": {
+          "type": "boolean"
+        },
+        "require_grounded_referents": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "service",
+              "specialist",
+              "branch",
+              "booking_ref"
+            ]
+          }
+        }
+      }
+    },
+    "runtimeEffects": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bypass_service_clarify": {
+          "type": "boolean"
+        },
+        "carryover_grounded_referents": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "service",
+              "specialist",
+              "branch",
+              "booking_ref"
+            ]
+          }
+        },
+        "preserve_expected_reply_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason_code": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "rowStatus": {
+      "type": "object",
+      "required": [
+        "state",
+        "raw"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "closed",
+            "closed_bounded",
+            "open"
+          ]
+        },
+        "raw": {
+          "type": "string",
+          "minLength": 1
+        },
+        "child_tp_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^P1\\.6o[0-9]+[a-z]?$"
+          }
+        },
+        "surfaced_by_runs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^r[0-9]+$"
+          }
+        }
+      }
+    },
+    "row": {
+      "type": "object",
+      "required": [
+        "row_id",
+        "active_slot",
+        "surface_family",
+        "semantic_contract_raw",
+        "semantic_axes",
+        "execution_owner",
+        "resume_owner",
+        "allowed_degrade_raw",
+        "forbidden_compression_raw",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "row_id": {
+          "type": "string",
+          "pattern": "^M[1-9][0-9]*$"
+        },
+        "active_slot": {
+          "type": "string",
+          "minLength": 1
+        },
+        "surface_family": {
+          "type": "string",
+          "minLength": 1
+        },
+        "semantic_contract_raw": {
+          "type": "string",
+          "minLength": 1
+        },
+        "semantic_axes": {
+          "$ref": "#/$defs/semanticAxes"
+        },
+        "execution_owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resume_owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowed_degrade_raw": {
+          "type": "string",
+          "minLength": 1
+        },
+        "forbidden_compression_raw": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtime_match": {
+          "$ref": "#/$defs/runtimeMatch"
+        },
+        "runtime_effects": {
+          "$ref": "#/$defs/runtimeEffects"
+        },
+        "status": {
+          "$ref": "#/$defs/rowStatus"
+        }
+      }
+    }
+  }
+}

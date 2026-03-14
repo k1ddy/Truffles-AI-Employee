@@ -66,6 +66,7 @@ def _load_evaluate_turn():
         "_llm_quality_has_stale_state_leak",
         "_llm_quality_has_timeout_degrade_booking_generic",
         "_llm_quality_has_expected_followup_prompt",
+        "_llm_quality_has_pending_question_interaction_contract",
         "_llm_quality_normalize_expect_token",
         "_llm_quality_value_matches",
         "_llm_quality_normalize_expect_mapping",
@@ -73,6 +74,7 @@ def _load_evaluate_turn():
         "_llm_quality_normalize_expect_trace_contains",
         "_llm_quality_entry_matches_expected",
         "_llm_quality_meta_matches_expected",
+        "_llm_quality_meta_matches_timeout_grounded_slot_constraint_name_resume",
         "_llm_quality_trace_has_expected_entries",
         "_llm_quality_text_has_billing_block_marker",
         "_llm_quality_payload_has_billing_block_marker",
@@ -469,6 +471,370 @@ def test_booking_slot_stall_not_reported_for_calendar_list_slots_with_success_si
         },
     )
     assert "booking_slot_stall" not in reasons
+
+
+def test_booking_slot_stall_not_reported_for_explicit_pending_question_interaction_contract():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={
+            "action": "reply",
+            "pending_question_act": "slot_compare",
+            "expected_reply_type": "time",
+        },
+        trace_entries=[
+            {"stage": "pending_question_interaction", "pending_question_act": "slot_compare"},
+            {"stage": "question_contract", "expected_reply_type": "time"},
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+    )
+    assert "booking_slot_stall" not in reasons
+
+
+def test_booking_slot_stall_not_reported_for_ask_about_requested_slot_contract():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={
+            "action": "reply",
+            "pending_question_act": "ask_about_requested_slot",
+            "expected_reply_type": "time",
+        },
+        trace_entries=[
+            {
+                "stage": "pending_question_interaction",
+                "pending_question_act": "ask_about_requested_slot",
+            },
+            {"stage": "question_contract", "expected_reply_type": "time"},
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+    )
+    assert "booking_slot_stall" not in reasons
+
+
+def test_booking_slot_stall_not_reported_for_temporal_scope_guidance_recovery():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={
+            "action": "reply",
+            "source": "booking_slot_guidance",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "expected_reply_type": "time",
+            "policy_core_degrade_reason": "policy_validation:semantic_temporal_scope_missing",
+            "policy_core_guard_recovery": "semantic_temporal_scope_missing_slot_guidance",
+        },
+        trace_entries=[
+            {
+                "stage": "policy_core_guard",
+                "decision": "semantic_temporal_scope_missing_slot_guidance",
+                "validation_error": "semantic_temporal_scope_missing",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_slot_guidance",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "booking_slot_guidance",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+    )
+    assert "booking_slot_stall" not in reasons
+
+
+def test_booking_slot_stall_not_reported_for_slot_compare_guidance_recovery():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={
+            "action": "reply",
+            "source": "booking_slot_guidance",
+            "pending_question_act": "slot_compare",
+            "pending_question_target": "time",
+            "expected_reply_type": "time",
+            "policy_core_degrade_reason": "policy_validation:semantic_temporal_scope_missing",
+            "policy_core_guard_recovery": "semantic_temporal_scope_missing_slot_guidance",
+        },
+        trace_entries=[
+            {
+                "stage": "policy_core_guard",
+                "decision": "semantic_temporal_scope_missing_slot_guidance",
+                "validation_error": "semantic_temporal_scope_missing",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_slot_guidance",
+                "pending_question_act": "slot_compare",
+                "pending_question_target": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "booking_slot_guidance",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+    )
+    assert "booking_slot_stall" not in reasons
+
+
+def test_booking_slot_stall_not_reported_for_slot_constraint_contract():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={
+            "action": "booking_prompt",
+            "source": "booking",
+            "pending_question_act": "slot_constraint",
+            "pending_question_target": "time",
+            "pending_question_interaction": "slot_constraint",
+            "expected_reply_type": "time",
+        },
+        trace_entries=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "slot_constraint",
+                "source": "question_contract",
+                "pending_question_act": "slot_constraint",
+                "pending_question_target": "time",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "matched",
+                "expected_reply_type": "time",
+                "value": "в пятницу",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+    )
+    assert "booking_slot_stall" not in reasons
+
+
+def test_booking_slot_stall_not_reported_for_tool_registry_missing_slot_pending_question():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={
+            "action": "reply",
+            "source": "tool_registry",
+            "intent": "calendar.list_slots",
+            "tool_action": "calendar.list_slots",
+            "tool_decision": "missing_slot",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "pending_question_interaction": "ask_about_requested_slot",
+            "expected_reply_type": "time",
+        },
+        trace_entries=[
+            {
+                "stage": "tool_registry",
+                "decision": "missing_slot",
+                "tool_action": "calendar.list_slots",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_slot_guidance",
+                "source": "tool_registry",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "llm_policy_core_tool",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+    )
+    assert "booking_slot_stall" not in reasons
+
+
+def test_booking_slot_stall_not_reported_for_tool_registry_missing_slot_slot_compare():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={
+            "action": "reply",
+            "source": "tool_registry",
+            "intent": "calendar.list_slots",
+            "tool_action": "calendar.list_slots",
+            "tool_decision": "missing_slot",
+            "pending_question_act": "slot_compare",
+            "pending_question_target": "time",
+            "pending_question_interaction": "slot_compare",
+            "expected_reply_type": "time",
+        },
+        trace_entries=[
+            {
+                "stage": "tool_registry",
+                "decision": "missing_slot",
+                "tool_action": "calendar.list_slots",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_slot_guidance",
+                "source": "tool_registry",
+                "pending_question_act": "slot_compare",
+                "pending_question_target": "time",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "llm_policy_core_tool",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+    )
+    assert "booking_slot_stall" not in reasons
+
+
+def test_booking_slot_stall_still_reported_without_pending_question_resume_contract():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={
+            "action": "reply",
+            "pending_question_act": "slot_compare",
+        },
+        trace_entries=[
+            {"stage": "pending_question_interaction", "pending_question_act": "slot_compare"},
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+    )
+    assert "booking_slot_stall" in reasons
 
 
 def test_expected_info_section_miss_not_reported_for_pending_escalation():
@@ -1647,6 +2013,448 @@ def test_evaluate_turn_does_not_flag_fact_without_evidence_for_service_clarify_c
     assert "fact_without_evidence" not in reasons
 
 
+def test_evaluate_turn_does_not_flag_fact_without_evidence_for_timeout_pending_slot_guidance():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "booking",
+            "source": "booking_slot_guidance",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "pending_question_interaction": "ask_about_requested_slot",
+            "pending_question_owner": "booking_slot_guidance",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "booking_slot_guidance",
+            "policy_core_guard_recovery": "timeout_pending_slot_question",
+            "policy_core_timeout_retry_path": "booking_slot_guidance",
+        },
+        trace_entries=[
+            {
+                "stage": "policy_core_guard",
+                "decision": "timeout_pending_slot_question",
+                "reason": "policy_error:timeout",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_slot_guidance",
+                "recovery": "timeout_pending_slot_question",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "booking_slot_guidance",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Могу помочь подобрать свободное время. На какую дату и время вам удобно?",
+        tool_signals={},
+    )
+
+    assert "fact_without_evidence" not in reasons
+
+
+def test_evaluate_turn_accepts_timeout_pending_slot_guidance_after_hours_info_lock():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "booking",
+            "source": "booking_slot_guidance",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "pending_question_interaction": "ask_about_requested_slot",
+            "pending_question_owner": "booking_slot_guidance",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "booking_slot_guidance",
+            "expected_reply_blocked_by_info": True,
+            "policy_core_guard_recovery": "timeout_pending_slot_question",
+            "policy_core_timeout_retry_path": "booking_slot_guidance",
+            "timeout_slot_question_info_lock_surface": True,
+            "suppressed_info_intents": ["hours"],
+        },
+        trace_entries=[
+            {
+                "stage": "policy_core_guard",
+                "decision": "suppress_time_preference_info_signal",
+                "suppression_surfaces": ["timeout_slot_question_info_lock_surface"],
+                "suppressed_info_intents": ["hours"],
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "timeout_pending_slot_question",
+                "reason": "policy_error:timeout",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_slot_guidance",
+                "recovery": "timeout_pending_slot_question",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "booking_slot_guidance",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Могу помочь подобрать свободное время. На какую дату и время вам удобно?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "source": ["booking_slot_guidance"],
+            "pending_question_act": ["ask_about_requested_slot"],
+            "pending_question_target": ["time"],
+            "pending_question_interaction": ["ask_about_requested_slot"],
+            "expected_reply_reason": ["booking_slot_guidance"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_slot_guidance",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "booking_slot_guidance",
+            },
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+    assert "fact_without_evidence" not in reasons
+
+
+def test_evaluate_turn_accepts_timeout_booking_slot_fill_followup():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "policy_core_timeout_booking_slot_fill_followup",
+            "policy_core_guard_recovery": "timeout_booking_slot_fill_followup",
+            "policy_core_timeout_retry_path": "booking_slot_fill_followup",
+            "booking_slot_fill_applied": ["name"],
+        },
+        trace_entries=[
+            {
+                "stage": "policy_core_guard",
+                "decision": "timeout_booking_slot_fill_followup",
+                "reason": "policy_error:timeout",
+                "missing_slot": "datetime",
+                "filled_slots": ["name"],
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "policy_core_timeout_booking_slot_fill_followup",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Понял, в субботу по услуге «Маникюр». Подскажите, пожалуйста, точное время.",
+        tool_signals={},
+    )
+
+    assert "fact_without_evidence" not in reasons
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_timeout_owner_boundary_collect():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "policy_core_timeout_owner_boundary",
+            "policy_core_guard_recovery": "timeout_owner_boundary_collect",
+            "policy_core_timeout_retry_path": "booking_owner_boundary_collect",
+            "timeout_owner_boundary_source": "matched_expected_reply",
+            "booking_slot_fill_applied": ["name"],
+            "owner_resolution_reason_code": "timeout_owner_boundary_matched_expected_reply",
+        },
+        trace_entries=[
+            {
+                "stage": "owner_resolver",
+                "decision": "timeout_owner_boundary_match",
+                "reason_code": "timeout_owner_boundary_matched_expected_reply",
+                "source": "matched_expected_reply",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "timeout_owner_boundary_collect",
+                "reason": "policy_error:timeout",
+                "missing_slot": "datetime",
+                "filled_slots": ["name"],
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "policy_core_timeout_owner_boundary",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Понял, завтра по услуге «Маникюр». Подскажите, пожалуйста, точное время.",
+        tool_signals={},
+    )
+
+    assert "fact_without_evidence" not in reasons
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_timeout_owner_boundary_slot_constraint_collect():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "policy_core_timeout_owner_boundary",
+            "policy_core_guard_recovery": "timeout_owner_boundary_collect",
+            "policy_core_timeout_retry_path": "booking_owner_boundary_collect",
+            "timeout_owner_boundary_source": "matched_expected_reply",
+            "booking_slot_fill_applied": ["datetime"],
+            "owner_resolution_reason_code": "timeout_owner_boundary_matched_expected_reply",
+            "pending_question_act": "slot_constraint",
+            "pending_question_target": "time",
+            "pending_question_interaction": "slot_constraint",
+            "pending_question_owner": "question_contract",
+        },
+        trace_entries=[
+            {
+                "stage": "question_contract",
+                "decision": "matched",
+                "answer_slot": "datetime",
+                "answer_value": "во вторник",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "owner_resolver",
+                "decision": "timeout_owner_boundary_match",
+                "reason_code": "timeout_owner_boundary_matched_expected_reply",
+                "source": "matched_expected_reply",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "timeout_owner_boundary_collect",
+                "reason": "policy_error:timeout",
+                "missing_slot": "datetime",
+                "filled_slots": ["datetime"],
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "slot_constraint",
+                "source": "question_contract",
+                "pending_question_act": "slot_constraint",
+                "pending_question_target": "time",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "policy_core_timeout_owner_boundary",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Понял, во вторник по услуге «Маникюр». Подскажите, пожалуйста, точное время.",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_act": ["slot_constraint"],
+            "pending_question_target": ["time"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "pending_question_interaction",
+                "pending_question_act": "slot_constraint",
+                "pending_question_target": "time",
+            },
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "time",
+            },
+        ],
+    )
+
+    assert "fact_without_evidence" not in reasons
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_timeout_resume_contract_boundary_collect():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "policy_core_timeout_owner_boundary",
+            "policy_core_guard_recovery": "timeout_owner_boundary_collect",
+            "policy_core_timeout_retry_path": "booking_resume_collect_boundary",
+            "timeout_owner_boundary_source": "resume_contract",
+            "owner_resolution_reason_code": "timeout_owner_boundary_resume_contract",
+        },
+        trace_entries=[
+            {
+                "stage": "owner_resolver",
+                "decision": "timeout_owner_boundary_match",
+                "reason_code": "timeout_owner_boundary_resume_contract",
+                "source": "resume_contract",
+            },
+            {
+                "stage": "boundary_state",
+                "decision": "resume_collect",
+                "source": "booking_interrupt",
+                "missing_slot": "datetime",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "timeout_owner_boundary_collect",
+                "reason": "policy_error:timeout",
+                "missing_slot": "datetime",
+                "filled_slots": [],
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "policy_core_timeout_owner_boundary",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На какую дату и время вам удобно?",
+        tool_signals={},
+    )
+
+    assert "fact_without_evidence" not in reasons
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
 def test_evaluate_turn_flags_booking_prompt_leak():
     evaluate = _load_evaluate_turn()
 
@@ -2224,6 +3032,102 @@ def test_weekend_availability_requires_resolved_referent_trace():
     assert "resolved_referent_trace_missing" not in reasons
 
 
+def test_policy_core_guard_referent_followup_booking_prompt_requires_referent_trace():
+    evaluate = _load_evaluate_turn()
+
+    base_kwargs = dict(
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+        outbox_text="На какую дату и время вам удобно?",
+        tool_signals={},
+    )
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "temporal_scope": "specific_time",
+            "resolution_mode": "referent_followup",
+            "capability_resolution_mode": "live_calendar",
+            "expected_reply_type": "time",
+        },
+        trace_entries=[
+            {
+                "stage": "policy_core_guard",
+                "decision": "collect_slot_order_collect_prompt",
+                "validation_error": "collect_slot_order_invalid",
+            }
+        ],
+        **base_kwargs,
+    )
+    assert "resolved_referent_trace_missing" in reasons
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "temporal_scope": "specific_time",
+            "resolution_mode": "referent_followup",
+            "capability_resolution_mode": "live_calendar",
+            "resolved_referent": "Маникюр",
+            "referent_source": "policy_slot_state",
+            "expected_reply_type": "time",
+            "llm_policy_core": {
+                "subject_kind": "service",
+                "capability": "bookability",
+                "temporal_scope": "specific_time",
+                "resolution_mode": "referent_followup",
+                "capability_resolution_mode": "live_calendar",
+                "referent_resolution": {
+                    "decision": "resolved",
+                    "resolved_referent": "Маникюр",
+                    "referent_source": "policy_slot_state",
+                },
+            },
+        },
+        trace_entries=[
+            {
+                "stage": "referent_resolver",
+                "decision": "resolved",
+                "subject_kind": "service",
+                "capability": "bookability",
+                "temporal_scope": "specific_time",
+                "capability_resolution_mode": "live_calendar",
+                "resolved_referent": "Маникюр",
+                "referent_source": "policy_slot_state",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "collect_slot_order_collect_prompt",
+                "validation_error": "collect_slot_order_invalid",
+            },
+        ],
+        **base_kwargs,
+    )
+    assert "resolved_referent_trace_missing" not in reasons
+
+
 def test_evaluate_turn_flags_expected_meta_mismatch_for_structured_oracle():
     evaluate = _load_evaluate_turn()
 
@@ -2326,6 +3230,1724 @@ def test_evaluate_turn_accepts_structured_meta_and_trace_oracle():
     assert "expected_trace_miss" not in reasons
 
 
+def test_evaluate_turn_accepts_timeout_grounded_slot_constraint_name_resume_meta():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "policy_core_guard",
+            "source": "llm_policy_core",
+            "expected_reply_type": "name",
+            "expected_reply_reason": "policy_core_degraded_collect",
+            "pending_question_act": "slot_constraint",
+            "pending_question_target": "time",
+            "pending_question_interaction": "slot_constraint",
+            "policy_core_degrade_reason": "policy_error:timeout",
+        },
+        trace_entries=[
+            {
+                "stage": "pending_question_interaction",
+                "source": "question_contract",
+                "decision": "slot_constraint",
+                "pending_question_act": "slot_constraint",
+                "pending_question_target": "time",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "matched",
+                "answer_slot": "datetime",
+                "answer_value": "завтра",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "timeout_booking_collect",
+                "reason": "policy_error:timeout",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "policy_core_degraded_collect",
+                "expected_reply_type": "name",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "degraded_collect",
+                "reason": "policy_error:timeout",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Отлично, время подходит. Как вас зовут?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_act": ["slot_constraint"],
+            "pending_question_target": ["time"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "question_contract",
+                "decision": "matched",
+                "answer_slot": "datetime",
+                "expected_reply_type": "time",
+            }
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_collect_slot_order_time_window_slot_constraint_guidance():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "booking",
+            "source": "booking_slot_guidance",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "booking_slot_guidance",
+            "pending_question_act": "slot_constraint",
+            "pending_question_target": "time",
+            "pending_question_interaction": "slot_constraint",
+            "policy_core_degrade_reason": "policy_validation:collect_slot_order_invalid",
+        },
+        trace_entries=[
+            {
+                "stage": "policy_core_guard",
+                "decision": "collect_slot_order_slot_constraint_guidance",
+                "validation_error": "collect_slot_order_invalid",
+                "missing_slot": "datetime",
+                "requested_slot": "name",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "source": "policy_core_guard",
+                "decision": "booking_slot_guidance",
+                "pending_question_act": "slot_constraint",
+                "pending_question_target": "time",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "booking_slot_guidance",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Подскажите, пожалуйста, точное время.",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_act": ["slot_constraint"],
+            "pending_question_target": ["time"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "pending_question_interaction",
+                "pending_question_act": "slot_constraint",
+                "pending_question_target": "time",
+            },
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "time",
+            },
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_flags_timeout_grounded_slot_constraint_name_resume_without_timeout_trace():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "policy_core_guard",
+            "source": "llm_policy_core",
+            "expected_reply_type": "name",
+            "expected_reply_reason": "policy_core_degraded_collect",
+            "pending_question_act": "slot_constraint",
+            "pending_question_target": "time",
+            "pending_question_interaction": "slot_constraint",
+            "policy_core_degrade_reason": "policy_error:timeout",
+        },
+        trace_entries=[
+            {
+                "stage": "pending_question_interaction",
+                "source": "question_contract",
+                "decision": "slot_constraint",
+                "pending_question_act": "slot_constraint",
+                "pending_question_target": "time",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "matched",
+                "answer_slot": "datetime",
+                "answer_value": "завтра",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Отлично, время подходит. Как вас зовут?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_act": ["slot_constraint"],
+            "pending_question_target": ["time"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "question_contract",
+                "decision": "matched",
+                "answer_slot": "datetime",
+                "expected_reply_type": "time",
+            }
+        ],
+    )
+
+    assert "expected_meta_mismatch" in reasons
+
+
+def test_evaluate_turn_flags_invalid_schema_truth_gate_for_specialist_followup():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "master",
+            "source": "truth_gate",
+            "expected_reply_type": "time",
+            "booking_interrupt_info": True,
+            "policy_core_mode": "degraded_fallback",
+            "policy_core_degrade_reason": "policy_error:invalid_schema",
+        },
+        trace_entries=[
+            {
+                "stage": "question_contract",
+                "decision": "missed",
+                "expected_reply_type": "time",
+                "answer_error": "blocked_by_info",
+            },
+            {
+                "stage": "llm_policy_core",
+                "error": "invalid_schema",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "degraded_fallback",
+                "reason": "policy_error:invalid_schema",
+            },
+            {
+                "stage": "booking_interrupt",
+                "decision": "info_reply",
+                "info_sections": ["master"],
+            },
+            {
+                "stage": "truth_gate",
+                "decision": "reply",
+                "intent": "master",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="У нас работает мастер Асем. На какую дату и время вам удобно?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_target": ["specialist"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "expected_reply_type": "time",
+            }
+        ],
+    )
+
+    assert "expected_meta_mismatch" in reasons
+    assert "expected_trace_miss" in reasons
+
+
+def test_evaluate_turn_accepts_invalid_schema_booking_request_specialist_followup():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "expected_reply_type": "time",
+            "pending_question_target": "specialist",
+            "pending_question_interaction": "specialist_followup",
+            "pending_question_owner": "policy_core_invalid_schema_specialist_followup",
+            "active_question_relation": "referent_followup",
+            "specialist_name": "Айгерим",
+            "policy_core_mode": "degraded_fallback",
+            "policy_core_degrade_reason": "policy_error:invalid_schema",
+        },
+        trace_entries=[
+            {
+                "stage": "question_contract",
+                "decision": "missed",
+                "expected_reply_type": "time",
+                "answer_error": "blocked_by_info",
+            },
+            {
+                "stage": "llm_policy_core",
+                "error": "invalid_schema",
+            },
+            {
+                "stage": "specialist_hint",
+                "decision": "ok",
+                "tool_action": "collect",
+                "specialist_name": "Айгерим",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "invalid_schema_specialist_followup",
+                "reason": "policy_error:invalid_schema",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "expected_reply_type": "time",
+                "specialist_name": "Айгерим",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "policy_core_invalid_schema_specialist_followup",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Айгерим доступна. На какую дату и время вам удобно?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_target": ["specialist"],
+            "active_question_relation": ["referent_followup"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "expected_reply_type": "time",
+            }
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_active_name_deictic_time_availability_followup():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "llm_policy_core",
+            "expected_reply_type": "name",
+            "expected_reply_reason": "booking_time_availability_followup",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "pending_question_interaction": "ask_about_requested_slot",
+            "pending_question_owner": "booking_time_availability_followup",
+            "active_question_relation": "ask_about_requested_slot",
+            "current_datetime": "15:00",
+            "alternate_datetime": "15:00",
+        },
+        trace_entries=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_time_availability_followup",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
+                "expected_reply_type": "name",
+                "current_datetime": "15:00",
+                "alternate_datetime": "15:00",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "booking_time_availability_followup",
+                "expected_reply_type": "name",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="name",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="name",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Сейчас в заявке отмечено 15:00. Если хотите оставить именно это время и продолжить запись, скажите об этом. Как вас зовут?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_act": ["ask_about_requested_slot"],
+            "pending_question_target": ["time"],
+            "active_question_relation": ["ask_about_requested_slot"],
+            "expected_reply_type": ["name"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_time_availability_followup",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
+                "expected_reply_type": "name",
+            },
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "name",
+            },
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_active_name_named_specialist_followup():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "llm_policy_core",
+            "expected_reply_type": "name",
+            "expected_reply_reason": "booking_prompt",
+            "pending_question_target": "specialist",
+            "pending_question_interaction": "specialist_followup",
+            "pending_question_owner": "booking_specialist_followup",
+            "active_question_relation": "referent_followup",
+            "specialist_name": "Айгерим",
+        },
+        trace_entries=[
+            {
+                "stage": "policy_core_guard",
+                "decision": "active_name_specialist_followup",
+                "reason": "contract_validation_failure",
+                "pending_question_target": "specialist",
+                "expected_reply_type": "name",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "expected_reply_type": "name",
+                "specialist_name": "Айгерим",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "booking_prompt",
+                "expected_reply_type": "name",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="name",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="name",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Как вас зовут?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_target": ["specialist"],
+            "active_question_relation": ["referent_followup"],
+            "expected_reply_type": ["name"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "expected_reply_type": "name",
+            },
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "name",
+            },
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_invalid_schema_specialist_followup_with_generalized_expectation():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "policy_core_invalid_schema_specialist_followup",
+            "pending_question_target": "specialist",
+            "pending_question_interaction": "specialist_followup",
+            "pending_question_owner": "policy_core_invalid_schema_specialist_followup",
+            "active_question_relation": "referent_followup",
+            "specialist_name": "Айгерим",
+            "policy_core_mode": "degraded_fallback",
+            "policy_core_degrade_reason": "policy_error:invalid_schema",
+            "policy_core_guard_recovery": "invalid_schema_specialist_followup",
+        },
+        trace_entries=[
+            {
+                "stage": "question_contract",
+                "decision": "missed",
+                "expected_reply_type": "time",
+                "answer_error": "blocked_by_info",
+            },
+            {
+                "stage": "llm_policy_core",
+                "error": "invalid_schema",
+            },
+            {
+                "stage": "specialist_hint",
+                "decision": "ok",
+                "tool_action": "collect",
+                "specialist_name": "Айгерим",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "invalid_schema_specialist_followup",
+                "reason": "policy_error:invalid_schema",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "expected_reply_type": "time",
+                "specialist_name": "Айгерим",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "policy_core_invalid_schema_specialist_followup",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Понял, ориентир по специалисту — Айгерим. На какую дату и время вам удобно?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_target": ["specialist"],
+            "pending_question_interaction": ["specialist_followup"],
+            "active_question_relation": ["referent_followup"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "time",
+            },
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_invalid_schema_specialist_followup_with_surface_hint():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "policy_core_invalid_schema_specialist_followup",
+            "pending_question_target": "specialist",
+            "pending_question_interaction": "specialist_followup",
+            "pending_question_owner": "policy_core_invalid_schema_specialist_followup",
+            "active_question_relation": "referent_followup",
+            "specialist_name": "Мадина",
+            "specialist_hint_source": "message_surface",
+            "policy_core_mode": "degraded_fallback",
+            "policy_core_degrade_reason": "policy_error:invalid_schema",
+            "policy_core_guard_recovery": "invalid_schema_specialist_followup",
+        },
+        trace_entries=[
+            {
+                "stage": "question_contract",
+                "decision": "missed",
+                "expected_reply_type": "time",
+                "answer_error": "blocked_by_info",
+            },
+            {
+                "stage": "llm_policy_core",
+                "error": "invalid_schema",
+            },
+            {
+                "stage": "specialist_hint",
+                "decision": "ok",
+                "tool_action": "collect",
+                "source": "message_surface",
+                "specialist_name": "Мадина",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "invalid_schema_specialist_followup",
+                "reason": "policy_error:invalid_schema",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "expected_reply_type": "time",
+                "specialist_name": "Мадина",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "policy_core_invalid_schema_specialist_followup",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Понял, ориентир по специалисту — Мадина. На какую дату и время вам удобно?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_target": ["specialist"],
+            "active_question_relation": ["referent_followup"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "expected_reply_type": "time",
+            }
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_timeout_active_name_named_specialist_followup():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "expected_reply_type": "name",
+            "expected_reply_reason": "policy_core_timeout_specialist_followup",
+            "pending_question_target": "specialist",
+            "pending_question_interaction": "specialist_followup",
+            "pending_question_owner": "policy_core_timeout_specialist_followup",
+            "active_question_relation": "referent_followup",
+            "specialist_name": "Айгерим",
+            "policy_core_guard_recovery": "timeout_specialist_followup",
+        },
+        trace_entries=[
+            {
+                "stage": "policy_core_guard",
+                "decision": "timeout_specialist_followup",
+                "reason": "policy_error:timeout",
+                "missing_slot": "name",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "expected_reply_type": "name",
+                "specialist_name": "Айгерим",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "policy_core_timeout_specialist_followup",
+                "expected_reply_type": "name",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="name",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="name",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Понял, ориентир по специалисту — Айгерим. Как вас зовут?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_target": ["specialist"],
+            "active_question_relation": ["referent_followup"],
+            "expected_reply_type": ["name"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "expected_reply_type": "name",
+            },
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "name",
+            },
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_timeout_master_info_interrupt_for_generic_specialist_change():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "master",
+            "source": "booking_info_contract",
+            "expected_reply_type": "time",
+            "pending_question_target": "specialist",
+            "active_question_relation": "specialist_availability_interrupt",
+            "booking_interrupt_info": True,
+            "info_sections": ["master"],
+            "policy_core_guard_recovery": "timeout_master_info_interrupt",
+            "policy_core_timeout_retry_path": "booking_interrupt_master_info",
+        },
+        trace_entries=[
+            {
+                "stage": "policy_core_guard",
+                "decision": "timeout_master_info_interrupt",
+                "reason": "policy_error:timeout",
+                "missing_slot": "datetime",
+                "pending_question_target": "specialist",
+                "active_question_relation": "specialist_availability_interrupt",
+            },
+            {
+                "stage": "booking_interrupt",
+                "decision": "info_reply",
+                "pending_question_target": "specialist",
+                "booking_interrupt_info": True,
+                "info_sections": ["master"],
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "booking_prompt",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Да, специалиста можно поменять. На какую дату и время вам удобно?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_target": ["specialist"],
+            "active_question_relation": ["specialist_availability_interrupt"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "booking_interrupt",
+                "decision": "info_reply",
+                "pending_question_target": "specialist",
+                "info_sections": ["master"],
+            },
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "time",
+            },
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_active_time_generic_master_info_interrupt():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "master",
+            "source": "booking_info_contract",
+            "expected_reply_type": "time",
+            "pending_question_target": "time",
+            "booking_interrupt_info": True,
+            "info_sections": ["master"],
+        },
+        trace_entries=[
+            {
+                "stage": "policy_interrupt_contract",
+                "decision": "semantic_override_blocked",
+                "reason_code": "policy_collect_info_interrupt_owner",
+                "info_sections": ["master"],
+            },
+            {
+                "stage": "booking_interrupt",
+                "decision": "info_reply",
+                "pending_question_target": "time",
+                "booking_interrupt_info": True,
+                "info_sections": ["master"],
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "booking_interrupt",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=["master"],
+        info_answered={"master": True},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="По маникюру у нас работают Айгерим и Динара. На какую дату и время вам удобно?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_target": ["time"],
+            "expected_reply_type": ["time"],
+            "source": ["booking_info_contract"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "booking_interrupt",
+                "decision": "info_reply",
+                "pending_question_target": "time",
+                "info_sections": ["master"],
+            },
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "time",
+            },
+        ],
+    )
+
+    assert "info_section_miss" not in reasons
+    assert "expected_info_section_miss" not in reasons
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_duration_info_interrupt_with_time_resume():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "service_duration",
+            "source": "truth_gate",
+            "expected_reply_type": "time",
+            "pending_question_target": "time",
+            "info_sections": ["duration", "service_duration"],
+        },
+        trace_entries=[
+            {
+                "stage": "policy_interrupt_contract",
+                "decision": "semantic_override_blocked",
+                "reason_code": "policy_collect_info_interrupt_owner",
+                "info_sections": ["duration"],
+            },
+            {
+                "stage": "policy_interrupt_contract",
+                "decision": "service_query_carryover",
+                "source": "booking_state",
+                "service_query": "Маникюр",
+                "info_sections": ["duration"],
+            },
+            {
+                "stage": "truth_gate",
+                "decision": "reply",
+                "intent": "service_duration",
+                "service_query": "Маникюр",
+                "info_sections": ["duration", "service_duration"],
+            },
+            {
+                "stage": "booking_interrupt",
+                "decision": "info_reply",
+                "pending_question_target": "time",
+                "info_sections": ["duration", "service_duration"],
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=["duration", "service_duration"],
+        info_answered={"duration": True, "service_duration": True},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Маникюр занимает около 90 минут.",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_target": ["time"],
+            "expected_reply_type": ["time"],
+            "source": ["truth_gate"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "booking_interrupt",
+                "decision": "info_reply",
+                "pending_question_target": "time",
+                "info_sections": ["duration", "service_duration"],
+            },
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "time",
+            },
+        ],
+    )
+
+    assert "expected_info_section_miss" not in reasons
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+    assert "irrelevant_fact" not in reasons
+
+
+def test_evaluate_turn_accepts_collect_service_info_interrupt_under_active_time():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "catalog.service_query",
+            "source": "tool_registry",
+            "tool_action": "catalog.service_query",
+            "tool_decision": "services_overview",
+            "expected_reply_type": "time",
+            "booking_interrupt_info": True,
+            "info_sections": ["services_overview"],
+            "policy_collect_guard_recovery": "active_time_service_info_interrupt",
+        },
+        trace_entries=[
+            {
+                "stage": "llm_policy_plan_delta",
+                "decision": "override_event",
+                "from_tool_action": "collect",
+                "to_tool_action": "catalog.service_query",
+            },
+            {
+                "stage": "policy_interrupt_contract",
+                "decision": "collect_service_info_interrupt",
+                "service_query": "Стрижка",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "booking_interrupt",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=["info"],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="По стрижке у нас есть женская, мужская и детская стрижка.",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={"expected_reply_type": ["time"]},
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "policy_interrupt_contract",
+                "decision": "collect_service_info_interrupt",
+            },
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "time",
+            },
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_service_choice_price_interrupt_booking_progress():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "catalog.service_query",
+            "source": "tool_registry",
+            "tool_action": "catalog.service_query",
+            "tool_decision": "truth_fallback",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "catalog_service_booking_progress",
+            "expected_reply_contract_reason": "catalog_service_booking_progress",
+            "info_sections": ["pricing"],
+        },
+        trace_entries=[
+            {
+                "stage": "tool_registry",
+                "decision": "truth_fallback",
+                "tool_action": "catalog.service_query",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "catalog_service_booking_progress",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=["price"],
+        info_answered={"price": True},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Маникюр классический — 2 500 ₸.",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "expected_reply_type": ["time"],
+            "expected_reply_contract_reason": ["catalog_service_booking_progress"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "time",
+                "reason": "catalog_service_booking_progress",
+            },
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_flags_hours_info_tag_on_booking_time_daypart_preference():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "policy_core_degraded_collect",
+            "expected_reply_matched": True,
+        },
+        trace_entries=[
+            {
+                "stage": "question_contract",
+                "decision": "matched",
+                "expected_reply_type": "time",
+                "answer_slot": "datetime",
+                "value": "утром",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "policy_core_degraded_collect",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=["hours"],
+        info_answered={"hours": False},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На какую дату и время вам удобно?",
+        tool_signals={},
+    )
+
+    assert "info_section_miss" in reasons
+
+
+def test_evaluate_turn_accepts_booking_time_daypart_preference_without_hours_info_tag():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "policy_core_degraded_collect",
+            "expected_reply_matched": True,
+        },
+        trace_entries=[
+            {
+                "stage": "question_contract",
+                "decision": "matched",
+                "expected_reply_type": "time",
+                "answer_slot": "datetime",
+                "value": "утром",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "policy_core_degraded_collect",
+                "expected_reply_type": "time",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На какую дату и время вам удобно?",
+        tool_signals={},
+    )
+
+    assert "info_section_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_question_like_daypart_exact_time_fill_name_resume():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "question_contract",
+            "expected_reply_type": "name",
+            "expected_reply_reason": "booking_prompt",
+            "expected_reply_matched": True,
+        },
+        trace_entries=[
+            {
+                "stage": "question_contract",
+                "decision": "matched",
+                "expected_reply_type": "time",
+                "value": "10:00",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "reason": "booking_prompt",
+                "expected_reply_type": "name",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="name",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="name",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Записала на завтра в 10:00. Как вас зовут?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={"expected_reply_type": ["name"]},
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "name",
+            }
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_flags_policy_core_success_specialist_followup_owner_gap():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "llm_policy_core",
+            "policy_core_mode": "policy_core",
+            "expected_reply_type": "time",
+        },
+        trace_entries=[
+            {
+                "stage": "question_contract",
+                "decision": "missed",
+                "expected_reply_type": "time",
+                "answer_error": "blocked_by_info",
+            },
+            {
+                "stage": "llm_policy_core",
+                "decision": "collect",
+                "intent": "booking",
+                "subject_kind": "specialist",
+                "capability": "bookability",
+                "resolution_mode": "clarify_missing_time",
+                "next_question": "datetime",
+                "pending_question_target": None,
+                "active_question_relation": None,
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "booking_prompt",
+            },
+            {
+                "stage": "booking",
+                "decision": "prompt",
+                "source": "llm_policy_core",
+                "missing_slot": "datetime",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На какую дату и время вам удобно?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_target": ["specialist"],
+            "active_question_relation": ["referent_followup"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "expected_reply_type": "time",
+            }
+        ],
+    )
+
+    assert "expected_meta_mismatch" in reasons
+    assert "expected_trace_miss" in reasons
+
+
+def test_evaluate_turn_accepts_choose_specialist_master_interrupt():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "master",
+            "source": "booking_info_contract",
+            "booking_interrupt_info": True,
+            "pending_question_target": "time",
+            "expected_reply_type": "time",
+            "info_sections": ["master"],
+        },
+        trace_entries=[
+            {
+                "stage": "booking_interrupt",
+                "decision": "info_reply",
+                "pending_question_target": "time",
+                "info_sections": ["master"],
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "booking_prompt",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=["master"],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=["master"],
+        info_answered={"master": True},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Да, специалиста выбрать можно. По маникюру у нас работают Айгерим и Динара. На какую дату и время вам удобно?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_question_target": ["time"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "booking_interrupt",
+                "decision": "info_reply",
+                "pending_question_target": "time",
+                "info_sections": ["master"],
+            }
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+    assert "info_section_miss" not in reasons
+
+
+def test_evaluate_turn_flags_invalid_schema_service_grounded_booking_service_choice_gap():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "llm_policy_core",
+            "policy_core_mode": "degraded_fallback",
+            "policy_core_degrade_reason": "policy_error:invalid_schema",
+            "expected_reply_type": "service_choice",
+            "service_query": None,
+        },
+        trace_entries=[
+            {
+                "stage": "llm_policy_core",
+                "error": "invalid_schema",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "degraded_collect",
+                "reason": "policy_error:invalid_schema",
+                "missing_slot": "service",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "service_choice",
+                "reason": "policy_core_degraded_collect",
+            },
+            {
+                "stage": "booking",
+                "decision": "prompt",
+                "source": "llm_policy_core",
+                "missing_slot": "service",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="service_choice",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На какую услугу хотите записаться? После этого сразу проверю свободное время.",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "policy_core_guard",
+                "decision": "invalid_schema_service_grounded_booking",
+                "reason": "policy_error:invalid_schema",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "policy_core_invalid_schema_service_grounded_booking",
+            },
+        ],
+    )
+
+    assert "expected_meta_mismatch" in reasons
+    assert "expected_trace_miss" in reasons
+
+
+def test_evaluate_turn_flags_active_time_consult_topic_shift_service_choice_gap():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "calendar.list_slots",
+            "source": "tool_registry",
+            "tool_action": "calendar.list_slots",
+            "expected_reply_type": "time",
+        },
+        trace_entries=[
+            {
+                "stage": "consult",
+                "decision": "reply",
+                "intent": "consult_reply",
+                "consult_topic": "nails_design",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "policy_core_degraded_collect",
+            },
+            {
+                "stage": "tool_registry",
+                "decision": "ok",
+                "tool_action": "calendar.list_slots",
+            },
+        ],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="service_choice",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На 20:00 свободного окна нет. Доступны: 09:00, 10:00, 11:00.",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "expected_reply_type": ["service_choice"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "service_choice",
+                "reason": "consult_topic_shift",
+            }
+        ],
+    )
+
+    assert "expected_meta_mismatch" in reasons
+    assert "expected_trace_miss" in reasons
+
+
 def test_evaluate_turn_flags_timeout_degrade_booking_generic():
     evaluate = _load_evaluate_turn()
 
@@ -2359,3 +4981,178 @@ def test_evaluate_turn_flags_timeout_degrade_booking_generic():
     )
 
     assert "timeout_degrade_booking_generic" in reasons
+
+
+def test_evaluate_turn_accepts_pending_handoff_pricing_interrupt_keeps_time_followup():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "reply",
+            "intent": "catalog.service_query",
+            "source": "tool_registry",
+            "pending_guard": "soft_pass",
+            "pending_action": "pending_pass",
+            "pending_resume_restored": True,
+            "pending_handoff_resume_boundary": True,
+            "expected_reply_type": "time",
+            "expected_reply_reason": "booking_time_availability_followup",
+        },
+        trace_entries=[
+            {
+                "stage": "pending_resume",
+                "decision": "restore_soft_pass",
+                "reason": "handover_soft_pass",
+            },
+            {
+                "stage": "session_memory",
+                "decision": "preserve",
+                "reason": "pending_handoff_resume_boundary",
+            },
+            {
+                "stage": "pending_guard",
+                "decision": "soft_pass",
+                "state": "pending",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "booking_time_availability_followup",
+            },
+            {
+                "stage": "tool_registry",
+                "decision": "truth_fallback",
+                "tool_action": "catalog.service_query",
+                "info_sections": ["pricing"],
+            },
+        ],
+        state="pending",
+        conv_meta={},
+        handover_meta={"status": "pending"},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=["pricing"],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=["price"],
+        info_answered={"pricing": True},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Маникюр классический — 2 500 ₸.",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "expected_reply_type": ["time"],
+            "pending_guard": ["soft_pass"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "time",
+            }
+        ],
+    )
+
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons
+
+
+def test_evaluate_turn_accepts_pending_soft_pass_timeout_booking_resume_boundary():
+    evaluate = _load_evaluate_turn()
+
+    reasons = evaluate(
+        meta={
+            "action": "booking_prompt",
+            "intent": "booking",
+            "source": "policy_core_guard",
+            "pending_guard": "soft_pass",
+            "pending_action": "pending_pass",
+            "pending_handoff_resume_boundary": True,
+            "session_memory_reset_skipped": "pending_handoff_resume_boundary",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "policy_core_timeout_owner_boundary",
+            "policy_core_guard_recovery": "timeout_owner_boundary_collect",
+            "policy_core_timeout_retry_path": "booking_resume_collect_boundary",
+            "timeout_owner_boundary_source": "resume_contract",
+            "owner_resolution_reason_code": "timeout_owner_boundary_resume_contract",
+            "interaction_owner": "timeout booking resume contract boundary",
+        },
+        trace_entries=[
+            {
+                "stage": "session_memory",
+                "decision": "preserve",
+                "reason": "pending_handoff_resume_boundary",
+            },
+            {
+                "stage": "pending_guard",
+                "decision": "soft_pass",
+                "state": "pending",
+            },
+            {
+                "stage": "owner_resolver",
+                "decision": "timeout_owner_boundary_match",
+                "reason_code": "timeout_owner_boundary_resume_contract",
+                "source": "resume_contract",
+            },
+            {
+                "stage": "boundary_state",
+                "decision": "resume_collect",
+                "source": "pending_handoff",
+                "missing_slot": "datetime",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "timeout_owner_boundary_collect",
+                "missing_slot": "datetime",
+                "filled_slots": [],
+            },
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+                "reason": "policy_core_timeout_owner_boundary",
+            },
+        ],
+        state="pending",
+        conv_meta={},
+        handover_meta={"status": "pending"},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_state="bot_active",
+        expected_reply=True,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="На какую дату и время вам удобно?",
+        tool_signals={},
+        expected_meta={},
+        expected_meta_any={
+            "pending_guard": ["soft_pass"],
+            "expected_reply_type": ["time"],
+        },
+        expected_meta_contains={},
+        expected_trace_contains=[
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "time",
+            }
+        ],
+    )
+
+    assert "expected_state_mismatch" not in reasons
+    assert "expected_meta_mismatch" not in reasons
+    assert "expected_trace_miss" not in reasons

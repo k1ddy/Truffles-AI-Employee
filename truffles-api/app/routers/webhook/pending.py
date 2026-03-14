@@ -113,6 +113,7 @@ def _build_pending_resume_snapshot(
     context: dict,
     context_manager: dict,
     expected_reply_type: str | None,
+    expected_reply_reason: str | None,
     intent_queue: list[str] | None,
     booking_context: dict | None,
     session_memory: dict,
@@ -124,6 +125,7 @@ def _build_pending_resume_snapshot(
     return {
         "context_manager": dict(context_manager) if isinstance(context_manager, dict) else {},
         "expected_reply_type": expected_reply_type,
+        "expected_reply_reason": expected_reply_reason,
         "intent_queue": list(intent_queue) if isinstance(intent_queue, list) else [],
         "booking": dict(booking_context) if isinstance(booking_context, dict) else {"active": False},
         "session_memory": dict(session_memory) if isinstance(session_memory, dict) else {},
@@ -151,6 +153,11 @@ def _restore_pending_resume(
         context,
         pending_resume.get("expected_reply_type") if isinstance(pending_resume, dict) else None,
     )
+    expected_reply_reason = pending_resume.get("expected_reply_reason") if isinstance(
+        pending_resume, dict
+    ) else None
+    if isinstance(expected_reply_reason, str) and expected_reply_reason.strip():
+        context[legacy.EXPECTED_REPLY_REASON_KEY] = expected_reply_reason.strip()
     context = legacy._set_intent_queue(
         context,
         pending_resume.get("intent_queue") if isinstance(pending_resume, dict) else [],

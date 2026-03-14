@@ -72,6 +72,7 @@
 - DONE (local/docs, A/B status-layer sync): canonical status precedence is aligned with `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md` (`Open Blocks Matrix`, code-fact `2026-03-03`) as release-scope source of truth; `P12` is now tracked as `release=de-scoped` + `program=blocked` (business/runtime onboarding dependency), and historical deterministic hardening evidence is explicitly marked as non-closure evidence for this cycle.
 - BLOCKED (business deferral): `P12 Cross-domain Hardening` remains blocked for final closure because runtime onboarding for two real non-salon domains is not in scope in this cycle; deterministic hardening is implemented (`truffles-api/tests/test_cross_domain_signal_contract_suite.py`, matrix gate in `ops/diagnose.py`), but guarded acceptance artifacts for two runtime non-salon domains are absent by design and required for closure.
 - BLOCKED (Block E / E2e runtime evidence, semantic): fresh acceptance lock `booking-lock-20260305-firebreak-e2-a1-r22` on firebreak runtime (`http://127.0.0.1:18184`) completed with full integrity (`infra_valid=true`, `run_integrity.valid=true`, `responses/trace=142/142`) but remained non-canonical (`semantic_valid=false`) with blocking reasons `calendar_tool_contract_miss=2`, `stale_booking_carryover=1`, `judge_fail=1`; threshold breaches: `hard_fail_rate=0.0141 (>0.0)` and `degraded_fallback_rate=0.1783 (>0.05)`. Additional runtime signal from artifacts: `policy_core_mode=degraded_fallback` appears on `23` turns (`responses.jsonl`) and lacks explicit reason-code in `policy_core_guard` (`unknown`), so graceful-degrade observability contract is incomplete for this run. Strict artifact audit passed (`python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/booking-lock-20260305-firebreak-e2-a1-r22 --status done --strict-artifacts` -> `artifact_integrity.valid=true`, `manual_audit=done`). Acceptance replay in same chain is fail-closed blocked (`chain_step_order_violation:replay:lock`) because lock step status is `failed` in `/tmp/booking_quality/_chain/20260305-firebreak-e2-a1-r22.json`. E2 remains open and moves to targeted semantic remediation TP `docs/TASK_PACKAGES/TP-2026-03-05-e2f-firebreak-semantic-contract-closure-a1.md`; deterministic slice `E2f.1` is now complete locally (see NOW bullet), next mandatory evidence step is canonical lock rerun `r23`.
+- BLOCKED (local/docs, remaining `demo_salon` closure architecture): `r73` (`Какой мастер свободен на этой неделе?`) is now frozen as a compound semantic+runtime owner gap, not a runtime-only blocker. Parent verdict `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60a-remaining-closure-architecture-verdict-a1.md` and owner matrix `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60b-remaining-closure-owner-matrix-a1.md` are published in the current worktree; child `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60-master-availability-followup-active-time-owner-a1.md` is explicitly blocked until it is implemented as matrix row `M7` only. Evidence: `/tmp/booking_quality/p1.6o6-l2-dev-20260309-a1-r73/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260309-a1-r73/trace_bundle.jsonl`, `prompts/llm_policy_core.md:58-72`, `truffles-api/app/routers/webhook/decision.py:5492-5578`, `truffles-api/app/routers/webhook/booking.py:1849-1967`.
 - DONE (local/code+tests+docs, Block E / E2a point-1): dedicated Task Package `docs/TASK_PACKAGES/TP-2026-03-04-e2a-interrupt-arbitration-owner-a1.md` delivered first E2 remediation slice with contract-level fixes in `truffles-api/app/routers/webhook/decision.py`: added single `collect -> info` interrupt owner for booking-active turns (`_resolve_policy_collect_interrupt_arbitration`, trace/meta stage `policy_interrupt_contract`) to stop collect takeover on master/info interrupts, and enforced terminal expected-reply clear invariant (`expected_reply_contract_terminal_clear`) to block same-turn re-derivation after clear-contract tool outcomes (fixes `calendar.book_slot=ok` follow-up drift class). Deterministic coverage added in `truffles-api/tests/test_message_endpoint.py` (`test_policy_collect_interrupt_arbitration_rewrites_master_query_to_info`, `test_policy_collect_interrupt_arbitration_rewrites_question_like_master_signal`, `test_llm_policy_core_calendar_book_slot_ok_terminal_clear_blocks_followup_expected_reply`); checks: `pytest -q truffles-api/tests/test_message_endpoint.py -k "policy_collect_interrupt_arbitration_rewrites_master_query_to_info or policy_collect_interrupt_arbitration_rewrites_question_like_master_signal or llm_policy_core_calendar_book_slot_ok_terminal_clear_blocks_followup_expected_reply or llm_policy_core_get_booking_ok_does_not_force_handoff"` (`4 passed, 272 deselected`), `pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core_master_query_normalizes_to_master_info_under_booking or booking_info_interrupt_pricing_with_expected_name_suppresses_booking_prompt"` (`2 passed, 274 deselected`), `ruff check truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py` (`All checks passed`). Residual debt intentionally deferred to `E2b`: price morphology coverage (`по цене`) and broader multilingual resolver hardening.
 - DONE (local/code+tests+docs, Block E / E2b): dedicated Task Package `docs/TASK_PACKAGES/TP-2026-03-04-e2b-lexicon-resolver-hardening-a1.md` delivered lexical/resolver hardening for runtime signal layer: added RU price morphology coverage (`цене/цены/по цене/по ценам`) in `truffles-api/app/knowledge/generic/SYSTEM_LEXICONS.yaml`, mirrored master booking phrases in data layer for system + demo pack (`master_query_direct_terms` updates in `SYSTEM_LEXICONS.yaml` and `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`), and added deterministic inflection fallback in adapters (`truffles-api/app/services/demo_salon_knowledge.py`, `truffles-api/app/services/pack_runtime_neutral_adapter.py`) so `по цене` resolves as price signal without heavy NLP dependency. Deterministic coverage added in `truffles-api/tests/test_pack_runtime_service.py` (`test_has_price_signal_handles_russian_case_forms`, `test_resolve_master_intent_detects_booking_phrase_with_specialist`) and `truffles-api/tests/test_message_endpoint.py` (`test_policy_collect_interrupt_arbitration_rewrites_price_question_to_info`); checks: `pytest -q truffles-api/tests/test_pack_runtime_service.py -k "price_signal or master_intent"` (`2 passed, 17 deselected`), `pytest -q truffles-api/tests/test_message_endpoint.py -k "policy_collect_interrupt_arbitration_rewrites_price_question_to_info or policy_collect_interrupt_arbitration_rewrites_question_like_master_signal"` (`2 passed, 275 deselected`), `ruff check truffles-api/app/services/demo_salon_knowledge.py truffles-api/app/services/pack_runtime_neutral_adapter.py truffles-api/tests/test_pack_runtime_service.py truffles-api/tests/test_message_endpoint.py` (`All checks passed`). E2 remains open until E2c guarded replay/canary proves semantic blockers are removed on canonical fingerprint.
 - DONE (historical, Block E / E2c canonical acceptance path): dedicated Task Package `docs/TASK_PACKAGES/TP-2026-03-04-e2c-canonical-replay-canary-a1.md` captured process-layer deadlock evidence (`r14`..`r21`) and proved blocker was chain/process coupling, not new semantic code regression; this process blocker was remediated in `E2d` and validated by successful full lock execution in `E2e` (`r22`). Evidence: `/tmp/booking_quality/booking-lock-20260304-firebreak-e2-a1-r14/summary.json`, `/tmp/booking_quality/booking-lock-20260304-firebreak-e2-a1-r15/summary.json`, `/tmp/booking_quality/booking-lock-20260304-firebreak-e2-a1-r16/summary.json`, `/tmp/booking_quality/booking-lock-20260304-firebreak-e2-a1-r17/summary.json`, `/tmp/booking_quality/booking-lock-20260304-firebreak-e2-a1-r18/summary.json`, `/tmp/booking_quality/_chain/20260304-firebreak-e2-a1-r19.json`, `/tmp/booking_quality/_chain/20260304-firebreak-e2-a1-r21.json`, `/tmp/booking_quality/booking-lock-20260305-firebreak-e2-a1-r22/summary.json`.
@@ -5384,3 +5385,2641 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 **Статус:**
 - P1 closure complete for current TP scope (`single semantic owner hard lock` + `E508` residual).
 - Next mandatory block remains `P2 FACT body neutrality` (separate scope).
+
+
+---
+
+### 2026-03-11 — P1.6o61 bounded closure; r81 opens repeated-timeout slot-question family
+
+**Что сделали:**
+- `P1.6o61/M10`: bounded semantic/runtime closure frozen; grounded-time specialist availability now preserves `specialist_availability_followup` and explicit `time -> name` resume transition on deterministic contour.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r81` no longer stopped on `r77/M10`.
+- New first fail is `dialog_id=1`, `turn_index=2`, user text `Какой ближайший слот доступен?`; opened `P1.6o62` / matrix row `M11` as a repeated-timeout `ask_about_requested_slot(time)` family under active `time` collect.
+
+**Evidence:**
+- Deterministic `M10` closure: focused suite `13 passed`; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r81/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r81/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r81/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r81/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r81/manual_audit.md`.
+- Canon sync: `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o61-grounded-time-specialist-availability-owner-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60b-remaining-closure-owner-matrix-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o6-demo-salon-closure-proof-bundle-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o62-timeout-ask-about-requested-slot-booking-limit-a1.md`.
+
+**Статус:**
+- `P1.6o61` = bounded closed; active blocker moved to `P1.6o62`.
+- `r81` is architectural evidence only (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`); acceptance replay/full remains blocked until `M11` is closed.
+
+### 2026-03-11 — P1.6o62 bounded closure; r82 opens active-name alternate-time family
+
+**Что сделали:**
+- `P1.6o62/M11`: bounded timeout-degrade closure frozen; repeated `policy_core` timeout no longer makes active `ask_about_requested_slot(time)` inherit the generic booking-collect retry limit.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r82` no longer stopped on `r81/M11`.
+- New first fail is `dialog_id=1`, `turn_index=8`, user text `А есть ли свободные слоты на 15:00?`; opened `P1.6o63` / matrix row `M12` as an active-`name` alternate-time availability family.
+
+**Evidence:**
+- Deterministic `M11` closure: focused suite `10 passed`; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r82/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r82/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r82/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r82/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r82/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r82/manual_audit.md`.
+- Canon sync: `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o62-timeout-ask-about-requested-slot-booking-limit-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o63-active-name-time-availability-followup-owner-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60b-remaining-closure-owner-matrix-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o6-demo-salon-closure-proof-bundle-a1.md`.
+
+**Статус:**
+- `P1.6o62` = bounded closed; active blocker moved to `P1.6o63`.
+- `r82` is architectural evidence only (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`); acceptance replay/full remains blocked until `M12` is closed.
+
+### 2026-03-11 — P1.6o63 bounded closure; r83 opens timeout-mixed-date governance family
+
+**Что сделали:**
+- `P1.6o63/M12`: bounded prompt/runtime/scenario closure frozen; active-name alternate-time availability now preserves `pending_question_target=time`, `active_question_relation=ask_about_requested_slot`, and resume `name` without silent overwrite of committed `booking.datetime`.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r83` no longer stopped on `r82/M12`.
+- New first fail is `dialog_id=1`, `turn_index=2`, user text `Есть ли свободные слоты на завтра?`; opened `P1.6o64` / matrix row `M13` as a timeout-degraded mixed-date scenario-governance family.
+
+**Evidence:**
+- Deterministic `M12` closure: focused suites `9 passed`; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r83/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r83/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r83/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r83/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r83/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r83/manual_audit.md`.
+- Canon sync: `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o63-active-name-time-availability-followup-owner-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o64-timeout-mixed-date-availability-governance-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60b-remaining-closure-owner-matrix-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o6-demo-salon-closure-proof-bundle-a1.md`.
+
+**Статус:**
+- `P1.6o63` = bounded closed; active blocker moved to `P1.6o64`.
+- `r83` is contract-first architectural evidence only (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `judge_alignment=conflicted`); acceptance replay/full remains blocked until `M13` is closed.
+
+### 2026-03-11 — P1.6o64 bounded closure; r90 opens invalid-schema specialist-followup family
+
+**Что сделали:**
+- `P1.6o64/M13`: bounded oracle/evaluator closure frozen; timeout-degraded mixed-date turns now score the post-grounding resume contract (`name`) after deterministic `datetime` grounding while preserving `slot_constraint(time)` evidence and timeout provenance.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r90` no longer stopped on `r83/M13`.
+- New first fail is `dialog_id=1`, `turn_index=4`, user text `Можно к мастеру Асем?`; opened `P1.6o65` / matrix row `M14` as an invalid-schema specialist-followup runtime-degrade family.
+
+**Evidence:**
+- Deterministic `M13` closure: `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "structured_meta or timeout_grounded_slot_constraint_name_resume or timeout_degrade_booking_generic"` -> `4 passed`; `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "mixed_date or tomorrow or active_name_time_availability_followup"` -> `2 passed`; `python3 -m py_compile ops/diagnose.py` -> pass; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r90/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r90/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r90/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r90/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r90/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r90/manual_audit.md`.
+- Canon sync: `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o64-timeout-mixed-date-availability-governance-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o65-invalid-schema-specialist-followup-truth-gate-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60b-remaining-closure-owner-matrix-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o6-demo-salon-closure-proof-bundle-a1.md`.
+
+**Статус:**
+- `P1.6o64` = bounded closed; active blocker moved to `P1.6o65`.
+- `r90` is architectural evidence only (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`); acceptance replay/full remains blocked until `M14` is closed.
+
+### 2026-03-11 — P1.6o65 bounded closure; r91 opens policy-core named-specialist follow-up family
+
+**Что сделали:**
+- `P1.6o65/M14`: bounded runtime closure frozen; non-retryable `invalid_schema` degraded fallback now preserves explicit specialist-followup recovery instead of collapsing into `booking_interrupt info_reply` + `truth_gate master`.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r91` no longer stopped on `r90/M14`.
+- New first fail is `dialog_id=1`, `turn_index=5`, user text `Я хочу записаться к Айгерим.`; opened `P1.6o66` / matrix row `M15` as a policy-core success-path named specialist follow-up family.
+
+**Evidence:**
+- Deterministic `M14` closure: `pytest -q truffles-api/tests/test_message_endpoint.py -k "invalid_schema_specialist_followup or timeout_specialist_followup or timeout_master_info_interrupt"` -> `3 passed`; `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "invalid_schema_truth_gate_for_specialist_followup or timeout_grounded_slot_constraint_name_resume or timeout_degrade_booking_generic"` -> `4 passed`; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r91/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r91/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r91/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r91/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r91/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r91/manual_audit.md`.
+- Audit: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r91 --status done --strict-artifacts` -> `artifact_integrity.valid=true`, `manual_audit=done`.
+- Canon sync: `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o65-invalid-schema-specialist-followup-truth-gate-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o66-policy-core-named-specialist-followup-owner-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60b-remaining-closure-owner-matrix-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o6-demo-salon-closure-proof-bundle-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60a-remaining-closure-architecture-verdict-a1.md`.
+
+**Статус:**
+- `P1.6o65` = bounded closed; active blocker moved to `P1.6o66`.
+- `r91` is contract-first architectural evidence only (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`); acceptance replay/full remains blocked until `M15` is closed.
+
+### 2026-03-11 — P1.6o66 bounded closure; r92 opens ambiguous-time-fill scenario-governance family
+
+**Что сделали:**
+- `P1.6o66/M15`: bounded prompt/runtime/test closure frozen; policy-core success path now preserves named specialist follow-up owner evidence under active `time` collect.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r92` no longer stopped on `r91/M15`.
+- New surfaced family is scenario-governance: dialog `1`, downstream first fail at turn `5` (`Какова цена маникюра?`), with true root cause at turn `3` (`Мне нужно в 14:00 или позже.`), where generated scenario overclaims exact-time closure and seeds stale `reply_type=name`; opened `P1.6o67` / matrix row `M16`.
+
+**Evidence:**
+- Deterministic `M15` closure: `pytest -q truffles-api/tests/test_message_endpoint.py -k "named_specialist_followup_recovers_blank_semantic_target_and_keeps_time_collect or question_like_specialist_followup_acknowledges_preference_and_keeps_time_collect or booking_specialist_followup_recovers_missing_specialist_preference_via_hint or invalid_schema_specialist_followup_keeps_time_collect or timeout_specialist_followup_keeps_time_collect"` -> `5 passed`; `pytest -q truffles-api/tests/test_message_endpoint.py -k "persists_preference_and_resumes_name_collect"` -> `1 passed`; `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "policy_core_success_specialist_followup_owner_gap or invalid_schema_truth_gate_for_specialist_followup or timeout_degrade_booking_generic"` -> `3 passed`; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r92/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r92/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r92/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r92/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r92/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r92/manual_audit.md`.
+- Audit: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r92 --status done --strict-artifacts` -> `artifact_integrity.valid=true`, `manual_audit=done`.
+- Deterministic `M16` start: `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "ambiguous_lower_bound or normalizes_explicit_time_fill_out_of_slot_constraint or scrubs_stale_slot_constraint_expect_override_after_time_normalization or keeps_slot_constraint_without_grounded_time_fill or preserves_time_resume_after_ambiguous_lower_bound_time_fill_and_pricing_interrupt or info_interrupt"` -> `9 passed`; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+
+**Статус:**
+- `P1.6o66` = bounded closed; active blocker moved to `P1.6o67`.
+- `r92` is contract-first architectural evidence only (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`); next expensive rerun stays blocked until `M16` deterministic scenario-governance closure is green and canon sync is complete.
+
+
+### 2026-03-11 — P1.6o67 bounded closure; r93 opens invalid-schema service-grounded degraded-booking family
+
+**Что сделали:**
+- `P1.6o67/M16`: bounded scenario-governance closure frozen; ambiguous lower-bound time phrases under active `time` collect now keep generated `reply_type=time` instead of overclaiming canonical exact-time fill.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r93` no longer stopped on `r92/M16`.
+- New first strict fail is `dialog_id=1`, `turn_index=3`, user text `А есть ли свободные слоты на субботу?`; opened `P1.6o68` / matrix row `M17` as an invalid-schema service-grounded degraded-booking family.
+
+**Evidence:**
+- Deterministic `M16` closure: `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "ambiguous_lower_bound or preserves_time_resume_after_ambiguous_lower_bound_time_fill_and_pricing_interrupt"` -> `2 passed`; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r93/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r93/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r93/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r93/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r93/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r93/manual_audit.md`.
+- Audit: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r93 --status done --strict-artifacts` -> `artifact_integrity.valid=true`, `manual_audit=done`.
+- Canon sync: `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o67-ambiguous-time-fill-scenario-governance-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o68-invalid-schema-service-grounded-booking-owner-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60b-remaining-closure-owner-matrix-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o6-demo-salon-closure-proof-bundle-a1.md`, `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60a-remaining-closure-architecture-verdict-a1.md`.
+
+**Статус:**
+- `P1.6o67` = bounded closed; active blocker moved to `P1.6o68`.
+- `r93` is contract-first architectural evidence only (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`); next expensive rerun stays blocked until `M17` deterministic runtime closure is green.
+
+### 2026-03-11 — P1.6o68 bounded closure; r94 opens declarative time-window slot-constraint family
+
+**Что сделали:**
+- `P1.6o68/M17`: bounded degraded-owner closure frozen; invalid-schema service-grounded booking intake now preserves grounded service and resume `time` instead of reopening `service_choice`.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r94` no longer stopped on `r93/M17`.
+- New first fail is `dialog_id=1`, `turn_index=3`, user text `Мне нужно с 10 до 12.`; opened `P1.6o69` / matrix row `M18` as a declarative time-window slot-constraint family.
+
+**Evidence:**
+- Deterministic `M17` closure: targeted runtime/evidence checks green; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r94/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r94/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r94/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r94/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r94/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r94/manual_audit.md`.
+
+**Статус:**
+- `P1.6o68` = bounded closed; active blocker moved to `P1.6o69`.
+- `r94` remains non-canonical proof evidence (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`).
+
+### 2026-03-11 — P1.6o69 bounded closure; r95 opens invalid-schema booking-request specialist-followup family
+
+**Что сделали:**
+- `P1.6o69/M18`: bounded runtime/evidence closure frozen; declarative time-window constraints under active `time` collect now preserve `slot_constraint(time)` trace/meta instead of degrading to generic collect prompt.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r95` no longer stopped on `r94/M18`.
+- New first fail is `dialog_id=3`, `turn_index=4`, user text `Можно ли записаться к Айгерим?`; opened `P1.6o70` / matrix row `M19`.
+
+**Evidence:**
+- Deterministic `M18` closure: targeted runtime/evidence checks green; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r95/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r95/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r95/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r95/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r95/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r95/manual_audit.md`.
+
+**Статус:**
+- `P1.6o69` = bounded closed; active blocker moved to `P1.6o70`.
+- `r95` remains non-canonical proof evidence (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`).
+
+### 2026-03-11 — P1.6o70 bounded closure; r96 opens stale check-booking/service-choice governance family
+
+**Что сделали:**
+- `P1.6o70/M19`: bounded runtime/evidence closure frozen; invalid-schema named-specialist booking-request follow-up now preserves `booking_specialist_followup` without explicit `мастер` wording.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r96` no longer stopped on `r95/M19`.
+- New first fail is `dialog_id=2`, `turn_index=4`, user text `Когда у меня назначена встреча?`; opened `P1.6o71` / matrix row `M20` as a stale `check_booking/service_choice` scenario-governance family.
+
+**Evidence:**
+- Deterministic `M19` closure: targeted runtime/evidence checks green; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r96/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r96/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r96/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r96/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r96/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r96/manual_audit.md`.
+
+**Статус:**
+- `P1.6o70` = bounded closed; active blocker moved to `P1.6o71`.
+- `r96` remains non-canonical proof evidence (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`).
+
+### 2026-03-11 — P1.6o71 bounded closure; r101 opens active-name deictic requested-slot family
+
+**Что сделали:**
+- `P1.6o71/M20`: bounded scenario-governance closure frozen; stale `service_choice` no longer survives `check_booking` / media interruption into booking-management follow-ups.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r101` no longer stopped on `r96/M20`.
+- New first fail is `dialog_id=1`, `turn_index=5`, user text `А есть ли у вас места в это время?`; opened `P1.6o72` / matrix row `M21` as an active-name deictic requested-slot family after explicit time grounding.
+
+**Evidence:**
+- Deterministic `M20` closure: `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/tests/test_booking_dialog_scenarios_script.py` -> pass; `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "check_booking_followup or booking_management_reset or reschedule_followup or preserves_time_resume_after_ambiguous_lower_bound_time_fill_and_pricing_interrupt or active_name_time_availability_followup"` -> `7 passed`; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r101/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r101/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r101/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r101/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r101/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r101/manual_audit.md`.
+- Audit: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r101 --status done --strict-artifacts` -> `artifact_integrity.valid=true`, `manual_audit=done`.
+
+**Статус:**
+- `P1.6o71` = bounded closed; active blocker moved to `P1.6o72`.
+- `r101` remains non-canonical proof evidence (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`).
+
+### 2026-03-11 — P1.6o72 bounded closure; r102 opens question-like daypart exact-time-fill family
+
+**Что сделали:**
+- `P1.6o72/M21`: bounded prompt/runtime/scenario closure frozen; under active `name` collect, deictic requested-slot follow-up `А есть ли у вас места в это время?` now preserves the grounded-time referent instead of collapsing into generic `name` collect.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r102` no longer stopped on `r101/M21`.
+- New surfaced family is rooted at `dialog_id=1`, `turn_index=2`, user text `А можно на утро, скажем, на 10 утра?`: explicit `10 утра` still does not ground `datetime`, runtime stays on `ask_about_requested_slot(time)` / generic time guidance, and the contract-first first fail then surfaces downstream at turn `3` (`Сколько стоит маникюр?`). Opened `P1.6o73` / matrix row `M22`.
+
+**Evidence:**
+- Deterministic `M21` closure: `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_booking_dialog_scenarios_script.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py` -> pass; `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "active_name_time_availability_followup or deictic_time_availability_followup or check_booking_followup"` -> `4 passed`; `pytest -q truffles-api/tests/test_message_endpoint.py -k "active_name_time_availability_followup or active_name_deictic_time_availability_followup"` -> `3 passed`; `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "active_name_deictic_time_availability_followup or active_name or requested_slot"` -> `2 passed`; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded run: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r102/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r102/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r102/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r102/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r102/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r102/manual_audit.md`.
+- Audit: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r102 --status done --strict-artifacts` -> `artifact_integrity.valid=true`, `manual_audit=done`.
+
+**Статус:**
+- `P1.6o72` = bounded closed; active blocker moved to `P1.6o73`.
+- `r102` remains non-canonical proof evidence (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`).
+
+### 2026-03-11 — P1.6o73 and P1.6o74 bounded closures; r104 opens active-time consult topic-shift family
+
+**Что сделали:**
+- `P1.6o73/M22`: bounded prompt/runtime/scenario closure frozen; question-like daypart phrasing with explicit exact time (`А можно на утро, скажем, на 10 утра?`) now grounds `datetime` and advances resume to `name` instead of staying on `ask_about_requested_slot(time)`.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r103` no longer stopped on `r102/M22` and surfaced `M23` on declarative named-specialist follow-up under active `name` collect.
+- `P1.6o74/M23`: bounded prompt/runtime/scenario closure frozen; under active `name` collect, declarative named-specialist follow-up (`Я хотел бы записаться к Айгерим.`) now preserves specialist preference and `referent_followup` instead of committing booking directly.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r104` no longer stopped on `r103/M23`.
+- New first fail is `dialog_id=2`, `turn_index=7`, user text `Какие у вас есть варианты?`; true root cause starts at dialog `2`, turn `6`, `Я интересуюсь дизайном ногтей.` where runtime replies through `consult_reply` but keeps stale booking `expected_reply_type=time`. Opened `P1.6o75` / matrix row `M24`.
+
+**Evidence:**
+- Deterministic `M22` closure: focused scenario/runtime/evidence checks green; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded `r103`: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r103/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r103/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r103/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r103/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r103/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r103/manual_audit.md`.
+- Deterministic `M23` closure: `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_booking_dialog_scenarios_script.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py` -> pass; `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "active_name_specialist_followup_after_cancel or booking_specialist_followup_preserves_active_name_contract"` -> `3 passed`; `pytest -q truffles-api/tests/test_message_endpoint.py -k "active_name_named_specialist_followup_blocks_direct_book_slot or booking_specialist_followup_persists_preference_and_resumes_name_collect"` -> `2 passed`; `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "active_name_named_specialist_followup or active_name_deictic_time_availability_followup or question_like_daypart_exact_time_fill_name_resume"` -> `3 passed`; broader adjacent checks green; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded `r104`: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r104/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r104/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r104/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r104/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r104/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r104/manual_audit.md`.
+- Audit: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r104 --status done --strict-artifacts` -> `artifact_integrity.valid=true`, `manual_audit=done`, `oracle_arbitration.winner=contract`, `conflict_count=1`.
+
+**Статус:**
+- `P1.6o73` = bounded closed.
+- `P1.6o74` = bounded closed.
+- Active blocker moved to `P1.6o75`.
+- `r103` and `r104` remain non-canonical proof evidence (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`).
+
+### 2026-03-11 — P1.6o75 bounded closure; r105 opens first-time requested-slot timeout family
+
+**Что сделали:**
+- `P1.6o75/M24`: bounded response/runtime/test closure frozen; standalone consult/service-topic shift (`Я интересуюсь дизайном ногтей.`) now clears or replaces stale booking `expected_reply_type=time` with consult/service-choice ownership before the next follow-up turn.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r105` no longer stopped on `r104/M24`.
+- New first fail is `dialog_id=1`, `turn_index=2`, user text `В какое время у вас есть слоты?`; true root cause starts on the same turn where `llm_policy_core` times out before row-specific owner evidence is written, `policy_core_guard` degrades to generic collect, and runtime preserves only `question_contract.expected_reply_type=time` without `ask_about_requested_slot(time)` interaction evidence. Opened `P1.6o76` / matrix row `M25`.
+
+**Evidence:**
+- Deterministic `M24` closure: `pytest -q truffles-api/tests/test_consult_followup_guard.py -k "consult_followup or locked_consult_topic_shift"` -> `7 passed`; `pytest -q truffles-api/tests/test_message_endpoint.py -k "locked_time_consult_topic_shift_sets_service_choice_owner or consult_reply_with_service_hint_sets_service_expected_reply_for_booking_cta"` -> `2 passed`; `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "consult_topic_shift_service_choice_gap or invalid_schema_service_grounded_booking_service_choice_gap"` -> `2 passed`; adjacent negative checks green; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded `r105`: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r105/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r105/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r105/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r105/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r105/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r105/manual_audit.md`.
+- Audit: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r105 --status done --strict-artifacts` -> `artifact_integrity.valid=true`, `manual_audit=done`, `oracle_arbitration.winner=contract`, `conflict_count=0`, `hardcode_core_gate.valid=false`.
+
+**Статус:**
+- `P1.6o75` = bounded closed.
+- Active blocker moved to `P1.6o76`.
+- `r105` remains non-canonical proof evidence (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`) and still inherits a pre-existing `hardcode_core_violation` outside this bounded row.
+
+### 2026-03-11 — P1.6o76 bounded closure; r106 opens active-time daypart-preference false-info family
+
+**Что сделали:**
+- `P1.6o76/M25`: bounded runtime/test closure frozen; first-time requested-slot timeout follow-up under active `time` collect now preserves `ask_about_requested_slot(time)` interaction evidence instead of collapsing into generic collect.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r106` no longer surfaced `M25` as the first strict fail.
+- New first fail is `dialog_id=1`, `turn_index=3`, user text `Я предпочитаю утренние часы.`; true root cause starts on the same turn where booking/time contract stays coherent enough for judge pass, but runtime still emits `hours` / `duration` info-class signals and `basic_info_message=true`, so strict contract fails with `info_section_miss`. Opened `P1.6o77` / matrix row `M26`.
+
+**Evidence:**
+- Deterministic `M25` closure: `pytest -q truffles-api/tests/test_message_endpoint.py -k "timeout_pending_slot_question"` -> `6 passed`; `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "timeout_pending_slot_guidance or requested_slot_contract"` -> `2 passed`; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded `r106`: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r106/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r106/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r106/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r106/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r106/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r106/manual_audit.md`.
+- Audit: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r106 --status done --strict-artifacts` -> `artifact_integrity.valid=true`, `manual_audit=done`, `oracle_arbitration.winner=contract`, `conflict_count=1`, `judge_alignment=conflicted`.
+- Direct dev replay attempts `r107`..`r109` on `r105` scenarios self-blocked at manual-audit preflight and were audited as invalid/non-evidence; they are not used for closure proof.
+
+**Статус:**
+- `P1.6o76` = bounded closed.
+- Active blocker moved to `P1.6o77`.
+- `r106` remains non-canonical proof evidence (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`).
+
+### 2026-03-11 — P1.6o77 bounded closure; r112 opens booking-confirm pricing-interrupt service-choice drift
+
+**Что сделали:**
+- `P1.6o77/M26`: bounded info-signal closure frozen; matched active-time daypart-preference answers like `Я предпочитаю утренние часы.` no longer emit phantom `hours` / `duration` info-class signals while the turn stays on booking/time collect.
+- Fresh guarded `dev L2` run `p1.6o6-l2-dev-20260311-a1-r112` no longer surfaced `M26` as the first strict fail.
+- New first fail is `dialog_id=1`, `turn_index=4`, user text `А сколько это будет стоить?`; true root cause starts on turn `3`, where comparative lower-bound time fill (`Мне нужно что-то после 15:00.`) keeps `expected_reply_type=time` via `slot_confirmation_required=true` / `booking_confirm_reject`, but the next pricing interrupt loses grounded service carryover and reopens `service_choice`. Opened `P1.6o78` / matrix row `M27`.
+
+**Evidence:**
+- Deterministic `M26` closure: `pytest -q truffles-api/tests/test_master_info_flow.py -k "daypart and hours"` -> `3 passed`; `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "hours and time and booking"` -> `2 passed`; `pytest -q truffles-api/tests/test_message_endpoint.py -k "booking_time_question_like_daypart_reply_keeps_partial_datetime_without_info_block or booking_time_question_like_daypart_exact_time_reply_advances_to_name_without_policy_core or llm_policy_core_question_like_daypart_constraint_preserves_slot_constraint_contract or llm_policy_core_declarative_daypart_constraint_preserves_slot_constraint_contract"` -> `4 passed`; `git diff --check` -> pass; `SESSION_AGENT=a1 scripts/session_check.sh` -> pass.
+- Guarded `r112`: `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112/summary.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112/brief.md`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112/scenarios.json`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112/responses.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112/trace_bundle.jsonl`, `/tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112/manual_audit.md`.
+- Audit: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112 --status done --strict-artifacts` -> `artifact_integrity.valid=true`, `manual_audit=done`, `oracle_arbitration.winner=contract`, `conflict_count=0`.
+- Invalid placeholders `r110` and `r111` were created by manual-audit preflight before the fresh rerun and were immediately audited as invalid/non-evidence; they are not admissible closure proof.
+
+**Статус:**
+- `P1.6o77` = bounded closed.
+- Active blocker moved to `P1.6o78`.
+- `r112` remains non-canonical proof evidence (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`).
+
+### 2026-03-12 — P1.6o79 redesign reset; executable interaction core becomes default next path
+
+**Что сделали:**
+- Published `P1.6o79` as a doc-only redesign reset for the remaining closure lane.
+- Reclassified `P1.6o16..P1.6o78` as mined evidence corpus + regression set rather than sufficient closure proof.
+- Moved the default next block away from tactical row `P1.6o78/M27` and toward executable interaction core work: base-canon sync -> machine-readable owner matrix -> persisted `InteractionState` -> `OwnerResolver` + `M27` vertical slice.
+- Synced the main remediation TP, closure program TP, and `P1.6o78` itself so the child loop is no longer the default closure path.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o79-executable-interaction-core-redesign-reset-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o78-booking-confirm-pricing-interrupt-service-choice-drift-a1.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112 --status done --strict-artifacts`
+- `git diff --check`
+- `SESSION_AGENT=a1 scripts/session_check.sh`
+
+**Статус:**
+- `P1.6o78/M27` stays open as tactical containment only.
+- `P1.6o79` is now the default next block for the closure lane.
+- No new expensive guarded run is admissible until the redesign chain starts with canon sync.
+
+### 2026-03-12 — P1.6o80 canon sync; interaction model promoted into base canon
+
+**Что сделали:**
+- Published `P1.6o80` as the first redesign child after `P1.6o79`.
+- Synced base canon so `expected_reply_type` is explicitly the resume axis, `pending_question_target` is the interaction target, `active_question_relation` is mandatory, and every active pending-question turn has one `interaction_owner`.
+- Added canon-level allowed-degrade / forbidden-compression rules and first-class `InteractionState` fields to the product/spec docs.
+- Synced the booking verification runbook so structured oracle assertions now explicitly prefer `pending_question_target`, `active_question_relation`, `interaction_owner`, and `reason_code` over surface-text fitting.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o80-base-canon-interaction-model-sync-a1.md`
+- `STRATEGY/REQUIREMENTS.md`
+- `SPECS/CONSULTANT.md`
+- `SPECS/ARCHITECTURE.md`
+- `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`
+- `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112 --status done --strict-artifacts`
+- `git diff --check`
+- `SESSION_AGENT=a1 scripts/session_check.sh`
+
+**Статус:**
+- `P1.6o79` remains published and binding.
+- `P1.6o80` is now the active redesign child and canon baseline for follow-up implementation.
+- `P1.6o81` (machine-readable owner matrix) is the next admissible block.
+- No runtime migration or guarded rerun is admissible before `P1.6o81`.
+
+### 2026-03-12 — P1.6o81 owner matrix artifact; rows `M1..M27` become machine-readable
+
+**Что сделали:**
+- Published `P1.6o81` as the contract-artifact block after `P1.6o80`.
+- Added `contracts/policy/interaction_owner_matrix.v1.jsonschema` as the versioned schema for the remaining owner matrix.
+- Added `truffles-api/app/knowledge/generic/INTERACTION_OWNER_MATRIX.yaml` as the machine-readable artifact with rows `M1..M27`, global invariants, row-status taxonomy, and admission rules.
+- Added deterministic validation in `truffles-api/tests/test_interaction_owner_matrix_contract.py`, freezing `M27` as the only open row and preserving `P1.6o78/r112` truthfully.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o81-machine-readable-owner-matrix-a1.md`
+- `contracts/policy/interaction_owner_matrix.v1.jsonschema`
+- `truffles-api/app/knowledge/generic/INTERACTION_OWNER_MATRIX.yaml`
+- `truffles-api/tests/test_interaction_owner_matrix_contract.py`
+- `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112 --status done --strict-artifacts`
+- `git diff --check`
+- `SESSION_AGENT=a1 scripts/session_check.sh`
+
+**Статус:**
+- `P1.6o79`, `P1.6o80`, and `P1.6o81` are now published and binding.
+- `P1.6o82` (persisted `InteractionState`) is the next admissible block.
+- `M27` remains the only open row and still must be migrated through the new executable interaction-core chain.
+- No runtime migration or guarded rerun is admissible before `P1.6o82`.
+
+### 2026-03-12 — P1.6o82 persisted InteractionState; canonical dialog state and session memory now carry the active row
+
+**Что сделали:**
+- Published `P1.6o82` as the persisted-state block after `P1.6o81`.
+- Added first-class `interaction_state` contract to `truffles-api/app/routers/webhook/context_manager.py`, so canonical dialog state now persists `resume_slot`, `interaction_target`, `interaction_relation`, `interaction_owner`, `grounded_referents`, `confirmation_state`, and `degrade_reason`.
+- Added explicit `interaction_state` normalization to `truffles-api/app/routers/webhook/session_memory.py` and `truffles-api/app/schemas/webhook.py`, so the same contract now lives in `conversation.context.session_memory`.
+- Reused existing pending-resume snapshot transport (`context_manager` + `session_memory`) instead of creating a new top-level silo; deterministic tests now prove the new state survives handover reuse / restore.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o82-persisted-interaction-state-a1.md`
+- `truffles-api/app/schemas/webhook.py`
+- `truffles-api/app/routers/webhook/context_manager.py`
+- `truffles-api/app/routers/webhook/session_memory.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py::test_canonical_dialog_state_syncs_interaction_state_from_policy_contract`
+- `truffles-api/tests/test_message_endpoint.py::test_reuse_active_handover_captures_interaction_state_in_pending_resume`
+- `truffles-api/tests/test_state_service.py::TestManagerResolve::test_preserve_context_restores_pending_resume_snapshot`
+- `pytest -q truffles-api/tests/test_message_endpoint.py::test_canonical_dialog_state_syncs_interaction_state_from_policy_contract truffles-api/tests/test_message_endpoint.py::test_reuse_active_handover_captures_interaction_state_in_pending_resume truffles-api/tests/test_state_service.py::TestManagerResolve::test_preserve_context_restores_pending_resume_snapshot`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112 --status done --strict-artifacts`
+- `git diff --check`
+- `SESSION_AGENT=a1 scripts/session_check.sh`
+
+**Статус:**
+- `P1.6o79`..`P1.6o82` are now published and binding.
+- `P1.6o83` (`OwnerResolver + M27 vertical slice`) is the next admissible block.
+- `M27` remains the only open row; this block only provides the persisted-state prerequisite.
+- No guarded rerun is admissible before `P1.6o83`.
+
+### 2026-03-12 — P1.6o83 OwnerResolver vertical slice; `M27` becomes executable before proof admission
+
+**Что сделали:**
+- Published `P1.6o83` as the first resolver-driven runtime slice after `P1.6o82`.
+- Extended `contracts/policy/interaction_owner_matrix.v1.jsonschema` and `truffles-api/app/knowledge/generic/INTERACTION_OWNER_MATRIX.yaml` with bounded `runtime_match` / `runtime_effects` fields for `M27`, so the open row now contains machine-readable execution criteria instead of only narrative contract text.
+- Added `truffles-api/app/services/interaction_owner_matrix_service.py` and `truffles-api/app/services/owner_resolver.py`, giving the runtime a cached matrix loader plus a pure resolver that matches `M27` from persisted `interaction_state` + current interrupt facts.
+- Integrated the resolver into `truffles-api/app/routers/webhook/decision.py` before pricing/service-clarify arbitration, so the runtime can recover grounded service from persisted `interaction_state`, stamp `interaction_owner`, and emit row-level trace/meta evidence before the booking interrupt path runs.
+- Added deterministic coverage for the positive and adjacent negative cases: positive `M27` now recovers grounded service from persisted interaction state; genuine service-missing pricing still falls back to `service_clarify`.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o83-owner-resolver-m27-vertical-slice-a1.md`
+- `contracts/policy/interaction_owner_matrix.v1.jsonschema`
+- `truffles-api/app/knowledge/generic/INTERACTION_OWNER_MATRIX.yaml`
+- `truffles-api/app/services/interaction_owner_matrix_service.py`
+- `truffles-api/app/services/owner_resolver.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_interaction_owner_matrix_contract.py`
+- `truffles-api/tests/test_owner_resolver.py`
+- `truffles-api/tests/test_message_endpoint.py::test_owner_resolver_m27_recovers_service_from_interaction_state`
+- `truffles-api/tests/test_message_endpoint.py::test_owner_resolver_m27_preserves_service_clarify_when_grounded_service_missing`
+- `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py truffles-api/tests/test_owner_resolver.py truffles-api/tests/test_message_endpoint.py -k "owner_resolver_m27 or booking_confirmation_pending or reschedule_pricing_interrupt"`
+- `python3 -m py_compile truffles-api/app/services/interaction_owner_matrix_service.py truffles-api/app/services/owner_resolver.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_interaction_owner_matrix_contract.py truffles-api/tests/test_owner_resolver.py truffles-api/tests/test_message_endpoint.py`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112 --status done --strict-artifacts`
+- `git diff --check`
+- `SESSION_AGENT=a1 scripts/session_check.sh`
+
+**Статус:**
+- `P1.6o79`..`P1.6o83` are now published and binding.
+- `M27` remains the only open row, but it is now executable through the owner-matrix + persisted-state + resolver chain instead of row-local branching only.
+- `P1.6o84` (proof lane + next-row admission) is the next admissible block.
+- `r112` remains non-canonical proof evidence (`infra_valid=false`, `semantic_valid=false`); no guarded rerun is admissible until the proof block is published.
+
+### 2026-03-12 — P1.6o84 proof lane; fresh guarded `dev L2` clears `M27` and surfaces the next scenario-governance row
+
+**Что сделали:**
+- Published `P1.6o84` as the first proof-lane admission block for the resolver-driven `M27` slice.
+- Re-ran the targeted deterministic gate with machine-readable `L1` evidence:
+  - `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py truffles-api/tests/test_owner_resolver.py truffles-api/tests/test_message_endpoint.py -k "owner_resolver_m27 or booking_confirmation_pending or reschedule_pricing_interrupt" --junitxml /tmp/booking_quality/p1.6o84-l1-20260312-a1-r1/pytest-junit.xml` -> `4 passed`
+- Re-audited historical surfaced blocker `r112` and kept it frozen as non-canonical before-fix evidence:
+  - `artifact_integrity.valid=true`
+  - `infra_valid=false`
+  - `semantic_valid=false`
+- First guarded proof attempt `p1.6o84-l2-dev-20260312-a1-r1` failed at runtime fingerprint preflight because the detached local `:18184` runtime did not stay alive outside its launch shell; strict audit recorded it as non-canonical preflight failure and it was not used as proof evidence.
+- Refreshed the live worktree runtime on `http://127.0.0.1:18184` and confirmed `/admin/version` matches current `HEAD` (`21afcead084aa3fdfc5702c5547fb40d74970b5a`).
+- Executed exactly one admissible fresh guarded `dev L2` on the live runtime:
+  - run id: `p1.6o84-l2-dev-20260312-a1-r2`
+  - strict audit: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`
+- Proof result:
+  - `M27` no longer stops the fresh run; pricing/promo/duration interrupts preserve the active booking `time` contract and do not reopen `service_choice`
+  - the next first fail is dialog `1`, turn `8`, user text `Можно записаться на 15:00?`
+  - runtime canonically consumes the explicit exact-time candidate and advances to `expected_reply_type=name`
+  - generated scenario still expects `pending_question_act=slot_compare`, `pending_question_target=time`, and `expected_reply_type=time`
+  - this is a new scenario-governance/oracle drift adjacent to `P1.6o45` / `M22`, not a remaining `M27` runtime carryover defect
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o84-m27-proof-lane-and-next-row-admission-a1.md`
+- `/tmp/booking_quality/p1.6o84-l1-20260312-a1-r1/pytest-junit.xml`
+- `/tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r1/manual_audit.md`
+- `/tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r2/summary.json`
+- `/tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r2/brief.md`
+- `/tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r2/scenarios.json`
+- `/tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r2/responses.jsonl`
+- `/tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r2/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r2/manual_audit.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o6-l2-dev-20260311-a1-r112 --status done --strict-artifacts`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r2 --status done --strict-artifacts`
+
+**Статус:**
+- `M27` is boundedly cleared by fresh proof-lane evidence; it is no longer the first strict fail family.
+- `P1.6o85` (`slot-compare explicit-time fill scenario-governance`) is the next admissible block.
+- No new guarded `dev/acceptance` run is admissible before `P1.6o85` closes on deterministic contour.
+
+### 2026-03-12 — P1.6o85 deterministic closure; explicit exact-time `slot_compare` now canonicalizes to `time -> name`
+
+**Что сделали:**
+- Published `P1.6o85` as the bounded scenario-governance closure for the `M28` family surfaced by `p1.6o84-l2-dev-20260312-a1-r2`.
+- Added explicit exact-time normalization for `slot_compare` under active `time` collect in `scripts/booking_dialog_scenarios.py`, so question-like exact clock fills such as `Можно записаться на 15:00?` now canonicalize to `time` instead of preserving stale `slot_compare`.
+- Reused the same canonical exact-time-fill contract on both sanitize and post-coverage repair paths, and added bounded `expected_reply_type=name` / `expected_reply=true` question-contract cleanup for grounded exact-time turns.
+- Added deterministic coverage proving the positive case and the adjacent negative case:
+  - explicit exact-time `slot_compare` after booking-side info interrupts now becomes `time -> name`
+  - generic compare phrasing like `Лучше утром или вечером?` still remains `slot_compare/time`
+- Synced the machine-readable owner matrix so `M28` is now truthfully `closed_bounded`; the next admissible block is the fresh proof admission `P1.6o86`.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o85-slot-compare-explicit-time-fill-scenario-governance-a1.md`
+- `/tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r2/scenarios.json`
+- `/tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r2/responses.jsonl`
+- `/tmp/booking_quality/p1.6o84-l2-dev-20260312-a1-r2/trace_bundle.jsonl`
+- `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "slot_compare and explicit_time"` -> `2 passed, 88 deselected`
+- `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+- `git diff --check`
+- `SESSION_AGENT=a1 scripts/session_check.sh`
+
+**Статус:**
+- `M28` is deterministically closed; the current known owner matrix now has no open rows.
+- `P1.6o86` (post-`M28` proof lane) is the next admissible block.
+- No new guarded `dev/acceptance` run is admissible until `P1.6o86` is published and the live runtime fingerprint is proven.
+
+### 2026-03-12 — P1.6o86 proof lane; fresh guarded `dev L2` clears `M28` and surfaces booking-tag requested-slot governance drift
+
+**Что сделали:**
+- Published `P1.6o86` as the post-`M28` proof admission block.
+- Re-ran the deterministic prerequisite before the expensive step:
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "slot_compare and explicit_time"` -> `2 passed, 88 deselected`
+  - `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+- Started a live worktree runtime on `http://127.0.0.1:18184` and proved `/admin/version` matches current `HEAD` (`21afcead084aa3fdfc5702c5547fb40d74970b5a`).
+- First guarded attempt `p1.6o86-l2-dev-20260312-a1-r1` was invalid/incomplete because `--jid-mode unique` was launched without `--allow-non-allowlist`; strict audit recorded it as non-canonical and it was not used as proof evidence.
+- Executed exactly one admissible fresh guarded `dev L2` rerun with corrected transport flags:
+  - run id: `p1.6o86-l2-dev-20260312-a1-r2`
+  - strict audit: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`
+- Proof result:
+  - `M28` no longer stops the fresh run
+  - the next first fail is dialog `1`, turn `2`, user text `На какое время у вас есть свободные слоты?`
+  - runtime canonically keeps the turn on `ask_about_requested_slot(time)` / `booking_slot_guidance` with `expected_reply_type=time`
+  - generated scenario still tags the turn as generic `booking` and carries stale `reply_type=service_choice` + `question_contract expected_reply_type=service_choice`
+  - this is a new scenario-governance/oracle drift caused by booking-management contamination, adjacent to `M2`, not a reopen of `M28`
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o86-post-m28-proof-lane-a1.md`
+- `/tmp/booking_quality/p1.6o86-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o86-l2-dev-20260312-a1-r1/manual_audit.md`
+- `/tmp/booking_quality/p1.6o86-l2-dev-20260312-a1-r2/summary.json`
+- `/tmp/booking_quality/p1.6o86-l2-dev-20260312-a1-r2/brief.md`
+- `/tmp/booking_quality/p1.6o86-l2-dev-20260312-a1-r2/scenarios.json`
+- `/tmp/booking_quality/p1.6o86-l2-dev-20260312-a1-r2/responses.jsonl`
+- `/tmp/booking_quality/p1.6o86-l2-dev-20260312-a1-r2/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o86-l2-dev-20260312-a1-r2/manual_audit.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o86-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o86-l2-dev-20260312-a1-r2 --status done --strict-artifacts`
+
+**Статус:**
+- `M28` is boundedly cleared by fresh proof-lane evidence; it is no longer the first strict fail family.
+- New open row `M29` is admitted in the owner matrix.
+- `P1.6o87` is the next admissible block.
+
+### 2026-03-12 — P1.6o87 boundedly closes booking-tag requested-slot governance drift on deterministic contour
+
+**Что сделали:**
+- Published `P1.6o87` as the bounded scenario-governance closure block for booking-tag requested-slot drift after booking-management contamination.
+- Tightened malformed `check_booking` normalization in `scripts/booking_dialog_scenarios.py` so generic booking intake like `Мне нужно записаться на маникюр на завтра.` no longer contaminates downstream free-slot questions with booking-management ownership.
+- Added bounded requested-slot restoration under active `time` collect so booking-tag free-slot questions like `На какое время у вас есть свободные слоты?` canonicalize back to `ask_about_requested_slot(time)` instead of stale `booking/service_choice`.
+- Added deterministic sanitize/repair regressions and kept the negative guard that standalone booking-tag slot questions without active `time` collect stay unchanged.
+- Synced the machine-readable owner matrix so `M29` is now truthfully `closed_bounded`; published `P1.6o88` as the next proof-lane admission block.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o87-booking-tag-requested-slot-governance-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o88-post-m29-proof-lane-a1.md`
+- `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "slot_question or check_booking"` -> `13 passed, 80 deselected`
+- `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+- `git diff --check`
+- `SESSION_AGENT=a1 scripts/session_check.sh`
+
+**Статус:**
+- `M29` is boundedly cleared on deterministic contour; no fresh proof-lane evidence has run yet in this block.
+- `P1.6o88` (post-`M29` proof lane) is the next admissible expensive block.
+- No new guarded `dev/acceptance` run is admissible until `P1.6o88` runs on a fingerprint-verified live runtime.
+
+### 2026-03-12 — P1.6o88 proof lane; fresh guarded `dev L2` clears `M29` and surfaces generic free-slot slot-constraint overclaim
+
+**Что сделали:**
+- Published `P1.6o88` as the post-`M29` proof admission block.
+- Re-ran the deterministic prerequisite before the expensive step:
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "slot_question or check_booking"` -> `13 passed, 80 deselected`
+  - `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+- Started a live worktree runtime on `http://127.0.0.1:18184` and proved `/admin/version` matches current `HEAD` (`21afcead084aa3fdfc5702c5547fb40d74970b5a`).
+- Executed exactly one fresh guarded `dev L2` run:
+  - run id: `p1.6o88-l2-dev-20260312-a1-r1`
+  - strict audit: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`
+- Proof result:
+  - `M29` no longer stops the fresh run
+  - the next first fail is dialog `1`, turn `2`, user text `Какое время доступно?`
+  - runtime canonically keeps the turn on `ask_about_requested_slot(time)` / `booking_slot_guidance` with `pending_question_act=ask_about_requested_slot`, `pending_question_target=time`, and `expected_reply_type=time`
+  - generated scenario still tags the turn as `slot_constraint` and requires stale `pending_question_interaction slot_constraint/time`
+  - this is a new scenario-governance/oracle drift adjacent to `P1.6o59`, not a reopen of `M29`
+- Published `P1.6o89` as the next bounded deterministic closure block for the new row.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o88-post-m29-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o89-slot-constraint-generic-free-slot-question-governance-a1.md`
+- `/tmp/booking_quality/p1.6o88-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o88-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o88-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o88-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o88-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o88-l2-dev-20260312-a1-r1/manual_audit.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o88-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+
+**Статус:**
+- `M29` is boundedly cleared by fresh proof-lane evidence; it is no longer the first strict fail family.
+- New open row `M30` is admitted in the owner matrix.
+- `P1.6o89` is the next admissible block.
+
+### 2026-03-12 — P1.6o89 boundedly closes generic free-slot slot-constraint overclaim on deterministic contour
+
+**Что сделали:**
+- Published `P1.6o89` as the bounded scenario-governance closure block for generic free-slot questions that were mis-tagged as `slot_constraint`.
+- Added bounded normalization in `scripts/booking_dialog_scenarios.py` so generic availability questions like `Какое время доступно?` retag from `slot_constraint` to canonical `ask_about_requested_slot` under active `time` collect.
+- Added deterministic sanitize/repair regressions and kept temporal-constraint negatives intact so genuine constraints like `после обеда` remain `slot_constraint`.
+- Synced the machine-readable owner matrix so `M30` is now truthfully `closed_bounded`; published `P1.6o90` as the next proof-lane admission block.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o89-slot-constraint-generic-free-slot-question-governance-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o90-post-m30-proof-lane-a1.md`
+- `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "slot_constraint and requested_slot"` -> `3 passed, 93 deselected`
+- `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+- `git diff --check`
+- `SESSION_AGENT=a1 scripts/session_check.sh`
+
+**Статус:**
+- `M30` is boundedly cleared on deterministic contour; no fresh proof-lane evidence has run yet in this block.
+- `P1.6o90` (post-`M30` proof lane) is the next admissible expensive block.
+- No new guarded `dev/acceptance` run is admissible until `P1.6o90` runs on a fingerprint-verified live runtime.
+
+
+### 2026-03-12 — P1.6o90 proof lane clears `M30` and truthfully reopens existing `M19`
+
+**Что сделали:**
+- Re-ran the deterministic prerequisite from `P1.6o89` and kept it green before the expensive step.
+- Started a live worktree runtime on `http://127.0.0.1:18184` and proved `/admin/version` matches current `HEAD` (`21afcead084aa3fdfc5702c5547fb40d74970b5a`).
+- Executed exactly one fresh guarded `dev L2` run `p1.6o90-l2-dev-20260312-a1-r1` and audited it strictly.
+- Proof result: `M30` no longer stops the run. The new first fail is dialog `1`, turn `5`, user text `Можно записаться к Айгерим?`. This does not open a new matrix family; it truthfully reopens existing `M19`.
+- Runtime evidence on the failing turn: `policy_core_mode=degraded_fallback`, `policy_core_degrade_reason=policy_error:invalid_schema`, `specialist_hint decision=empty`, final response falls back to generic `booking_prompt`, and final meta/trace drop `pending_question_target=specialist` / `active_question_relation=referent_followup`.
+- Published `P1.6o91` as the bounded deterministic re-closure block for reopened `M19`.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o90-post-m30-proof-lane-a1.md`
+- `/tmp/booking_quality/p1.6o90-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o90-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o90-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o90-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o90-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o90-l2-dev-20260312-a1-r1/manual_audit.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o90-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+
+**Статус:**
+- `M30` is boundedly cleared by fresh proof-lane evidence; it is no longer the first strict fail family.
+- Existing `M19` is truthfully reopened by `r116`; no new matrix row was admitted.
+- `P1.6o91` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o91 boundedly re-closes reopened `M19` with branch-catalog specialist recovery
+
+**Что сделали:**
+- Published `P1.6o91` as the bounded runtime re-closure for reopened `M19`.
+- Added deterministic branch-catalog specialist matching before the secondary specialist-hint LLM in `_resolve_specialist_name_hint_with_trace`, so explicit branch-known names like `Айгерим` recover `booking_specialist_followup` even when the secondary hint LLM would return empty.
+- Emitted explicit trace/meta provenance `specialist_hint_source=branch_catalog` for the deterministic recovery path.
+- Added targeted runtime regressions covering the helper path and the reopened invalid-schema booking-request specialist-followup variant.
+- Synced the machine-readable owner matrix so `M19` is truthfully re-closed and published `P1.6o92` as the next proof-lane admission block.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o91-invalid-schema-booking-request-specialist-catalog-match-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o92-post-m19-reclosure-proof-lane-a1.md`
+- `pytest -q truffles-api/tests/test_message_endpoint.py -k "branch_catalog_match or invalid_schema_question_like_named_specialist_followup_keeps_time_collect"` -> `3 passed`
+- `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "invalid_schema_specialist_followup or specialist_followup_owner_gap"` -> `1 passed`
+
+**Статус:**
+- Reopened `M19` is re-closed on deterministic contour.
+- No fresh proof-lane evidence has run yet after this re-closure.
+- `P1.6o92` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o92 proof lane clears reopened `M19` and admits `M31`
+
+**Что сделали:**
+- Re-ran the deterministic prerequisite from `P1.6o91` and kept it green before the expensive step.
+- Started a live worktree runtime on `http://127.0.0.1:18184` and proved `/admin/version` matches current `HEAD` (`21afcead084aa3fdfc5702c5547fb40d74970b5a`).
+- Executed exactly one fresh guarded `dev L2` run `p1.6o92-l2-dev-20260312-a1-r1` and audited it strictly.
+- Proof result: reopened `M19` no longer stops the run. The new first fail is dialog `1`, turn `6`, user text `Можно выбрать мастера?`.
+- The surfaced family is admitted as new open row `M31`: `llm_policy_core` succeeds with `subject_kind=specialist`, `resolution_mode=referent_followup`, `next_question=name`, and `open_questions=["name"]`, but the success-path interaction axes stay blank and runtime compresses the turn into generic `booking_info_contract/master` / `master_service_not_found`.
+- Published `P1.6o93` as the bounded deterministic closure block for `M31`.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o92-post-m19-reclosure-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o93-generic-specialist-choice-followup-owner-a1.md`
+- `/tmp/booking_quality/p1.6o92-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o92-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o92-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o92-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o92-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o92-l2-dev-20260312-a1-r1/manual_audit.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o92-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+
+**Статус:**
+- Reopened `M19` is boundedly cleared by fresh proof-lane evidence; it is no longer the first strict fail family.
+- New open row `M31` is admitted in the machine-readable owner matrix.
+- `P1.6o93` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o93 deterministically closes `M31` and publishes `P1.6o94`
+
+**Что сделали:**
+- Published and completed `P1.6o93` for surfaced row `M31`.
+- Added a bounded success-path guard in `decision.py` so generic specialist-choice question `Можно выбрать мастера?` under active `time` collect now preserves `booking_specialist_followup` ownership, stamps `pending_question_target=specialist` / `active_question_relation=referent_followup`, and resumes `expected_reply_type=time` instead of collapsing into generic `booking_info_contract/master`.
+- Added targeted runtime regressions plus response-guard coverage for the new generic specialist-choice contract and kept adjacent named-specialist / generic-master rows green in the focused set.
+- Synced the machine-readable owner matrix so `M31` is now `closed_bounded`.
+- Published `P1.6o94` as the next admissible proof-lane block.
+
+**Evidence:**
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o93-generic-specialist-choice-followup-owner-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o94-post-m31-proof-lane-a1.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o92-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+- `pytest -q truffles-api/tests/test_message_endpoint.py -k "generic_specialist_choice_followup or booking_specialist_followup_persists_preference or named_master_question_rewrites_collect_to_master_info or bare_named_specialist_question_rewrites_collect_to_master_info"`
+- `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "generic_specialist_choice_followup or specialist_followup"`
+- `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py`
+
+**Статус:**
+- `M31` is boundedly closed on deterministic contour.
+- `P1.6o94` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o94 proof lane clears `M31` and admits `M32`
+
+- Completed `P1.6o94` on one fresh guarded `dev L2`.
+- Verified live runtime fingerprint on `http://127.0.0.1:18184`: `/admin/version` matched `HEAD` `21afcead084aa3fdfc5702c5547fb40d74970b5a` before the run.
+- Fresh guarded `dev L2` `p1.6o94-l2-dev-20260312-a1-r1` is admissible for audit (`artifact_integrity.valid=true`) but remains non-canonical (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`).
+- `M31` is no longer the first fail on the proof lane.
+- New surfaced row is `M32`: dialog `1`, turn `6`, user text `У вас есть свободные слоты на этот день?`.
+- `M32` is compound, not scenario-only: policy-core already emits grounded `ask_about_requested_slot(time)` semantics under active `name` resume, but runtime drops `booking_time_availability_followup` owner evidence and scenario-governance leaves stale `service_choice` expectations.
+- Published `P1.6o95` as the bounded deterministic closure block for `M32`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o94-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o94-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o94-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o94-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o94-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o94-l2-dev-20260312-a1-r1/manual_audit.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o94-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+
+Residual / next:
+- `M32` is admitted and open until deterministic closure lands.
+- `P1.6o95` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o95 deterministically closes `M32` and publishes `P1.6o96`
+
+- Published and completed `P1.6o95` for surfaced row `M32`.
+- Runtime now preserves `booking_time_availability_followup` for the `bookability + specific_time + ask_about_requested_slot + expected_reply_type=name` variant instead of collapsing the turn into generic `booking_prompt`.
+- Scenario-governance now recognizes deictic day/date requested-slot phrasing such as `на этот день` / `на эту дату` as the same grounded active-name follow-up family.
+- Synced the machine-readable owner matrix so `M32` is now `closed_bounded` and `M31` truthfully records that proof rolled past it to `M32`.
+- Published `P1.6o96` as the next admissible proof-lane block.
+
+Checks:
+- `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "active_name_time_availability_followup or grounded_time_availability_probe or deictic_day_availability_followup"` -> `3 passed`
+- `pytest -q truffles-api/tests/test_message_endpoint.py -k "active_name_time_availability_followup or deictic_time_availability_followup or deictic_day_availability_followup"` -> `4 passed`
+- `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "active_name_deictic_time_availability_followup"` -> `1 passed`
+- `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+- `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_booking_dialog_scenarios_script.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_interaction_owner_matrix_contract.py`
+
+Residual / next:
+- `M32` is boundedly closed on deterministic contour.
+- `P1.6o96` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o96 proof lane clears `M32` and admits `M33`
+
+- Completed `P1.6o96` on one fresh guarded `dev L2`.
+- Verified live runtime fingerprint on `http://127.0.0.1:18184`: `/admin/version` matched `HEAD` `21afcead084aa3fdfc5702c5547fb40d74970b5a` before the run.
+- Fresh guarded `dev L2` `p1.6o96-l2-dev-20260312-a1-r1` is admissible for audit (`artifact_integrity.valid=true`) but remains non-canonical (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`).
+- `M32` is no longer the first fail on the proof lane.
+- New surfaced row is `M33`: dialog `1`, turn `4`, user text `Какова цена на маникюр?`.
+- `M33` is a runtime owner gap, not a judge/text failure: judge `pass`, but factual `catalog.service_query` side-question under active `name` resume still falls back to generic `booking_interrupt/time` and drops the persisted requested-slot owner contract.
+- Published `P1.6o97` as the bounded deterministic closure block for `M33`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o96-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o96-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o96-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o96-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o96-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o96-l2-dev-20260312-a1-r1/manual_audit.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o96-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+
+Residual / next:
+- `M33` is admitted and open until deterministic closure lands.
+- `P1.6o97` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o97 deterministically closes `M33` and publishes `P1.6o98`
+
+- Published and completed `P1.6o97` for surfaced row `M33`.
+- Generalized `owner_resolver` from a single hardcoded runtime row to machine-readable runtime rows with `runtime_match` / `runtime_effects`.
+- Added new owner-matrix row `M33` so active-name factual `catalog.service_query` side-questions under requested-slot follow-up preserve the active `name` resume instead of generic `booking_interrupt/time` fallback.
+- Updated tool-response arbitration in `decision.py` to reuse matrix-owned interaction state before slot-order re-derivation and to skip `_derive_booking_followup_prompt` when the matrix row explicitly preserves the active resume.
+- Added targeted unit + runtime regressions for `M27` and `M33` and kept the executable owner matrix contract green.
+- Synced the machine-readable owner matrix so `M33` is now `closed_bounded`.
+- Published `P1.6o98` as the next admissible proof-lane block.
+
+Checks:
+- `pytest -q truffles-api/tests/test_owner_resolver.py truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `5 passed`
+- `pytest -q truffles-api/tests/test_message_endpoint.py -k "owner_resolver_m27 or owner_resolver_m33"` -> `3 passed, 376 deselected`
+- `python3 -m py_compile truffles-api/app/services/owner_resolver.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_owner_resolver.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_interaction_owner_matrix_contract.py`
+
+Residual / next:
+- `M33` is boundedly closed on deterministic contour.
+- `P1.6o98` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o98 proof lane clears `M33` and admits `M34`
+
+- Completed `P1.6o98` on one fresh guarded `dev L2`.
+- Verified live runtime fingerprint on `http://127.0.0.1:18184`: `/admin/version` matched `HEAD` `21afcead084aa3fdfc5702c5547fb40d74970b5a` before the run.
+- Fresh guarded `dev L2` `p1.6o98-l2-dev-20260312-a1-r1` is admissible for audit (`artifact_integrity.valid=true`) but remains non-canonical (`infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`).
+- `M33` is no longer the first fail on the proof lane.
+- New surfaced row is `M34`: dialog `1`, turn `5`, user text `Могу выбрать Айгерим?`.
+- `M34` is compound, not scenario-only: scenario-governance leaves the turn on stale `service_choice`, while timeout-degraded runtime also drops `pending_question_interaction=specialist_followup` / `active_question_relation=referent_followup` and falls back to generic `policy_core_degraded_collect` under active `name` collect.
+- Published `P1.6o99` as the bounded deterministic closure block for `M34`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o98-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o98-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o98-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o98-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o98-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o98-l2-dev-20260312-a1-r1/manual_audit.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o98-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+
+Residual / next:
+- `M34` is admitted and open until deterministic closure lands.
+- `P1.6o99` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o99 deterministically closes `M34` and publishes `P1.6o100`
+
+- Published and completed `P1.6o99` for surfaced row `M34`.
+- Timeout specialist-followup recovery now covers active `name` collect, so question-like named-specialist choice such as `Могу выбрать Айгерим?` preserves `pending_question_interaction=specialist_followup`, `active_question_relation=referent_followup`, `expected_reply_type=name`, and explicit `policy_core_timeout_specialist_followup` provenance instead of generic `policy_core_degraded_collect`.
+- Scenario-governance now normalizes bounded `выбр* + specialist-name` phrasing under the same active-name named-specialist follow-up family instead of stale `service_choice` expectations.
+- Added targeted runtime, response-guard, scenario, and matrix regressions for the surfaced phrasing while keeping existing active-name and timeout-specialist families green.
+- Synced the machine-readable owner matrix so `M34` is now `closed_bounded`.
+- Published `P1.6o100` as the next admissible proof-lane block.
+
+Checks:
+- `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "active_name_specialist_followup or choose_named_specialist"` -> `3 passed, 95 deselected`
+- `pytest -q truffles-api/tests/test_message_endpoint.py -k "timeout_active_name_specialist_followup or timeout_specialist_followup_keeps_time_collect"` -> `2 passed, 378 deselected`
+- `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "active_name_named_specialist_followup or timeout_active_name_named_specialist_followup"` -> `2 passed, 91 deselected`
+- `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_booking_dialog_scenarios_script.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_interaction_owner_matrix_contract.py`
+
+Residual / next:
+- `M34` is boundedly closed on deterministic contour.
+- `P1.6o100` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o100 proof lane clears `M34` and admits `M35`
+
+- Completed `P1.6o100` on fresh guarded `dev L2` `p1.6o100-l2-dev-20260312-a1-r1` after re-running the deterministic `P1.6o99` prerequisite and proving live runtime fingerprint parity on `http://127.0.0.1:18184/admin/version` against current `HEAD` (`21afcead084aa3fdfc5702c5547fb40d74970b5a`).
+- Strict audit for `p1.6o100-l2-dev-20260312-a1-r1` is truthful and non-canonical for closure (`artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`), but it still serves as the bounded proof-admission artifact for the next row.
+- `M34` is no longer the first fail family.
+- New surfaced row is `M35`: dialog `1`, turn `2`, text `Какое время доступно?`.
+- Runtime remains canonical on this turn: `source=booking_slot_guidance`, `pending_question_act=ask_about_requested_slot`, `pending_question_target=time`, `pending_question_interaction=ask_about_requested_slot`, `expected_reply_type=time`.
+- Remaining defect is scenario-governance/oracle drift: generated `scenarios.json` still tags the turn as `slot_compare` and expects stale `pending_question_act=slot_compare` plus `slot_compare/time` trace evidence.
+- Published `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o101-slot-compare-generic-free-slot-question-governance-a1.md` as the next bounded deterministic block.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o100-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o100-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o100-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o100-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o100-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o100-l2-dev-20260312-a1-r1/manual_audit.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o100-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+
+Residual / next:
+- `M35` is admitted and open until deterministic closure lands.
+- `P1.6o101` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o101 deterministically closes `M35` and publishes `P1.6o102`
+
+- Published and completed `P1.6o101` for surfaced row `M35`.
+- Scenario-governance now normalizes generic free-slot `slot_compare` overclaim back to canonical `ask_about_requested_slot(time)` under active `time` collect.
+- Added targeted sanitize/repair regressions so `Какое время доступно?` no longer keeps stale `slot_compare/time` meta/trace, while genuine compare turns remain `slot_compare`.
+- Synced the machine-readable owner matrix so `M35` is now `closed_bounded`.
+- Published `P1.6o102` as the next admissible proof-lane block.
+
+Checks:
+- `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "slot_compare and requested_slot"` -> `2 passed, 98 deselected`
+- `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py`
+- `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/tests/test_booking_dialog_scenarios_script.py truffles-api/tests/test_interaction_owner_matrix_contract.py`
+
+Residual / next:
+- `M35` is boundedly closed on deterministic contour.
+- `P1.6o102` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o102 proof lane clears `M35` and admits `M36`
+
+- Completed `P1.6o102` on fresh guarded `dev L2` `p1.6o102-l2-dev-20260312-a1-r1` after re-running the deterministic `P1.6o101` prerequisite and proving live runtime fingerprint parity on `http://127.0.0.1:18184/admin/version` against current `HEAD` (`21afcead084aa3fdfc5702c5547fb40d74970b5a`).
+- Strict audit for `p1.6o102-l2-dev-20260312-a1-r1` is truthful and non-canonical for closure (`artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`), but it still serves as the bounded proof-admission artifact for the next row.
+- `M35` is no longer the first fail family.
+- New surfaced row is `M36`: dialog `1`, turn `5`, text `Мне нужна информация о свободных слотах на утро.` after prior partial-date fill `Я хочу записаться на завтра.`.
+- Runtime remains canonical on this turn: `answer_detected_slot=datetime`, `answer_value=утром`, `expected_reply_type=name`, and the bot advances to `Отлично, время подходит. Как вас зовут?`.
+- Remaining defect is scenario-governance/oracle drift: generated `scenarios.json` still tags the turn as `mixed_fill_plus_question` and expects stale `expected_reply_type=time` even though the prior turn already grounded the partial date.
+- Published `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o103-grounded-partial-date-daypart-fill-governance-a1.md` as the next bounded deterministic block.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o102-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o102-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o102-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o102-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o102-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o102-l2-dev-20260312-a1-r1/manual_audit.md`
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o102-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+
+Residual / next:
+- `M36` is admitted and open until deterministic closure lands.
+- `P1.6o103` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o103 deterministically closes `M36` and publishes `P1.6o104`
+
+- Published and completed `P1.6o103` for surfaced row `M36`.
+- Scenario-governance now preserves a bounded partial-date anchor under active `time` collect and normalizes grounded daypart availability follow-ups from stale `mixed_fill_plus_question/time` to canonical `time -> name`.
+- Added targeted sanitize/repair regressions so `Мне нужна информация о свободных слотах на утро.` only advances to `name` when a prior partial-date anchor is active, while the same surface without that anchor remains `mixed_fill_plus_question`.
+- Synced the machine-readable owner matrix so `M36` is now `closed_bounded`.
+- Published `P1.6o104` as the next admissible proof-lane block.
+
+Checks:
+- `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "grounded_partial_date_daypart or mixed_daypart_question_without_grounded_partial_date"` -> `3 passed, 100 deselected`
+- `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py`
+- `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/tests/test_booking_dialog_scenarios_script.py truffles-api/tests/test_interaction_owner_matrix_contract.py`
+
+Residual / next:
+- `M36` is boundedly closed on deterministic contour.
+- `P1.6o104` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o104 proof lane clears `M36` and admits `M37`
+
+- Completed fresh guarded `dev L2` `p1.6o104-l2-dev-20260312-a1-r1` on a live `:18184` runtime after verifying `/admin/version` matched current `HEAD` `21afcead084aa3fdfc5702c5547fb40d74970b5a`.
+- Strict audit stayed truthful and non-canonical: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`.
+- `M36` is no longer the first fail. The new first fail is surfaced row `M37` on dialog `1`, turn `12`, text `Меня зовут Динара.` under active booking timeout degrade.
+- Failure family is runtime timeout-degrade, not scenario-governance: active booking already held `service=Маникюр` and `datetime=в субботу`, but timeout boundary emitted `policy_core_timeout_fact_fallback` / `pack_fact_fallback`, returned FACT-like `off_topic`, and tripped strict `fact_without_evidence` instead of bounded booking follow-up.
+- Synced the machine-readable owner matrix so `M37` is now the admitted next bounded row.
+
+Checks:
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o104-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+- `curl -sf http://127.0.0.1:18184/admin/version` -> `{"version":"fix/llm-first-firebreak-2026-02-19","git_commit":"21afcead084aa3fdfc5702c5547fb40d74970b5a","build_time":"2026-03-12T12:45:19Z"}`
+
+Evidence:
+- `/tmp/booking_quality/p1.6o104-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o104-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o104-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o104-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o104-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o104-l2-dev-20260312-a1-r1/manual_audit.md`
+
+Residual / next:
+- `M37` is admitted and open until deterministic closure lands.
+- `P1.6o105` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o105 deterministically closes `M37` and publishes `P1.6o106`
+
+- Published and completed `P1.6o105` for surfaced row `M37`.
+- Timeout-degrade recovery now reuses `_update_booking_from_messages(...)` and `_next_booking_prompt(...)` before `pack_fact_fallback`, so explicit name fill `Меня зовут Динара.` under active incomplete booking resumes bounded booking follow-up instead of collapsing into FACT-like fallback.
+- Added targeted runtime and response-guard regressions; timeout provenance stays explicit via `policy_core_guard_recovery=timeout_booking_slot_fill_followup`, `policy_core_timeout_retry_path=booking_slot_fill_followup`, and `expected_reply_reason=policy_core_timeout_booking_slot_fill_followup`.
+- Synced the machine-readable owner matrix so `M37` is now `closed_bounded`.
+- Published `P1.6o106` as the next admissible proof-lane block.
+
+Checks:
+- `pytest -q truffles-api/tests/test_message_endpoint.py -k "timeout_booking_slot_fill_followup or timeout_pending_slot_question or timeout_specialist_followup"` -> `7 passed, 374 deselected`
+- `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "timeout_booking_slot_fill_followup or timeout_pending_slot_question"` -> `1 passed, 93 deselected`
+- `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+- `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_interaction_owner_matrix_contract.py`
+- `git diff --check`
+- `SESSION_AGENT=a1 scripts/session_check.sh`
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o105-timeout-active-booking-name-fill-followup-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o106-post-m37-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/tests/test_booking_quality_response_guard.py`
+- `truffles-api/app/knowledge/generic/INTERACTION_OWNER_MATRIX.yaml`
+
+Residual / next:
+- `M37` is boundedly closed on deterministic contour.
+- `P1.6o106` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o106 proof lane clears `M37` and admits `M38`
+
+- Completed fresh guarded `dev L2` `p1.6o106-l2-dev-20260312-a1-r1` on a live `:18184` runtime after verifying `/admin/version` matched current `HEAD` commit `21afcead084aa3fdfc5702c5547fb40d74970b5a`.
+- Strict audit remains truthful and non-canonical: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`.
+- `M37` is no longer the first fail. The new first fail is surfaced row `M38` on dialog `2`, turn `8`, text `Могу я поменять специалиста?`.
+- Failure family is bounded runtime timeout owner drift: under active `time` collect the generic specialist-change side question loses `pending_question_target=specialist`, hits `policy_core_timeout_degrade_booking_limit`, and escalates to `pending/handoff` instead of preserving the specialist-target interrupt contract.
+- Published `P1.6o107` as the next admissible bounded closure block and synced the machine-readable owner matrix so `M38` is now the admitted next row.
+
+Checks:
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o106-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+- `curl -sf http://127.0.0.1:18184/admin/version` -> `{"version":"main","git_commit":"21afcead084aa3fdfc5702c5547fb40d74970b5a","build_time":null}`
+
+Evidence:
+- `/tmp/booking_quality/p1.6o106-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o106-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o106-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o106-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o106-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o106-l2-dev-20260312-a1-r1/manual_audit.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o107-active-time-timeout-generic-specialist-choice-followup-a1.md`
+
+Residual / next:
+- `M38` is admitted and open until deterministic closure lands.
+- `P1.6o107` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o107 deterministically closes `M38` and publishes `P1.6o108`
+
+- Audited proof baseline remains `p1.6o106-l2-dev-20260312-a1-r1`: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, first fail `M38` on `Могу я поменять специалиста?`.
+- `P1.6o107` reuses the existing timeout master-info interrupt + booking-interrupt prompt retention path: active-time generic specialist-change turns now stay inside the specialist-target interrupt family instead of escalating via `policy_core_timeout_degrade_booking_limit`.
+- Deterministic evidence is green:
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "timeout_specialist_followup_keeps_time_collect or timeout_master_info_interrupt"` -> `3 passed, 379 deselected`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "timeout_specialist_followup or timeout_master_info_interrupt"` -> `1 passed, 94 deselected`
+  - `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/booking.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `pass`
+  - `git diff --check` -> `pass`
+  - `SESSION_AGENT=a1 scripts/session_check.sh` -> `Session OK`
+- `M38` is now `closed_bounded` in the machine-readable owner matrix.
+- Published `P1.6o108` as the next admissible proof-lane block.
+
+**Residual gap / next step**
+
+- Closure proof is still missing: no fresh post-`M38` guarded `dev L2` has been run yet.
+- `P1.6o108` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o108 proof lane clears `M38` and admits `M39`
+
+- Completed fresh guarded `dev L2` `p1.6o108-l2-dev-20260312-a1-r1` on a live `:18184` runtime after verifying `/admin/version` matched current `HEAD` commit `21afcead084aa3fdfc5702c5547fb40d74970b5a`.
+- Strict audit remains truthful and non-canonical: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`.
+- `M38` is no longer the first fail. The new first fail is surfaced row `M39` on dialog `2`, turn `2`, text `Какие услуги по стрижке волос вы предлагаете?`.
+- Failure family is a bounded runtime owner gap: under active `time` collect, a grounded services-overview side question keeps `intent=info` and `service_query`, but runtime leaves `tool_action=collect`, reopens `service_choice`, and misses the factual side-question instead of using the existing `catalog.service_query` interrupt path.
+- Published `P1.6o109` as the next admissible bounded closure block and synced the machine-readable owner matrix so `M39` is now the admitted next row.
+
+Checks:
+- `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/p1.6o108-l2-dev-20260312-a1-r1 --status done --strict-artifacts`
+- `curl -sf http://127.0.0.1:18184/admin/version` -> `{"version":"main","git_commit":"21afcead084aa3fdfc5702c5547fb40d74970b5a","build_time":null}`
+
+Evidence:
+- `/tmp/booking_quality/p1.6o108-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o108-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o108-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o108-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o108-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o108-l2-dev-20260312-a1-r1/manual_audit.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o109-active-time-services-overview-interrupt-owner-a1.md`
+
+Residual / next:
+- `M39` is admitted and open until deterministic closure lands.
+- `P1.6o109` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o109 deterministically closes `M39` and publishes `P1.6o110`
+
+- Audited proof baseline remains `p1.6o108-l2-dev-20260312-a1-r1`: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, first fail `M39` on `Какие услуги по стрижке волос вы предлагаете?`.
+- `P1.6o109` reuses the existing `catalog.service_query` tool path: active-time grounded services-overview side questions now promote stale `tool_action=collect` into the factual interrupt path before collect prompt emission, preserve `expected_reply_type=time`, and stamp explicit `policy_interrupt_contract` / `booking_interrupt_info` evidence.
+- Deterministic evidence is green:
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "collect_service_info_interrupt or owner_resolver_m33 or reschedule_pricing_interrupt"` -> `3 passed, 380 deselected`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "services_overview or collect_service_info_interrupt"` -> `2 passed, 94 deselected`
+  - `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `pass`
+  - `git diff --check` -> `pass`
+  - `SESSION_AGENT=a1 scripts/session_check.sh` -> `Session OK`
+- `M39` is now `closed_bounded` in the machine-readable owner matrix.
+- Published `P1.6o110` as the next admissible proof-lane block.
+
+**Residual gap / next step**
+
+- Closure proof is still missing: no fresh post-`M39` guarded `dev L2` has been run yet.
+- `P1.6o110` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o110 proof lane clears `M39` and admits `M40`
+
+- Fresh guarded `dev L2` `p1.6o110-l2-dev-20260312-a1-r1` ran on a fingerprint-verified live runtime and strict audit stayed truthful: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`.
+- `M39` is no longer the first fail. The new first fail is surfaced row `M40` on dialog `1`, turn `3`, text `Могу прийти в пятницу.`.
+- Runtime evidence is canonical, not reopened runtime drift: `responses.jsonl` / `trace_bundle.jsonl` show `answer_slot=datetime`, `answer_value=в пятницу`, then `policy_core_guard decision=timeout_booking_collect` and final `question_contract expected_reply_type=name` with `expected_reply_reason=policy_core_degraded_collect`.
+- The remaining gap is scenario-governance/oracle drift: generated scenario still kept stale `reply_type=time` / `expected_reply_type=time` for the grounded partial-date answer.
+- Published `P1.6o111` as the next admissible bounded closure block and synced the machine-readable owner matrix so `M40` is now the admitted next row.
+- Live runtime on `127.0.0.1:18184` was stopped after proof capture; `curl http://127.0.0.1:18184/admin/version` now returns `STOPPED`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o110-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o110-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o110-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o110-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o110-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o110-l2-dev-20260312-a1-r1/manual_audit.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o110-post-m39-proof-lane-a1.md`
+
+Residual / next:
+- `M40` is admitted and open until deterministic closure lands.
+- `P1.6o111` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o111 deterministically closes `M40` and publishes `P1.6o112`
+
+- Audited proof baseline remains `p1.6o110-l2-dev-20260312-a1-r1`: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, first fail `M40` on `Могу прийти в пятницу.`.
+- `P1.6o111` adds one bounded scenario-governance rule in `scripts/booking_dialog_scenarios.py`: pure partial-date `time` fills under active `time` collect now canonicalize to `reply_type=name` in sanitize and post-coverage repair flows after grounded `datetime`.
+- Deterministic evidence is green:
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "partial_date_fill or grounded_partial_date_daypart_fill or exact_time_fill_collect"` -> `4 passed, 101 deselected`
+  - `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+  - `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/tests/test_booking_dialog_scenarios_script.py truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `pass`
+  - `git diff --check` -> `pass`
+  - `SESSION_AGENT=a1 scripts/session_check.sh` -> `Session OK`
+- `M40` is now `closed_bounded` in the machine-readable owner matrix.
+- Published `P1.6o112` as the next admissible proof-lane block.
+
+**Residual gap / next step**
+
+- Closure proof is still missing: no fresh post-`M40` guarded `dev L2` has been run yet.
+- `P1.6o112` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o112 proof lane blocked on repeated invalid judge preflight
+
+- Live runtime on `127.0.0.1:18184` was refreshed and fingerprint parity was confirmed before both proof attempts: `/admin/version.git_commit == HEAD == 21afcead084aa3fdfc5702c5547fb40d74970b5a`.
+- Guarded attempts `p1.6o112-l2-dev-20260312-a1-r1` and `p1.6o112-l2-dev-20260312-a1-r2` both failed the hard OpenAI judge preflight with the same error: `probe_error:TimeoutError`.
+- Both runs are `INVALID` and audited away:
+  - `stop_reason=invalid_openai_preflight`
+  - `artifact_integrity.valid=false`
+  - missing `scenarios.json`, `responses.jsonl`, `trace_bundle.jsonl`
+  - no admissible first-fail evidence and no new matrix row admission
+- Stop-the-line is active for this proof block because two consecutive guarded attempts produced the same non-canonical preflight failure without new surfaced product evidence.
+- Live runtime was stopped after the second invalid attempt; `curl http://127.0.0.1:18184/admin/version` now returns `STOPPED`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r1/manual_audit.md`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r1/manual_audit.json`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r2/summary.json`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r2/manual_audit.md`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r2/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o112-post-m40-proof-lane-a1.md`
+
+Residual / next:
+- `M40` remains deterministically closed; no new surfaced family is admitted.
+- Active next block remains `P1.6o112`, but rerun is blocked until judge preflight is stable enough to yield one admissible guarded run.
+
+### 2026-03-12 — P1.6o113 removes the repeated OpenAI preflight false-negative
+
+- `P1.6o113` aligned OpenAI preflight timeout handling with the configured budget under a bounded cap and reuses one successful probe across identical `llm`/`judge` transport tuples.
+- Deterministic evidence is green:
+  - `pytest -q truffles-api/tests/test_booking_quality_openai_preflight.py` -> `3 passed`
+  - `python3 -m py_compile ops/diagnose.py truffles-api/tests/test_booking_quality_openai_preflight.py` -> `pass`
+  - `git diff --check` -> `pass`
+  - `SESSION_AGENT=a1 scripts/session_check.sh` -> `Session OK`
+- `P1.6o112` is no longer blocked on the repeated `probe_error:TimeoutError` false-negative and may be rerun canonically once.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r2/summary.json`
+- `ops/diagnose.py`
+- `truffles-api/tests/test_booking_quality_openai_preflight.py`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o113-openai-preflight-transport-dedupe-timeout-alignment-a1.md`
+
+Residual / next:
+- Proof remains open until one admissible guarded rerun lands.
+- `P1.6o112` remains the next admissible proof block until that rerun completes.
+
+### 2026-03-12 — P1.6o112 admissible rerun clears `M40` and admits `M41`
+
+- Fresh guarded `dev L2` `p1.6o112-l2-dev-20260312-a1-r3` ran on a fingerprint-verified live runtime after `/admin/version.git_commit == HEAD == 21afcead084aa3fdfc5702c5547fb40d74970b5a`.
+- Strict audit stays truthful and non-canonical: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`.
+- `M40` is no longer the first fail. The new first fail is surfaced row `M41` on dialog `1`, turn `3`, text `У меня есть предпочтения по времени.`
+- Runtime evidence shows a bounded degraded owner miss, not a scenario-governance reopen:
+  - active `expected_reply_type=time` / `pending_question_act=ask_about_requested_slot`
+  - `llm_policy_core` timed out
+  - degraded path still emitted `booking_interrupt info_reply` + `truth_gate service_duration`
+  - `expected_reply_blocked_by_info=true` and false-positive `duration` info signaling short-circuited requested-slot guidance ownership
+- Published `P1.6o114` as the next admissible bounded closure block and synced the machine-readable owner matrix so `M41` is now the admitted next row.
+- Live runtime on `127.0.0.1:18184` was stopped after proof capture; `curl http://127.0.0.1:18184/admin/version` now returns `STOPPED`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r3/summary.json`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r3/brief.md`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r3/scenarios.json`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r3/responses.jsonl`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r3/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r3/manual_audit.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o112-post-m40-proof-lane-a1.md`
+
+Residual / next:
+- `M41` is admitted and open until deterministic closure lands.
+- `P1.6o114` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o114 deterministically closes `M41` and publishes `P1.6o115`
+
+- Audited proof baseline remains `p1.6o112-l2-dev-20260312-a1-r3`: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, first fail `M41` on `У меня есть предпочтения по времени.`
+- `P1.6o114` adds one bounded generic time-preference detector and wires it into timeout pending-slot-question recovery under active `time` collect.
+- The actual blocker was fixed at the owner boundary: under `policy_core_mode=degraded_fallback`, the family-specific false-positive `duration` info signal is now suppressed before `pending_info_signal` can short-circuit requested-slot guidance into `truth_gate`.
+- Deterministic evidence is green:
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "timeout_pending_slot_question or time_preference_statement"` -> `8 passed, 377 deselected`
+  - `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+  - `python3 -m py_compile truffles-api/app/services/booking_signal_service.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py` -> `pass`
+  - `git diff --check` -> `pass`
+  - `SESSION_AGENT=a1 scripts/session_check.sh` -> `Session OK`
+- `M41` is now `closed_bounded` in the machine-readable owner matrix.
+- Published `P1.6o115` as the next admissible proof-lane block.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r3/summary.json`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r3/brief.md`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r3/responses.jsonl`
+- `/tmp/booking_quality/p1.6o112-l2-dev-20260312-a1-r3/trace_bundle.jsonl`
+- `truffles-api/app/services/booking_signal_service.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/app/knowledge/generic/INTERACTION_OWNER_MATRIX.yaml`
+- `truffles-api/tests/test_interaction_owner_matrix_contract.py`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o114-active-time-time-preference-timeout-guidance-owner-a1.md`
+
+Residual / next:
+- Closure proof is still missing: no fresh post-`M41` guarded `dev L2` has been run yet.
+- `P1.6o115` is the next admissible expensive block.
+
+### 2026-03-12 — P1.6o115 proof lane clears `M41` and reopens existing `M21`
+
+- Fresh guarded `dev L2` `p1.6o115-l2-dev-20260312-a1-r1` ran on a fingerprint-verified live runtime after `/admin/version.git_commit == HEAD == 21afcead084aa3fdfc5702c5547fb40d74970b5a`.
+- Strict audit stays truthful and non-canonical: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`.
+- `M41` is no longer the first fail. The new first fail reopens existing row `M21` on dialog `1`, turn `4`, text `А если это время занято?`.
+- This is not a new family: runtime evidence already preserves the canonical active-name requested-slot follow-up contract:
+  - `expected_reply_type=name`
+  - `pending_question_act=ask_about_requested_slot`
+  - `pending_question_target=time`
+  - `active_question_relation=ask_about_requested_slot`
+  - `pending_question_owner=booking_time_availability_followup`
+- Remaining gap is scenario-governance/oracle drift: generated scenario still expected stale `reply_type=service_choice` / `expected_reply_type=service_choice` for this deictic specific-time occupancy wording.
+- Published `P1.6o116` as the next admissible bounded closure block; no new matrix row was admitted.
+- Live runtime on `127.0.0.1:18184` was stopped after proof capture; `curl http://127.0.0.1:18184/admin/version` now returns `STOPPED`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o115-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o115-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o115-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o115-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o115-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o115-l2-dev-20260312-a1-r1/manual_audit.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o115-post-m41-proof-lane-a1.md`
+
+Residual / next:
+- Existing row `M21` is reopened and open until deterministic re-closure lands.
+- `P1.6o116` is the next admissible deterministic block.
+
+### 2026-03-12 — P1.6o116 deterministically re-closes reopened `M21` and publishes `P1.6o117`
+
+- Audited proof baseline remains `p1.6o115-l2-dev-20260312-a1-r1`: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, first fail reopened `M21` on `А если это время занято?`.
+- `P1.6o116` extends the bounded deictic requested-slot probe in `scripts/booking_dialog_scenarios.py` with one occupancy-wording detector, so active-name requested-slot follow-up expectations now cover both availability phrasing and deictic occupancy phrasing under grounded specific time.
+- Deterministic evidence is green:
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "deictic_time_availability_followup or deictic_day_availability_followup or occupancy_followup"` -> `3 passed, 103 deselected`
+  - `pytest -q truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `2 passed`
+  - `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/tests/test_booking_dialog_scenarios_script.py truffles-api/tests/test_interaction_owner_matrix_contract.py` -> `pass`
+  - `git diff --check` -> `pass`
+  - `SESSION_AGENT=a1 scripts/session_check.sh` -> `Session OK`
+- Reopened `M21` is now `closed_bounded` again in the machine-readable owner matrix, with surfaced runs `r102` and `r128` and child TPs `P1.6o72` + `P1.6o116`.
+- Published `P1.6o117` as the next admissible proof-lane block.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o115-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o115-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o115-l2-dev-20260312-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o115-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o115-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `scripts/booking_dialog_scenarios.py`
+- `truffles-api/tests/test_booking_dialog_scenarios_script.py`
+- `truffles-api/app/knowledge/generic/INTERACTION_OWNER_MATRIX.yaml`
+- `truffles-api/tests/test_interaction_owner_matrix_contract.py`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o116-active-name-deictic-time-occupancy-followup-governance-a1.md`
+
+Residual / next:
+- Closure proof is still missing: no fresh post-reclosure guarded `dev L2` has been run yet.
+- `P1.6o117` is the next admissible expensive block.
+
+### 2026-03-13 — P1.6o118 publishes a class-level closure/process reset for the current worktree
+
+- Published `P1.6o118` as a binding process reset for `/home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19`.
+- The immediate next admissible step remains `P1.6o117`: one fresh guarded `dev L2` after reopened `M21` deterministic re-closure.
+- The default continuation after `P1.6o117` is no longer automatic `next surfaced row -> next bounded child TP`.
+- Remaining work is now explicitly organized around root-cause classes:
+  - `scenario-governance/oracle duplication`
+  - `runtime owner/degrade branching outside the resolver`
+  - `proof/infra validity blockers`
+- New process rule: after `P1.6o117`, the surfaced result must be classified by class before any new implementation TP is published; if the result belongs to an already-seen class, the next block must be structural for that class rather than another same-shape local containment patch.
+- Synced main remediation, closure program, structure map, and session log to this new process truth.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o118-class-level-closure-process-reset-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md`
+- `docs/SESSIONS/SESSION-2026-02-19-llm-first-firebreak-a1.md`
+- `STRUCTURE.md`
+
+Residual / next:
+- `P1.6o117` is still the immediate next admissible expensive block.
+- After `P1.6o117`, the next block must be chosen by class triage under `P1.6o118`, not by automatic row-by-row continuation.
+
+### 2026-03-13 — P1.6o117 completes, clears reopened `M21`, and routes the worktree to structural `Track C`
+
+- Started a live worktree runtime on `127.0.0.1:18184`, verified `/admin/version.git_commit == 21afcead084aa3fdfc5702c5547fb40d74970b5a` (`HEAD`), executed exactly one guarded `dev L2` run `p1.6o117-l2-dev-20260312-a1-r1`, audited it strictly, and then stopped the local runtime.
+- Audited run truth:
+  - `artifact_integrity.valid=true`
+  - `infra_valid=false`
+  - `semantic_valid=false`
+  - `stop_reason=max_failures_reached:1`
+- Reopened `M21` is no longer the first fail family.
+- The first surfaced failing turn is `dialog 1 / turn 12 / "Меня зовут Динара."`
+  - `question_contract` matched `name`
+  - active booking still held grounded `service=Маникюр` and `datetime=завтра`
+  - `llm_policy_core` timed out
+  - `llm_policy_plan_delta` overrode to `fact` / `pack.fact_fallback`
+  - strict contract verdict is `fact_without_evidence`
+- Inference from code plus trace:
+  - because the turn still had `expected_reply_type=name`, `booking_collect_contract_signal` is true in the timeout branch;
+  - factual fallback can therefore only win here because degraded side gating still preempts collect continuity before one shared owner boundary resolves the turn.
+- Classified under `P1.6o118` as `Class C — timeout/degrade owner branching outside resolver`.
+- No new matrix row is admitted from this run because it remains non-canonical for closure; the surfaced signal is used only for class-level routing.
+- Published `P1.6o119` as the next structural implementation block:
+  - `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o119-timeout-degrade-owner-boundary-first-slice-a1.md`
+  - objective: land the first shared timeout owner-boundary slice before degraded info/fact fallback so matched booking-collect continuity is preserved through one contract path.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o117-l2-dev-20260312-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o117-l2-dev-20260312-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o117-l2-dev-20260312-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o117-l2-dev-20260312-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o117-l2-dev-20260312-a1-r1/manual_audit.md`
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o117-post-m21-reclosure-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o118-class-level-closure-process-reset-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o119-timeout-degrade-owner-boundary-first-slice-a1.md`
+
+Residual / next:
+- `P1.6o117` is complete as a tactical proof gate, but it is not closure evidence.
+- `P1.6o119` is now the next admissible implementation block.
+- No new row-local timeout TP is admissible until the structural `Track C` slice lands.
+
+### 2026-03-13 — `P1.6o119` lands deterministic `Track C`; `P1.6o120` clears timeout first-fail position and routes the worktree to structural `Track A`
+
+- `P1.6o119` is complete on deterministic contour:
+  - matched booking expected-reply continuity now resolves through one shared timeout owner-boundary before degraded info/fact fallback
+  - targeted runtime/oracle/resolver checks are green, so the covered `Class C` family is no longer only a narrative hypothesis
+- Refreshed the live worktree runtime on `127.0.0.1:18184`, verified `/admin/version.git_commit == 21afcead084aa3fdfc5702c5547fb40d74970b5a` (`HEAD`), executed exactly one guarded `dev L2` run `p1.6o120-l2-dev-20260313-a1-r1`, strictly audited it, and then stopped the local runtime.
+- Audited run truth for `P1.6o120`:
+  - `artifact_integrity.valid=true`
+  - `infra_valid=false`
+  - `semantic_valid=false`
+  - `stop_reason=max_failures_reached:1`
+- The covered `Class C` timeout/degrade owner-boundary family is no longer the first surfaced fail.
+- The new first surfaced failing turn is `dialog 1 / turn 2 / "Какие дни у вас доступны?"`
+  - generated scenario still expects `tags=["slot_compare"]`
+  - `meta_any.pending_question_act=["slot_compare"]`
+  - `trace_contains.pending_question_act="slot_compare"`
+  - runtime canonically returns `decision_meta.source="booking_slot_guidance"`
+  - `llm_policy_core` validates with `pending_question_act="ask_about_requested_slot"`, `pending_question_target="time"`, `active_question_relation="ask_about_requested_slot"`
+  - `question_contract` sets `expected_reply_type="time"`
+  - `pending_question_interaction` records `decision="booking_slot_guidance"` with `pending_question_act="ask_about_requested_slot"` and `pending_question_target="time"`
+- Classified under `P1.6o118` as `Track A — scenario-governance/oracle duplication`, not as a remaining timeout owner-boundary reopen.
+- No new matrix row is admitted from `P1.6o120` because the run remains non-canonical for closure; the surfaced signal is used only for class-level routing.
+- Published and completed `P1.6o121` as the first structural `Track A` implementation block:
+  - `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o121-booking-slot-guidance-scenario-convergence-first-slice-a1.md`
+  - objective: make scenario/oracle derive active booking slot-guidance expectations from canonical runtime interaction contract instead of stale `slot_compare` tags/meta for generic availability questions under active `time` collect.
+  - landed mechanism: only the `slot_compare` path now canonicalizes non-comparative availability questions back to `ask_about_requested_slot`, leaving true compare/constraint families untouched.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o120-l2-dev-20260313-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o120-l2-dev-20260313-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o120-l2-dev-20260313-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o120-l2-dev-20260313-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o120-l2-dev-20260313-a1-r1/manual_audit.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o119-timeout-degrade-owner-boundary-first-slice-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o120-post-track-c-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o121-booking-slot-guidance-scenario-convergence-first-slice-a1.md`
+
+Residual / next:
+- `P1.6o119` is complete as the first bounded `Track C` slice; broader timeout/degrade migration remains open but is no longer the active first-fail blocker.
+- `P1.6o120` is complete as a proof-lane admission step, but it is not closure evidence.
+- `P1.6o121` is complete on deterministic contour via targeted generator/oracle checks.
+- `P1.6o122` is complete as the next proof-lane admission step:
+  - fresh guarded `dev L2` `p1.6o122-l2-dev-20260313-a1-r1` ran on a fingerprint-verified live runtime (`/admin/version.git_commit == 21afcead084aa3fdfc5702c5547fb40d74970b5a`, matching `HEAD`)
+  - `artifact_integrity.valid=true`
+  - `infra_valid=true`
+  - `semantic_valid=false`
+  - `stop_reason=max_failures_reached:1`
+  - the covered `P1.6o121` `Track A` family is no longer the first fail
+  - the new surfaced first fail is `dialog 1 / turn 9 / "Сколько стоит маникюр?"` after turn 8 timeout-degraded collect on `Когда у вас есть свободные слоты?`
+  - runtime answers pricing truthfully through `catalog.service_query`, but continuity still relies on stale degraded state because fresh `catalog_service_booking_progress` / follow-up contract evidence is not stamped explicitly; generated oracle then keeps stale `service_choice` as a secondary drift
+- No new matrix row is admitted from `P1.6o122`; the run is used only for class-level routing.
+- `P1.6o123` is complete as the bounded runtime-first structural continuation:
+  - `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o123-active-service-choice-service-info-progress-scenario-convergence-a1.md`
+  - shared expected-reply contract now emits explicit `catalog_service_booking_progress` for service-grounded pricing/duration/promo interrupts under active booking continuity
+  - decision follow-up stamping now preserves explicit question-contract evidence on the bounded contour without regressing existing owner-resolver precedence
+  - scenario/oracle now advances only the same bounded service-grounded contour from stale `service_choice` to canonical `time`; generic service-missing turns remain `service_choice`
+  - deterministic checks green: `python3 -m py_compile truffles-api/app/services/expected_reply_contract.py truffles-api/app/routers/webhook/decision.py scripts/booking_dialog_scenarios.py truffles-api/tests/test_expected_reply_contract.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_dialog_scenarios_script.py truffles-api/tests/test_booking_quality_response_guard.py`, `pytest -q truffles-api/tests/test_expected_reply_contract.py -k "catalog_service_booking_progress"`, `pytest -q truffles-api/tests/test_message_endpoint.py -k "service_info_interrupt_under_degraded_collect or owner_resolver_m33_preserves_active_name_service_info_resume"`, `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "service_choice_price_interrupt_booking_progress or preserves_time_after_price_interrupt"`, `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "service_choice_price_interrupt_booking_progress"`
+- `P1.6o124` is complete as a truthful but non-canonical proof-lane admission step:
+  - fresh guarded `dev L2` `p1.6o124-l2-dev-20260313-a1-r1` ran on fingerprint-verified live runtime (`/admin/version.git_commit == 21afcead084aa3fdfc5702c5547fb40d74970b5a`, matching `HEAD`)
+  - `artifact_integrity.valid=true`
+  - `infra_valid=false`
+  - `semantic_valid=false`
+  - `run_integrity_valid=false`
+  - `run_integrity_reasons=["run_completion_gap"]`
+  - the covered `P1.6o123` service-info continuity family is no longer the first fail
+  - the surfaced failing turn is `dialog 1 / turn 9 / "Я хочу записаться на 5 вечера."`: runtime matched `datetime`, `llm_policy_core` tried to advance booking collect to `name`, but validation degraded back to generic requested-slot follow-up and oracle stayed stale
+  - no semantic child is admitted from `P1.6o124` because the run is non-canonical; the surfaced turn is used only as informative proof evidence
+- `P1.6o125` is complete as the bounded proof-validity blocker slice:
+  - `ops/diagnose.py` strict `tool_evidence` now binds calendar/confirm requirements to observed booking-tool opportunity/evidence in the executed prefix instead of broad `booking` coverage alone
+  - fail-fast booking prefixes without observed calendar/check-booking/confirm opportunity no longer become false `infra_invalid`
+  - strict evidence/hook requirements remain enforced once alias/calendar/confirm opportunity is actually observed
+  - deterministic checks green: `python3 -m py_compile ops/diagnose.py truffles-api/tests/test_booking_quality_tool_evidence_gate.py`, `pytest -q truffles-api/tests/test_booking_quality_tool_evidence_gate.py`
+- `P1.6o126` is complete as the post-tool-evidence proof-lane admission step:
+  - fresh guarded `dev L2` `p1.6o126-l2-dev-20260313-a1-r1` ran on fingerprint-verified live runtime (`/admin/version.git_commit == 21afcead084aa3fdfc5702c5547fb40d74970b5a`, matching `HEAD`)
+  - strict audit is truthful: `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`
+  - the proof-validity blocker from `P1.6o124` is gone: `tool_evidence.valid=true`
+  - the run is still non-canonical for closure because `run_integrity_valid=false` with `run_completion_gap`, but it is now admissible for class routing
+  - the surfaced first fail moved to `dialog 1 / turn 8 / "Какой у вас прайс на маникюр?"`
+  - runtime trace shows `turn 7` booking verification ended with `delivery_state=transport_degraded`, then `turn 8` begins in `pending`, resets `session_memory` with reason `handover`, marks `re_entry required`, soft-passes pending guard, and lets `llm_policy_core` answer pure pricing fact through `catalog.service_query` without restoring booking follow-up `expected_reply_type=time`
+  - failing reasons are `expected_meta_mismatch` and `expected_trace_miss`; the runtime does not emit the expected `question_contract expected_reply_type=time` after the pricing interrupt
+- Classified under `P1.6o118` as runtime owner/resume drift at the pending/handoff transport boundary, not as a pure scenario-governance/oracle reopen.
+- Published `P1.6o127` as the next structural implementation block:
+  - `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o127-pending-handoff-resume-boundary-first-slice-a1.md`
+  - objective: preserve booking follow-up continuity across pending/handoff soft-pass and transport-degraded re-entry so service/check-booking factual interrupts do not erase `expected_reply_type=time` before semantic owner resolution
+- `P1.6o127` is complete on deterministic contour:
+  - pending/handoff soft-pass now restores booking continuity from `pending_resume` before generic handover reset, preserves `expected_reply_reason` together with `expected_reply_type`, and keeps `session_memory` intact on the surfaced transport-degraded pricing interrupt contour
+  - targeted runtime checks are green: `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/pending.py truffles-api/app/services/state_service.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py`, `pytest -q truffles-api/tests/test_state_service.py -k "preserve_context_restores_pending_resume_snapshot"`, `pytest -q truffles-api/tests/test_message_endpoint.py -k "pending_handoff_pricing_interrupt_preserves_time_followup or transport_degraded_pending_reentry_restores_booking_resume"`, `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "pending_handoff_pricing_interrupt_keeps_time_followup"`
+- `P1.6o128` is complete as the post-`P1.6o127` proof-lane admission step:
+  - fresh guarded `dev L2` `p1.6o128-l2-dev-20260313-a1-r1` ran on fingerprint-verified live runtime (`/admin/version.git_commit == 21afcead084aa3fdfc5702c5547fb40d74970b5a`, matching `HEAD`)
+  - strict audit is truthful: `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`
+  - the covered pending/handoff runtime-owner family is no longer the first fail
+  - the surfaced first fail moved to `dialog 1 / turn 5 / "Я предпочитаю Айгерим, она свободна?"`
+  - runtime meta/trace are coherent with generalized specialist followup under degraded invalid-schema path: `pending_question_target=specialist`, `pending_question_interaction=specialist_followup`, `active_question_relation=referent_followup`, `expected_reply_type=time`, trace decision `booking_specialist_followup`
+  - failing reasons are `expected_meta_mismatch` and `expected_trace_miss` because scenario expectations stayed stale on `pending_question_act=ask_about_requested_slot` / `pending_question_target=time`
+- Classified under `P1.6o118` as `Track A` scenario-governance/oracle drift on active-time named specialist preference availability followup, not as a new runtime-owner reopen.
+- `P1.6o129` is complete on deterministic contour:
+  - scenario-governance now recognizes named specialist preference availability turns under active `time` collect and emits generalized specialist-followup expectations without path-specific owner hardcode
+  - targeted checks are green: `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/tests/test_booking_dialog_scenarios_script.py truffles-api/tests/test_booking_quality_response_guard.py`, `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "named_specialist_preference_availability_keeps_generalized_followup"`, `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "generalized_expectation or invalid_schema_booking_request_specialist_followup"`
+  - one broader pre-existing red case in `truffles-api/tests/test_booking_dialog_scenarios_script.py` around `master` -> `booking` tag normalization remains outside this slice and was not used as closure evidence
+- `P1.6o130` is complete as the post-`P1.6o129` proof-lane admission step:
+  - fresh guarded `dev L2` `p1.6o130-l2-dev-20260313-a1-r1` ran on fingerprint-verified runtime and truthfully displaced the covered named specialist followup `Track A` family from first fail
+  - strict audit recorded `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`
+  - the surfaced failing turn was `dialog 1 / turn 3 / "Я предпочла бы утренние часы."` with apparent `info_section_miss`
+  - manual audit plus the bounded proof/oracle fix later proved this was not the next semantic class: runtime meta/trace already held booking `slot_constraint/time` continuity, while audit inferred stale `hours` from raw text alone
+- Post-`P1.6o130` bounded proof/oracle fix is complete on deterministic contour:
+  - `ops/diagnose.py` no longer infers text-level `hours` info tags when the turn is already matched by active booking question contract and no explicit info sections are expected
+  - targeted checks green: `python3 -m py_compile ops/diagnose.py truffles-api/tests/test_booking_quality_info_sections.py`, `pytest -q truffles-api/tests/test_booking_quality_info_sections.py -k "info_tag_infer"`, `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "booking_time_daypart_preference"`
+- `P1.6o132` is complete as the fresh post-fix proof rerun:
+  - fresh guarded `dev L2` `p1.6o132-l2-dev-20260313-a1-r1` stayed non-canonical with `infra_valid=false`, `semantic_valid=false`, `run_integrity_valid=false`, `artifact_integrity.valid=true`
+  - manual audit root causes are `runtime_pipeline_latency_budget_exceeded` and `non_canonical_partial_dialog_execution`
+  - the first hard failure hit `dialog 1 / turn 7 / "Можно к мастеру Мадина?"` after repeated webhook timeouts left `decision_meta`/state missing
+- Runtime launch recovery is complete operationally:
+  - prior live runtime on `:18184` was blocked writing logs to a dead TTY (`/dev/pts/9`); the recovered runtime now writes to `/tmp/booking_quality/p1.6o133-runtime-18184.log`
+  - recovered runtime is responsive on `/admin/version` and no longer shows the dead-TTY write block as the active blocker
+- `P1.6o134` is complete as the bounded proof-process admission slice:
+  - `run_economy` now allows unchanged-fingerprint lock retry only under explicit `--allow-non-canonical-lock-retry` and only when the previous lock is audited, `infra_valid=false`, `run_integrity_valid=false`, and `artifact_integrity.valid=true`
+  - same-fingerprint semantic-red locks with valid infra or unaudited infra locks remain blocked
+  - targeted checks green: `python3 -m py_compile ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py`, `pytest -q truffles-api/tests/test_booking_quality_status_gate.py -k "non_canonical_lock_retry"`
+- The next admissible step is one fresh proof rerun after deterministic closure of `P1.6o134`, using the recovered fingerprint-verified runtime and explicit non-canonical-lock retry override if the fingerprint remains unchanged.
+- No new row-local scenario/runtime TP is admissible unless that fresh post-`P1.6o134` proof rerun truthfully surfaces a different class.
+
+### 2026-03-13 — Binding beauty-salon canonical control-plane roadmap published; `P1.6o136` is the only admissible operational continuation
+
+- Published `P1.6o135` as the binding execution roadmap for this worktree:
+  - freeze future work to `fresh proof rerun -> contract compiler -> executable owner coverage -> boundary statechart -> proof bundle`
+  - explicitly forbid boundary-statechart implementation before contract/oracle unification
+  - keep `beauty-salon canonical closure` as the only closure target before any multilingual/business-agnostic claim
+- Structural diagnosis is now frozen as worktree truth:
+  - remaining blocker is structural duplication, not missing row-local phrase coverage
+  - semantic truth is still split across `llm_policy_core`, handwritten runtime owner/degrade logic, handwritten scenario/oracle logic, and audit inference
+  - executable matrix coverage remains narrow, so most rows are still documentary rather than runtime-owned
+- Published `P1.6o136` as the immediate proof-only continuation:
+  - exactly one fresh guarded rerun must run on the recovered fingerprint-verified runtime
+  - no new local runtime/oracle patch is admissible before that rerun is strictly audited
+  - the next structural implementation block must be selected from the surfaced class, not from stale `Mxx` momentum
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o135-beauty-salon-canonical-control-plane-roadmap-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o136-post-p1.6o134-fresh-proof-rerun-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-07-p1.6o-demo-salon-architecture-closure-program-a1.md`
+
+### 2026-03-13 — `P1.6o136` surfaces `Track A` expectation drift; `P1.6o137` opens the first frozen-order contract-compiler slice
+
+- Completed `P1.6o136` as the one admissible fresh proof continuation after `P1.6o134`:
+  - `r1` was `invalid_preflight` because auto lane inference required the acceptance chain controller; `r2` was `invalid_preflight` because the manual-audit gate still had pending `r1`; both preflight attempts were closed by strict manual audit.
+  - the one admissible fresh rerun is `p1.6o136-l2-dev-20260313-a1-r3` on fingerprint-verified runtime `:18184` with explicit `--quality-lane dev`; strict audit completed with `artifact_integrity.valid=true`.
+  - `r3` remained a fail-fast non-canonical prefix (`infra_valid=false`, `semantic_valid=false`, `run_integrity_reasons=[run_completion_gap]`), but the surfaced first fail is admissible because the failing turn has full `decision_meta` + `decision_trace` evidence.
+- Surfaced class under `P1.6o118` routing:
+  - first fail family is `reason:expected_trace_miss|type:turn|category:expectation|stage:booking|state:bot_active` at `dialog 1 / turn 6 / "Я хочу записаться к Айгерим."`
+  - runtime truth is coherent: `expected_reply_type=time`, `pending_question_target=specialist`, `active_question_relation=referent_followup`, `pending_question_interaction=specialist_followup`, `pending_question_owner=booking_specialist_followup`; trace contains `question_contract` + `booking prompt` but no matching handwritten `pending_question_interaction` trace entry.
+  - classified as `Track A — scenario/oracle expectation drift`, not as a new runtime-owner reopen.
+- Published `P1.6o137` as the next admissible structural block:
+  - this worktree now enters the first frozen-order `contract compiler` slice
+  - scope is bounded to active-time specialist-followup expectation compilation for scenario + audit from machine-readable contract inputs
+  - no new runtime-owner patch or boundary-statechart work is admissible before this deterministic compiler slice lands
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o136-post-p1.6o134-fresh-proof-rerun-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o137-track-a-contract-compiler-active-time-specialist-followup-a1.md`
+- `/tmp/booking_quality/p1.6o136-l2-dev-20260313-a1-r1/manual_audit.json`
+- `/tmp/booking_quality/p1.6o136-l2-dev-20260313-a1-r2/manual_audit.json`
+- `/tmp/booking_quality/p1.6o136-l2-dev-20260313-a1-r3/summary.json`
+- `/tmp/booking_quality/p1.6o136-l2-dev-20260313-a1-r3/manual_audit.json`
+- `/tmp/booking_quality/p1.6o136-l2-dev-20260313-a1-r3/failure_families.json`
+
+### 2026-03-13 — `P1.6o137` lands the first frozen-order contract-compiler slice; `P1.6o138` becomes the active proof continuation
+
+- Completed `P1.6o137` on deterministic contour:
+  - added shared compiler module `truffles-api/app/services/scenario_contract_compiler.py` for the surfaced active-time specialist-followup family
+  - `scripts/booking_dialog_scenarios.py` now compiles the covered expectation from machine-readable contract inputs instead of hand-assembling stale `pending_question_interaction` trace literals on the surfaced path
+  - `ops/diagnose.py` now normalizes the same covered expectation family through the shared compiler before strict comparison
+- Targeted deterministic checks are green:
+  - `python3 -m py_compile truffles-api/app/services/scenario_contract_compiler.py scripts/booking_dialog_scenarios.py ops/diagnose.py`
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "active_time_specialist_followup or scenario_contract_compiler or named_specialist_preference_availability_keeps_generalized_followup"` -> `2 passed, 110 deselected`
+  - `pytest -q truffles-api/tests/test_booking_quality_scenario_contract_gate.py -k "specialist_followup or scenario_contract_compiler or extract_expectations_compiles_active_time_specialist_followup_contract"` -> `1 passed, 8 deselected`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh` -> `Session OK`
+- Published `P1.6o138` as the next admissible proof-only continuation:
+  - exactly one fresh guarded rerun must verify that the covered compiler family moved off first fail
+  - no new structural continuation is admissible before `P1.6o138` is strict-audited
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o137-track-a-contract-compiler-active-time-specialist-followup-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o138-post-track-a-contract-compiler-proof-lane-a1.md`
+- `truffles-api/app/services/scenario_contract_compiler.py`
+- `scripts/booking_dialog_scenarios.py`
+- `ops/diagnose.py`
+- `truffles-api/tests/test_booking_dialog_scenarios_script.py`
+- `truffles-api/tests/test_booking_quality_scenario_contract_gate.py`
+
+### 2026-03-13 — `P1.6o138` proves the first compiler slice moved off first fail; `P1.6o139` opens bounded active-time generic master-info owner closure
+
+- Completed `P1.6o138` as the post-compiler proof continuation:
+  - runtime parity on `:18184` was verified against `HEAD=21afcead084aa3fdfc5702c5547fb40d74970b5a`
+  - fresh guarded `dev L2` `p1.6o138-l2-dev-20260313-a1-r1` completed and strict audit recorded `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`
+  - the covered `P1.6o137` `Track A` compiler family is no longer the first fail
+- Surfaced next class under `P1.6o118` routing:
+  - primary failure family is `reason:info_section_miss|type:turn|category:data|stage:booking|state:bot_active`
+  - secondary corroboration is `reason:judge_fail|type:turn|category:expectation|stage:booking|state:bot_active`
+  - failing turn is `dialog 1 / turn 8 / "Какой у вас мастер?"`
+  - runtime truth on the failing turn is not another stale expectation drift:
+    - `decision_meta.action=booking_prompt`
+    - `pending_question_interaction=specialist_followup`
+    - `pending_question_owner=booking_specialist_followup`
+    - `expected_reply_type=time`
+    - judge explicitly marked the turn as a missed master-info question, not as a trace-only mismatch
+- Published `P1.6o139` as the next admissible structural block:
+  - scope is bounded to active-time generic master-info interrupt detection plus adjacent scenario retag
+  - this is the first frozen-order `executable owner coverage` continuation after the initial compiler slice proved out
+  - no boundary-statechart work is admissible; next expensive step after `P1.6o139` remains one fresh guarded proof rerun
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o138-post-track-a-contract-compiler-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o139-active-time-generic-master-info-interrupt-owner-a1.md`
+- `/tmp/booking_quality/p1.6o138-l2-dev-20260313-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o138-l2-dev-20260313-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o138-l2-dev-20260313-a1-r1/failure_families.json`
+- `/tmp/booking_quality/p1.6o138-l2-dev-20260313-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o138-l2-dev-20260313-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o138-l2-dev-20260313-a1-r1/manual_audit.json`
+
+### 2026-03-13 — `P1.6o139` closes the surfaced active-time generic master-info family; next admissible step returns to proof lane
+
+- Completed `P1.6o139` on deterministic contour:
+  - `truffles-api/app/services/pack_runtime_service.py` now recognizes filler-shaped generic master questions under existing booking service context as explicit bounded `master` intent.
+  - `truffles-api/app/routers/webhook/decision.py` no longer mis-recovers `Какой у вас мастер?` into `generic_specialist_choice_followup`: the guard now uses effective merged service context before preserving specialist-choice ownership.
+  - `truffles-api/app/routers/webhook/booking.py` now keeps surfaced active-time master-info interrupts on `booking_interrupt/master`, preserves `pending_question_target=time`, and appends the booking time follow-up prompt without reopening stale `specialist_followup`.
+  - `scripts/booking_dialog_scenarios.py` now retags booking-tag active-time generic master-info surfaces to the same bounded `master` interrupt contract and removes stale pending-question carryover expectations for this family.
+- Deterministic evidence is green:
+  - `python3 -m py_compile truffles-api/app/services/pack_runtime_service.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/booking.py scripts/booking_dialog_scenarios.py`
+  - `pytest -q truffles-api/tests/test_pack_runtime_service.py -k "resolve_master_intent"`
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "generic_master_info_interrupt and active_time"`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "generic_specialist_choice_followup or generic_master_info_interrupt_resumes_time_collect or master_info_interrupt_resumes_name_collect or timeout_master_info_interrupt_keeps_time_collect_for_generic_specialist_change or timeout_master_info_interrupt_resumes_name_collect"`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "active_time_generic_master_info_interrupt or timeout_master_info_interrupt_for_generic_specialist_change"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- The next admissible expensive step is now one fresh guarded proof rerun after `P1.6o139`; no new structural child is admissible before that rerun is audited.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o139-active-time-generic-master-info-interrupt-owner-a1.md`
+- `truffles-api/app/services/pack_runtime_service.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/app/routers/webhook/booking.py`
+- `scripts/booking_dialog_scenarios.py`
+- `truffles-api/tests/test_pack_runtime_service.py`
+- `truffles-api/tests/test_booking_dialog_scenarios_script.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/tests/test_booking_quality_response_guard.py`
+
+### 2026-03-13 — `P1.6o140` proves owner slice is off first fail; `P1.6o141` opens the first admissible boundary-statechart slice
+
+- Completed `P1.6o140` as the post-`P1.6o139` proof continuation:
+  - runtime parity on `:18184` was verified against `HEAD=21afcead084aa3fdfc5702c5547fb40d74970b5a`
+  - fresh guarded `dev L2` `p1.6o140-l2-dev-20260313-a1-r1` completed and strict audit recorded `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`
+  - the covered `P1.6o139` active-time generic master-info family is no longer the first fail
+- Surfaced next class under `P1.6o118` routing:
+  - primary failure families are `reason:expected_meta_mismatch|type:turn|category:expectation|stage:transport|state:pending` and `reason:expected_trace_miss|type:turn|category:expectation|stage:transport|state:pending`
+  - failing turn is `dialog 1 / turn 5 / "Мне нужно на следующую неделю."`
+  - runtime truth on the failing turn is coherent enough for class routing despite the non-canonical prefix:
+    - `conversation_state=pending`
+    - `decision_meta.action=escalate`
+    - `decision_meta.intent=policy_timeout_degrade`
+    - `decision_meta.policy_core_degrade_reason=policy_error:deadline_exceeded`
+    - `decision_meta.policy_core_timeout_retry_exhausted=true`
+    - `oracle_arbitration.winner=contract`
+  - classified as the first admissible boundary lifecycle drift after compiler + executable owner coverage, not as a reopen of `P1.6o139`
+- Published `P1.6o141` as the next admissible structural block:
+  - this is the first boundary-statechart slice allowed by the frozen roadmap after `fresh rerun -> contract compiler -> executable owner coverage`
+  - scope is bounded to timeout/degrade/pending transitions on active booking collect
+  - no new proof rerun is admissible before deterministic closure of this slice
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o140-post-p1.6o139-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o141-timeout-degrade-pending-boundary-statechart-first-slice-a1.md`
+- `/tmp/booking_quality/p1.6o140-l2-dev-20260313-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o140-l2-dev-20260313-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o140-l2-dev-20260313-a1-r1/failure_families.json`
+- `/tmp/booking_quality/p1.6o140-l2-dev-20260313-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o140-l2-dev-20260313-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o140-l2-dev-20260313-a1-r1/manual_audit.json`
+
+### 2026-03-13 — `P1.6o141` closes the first boundary-statechart slice; `P1.6o142` is the next admissible proof lane
+
+- Completed `P1.6o141` as the first admissible boundary-statechart slice after compiler + executable owner coverage:
+  - `truffles-api/app/services/owner_resolver.py` now exposes an explicit timeout boundary `resume_contract` source, so the boundary model can resume active booking collect from runtime contract instead of treating retry exhaustion as an automatic handoff.
+  - `truffles-api/app/routers/webhook/decision.py` now emits an explicit `boundary_state.resume_collect` transition for active `time` collect under `booking_interrupt`, and routes the guarded retry path through `booking_resume_collect_boundary` instead of collapsing resumable turns into `pending/policy_timeout_degrade`.
+  - the slice is intentionally bounded to active `time` resume continuity; existing timeout info-interrupt owners such as `timeout_master_info_interrupt` remain intact.
+- Targeted deterministic closure is green:
+  - `python3 -m py_compile truffles-api/app/services/owner_resolver.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_owner_resolver.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py`
+  - `pytest -q truffles-api/tests/test_owner_resolver.py -k "timeout_owner_boundary"`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "timeout_owner_boundary_collect or timeout_resume_contract_boundary_collect"`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "timeout_booking_interrupt_resume_boundary_bypasses_exhausted_limit or degraded_timeout_booking_safe_second_hit_escalates or timeout_master_info_interrupt_resumes_name_collect or degraded_timeout_matched_name_continuity_uses_owner_boundary or degraded_timeout_active_booking_name_fill_resumes_followup or pending_handoff_pricing_interrupt_preserves_time_followup or transport_degraded_pending_reentry_restores_booking_resume"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o142` as the next admissible continuation:
+  - exactly one fresh guarded rerun is now allowed after deterministic closure of `P1.6o141`
+  - no new structural implementation block is admissible before that rerun is strictly audited
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o141-timeout-degrade-pending-boundary-statechart-first-slice-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o142-post-p1.6o141-proof-lane-a1.md`
+- `truffles-api/app/services/owner_resolver.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_owner_resolver.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/tests/test_booking_quality_response_guard.py`
+
+
+### 2026-03-13 — `P1.6o142` proves the first boundary-statechart slice moved off first fail; `P1.6o143` opens pending soft-pass timeout resume recovery
+
+- Completed `P1.6o142` as the post-`P1.6o141` proof continuation:
+  - runtime parity on `:18184` was verified against `HEAD=21afcead084aa3fdfc5702c5547fb40d74970b5a`
+  - fresh guarded `dev L2` `p1.6o142-l2-dev-20260313-a1-r1` completed and strict audit recorded `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`
+  - the covered `P1.6o141` timeout/degrade pending-boundary family is no longer the first fail
+- Surfaced next class under `P1.6o118` routing:
+  - primary failure family is `reason:expected_state_mismatch|type:turn|category:expectation|stage:llm_policy_plan_delta|state:pending`
+  - failing turn is `dialog 2 / turn 5 / "Если да, то в какое время?"`
+  - runtime truth on the failing turn is boundary drift, not oracle-only drift:
+    - `conversation_state=pending`
+    - `decision_meta.pending_guard=policy_core_degraded`
+    - `decision_meta.pending_action=policy_core_degraded_hold`
+    - `decision_meta.delivery_state=transport_degraded`
+    - `decision_meta.policy_core_degrade_reason=policy_error:timeout`
+    - trace shows `session_memory decision=reset reason=handover`, `re_entry decision=required reason=handover`, `pending_guard decision=soft_pass`
+    - live booking/session context still proves resumable continuity after the run: `booking.active=true`, `booking.last_question=datetime`, `session_memory.active_goal=booking`, `session_memory.last_question_type=time`
+- Published `P1.6o143` as the next admissible structural block:
+  - scope is bounded to pending soft-pass timeout recovery when active booking resume-slot continuity survives outside cleared `expected_reply_type`
+  - this remains the next admissible boundary-statechart slice under the frozen roadmap; no proof rerun is admissible before deterministic closure of this family
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o142-post-p1.6o141-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o143-pending-soft-pass-booking-resume-slot-timeout-boundary-a1.md`
+- `/tmp/booking_quality/p1.6o142-l2-dev-20260313-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o142-l2-dev-20260313-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o142-l2-dev-20260313-a1-r1/failure_families.json`
+- `/tmp/booking_quality/p1.6o142-l2-dev-20260313-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o142-l2-dev-20260313-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o142-l2-dev-20260313-a1-r1/manual_audit.json`
+
+### 2026-03-13 — `P1.6o143` closes pending soft-pass timeout resume recovery; `P1.6o144` is the next admissible proof lane
+
+- Completed `P1.6o143` on deterministic contour:
+  - `truffles-api/app/routers/webhook/decision.py` now derives pending booking resume continuity from live booking/session contract state even when explicit `expected_reply_type` is absent.
+  - the same boundary now restores resumable booking follow-up under `pending -> soft_pass -> policy_core timeout` and routes one bounded `resume_contract -> timeout_owner_boundary_collect -> collect` recovery path before generic `policy_core_degraded_hold`.
+  - `ops/diagnose.py` now accepts this bounded pending collect recovery only when contract-first `action/state/trace/meta` evidence proves the timeout owner boundary path.
+- Targeted deterministic closure is green:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py ops/diagnose.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "pending_soft_pass_timeout_booking_resume_boundary or transport_degraded_pending_reentry_restores_booking_resume"`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "pending_soft_pass_timeout_booking_resume_boundary or timeout_resume_contract_boundary_collect"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o144` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o143`
+  - no new structural implementation block is admissible before that rerun is strictly audited
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o143-pending-soft-pass-booking-resume-slot-timeout-boundary-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o144-post-p1.6o143-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `ops/diagnose.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/tests/test_booking_quality_response_guard.py`
+
+### 2026-03-13 — `P1.6o144` proves the pending soft-pass timeout family moved off first fail; `P1.6o145` opens bounded owner-priority recovery for active time slot-questions
+
+- Completed `P1.6o144` as the post-`P1.6o143` proof continuation:
+  - runtime parity on `:18184` was verified against `HEAD=21afcead084aa3fdfc5702c5547fb40d74970b5a`
+  - fresh guarded `dev L2` `p1.6o144-l2-dev-20260313-a1-r1` completed and strict audit recorded `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`
+  - the covered `P1.6o143` pending soft-pass timeout family is no longer the first fail
+- Surfaced next class under `P1.6o118` routing:
+  - primary failure families are `reason:expected_meta_mismatch|type:turn|category:expectation|stage:transport|state:bot_active` and `reason:expected_trace_miss|type:turn|category:expectation|stage:transport|state:bot_active`
+  - failing turn is `dialog 1 / turn 2 / "Во сколько у вас свободные слоты?"`
+  - runtime truth shows owner-priority drift, not oracle-only drift:
+    - `llm_policy_core` resolved `intent=booking`, `action=collect`, `pending_question_act=ask_about_requested_slot`, `pending_question_target=time`, `active_question_relation=ask_about_requested_slot`
+    - final runtime meta rewrote the turn to `action=reply`, `intent=hours`, `source=booking_info_contract`, while still keeping `expected_reply_type=time`, `expected_reply_reason=booking_prompt`, `interaction_owner=question_contract:booking_prompt`, `pending_question_target=time`, `interaction_relation=ask_about_requested_slot`
+    - trace records `policy_interrupt_contract decision=semantic_override_blocked reason_code=policy_collect_info_interrupt_owner` before the final `hours` reply
+- Published `P1.6o145` as the next admissible structural block:
+  - scope is bounded to active booking time slot-question continuity vs generic `hours` info-interrupt owner priority
+  - this is a runtime boundary ownership fix, not an oracle weakening; next expensive step after deterministic closure remains one fresh guarded proof rerun
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o144-post-p1.6o143-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o145-active-time-slot-question-hours-info-interrupt-owner-a1.md`
+- `/tmp/booking_quality/p1.6o144-l2-dev-20260313-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o144-l2-dev-20260313-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o144-l2-dev-20260313-a1-r1/failure_families.json`
+- `/tmp/booking_quality/p1.6o144-l2-dev-20260313-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o144-l2-dev-20260313-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o144-l2-dev-20260313-a1-r1/manual_audit.json`
+
+
+### 2026-03-13 — `P1.6o145` closes active-time slot-question vs `hours` owner drift; `P1.6o146` is the next admissible proof lane
+
+- Completed `P1.6o145` on deterministic contour:
+  - `truffles-api/app/routers/webhook/decision.py` now preserves active booking `time` slot-question continuity before generic `hours` info-interrupt arbitration when runtime still holds slot-question relation state.
+  - the bounded guard keys off booking goal + `pending_question_target=time` + active slot-question relation, so the fix remains contract-first and does not hardcode surface phrases.
+  - real `hours` info questions outside this bounded contour remain eligible for collect-to-info takeover.
+- Targeted deterministic closure is green:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "policy_collect_interrupt_arbitration_preserves_active_time_slot_question_owner or keeps_hours_interrupt_without_active_slot_question_owner or active_time_slot_question_hours_phrase_keeps_booking_guidance"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o146` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o145`
+  - no new structural implementation block is admissible before that rerun is strictly audited
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o145-active-time-slot-question-hours-info-interrupt-owner-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o146-post-p1.6o145-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+
+
+### 2026-03-13 — `P1.6o146` proves the `hours` owner slice moved off first fail; `P1.6o147` opens timeout slot-question continuity recovery
+
+- Completed `P1.6o146` as the post-`P1.6o145` proof continuation:
+  - invalid attempt `p1.6o146-l2-dev-20260313-a1-r1` was operator-stopped after a silent long-running session; strict audit recorded `infra_valid=false`, `semantic_valid=false`, `stop_reason=in_progress`, `run_integrity_reasons=[run_incomplete]`, so it was not used for class routing.
+  - admissible rerun `p1.6o146-l2-dev-20260313-a1-r2` completed on parity-verified runtime `:18184` with strict audit `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`.
+  - the covered `P1.6o145` active-time slot-question vs `hours` owner family is no longer the first fail.
+- Surfaced next class under `P1.6o118` routing:
+  - primary failure families are `reason:expected_meta_mismatch|type:turn|category:expectation|stage:contract|state:bot_active` and `reason:expected_trace_miss|type:turn|category:expectation|stage:contract|state:bot_active`
+  - failing turn is `dialog 1 / turn 2 / "Во сколько у вас свободные слоты?"`
+  - runtime truth shows timeout boundary continuity drift, not a reopen of the prior `hours` owner slice:
+    - final meta is `action=booking_prompt`, `intent=booking`, `source=llm_policy_core`, `expected_reply_type=time`, `expected_reply_reason=policy_core_degraded_collect`, `policy_core_mode=degraded_fallback`, `policy_core_degrade_reason=policy_error:timeout`, while `pending_question_act/target/interaction` are absent
+    - trace shows `question_contract decision=missed answer_error=blocked_by_info`, `carryover_guard decision=ignored reason=basic_info_lock`, `llm_policy_core error=timeout`, then `question_contract decision=set reason=policy_core_degraded_collect` with no `pending_question_interaction` evidence
+    - judge passed the response text, but `oracle_arbitration.winner=contract`
+- Published `P1.6o147` as the next admissible structural block:
+  - scope is bounded to timeout slot-question continuity under `basic_info_lock` + `policy_core` timeout on active booking followup
+  - this is a boundary evidence/state recovery slice, not oracle weakening; next expensive step after deterministic closure remains one fresh guarded proof rerun
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o146-post-p1.6o145-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o147-timeout-slot-question-info-lock-degraded-collect-boundary-a1.md`
+- `/tmp/booking_quality/p1.6o146-l2-dev-20260313-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o146-l2-dev-20260313-a1-r1/manual_audit.json`
+- `/tmp/booking_quality/p1.6o146-l2-dev-20260313-a1-r2/summary.json`
+- `/tmp/booking_quality/p1.6o146-l2-dev-20260313-a1-r2/brief.md`
+- `/tmp/booking_quality/p1.6o146-l2-dev-20260313-a1-r2/failure_families.json`
+- `/tmp/booking_quality/p1.6o146-l2-dev-20260313-a1-r2/responses.jsonl`
+- `/tmp/booking_quality/p1.6o146-l2-dev-20260313-a1-r2/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o146-l2-dev-20260313-a1-r2/manual_audit.json`
+
+
+### 2026-03-13 — `P1.6o147` closes timeout slot-question info-lock drift; `P1.6o148` is the next admissible proof lane
+
+- Completed `P1.6o147` on deterministic contour:
+  - degraded fallback now suppresses the lexical `hours` info lock only on the bounded timeout slot-question surface of the active booking timeout slot-fill followup boundary, so `basic_info_lock` no longer forces the surfaced turn into generic `policy_core_degraded_collect`.
+  - runtime now re-enters `timeout_pending_slot_question -> booking_slot_guidance` on the surfaced contour and emits the missing `pending_question_act/target/interaction` meta/trace contract instead of generic degraded-collect evidence.
+  - the bounded helper keys off question-like slot-question marker density plus the existing timeout followup boundary, so real `hours` prompts outside that contour remain unchanged.
+- Targeted deterministic closure is green:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "timeout_pending_slot_question or active_time_slot_question_hours_phrase"`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "timeout_pending_slot_guidance or timeout_booking_slot_fill_followup"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o148` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o147`
+  - no new structural implementation block is admissible before that rerun is strictly audited
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o147-timeout-slot-question-info-lock-degraded-collect-boundary-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o148-post-p1.6o147-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/tests/test_booking_quality_response_guard.py`
+
+
+### 2026-03-13 — `P1.6o148` proves the timeout slot-question continuity family moved off first fail; `P1.6o149` opens partial-date availability governance closure
+
+- Completed `P1.6o148` as the post-`P1.6o147` proof continuation:
+  - `p1.6o148-l2-dev-20260313-a1-r1` completed on parity-verified runtime `:18184` with strict audit `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`.
+  - manual audit recorded `run_integrity_reasons=[run_completion_gap]`, `dialogs_seen=[1]`, `expected_dialogs=10`, `responses_rows=3`, `trace_rows=3`, so the run remains non-canonical for baseline/closure claims but is still usable for truthful first-fail routing inside the observed prefix.
+  - the covered `P1.6o147` timeout slot-question continuity family is no longer the first fail.
+- Surfaced next class under `P1.6o118` routing:
+  - primary failure families are `reason:expected_meta_mismatch|type:turn|category:expectation|stage:transport|state:bot_active` and `reason:expected_trace_miss|type:turn|category:expectation|stage:transport|state:bot_active`
+  - failing turn is `dialog 1 / turn 3 / "Есть ли у вас время на завтра?"`
+  - runtime truth shows bounded scenario-governance drift, not a reopen of the prior timeout boundary slice:
+    - scenario still expects `slot_compare(time)` with `pending_question_act=slot_compare` and matching `pending_question_interaction` trace evidence;
+    - runtime canonically emits `action=booking_prompt`, `intent=booking`, `source=policy_core_guard`, `expected_reply_type=time`, `expected_reply_reason=policy_core_degraded_collect`, `pending_question_act=slot_constraint`, `pending_question_target=time`, `pending_question_interaction=slot_constraint`, `pending_question_owner=question_contract`, `answer_slot=datetime`, `answer_value=завтра`, and `policy_core_degrade_reason=policy_validation:collect_slot_order_invalid`;
+    - trace shows `question_contract decision=matched` and `pending_question_interaction decision=slot_constraint` before degraded collect;
+    - judge passed the response text, but `oracle_arbitration.winner=contract` with `judge_alignment=conflicted`.
+- Published `P1.6o149` as the next admissible structural block:
+  - scope is bounded to generator/oracle normalization for partial-date availability probes mis-tagged as `slot_compare` under active `time` collect
+  - this is a `Track A` scenario-governance repair, not a new runtime/boundary patch; next expensive step after deterministic closure remains one fresh guarded proof rerun
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o148-post-p1.6o147-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o149-partial-date-availability-slot-constraint-governance-a1.md`
+- `/tmp/booking_quality/p1.6o148-l2-dev-20260313-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o148-l2-dev-20260313-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o148-l2-dev-20260313-a1-r1/failure_families.json`
+- `/tmp/booking_quality/p1.6o148-l2-dev-20260313-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o148-l2-dev-20260313-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o148-l2-dev-20260313-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o148-l2-dev-20260313-a1-r1/manual_audit.json`
+
+
+### 2026-03-13 — `P1.6o149` closes partial-date availability governance drift; `P1.6o150` proves it moved off first fail and opens timeout owner-boundary slot-constraint continuity
+
+- Completed `P1.6o149` on deterministic contour:
+  - `scripts/booking_dialog_scenarios.py` now normalizes partial-date availability probes like `Есть ли у вас время на завтра?` from stale `slot_compare` to canonical `slot_constraint` under active `time` collect, while preserving explicit alternative-bearing compare turns.
+  - normalization runs in both sanitize and post-coverage repair flows, so stale expectations do not reappear after generation.
+  - targeted deterministic checks stayed green on the bounded slice; one broader neighboring red around `reply_type` on another partial-date case remains outside this block and was not touched.
+- Completed `P1.6o150` as the post-`P1.6o149` proof continuation:
+  - fresh guarded `dev L2` `p1.6o150-l2-dev-20260313-a1-r1` ran on parity-verified runtime `:18184` with strict audit `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`.
+  - manual audit recorded `run_integrity_reasons=[run_completion_gap]`, `dialogs_seen=[1]`, `expected_dialogs=10`, `responses_rows=3`, `trace_rows=3`, together with `pipeline_budget_exceeded`, `dialog_coverage_gap`, `judge_eval_conflict`, and `oracle_arbitration.winner=contract`; the run stays non-canonical for closure/baseline claims but remains admissible for truthful first-fail routing inside the observed prefix.
+  - the covered `P1.6o149` partial-date availability governance family is no longer the first fail.
+- Surfaced next class under `P1.6o118` routing:
+  - primary failure families are `reason:expected_meta_mismatch|type:turn|category:expectation|stage:contract|state:bot_active` and `reason:expected_trace_miss|type:turn|category:expectation|stage:contract|state:bot_active`
+  - failing turn is `dialog 1 / turn 3 / "Мне нужно на следующий вторник."`
+  - runtime truth shows bounded timeout owner-boundary continuity drift, not a reopen of the prior generator slice:
+    - scenario expects bounded `slot_constraint(time)` with `pending_question_act=slot_constraint`, `pending_question_target=time`, and matching `pending_question_interaction` trace evidence;
+    - runtime canonically keeps `action=booking_prompt`, `intent=booking`, `source=policy_core_guard`, `expected_reply_type=time`, `expected_reply_reason=policy_core_timeout_owner_boundary`, `booking_slot_fill_applied=["datetime"]`, `owner_resolution_reason_code=timeout_owner_boundary_matched_expected_reply`, and `policy_core_degrade_reason=policy_error:deadline_exceeded`;
+    - trace shows `question_contract decision=matched` with `answer_slot=datetime`, `answer_value=во вторник`, then `question_contract decision=set reason=policy_core_timeout_owner_boundary`, `owner_resolver decision=timeout_owner_boundary_match`, and `policy_core_guard decision=timeout_owner_boundary_collect`;
+    - final meta/trace drop the bounded `pending_question_act/target/interaction` evidence, which is why contract beats judge even though the response text remains acceptable.
+- Published `P1.6o151` as the next admissible structural block:
+  - scope is bounded to runtime timeout owner-boundary continuity for grounded `datetime` fill -> `slot_constraint(time)` evidence preservation
+  - this is a `Track C` boundary/runtime repair, not another generator/oracle patch; the next expensive step remains one fresh guarded proof rerun only after deterministic closure of this bounded runtime slice
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o149-partial-date-availability-slot-constraint-governance-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o150-post-p1.6o149-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o151-timeout-owner-boundary-slot-constraint-continuity-a1.md`
+- `/tmp/booking_quality/p1.6o150-l2-dev-20260313-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o150-l2-dev-20260313-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o150-l2-dev-20260313-a1-r1/failure_families.json`
+- `/tmp/booking_quality/p1.6o150-l2-dev-20260313-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o150-l2-dev-20260313-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o150-l2-dev-20260313-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o150-l2-dev-20260313-a1-r1/manual_audit.json`
+
+
+### 2026-03-13 — `P1.6o155` closes collect-slot-order partial-date slot-constraint continuity; `P1.6o156` is the next admissible proof lane
+
+- Completed `P1.6o155` on deterministic contour:
+  - `truffles-api/app/routers/webhook/decision.py` now extends the bounded question-contract `slot_constraint` detector with one surfaced declarative partial-date weekend guard, so matched `datetime` answers like `в субботу` on raw turns like `Мне нужно на этот выходной.` preserve canonical `slot_constraint(time)` meta/trace continuity before `policy_core_guard` degrades back to the booking time prompt.
+  - the fix stays bounded: existing question-like daypart and declarative time-window slot-constraint behavior remains intact, and no scenario/oracle/compiler files changed in this block.
+- Deterministic validation for `P1.6o155`:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "collect_slot_order_invalid_time_window_uses_slot_constraint_guidance or collect_slot_order_invalid_question_like_daypart_keeps_slot_constraint_trace or collect_slot_order_invalid_partial_date_keeps_slot_constraint_trace"`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "accepts_collect_slot_order_time_window_slot_constraint_guidance"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o156` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o155`;
+  - no new runtime/oracle patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o155-collect-slot-order-partial-date-slot-constraint-continuity-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o156-post-p1.6o155-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/tests/test_booking_quality_response_guard.py`
+
+
+### 2026-03-13 — `P1.6o156` proves `P1.6o155` moved off first fail, but reopens `Class D`; `P1.6o157` is the next admissible blocker
+
+- Completed `P1.6o156` as a truthfully non-canonical proof classification block:
+  - fresh guarded `dev L2` `p1.6o156-l2-dev-20260313-a1-r1` ran on parity-verified runtime `:18184` and moved the covered `P1.6o155` collect-slot-order partial-date slot-constraint continuity family off first fail inside the executed prefix;
+  - strict audit stayed non-canonical for closure/baseline: `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, `dialogs_seen=[1]`, `oracle_arbitration.winner=contract`.
+- The executed failing turn is `dialog 1 / turn 11 / "Можно на 19:00?"`:
+  - runtime recorded `tool_action=calendar.book_slot`, `tool_decision=provider_unavailable`, `tool_verifier=pre_execute`, `provider_reason=token_expired`, and ended with `expected_reply_type=time` via `booking_interrupt`;
+  - strict tool evidence simultaneously declared `calendar_hook_missing`, even though the auto-hook sender suppresses calendar hooks for failure outcomes outside `{success,pending}`.
+- Final classification:
+  - `P1.6o156` cannot admit a new semantic child because the executed first fail is proof-validity contaminated by an internal hook-policy mismatch;
+  - the next admissible block is therefore `P1.6o157`, a bounded `Class D` proof-validity fix in `ops/diagnose.py` so strict calendar-hook evidence binds only to observed hook-eligible calendar turns.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o156-post-p1.6o155-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o157-provider-unavailable-calendar-hook-proof-validity-a1.md`
+- `/tmp/booking_quality/p1.6o156-l2-dev-20260313-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o156-l2-dev-20260313-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o156-l2-dev-20260313-a1-r1/failure_families.json`
+- `/tmp/booking_quality/p1.6o156-l2-dev-20260313-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o156-l2-dev-20260313-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o156-l2-dev-20260313-a1-r1/manual_audit.json`
+
+
+### 2026-03-13 — `P1.6o157` closes provider-unavailable calendar-hook proof validity; `P1.6o158` is the next admissible proof lane
+
+- Completed `P1.6o157` on deterministic contour:
+  - `ops/diagnose.py` now records observed hook-eligible calendar opportunities through the same predicate that drives auto calendar-hook sending, and strict `tool_evidence` requires `calendar_hook_missing` only when at least one such hook-eligible opportunity actually appeared in the executed prefix;
+  - provider-unavailable calendar failures without hook-eligible auto-hook path no longer become `infra_valid=false` only because the hook sender intentionally suppressed the hook, while hook-eligible calendar turns still keep strict hook requirements intact.
+- Deterministic validation for `P1.6o157`:
+  - `python3 -m py_compile ops/diagnose.py truffles-api/tests/test_booking_quality_tool_evidence_gate.py`
+  - `pytest -q truffles-api/tests/test_booking_quality_tool_evidence_gate.py`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o158` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o157`;
+  - no new runtime/oracle patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o157-provider-unavailable-calendar-hook-proof-validity-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o158-post-p1.6o157-proof-lane-a1.md`
+- `ops/diagnose.py`
+- `truffles-api/tests/test_booking_quality_tool_evidence_gate.py`
+
+
+### 2026-03-13 — `P1.6o158` restores proof validity and surfaces a new runtime owner miss; `P1.6o159` is the next admissible block
+
+- Completed `P1.6o158` as a strict-audited proof classification block:
+  - fresh guarded `dev L2` `p1.6o158-l2-dev-20260313-a1-r1` ran on parity-verified runtime `:18184` and proved the covered `P1.6o157` provider-unavailable calendar-hook blocker moved off first fail;
+  - strict audit is admissible for class routing on executed evidence: `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `dialogs_seen=[1,2]`, `oracle_arbitration.winner=contract`.
+- The surfaced first fail is `dialog 2 / turn 8 / "Какой мастер будет делать маникюр в субботу?"`:
+  - runtime kept `source=llm_policy_core`, `action=booking_prompt`, `expected_reply_type=time`, and plain `question_contract:policy_core_degraded_collect`;
+  - `llm_policy_core` itself emitted `goal=info`, `subject_kind=specialist`, `capability=live_availability`, `resolution_mode=clarify_missing_time`, `pending_question_target=specialist`, `active_question_relation=ask_about_requested_slot`, but runtime did not reuse the existing specialist-availability followup response/meta/trace path, so `master/specialist` evidence was lost and judge marked `missed_question`.
+- Final classification:
+  - this is a new admissible runtime owner-coverage miss, not a proof-validity blocker;
+  - the next admissible block is `P1.6o159`, a bounded `Track B` runtime-owner continuation so the surfaced service-choice/live-availability envelope reuses the existing specialist-availability followup path instead of generic `booking_prompt`.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o158-post-p1.6o157-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o159-service-choice-master-availability-followup-owner-a1.md`
+- `/tmp/booking_quality/p1.6o158-l2-dev-20260313-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o158-l2-dev-20260313-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o158-l2-dev-20260313-a1-r1/failure_families.json`
+- `/tmp/booking_quality/p1.6o158-l2-dev-20260313-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o158-l2-dev-20260313-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o158-l2-dev-20260313-a1-r1/manual_audit.json`
+
+
+### 2026-03-13 — `P1.6o159` closes service-choice master-availability owner coverage; `P1.6o160` is the next admissible proof lane
+
+- Completed `P1.6o159` on deterministic contour:
+  - `truffles-api/app/routers/webhook/decision.py` now admits one bounded service-choice/live-availability `clarify_missing_time` envelope into the existing specialist-availability followup path, so surfaced turns like `Какой мастер будет делать маникюр в субботу?` no longer fall through to generic `booking_prompt/time` without `master` followup evidence;
+  - the fix reuses the existing specialist-availability response/meta/trace path and keeps the raw `llm_policy_core` relation untouched in plan metadata while normalizing the runtime followup owner contract.
+- Deterministic validation for `P1.6o159`:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "specialist_availability_followup_keeps_time_collect or grounded_specialist_availability_transitions_to_name_collect or service_choice_master_availability_followup_keeps_time_collect"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o160` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o159`;
+  - no new runtime/oracle patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o159-service-choice-master-availability-followup-owner-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o160-post-p1.6o159-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+
+
+### 2026-03-14 — `P1.6o160` moves the covered owner slice off first fail and surfaces active-name requested-slot scenario drift; `P1.6o161` is the next admissible block
+
+- Completed `P1.6o160` as a strict-audited proof classification block:
+  - runtime parity on `:18184` matched `HEAD`;
+  - fresh guarded `dev L2` `p1.6o160-l2-dev-20260313-a1-r1` finished with `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, and `oracle_arbitration.winner=contract`;
+  - the covered `P1.6o159` service-choice master-availability owner family moved off first fail.
+- Surfaced next admissible class:
+  - `dialog 1 / turn 3 / "На какое время вы можете меня записать?"`;
+  - scenario still required orphan `service_choice` via `question_contract.expected_reply_type=service_choice`;
+  - runtime canonically kept `expected_reply_type=name` with `pending_question_act=ask_about_requested_slot`, `pending_question_target=time`, `pending_question_owner=booking_time_availability_followup`, and judge `pass`.
+- Routed the worktree into `P1.6o161`:
+  - bounded `Track A` scenario-governance continuation for active-name requested-slot followup without temporal scope;
+  - no runtime/core patch is admissible before this bounded oracle/compiler closure.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o160-post-p1.6o159-proof-lane-a1.md`
+- `/tmp/booking_quality/p1.6o160-l2-dev-20260313-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o160-l2-dev-20260313-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o160-l2-dev-20260313-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o160-l2-dev-20260313-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o160-l2-dev-20260313-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o160-l2-dev-20260313-a1-r1/manual_audit.json`
+
+
+### 2026-03-14 — `P1.6o161` closes active-name requested-slot scenario governance; `P1.6o162` is the next admissible proof lane
+
+- Completed `P1.6o161` on deterministic contour:
+  - `scripts/booking_dialog_scenarios.py` now preserves active-name requested-slot followup expectations not only for explicit/deictic time probes but also for generic requested-slot questions without temporal scope, so surfaced turns like `На какое время вы можете меня записать?` no longer degrade to orphan `service_choice`;
+  - the fix stays bounded to the active `name` + requested-slot followup envelope and leaves real orphan pending-question fallback intact outside that contour.
+- Deterministic validation for `P1.6o161`:
+  - `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/tests/test_booking_dialog_scenarios_script.py`
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "active_name_time_availability_followup or active_name_requested_slot_followup_without_temporal_scope or orphan_pending_question"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o162` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o161`;
+  - no new runtime/oracle patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o161-active-name-requested-slot-followup-scenario-governance-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o162-post-p1.6o161-proof-lane-a1.md`
+- `scripts/booking_dialog_scenarios.py`
+- `truffles-api/tests/test_booking_dialog_scenarios_script.py`
+
+
+### 2026-03-14 — `P1.6o162` moves the covered scenario slice off first fail and surfaces bounded timeout specialist-interrupt runtime drift; `P1.6o163` is the next admissible block
+
+- Completed `P1.6o162` as a strict-audited proof classification block:
+  - runtime parity on `:18184` matched `HEAD`;
+  - fresh guarded `dev L2` `p1.6o162-l2-dev-20260314-a1-r1` finished with `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, and `oracle_arbitration.winner=contract` / `judge_alignment=corroborated`;
+  - the covered `P1.6o161` active-name requested-slot scenario-governance family moved off first fail.
+- Surfaced next admissible class:
+  - `dialog 1 / turn 3 / "Могу ли я выбрать специалиста?"`;
+  - runtime stayed on generic `booking_info_contract/master`, preserved `expected_reply_type=time`, but stamped `pending_question_target=time` with no timeout specialist-target recovery evidence;
+  - scenario and judge both rejected the turn as a missed specialist-choice question, so the class is a bounded runtime timeout recovery miss, not new scenario drift.
+- Routed the worktree into `P1.6o163`:
+  - bounded `Track C` runtime continuation for active-time choose-specialist timeout recovery under `pending_info_signal=master`;
+  - no new proof run is admissible before deterministic closure of this timeout boundary slice.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o162-post-p1.6o161-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o163-timeout-active-time-choose-specialist-interrupt-recovery-a1.md`
+- `/tmp/booking_quality/p1.6o162-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o162-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o162-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o162-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o162-l2-dev-20260314-a1-r1/manual_audit.json`
+
+
+### 2026-03-14 — `P1.6o163` closes active-time choose-specialist timeout recovery; `P1.6o164` is the next admissible proof lane
+
+- Completed `P1.6o163` on deterministic contour:
+  - `truffles-api/app/routers/webhook/decision.py` now performs a narrow pre-guard admission for the explicit active-time choose-specialist timeout envelope before `degraded_policy_core_critical` gates the timeout rescue block, so `pending_info_signal=master` no longer disables the existing timeout specialist-interrupt recovery for that surfaced class;
+  - the fix reuses the existing timeout master-info interrupt path and keeps generic master-info timeout fallback unchanged outside this bounded contour.
+- Deterministic validation for `P1.6o163`:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "timeout_master_info_interrupt_keeps_time_collect_for_generic_specialist_change or timeout_choose_specialist_interrupt_preserves_specialist_target_with_pending_info_signal or generic_specialist_choice_followup_keeps_time_collect"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o164` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o163`;
+  - no new runtime/oracle patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o163-timeout-active-time-choose-specialist-interrupt-recovery-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o164-post-p1.6o163-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+
+
+### 2026-03-14 — `P1.6o164` moves the covered timeout recovery slice off first fail and surfaces bounded partial-date/daypart scenario drift; `P1.6o165` is the next admissible block
+
+- Completed `P1.6o164` as the required strict-audited proof checkpoint:
+  - fresh guarded `dev L2` rerun `p1.6o164-l2-dev-20260314-a1-r1` on parity-verified runtime `:18184` moved the covered `P1.6o163` timeout choose-specialist family off first fail;
+  - strict audit recorded `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, and `oracle_arbitration.winner=contract`.
+- Surfaced first fail for `P1.6o164`:
+  - `dialog 1 / turn 4 / "А сколько стоит маникюр?"`;
+  - runtime answered pricing canonically through `tool_registry` with `expected_reply_type=time`, `expected_reply_reason=booking_interrupt`, and judge pass;
+  - scenario/oracle still required stale `reply_type=name`, `meta_any.expected_reply_type=["name"]`, and `question_contract.expected_reply_type=name` because the prior `hours` interrupt left `partial_date_anchor_active` set.
+- Routed the worktree into `P1.6o165`:
+  - the next admissible block is bounded `Track A` scenario-governance only;
+  - no runtime/core patch is admissible before deterministic closure of the surfaced stale-anchor expectation drift.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o164-post-p1.6o163-proof-lane-a1.md`
+- `/tmp/booking_quality/p1.6o164-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o164-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o164-l2-dev-20260314-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o164-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o164-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o164-l2-dev-20260314-a1-r1/manual_audit.json`
+
+
+### 2026-03-14 — `P1.6o165` closes partial-date/daypart info-interrupt anchor drift; `P1.6o166` is the next admissible proof lane
+
+- Completed `P1.6o165` on deterministic contour:
+  - `scripts/booking_dialog_scenarios.py` now uses explicit expectation contract evidence to decide whether a generic active info interrupt may preserve the partial-date anchor;
+  - generic `hours`/info interrupts without `expected_reply_contract_reason=catalog_service_booking_progress` now reset `partial_date_anchor_active`, so the surfaced `partial-date -> hours -> grounded daypart -> pricing` contour stays on `reply_type=time` instead of over-advancing to `name`.
+- Deterministic validation for `P1.6o165`:
+  - `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/tests/test_booking_dialog_scenarios_script.py`
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "grounded_partial_date_daypart_fill_to_time or partial_date_anchor_resets_after_generic_hours_interrupt or service_choice_price_interrupt_advances_to_time_on_grounded_service or repair_post_coverage_orphan_pending_question_turns_normalizes_grounded_partial_date_daypart_fill"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o166` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o165`;
+  - no new runtime/oracle patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o165-partial-date-daypart-info-interrupt-anchor-scenario-governance-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o166-post-p1.6o165-proof-lane-a1.md`
+- `scripts/booking_dialog_scenarios.py`
+- `truffles-api/tests/test_booking_dialog_scenarios_script.py`
+
+
+### 2026-03-14 — `P1.6o166` moves the covered scenario slice off first fail and surfaces bounded choose-specialist runtime drift; `P1.6o167` is the next admissible block
+
+- Completed `P1.6o166` as the required strict-audited proof checkpoint:
+  - fresh guarded `dev L2` rerun `p1.6o166-l2-dev-20260314-a1-r1` on parity-verified runtime `:18184` moved the covered `P1.6o165` partial-date/daypart scenario family off first fail;
+  - strict audit recorded `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, and `oracle_arbitration.winner=contract`.
+- Surfaced first fail for `P1.6o166`:
+  - `dialog 1 / turn 5 / "А можно выбрать специалиста?"`;
+  - runtime kept `pending_question_interaction=booking_specialist_followup`, `pending_question_target=specialist`, and `expected_reply_type=time`, but the actual reply stayed `На какую дату и время вам удобно?`;
+  - strict failure family is bounded runtime owner/response drift: `info_section_miss` + judge `missed_question` because explicit specialist-choice question was not answered.
+- Routed the worktree into `P1.6o167`:
+  - the next admissible block is bounded runtime routing only;
+  - no scenario/oracle patch is admissible before deterministic closure of the surfaced choose-specialist response miss.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o166-post-p1.6o165-proof-lane-a1.md`
+- `/tmp/booking_quality/p1.6o166-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o166-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o166-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o166-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o166-l2-dev-20260314-a1-r1/manual_audit.json`
+
+
+### 2026-03-14 — `P1.6o167` closes active-time choose-specialist master interrupt routing; `P1.6o168` is the next admissible proof lane
+
+- Completed `P1.6o167` on deterministic contour:
+  - explicit choose/pick-specialist questions under active `time` collect now enter the existing master-info interrupt success path instead of the bare specialist-followup prompt;
+  - the bounded fix preserves `expected_reply_type=time` while answering the specialist question through `booking_interrupt info_reply`.
+- Deterministic validation for `P1.6o167`:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "generic_master_info_interrupt_resumes_time_collect or generic_master_info_interrupt_bypasses_specialist_followup_and_keeps_time_resume or choose_specialist_question_rewrites_collect_to_master_info"`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "active_time_generic_master_info_interrupt or choose_specialist_master_interrupt"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o168` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o167`;
+  - no new runtime/oracle patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o167-active-time-choose-specialist-master-interrupt-owner-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o168-post-p1.6o167-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/tests/test_booking_quality_response_guard.py`
+
+
+### 2026-03-14 — `P1.6o168` moves the covered runtime slice off first fail and surfaces active-name specialist/time scenario drift; `P1.6o169` is the next admissible block
+
+- Completed `P1.6o168` as the required strict-audited proof checkpoint:
+  - fresh guarded `dev L2` rerun `p1.6o168-l2-dev-20260314-a1-r1` on parity-verified runtime `:18184` moved the covered `P1.6o167` choose-specialist runtime family off first fail;
+  - strict audit recorded `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, `oracle_arbitration.winner=contract`, and `judge_alignment=conflicted`.
+- Surfaced first fail for `P1.6o168`:
+  - `dialog 1 / turn 10 / "Могу я записаться к ней на 14:00?"`;
+  - runtime canonically kept `pending_question_act=ask_about_requested_slot`, `pending_question_target=time`, `pending_question_owner=booking_time_availability_followup`, and `expected_reply_type=name`;
+  - scenario/oracle still required orphan `service_choice` (`question_contract.expected_reply_type=service_choice`) after the preceding master-info interrupt, so the surfaced family is bounded scenario-governance drift, not a new runtime miss.
+- Routed the worktree into `P1.6o169`:
+  - bounded `Track A` scenario-governance continuation for active-name specialist-referent explicit-time followup after master-info interrupt;
+  - no runtime/core patch is admissible before deterministic closure of this scenario compiler slice.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o168-post-p1.6o167-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o169-active-name-specialist-time-followup-scenario-governance-a1.md`
+- `/tmp/booking_quality/p1.6o168-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o168-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o168-l2-dev-20260314-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o168-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o168-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o168-l2-dev-20260314-a1-r1/manual_audit.json`
+
+
+### 2026-03-14 — `P1.6o169` closes active-name specialist/time followup scenario governance; `P1.6o170` is the next admissible proof lane
+
+- Completed `P1.6o169` on deterministic contour:
+  - `scripts/booking_dialog_scenarios.py` now preserves active-name requested-slot continuity not only for availability probes and generic requested-slot questions, but also for explicit-time specialist-referent followups after a bounded master-info interrupt;
+  - the same bounded predicate is mirrored in post-coverage orphan repair, so the surfaced contour no longer collapses to stale orphan `service_choice` after sanitize or repair.
+- Deterministic validation for `P1.6o169`:
+  - `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/tests/test_booking_dialog_scenarios_script.py`
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "active_name_time_availability_followup or active_name_requested_slot_followup_without_temporal_scope or active_name_specialist_time_followup_after_master_interrupt or repair_post_coverage_orphan_pending_question_turns_keeps_active_name_specialist_time_followup"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o170` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o169`;
+  - no new runtime/oracle patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o169-active-name-specialist-time-followup-scenario-governance-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o170-post-p1.6o169-proof-lane-a1.md`
+- `scripts/booking_dialog_scenarios.py`
+- `truffles-api/tests/test_booking_dialog_scenarios_script.py`
+
+
+### 2026-03-14 — `P1.6o170` strict-audited proof surfaces multi-service/hours scenario drift; `P1.6o171` is the selected bounded continuation
+
+- Completed `P1.6o170` as a strict-audited proof classification block:
+  - fresh guarded `dev L2` rerun `p1.6o170-l2-dev-20260314-a1-r1` completed on parity-verified runtime `:18184` and moved the covered `P1.6o169` active-name specialist/time scenario family off first fail;
+  - strict audit recorded `artifact_integrity.valid=true`, `snapshot.infra_valid=true`, `snapshot.semantic_valid=false`, `snapshot.stop_reason=max_failures_reached:1`, `snapshot.run_integrity_reasons=[run_completion_gap]`, `oracle_arbitration.winner=contract`, and `oracle_arbitration.judge_alignment=conflicted`.
+- Surfaced first fail is bounded `Track A` scenario-governance drift on `dialog 2 / turn 4 / "Какой у вас график работы?"`:
+  - runtime canonically answered pure `hours` info with `action=reply`, `intent=hours`, `source=llm_policy_core`, `info_sections=[hours]`, and no active booking followup evidence;
+  - scenario still required stale `reply_type=time`, `meta_any.expected_reply_type=[time]`, and `question_contract.expected_reply_type=time` because the preceding multi-service request had been over-grounded to a single-service `time` flow.
+- Published `P1.6o171` as the next admissible bounded continuation:
+  - the required next block is scenario-governance only: detect unresolved multi-service booking clarify state and clear stale followup continuity on later info interrupts;
+  - no runtime/boundary patch was admissible before that bounded compiler fix.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o170-post-p1.6o169-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o171-multi-service-hours-interrupt-scenario-governance-a1.md`
+- `/tmp/booking_quality/p1.6o170-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o170-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o170-l2-dev-20260314-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o170-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o170-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o170-l2-dev-20260314-a1-r1/manual_audit.json`
+
+
+### 2026-03-14 — `P1.6o171` closes multi-service/hours scenario governance; `P1.6o172` is the next admissible proof lane
+
+- Completed `P1.6o171` on deterministic contour:
+  - `scripts/booking_dialog_scenarios.py` now treats unresolved multi-service booking requests like `"Мне нужен маникюр и педикюр."` as bounded `service_choice` clarify state with explicit `expected_reply_contract_reason=multi_service_booking_clarify` instead of over-grounding them to `time`;
+  - the same compiler slice now clears stale `question_contract` and pending-question continuity when later generic info interrupts like `hours` occur while that multi-service clarify state is still active;
+  - sanitize and post-coverage repair now share one `_advance_multi_service_clarify_context(...)` helper so the surfaced contour closes on one bounded contract path.
+- Deterministic validation for `P1.6o171`:
+  - `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/tests/test_booking_dialog_scenarios_script.py`
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "service_grounded_booking_reply_type_to_time or multi_service_booking_request_stays_service_choice or multi_service_hours_interrupt_clears_stale_time_followup or repair_post_coverage_orphan_pending_question_turns_clears_multi_service_hours_followup or active_name_specialist_time_followup_after_master_interrupt or repair_post_coverage_orphan_pending_question_turns_keeps_active_name_specialist_time_followup"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o172` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o171`;
+  - no new structural patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o171-multi-service-hours-interrupt-scenario-governance-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o172-post-p1.6o171-proof-lane-a1.md`
+- `scripts/booking_dialog_scenarios.py`
+- `truffles-api/tests/test_booking_dialog_scenarios_script.py`
+
+
+### 2026-03-14 — `P1.6o172` strict-audited rerun surfaces invalid-schema named-specialist budget drift; `P1.6o173` is the next admissible structural block
+
+- Completed `P1.6o172` proof lane:
+  - `p1.6o172-l2-dev-20260314-a1-r1` was preflight-invalid because `--jid-mode unique` was missing `--allow-non-allowlist`; the run was truthfully audited as incomplete and excluded from class routing.
+  - admissible rerun `p1.6o172-l2-dev-20260314-a1-r2` strict-audited with `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=["run_completion_gap"]`, and `oracle_arbitration.winner=contract`.
+- Surfaced first fail from `r2`:
+  - `dialog 1 / turn 6 / "Можно к мастеру Мадина?"`
+  - scenario contract still correctly required `pending_question_target=specialist`, `active_question_relation=referent_followup`, and `expected_reply_type=time`;
+  - runtime instead fell through to generic `truth_gate/master` info reply with `booking_interrupt_info=true`, `interaction_owner=question_contract:booking_prompt`, and `policy_core_degrade_reason=policy_error:invalid_schema`.
+- Published `P1.6o173` as the next admissible continuation:
+  - add one bounded runtime-only specialist surface-hint recovery inside the shared invalid-schema specialist-followup path;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o173`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o172-l2-dev-20260314-a1-r1/manual_audit.json`
+- `/tmp/booking_quality/p1.6o172-l2-dev-20260314-a1-r2/summary.json`
+- `/tmp/booking_quality/p1.6o172-l2-dev-20260314-a1-r2/brief.md`
+- `/tmp/booking_quality/p1.6o172-l2-dev-20260314-a1-r2/responses.jsonl`
+- `/tmp/booking_quality/p1.6o172-l2-dev-20260314-a1-r2/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o172-l2-dev-20260314-a1-r2/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o172-post-p1.6o171-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o173-invalid-schema-named-specialist-surface-hint-followup-a1.md`
+
+
+### 2026-03-14 — `P1.6o173` closes invalid-schema named-specialist surface-hint followup; `P1.6o174` is the next admissible proof lane
+
+- Completed `P1.6o173` on deterministic contour:
+  - `truffles-api/app/routers/webhook/decision.py` now augments `master_query_person_terms` with bounded inflected fallback forms inside `_resolve_specialist_name_hint_with_trace(...)`, so explicit person-term requests like `"Можно к мастеру Мадина?"` still resolve a validated specialist hint when branch catalog lookup misses and the late secondary hint stage is budget-skipped;
+  - the existing invalid-schema specialist-followup recovery reuses that shared resolver result and keeps the surfaced contour on canonical `booking_specialist_followup -> expected_reply_type=time` instead of falling through to generic master info.
+- Deterministic validation for `P1.6o173`:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "invalid_schema_specialist_followup_keeps_time_collect or invalid_schema_question_like_named_specialist_followup_keeps_time_collect or invalid_schema_named_specialist_surface_hint_keeps_time_collect_when_budget_reserved or named_master_question_rewrites_collect_to_master_info"`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "choose_specialist_master_interrupt or invalid_schema_specialist_followup or surface_hint"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o174` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o173`;
+  - no new structural patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o172-post-p1.6o171-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o173-invalid-schema-named-specialist-surface-hint-followup-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o174-post-p1.6o173-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/tests/test_booking_quality_response_guard.py`
+
+
+### 2026-03-14 — `P1.6o174` strict-audited rerun surfaces active-time duration info interrupt drift; `P1.6o175` is the next admissible structural block
+
+- Completed `P1.6o174` proof lane:
+  - fresh guarded `dev L2` rerun `p1.6o174-l2-dev-20260314-a1-r1` strict-audited with `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, and `oracle_arbitration.winner=contract`.
+- Surfaced first fail from `r1`:
+  - `dialog 1 / turn 3 / "Что насчет времени выполнения?"`
+  - scenario contract still correctly required `info_sections=[duration,service_duration]` together with `expected_reply_type=time`;
+  - runtime instead stayed on `action=reply`, `intent=booking`, `source=booking_slot_guidance`, and emitted no duration info evidence, producing `expected_info_section_miss` + `info_section_miss`.
+- Published `P1.6o175` as the next admissible continuation:
+  - add one bounded runtime-owner exception so explicit duration info under active `time` collect enters `booking_info_interrupt(duration)` before the broad slot-guidance preserve guard;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o175`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o174-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o174-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o174-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o174-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o174-l2-dev-20260314-a1-r1/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o174-post-p1.6o173-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o175-active-time-duration-info-interrupt-owner-a1.md`
+
+
+### 2026-03-14 — `P1.6o175` closes active-time duration info interrupt owner drift; `P1.6o176` is the next admissible proof lane
+
+- Completed `P1.6o175` on deterministic contour:
+  - `truffles-api/app/routers/webhook/decision.py` now admits explicit duration info interrupts ahead of the broad active-time slot-question preserve guard inside `_resolve_policy_collect_interrupt_arbitration(...)`, so surfaced turns like `"Что насчет времени выполнения?"` rewrite `collect -> info` instead of falling through to `booking_slot_guidance`;
+  - the same bounded runtime slice now carries `service_query` from booking state into service-dependent info interrupts when the surfaced collect-to-info rewrite would otherwise lose the grounded service, allowing the existing truth-gate/booking-interrupt duration path to answer factually while preserving `expected_reply_type=time`.
+- Deterministic validation for `P1.6o175`:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_quality_response_guard.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "policy_collect_interrupt_arbitration_rewrites_active_time_duration_question_to_info or llm_policy_core_active_time_duration_info_interrupt_preserves_time_resume or llm_policy_core_pending_question_act_time_guidance_keeps_resume_contract or llm_policy_core_slot_compare_time_guidance_keeps_resume_contract or llm_policy_core_active_time_slot_question_hours_phrase_keeps_booking_guidance"`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "duration_info_interrupt_with_time_resume or choose_specialist_master_interrupt"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o176` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o175`;
+  - no new structural patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o175-active-time-duration-info-interrupt-owner-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o176-post-p1.6o175-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/tests/test_booking_quality_response_guard.py`
+
+
+### 2026-03-14 — `P1.6o176` strict-audited rerun stays infra-invalid on confirm-candidate proof-validity blocker; `P1.6o177` is the next admissible structural block
+
+- Completed `P1.6o176` proof lane:
+  - fresh guarded `dev L2` rerun `p1.6o176-l2-dev-20260314-a1-r1` strict-audited with `artifact_integrity.valid=true`, `infra_valid=false`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, and `oracle_arbitration.winner=contract`.
+- Result classification from `r1`:
+  - no new semantic class was admissible for routing because strict `tool_evidence` invalidated the run on `confirm_candidate_missing`;
+  - the invalidation was self-contradictory: the same run already carried `confirm_tool_events=1`, `confirm_hook_events=1`, and `booking_confirm_trace_events=1`, but `ops/diagnose.py` still required a separate confirm candidate label.
+- Published `P1.6o177` as the next admissible continuation:
+  - fix one bounded proof-validity blocker in `ops/diagnose.py` so observed confirm evidence satisfies confirm-candidate admission;
+  - no runtime/semantic class routing is admissible before deterministic closure of `P1.6o177`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o176-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o176-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o176-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o176-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o176-l2-dev-20260314-a1-r1/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o176-post-p1.6o175-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o177-confirm-evidence-candidate-proof-validity-a1.md`
+
+
+### 2026-03-14 — `P1.6o177` closes confirm-candidate proof-validity drift; `P1.6o178` is the next admissible proof lane
+
+- Completed `P1.6o177` on deterministic contour:
+  - `ops/diagnose.py` now treats observed confirm evidence as sufficient to suppress the self-contradictory `confirm_candidate_missing` blocker, while keeping strict confirm evidence/hook requirements intact once a real confirm opportunity exists;
+  - `truffles-api/tests/test_booking_quality_tool_evidence_gate.py` now covers the surfaced contour where `booking_confirm` trace plus confirm tool/hook evidence exist without a separate candidate label.
+- Deterministic validation for `P1.6o177`:
+  - `python3 -m py_compile ops/diagnose.py truffles-api/tests/test_booking_quality_tool_evidence_gate.py`
+  - `pytest -q truffles-api/tests/test_booking_quality_tool_evidence_gate.py -k "observed_confirm_evidence or counts_check_booking_alias_intents or keeps_confirm_requirements_once_alias_opportunity_is_observed or strict_policy_blocks_missing_calendar_and_confirm_evidence"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o178` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o177`;
+  - class routing stays blocked until that rerun is strict-audited.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o177-confirm-evidence-candidate-proof-validity-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o178-post-p1.6o177-proof-lane-a1.md`
+- `ops/diagnose.py`
+- `truffles-api/tests/test_booking_quality_tool_evidence_gate.py`
+
+
+### 2026-03-14 — `P1.6o178` strict-audited rerun clears confirm-candidate proof-validity blocker; `P1.6o179` is the next admissible structural block
+
+- Completed `P1.6o178` proof lane:
+  - fresh guarded `dev L2` rerun `p1.6o178-l2-dev-20260314-a1-r1` strict-audited with `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, and `oracle_arbitration.winner=contract`.
+- Result classification from `r1`:
+  - the prior `confirm_candidate_missing` blocker did not recur; strict `tool_evidence` stayed valid, so `P1.6o177` is off the blocker path;
+  - surfaced next admissible family at `dialog 1 / turn 11 / "Меня зовут Лена."`, where timeout-degraded runtime completed booking collection but fell into `pack_fact_fallback` / `fact_without_evidence` instead of booking completion continuity.
+- Published `P1.6o179` as the next admissible continuation:
+  - add one bounded timeout-completed-booking continuity slice before `pack_fact_fallback`;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o179`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o178-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o178-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o178-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o178-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o178-l2-dev-20260314-a1-r1/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o178-post-p1.6o177-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o179-timeout-completed-booking-name-fill-continuity-a1.md`
+
+
+### 2026-03-14 — `P1.6o179` closes timeout completed-booking continuity; `P1.6o180` is the next admissible proof lane
+
+- Completed `P1.6o179` on deterministic contour:
+  - `truffles-api/app/routers/webhook/decision.py` now detects matched final-slot fills that complete booking collection under timeout degrade and routes them into the existing booking completion/handoff path before `pack_fact_fallback` can fire;
+  - `truffles-api/tests/test_message_endpoint.py` now covers the surfaced completed-booking contour `Меня зовут Лена.` under timeout-degraded active booking completion.
+- Deterministic validation for `P1.6o179`:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "timeout_completed_booking_name_routes_into_booking_flow or degraded_timeout_matched_name_continuity_uses_owner_boundary or degraded_timeout_active_booking_name_fill_resumes_followup"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o180` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o179`;
+  - no new structural patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o179-timeout-completed-booking-name-fill-continuity-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o180-post-p1.6o179-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+
+
+### 2026-03-14 — `P1.6o180` strict-audited rerun clears completed-booking timeout family; `P1.6o181` is the next admissible structural block
+
+- Completed `P1.6o180` proof lane:
+  - fresh guarded `dev L2` rerun `p1.6o180-l2-dev-20260314-a1-r1` strict-audited with `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, and `oracle_arbitration.winner=contract`.
+- Result classification from `r1`:
+  - `P1.6o179` is off first fail: the surfaced completed-booking timeout family no longer falls into `pack_fact_fallback` / `fact_without_evidence`;
+  - surfaced next admissible family at `dialog 1 / turn 5 / "А есть ли возможность записаться на 14:00?"`, where timeout-degraded runtime keeps `expected_reply_type=name` but loses canonical `booking_time_availability_followup` meta/trace continuity.
+- Published `P1.6o181` as the next admissible continuation:
+  - add one bounded timeout recovery so active-name requested-slot followup keeps `pending_question_target=time` and `booking_time_availability_followup` under timeout degrade;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o181`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o180-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o180-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o180-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o180-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o180-l2-dev-20260314-a1-r1/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o180-post-p1.6o179-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o181-timeout-active-name-time-availability-followup-owner-a1.md`
+
+
+### 2026-03-14 — `P1.6o181` closes timeout active-name requested-slot continuity; `P1.6o182` is the next admissible proof lane
+
+- Completed `P1.6o181` on deterministic contour:
+  - `truffles-api/app/routers/webhook/decision.py` now restores the canonical `booking_time_availability_followup` contract for explicit requested-slot probes under timeout-degraded active `name` collect instead of falling through to generic `policy_core_degraded_collect`;
+  - `truffles-api/tests/test_message_endpoint.py` now covers the surfaced contour `А есть ли возможность записаться на 14:00?` under timeout-degraded active booking `name` resume.
+- Deterministic validation for `P1.6o181`:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "timeout_active_name_time_availability_followup_keeps_name_resume or llm_policy_core_active_name_time_availability_followup_keeps_name_resume or degraded_timeout_matched_name_continuity_uses_owner_boundary"`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o182` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o181`;
+  - no new structural patch is admissible before the strict-audited rerun result.
+
+Evidence:
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o181-timeout-active-name-time-availability-followup-owner-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o182-post-p1.6o181-proof-lane-a1.md`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+
+
+### 2026-03-14 — `P1.6o182` strict-audited rerun clears timeout active-name requested-slot family; `P1.6o183` is the next admissible structural block
+
+- Completed `P1.6o182` proof lane:
+  - fresh guarded `dev L2` rerun `p1.6o182-l2-dev-20260314-a1-r1` strict-audited with `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, and `oracle_arbitration.winner=contract`.
+- Result classification from `r1`:
+  - `P1.6o181` is off first fail; the covered timeout active-name requested-slot family no longer stops the rerun;
+  - surfaced next admissible family at `dialog 1 / turn 7 / "У вас есть время на 15:00?"`, where `provider_unavailable -> human_request -> pending -> manager_active -> bot_active` loses booking-interrupt time resume and falls through to generic `policy_core_degraded_collect`; judge independently marks the response as `missed_question`.
+- Published `P1.6o183` as the next admissible continuation:
+  - add one bounded boundary-resume restore for the provider-unavailable + human-request resolved contour so bot re-enters the interrupted booking time followup instead of a default generic collect;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o183`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o182-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o182-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o182-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o182-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o182-l2-dev-20260314-a1-r1/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o182-post-p1.6o181-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o183-provider-unavailable-human-request-time-resume-boundary-a1.md`
+
+
+### 2026-03-14 — `P1.6o183` closes resolved-handoff provider-unavailable resume continuity; `P1.6o184` is the next admissible proof lane
+
+- Completed `P1.6o183` on deterministic contour:
+  - resolved-handoff restore now runs before canonical sync can erase the interrupted `booking_interrupt` reason, so `provider_unavailable -> human_request -> pending/manager_active -> bot_active` preserves booking resume continuity on the first `bot_active` turn instead of falling straight to generic `policy_core_degraded_collect`;
+  - runtime now emits explicit `resolved_handoff_resume_boundary` trace/meta evidence on the restored path and keeps the existing timeout resume-boundary contract available after manager resolution;
+  - targeted regressions cover positive restore, negative no-boundary skip, and timeout resume-boundary continuity after manager resolve.
+- Deterministic validation for `P1.6o183`:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "provider_unavailable and human_request and pending_resume"` -> `3 passed, 411 deselected`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o184` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o183`;
+  - no new runtime refactor is admissible before that rerun is strict-audited and classified.
+
+Evidence:
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o183-provider-unavailable-human-request-time-resume-boundary-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o184-post-p1.6o183-proof-lane-a1.md`
+- `docs/SESSIONS/SESSION-2026-02-19-llm-first-firebreak-a1.md`
+
+### 2026-03-14 — `P1.6o184` strict-audited rerun clears resolved-handoff resume first fail; `P1.6o185` is the next admissible structural block
+
+- Completed `P1.6o184` proof lane:
+  - fresh guarded `dev L2` rerun `p1.6o184-l2-dev-20260314-a1-r1` strict-audited with `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, and `oracle_arbitration.winner=contract`.
+- Result classification from `r1`:
+  - `P1.6o183` is off first fail; the covered resolved-handoff provider-unavailable resume family no longer stops the rerun;
+  - surfaced next admissible runtime family at `dialog 1 / turn 8 / "Можно ли забронировать за собой место?"`, where active `name` continuity is still alive in `llm_policy_core` / session memory, but `calendar.book_slot -> provider_unavailable` clears `datetime` inside `booking_transition_owner`, re-derives slot order from service-only booking state, and rewrites the followup back to `expected_reply_type=time`.
+  - strict fail shows up as `expected_meta_mismatch` / `expected_trace_miss`, but the bounded root cause is runtime continuity loss rather than judge output; judge stayed advisory `pass`, and contract arbitration kept runtime evidence authoritative.
+- Published `P1.6o185` as the next admissible continuation:
+  - close the bounded provider-unavailable transition-owner drift so transient calendar unavailability no longer erases grounded `datetime` under active `name` continuity;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o185`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o184-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o184-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o184-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o184-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o184-l2-dev-20260314-a1-r1/manual_audit.json`
+- `truffles-api/app/services/booking_transition_owner.py`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o184-post-p1.6o183-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o185-provider-unavailable-active-name-datetime-continuity-a1.md`
+
+### 2026-03-14 — `P1.6o185` closes provider-unavailable active-name datetime continuity; `P1.6o186` is the next admissible proof lane
+
+- Completed `P1.6o185` on deterministic contour:
+  - transient `calendar.book_slot -> provider_unavailable` no longer clears grounded `datetime` inside `apply_tool_transition_owner`, so active `name` continuity survives the surfaced contour instead of re-deriving slot order from service-only booking state;
+  - targeted regressions now protect both the transition-owner invariant and the message-endpoint followup contract for provider-unavailable turns under active `name` collect.
+- Deterministic validation for `P1.6o185`:
+  - `python3 -m py_compile truffles-api/app/services/booking_transition_owner.py truffles-api/tests/test_booking_appointments.py truffles-api/tests/test_message_endpoint.py`
+  - `pytest -q truffles-api/tests/test_booking_appointments.py -k "booking_transition_owner and provider_unavailable"` -> `1 passed, 77 deselected`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "provider_unavailable and active_name"` -> `1 passed, 414 deselected`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o186` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o185`;
+  - no new runtime refactor is admissible before that rerun is strict-audited and classified.
+
+Evidence:
+- `truffles-api/app/services/booking_transition_owner.py`
+- `truffles-api/tests/test_booking_appointments.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o185-provider-unavailable-active-name-datetime-continuity-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o186-post-p1.6o185-proof-lane-a1.md`
+- `docs/SESSIONS/SESSION-2026-02-19-llm-first-firebreak-a1.md`
+
+
+### 2026-03-14 — `P1.6o186` repeated guarded reruns stay invalid on OpenAI `llm` preflight; `P1.6o187` is the next admissible deterministic blocker
+
+- Completed `P1.6o186` proof lane as a truth-first blocker classification:
+  - fresh guarded `dev L2` reruns `p1.6o186-l2-dev-20260314-a1-r1` and `p1.6o186-l2-dev-20260314-a1-r2` both verified runtime parity on `:18184` and then failed before scenario generation on the same hard OpenAI `llm` preflight error `probe_error:TimeoutError`;
+  - both runs are `INVALID`: `stop_reason=invalid_openai_preflight`, `infra_valid=false`, `semantic_valid=false`;
+  - strict audit truthfully records missing `scenarios.json`, `responses.jsonl`, and `trace_bundle.jsonl`, so no admissible semantic first-fail family was surfaced.
+- Published `P1.6o187` as the next admissible continuation:
+  - close the bounded proof-lane blocker so transient OpenAI transport timeouts do not fail-close the whole guarded run on the first preflight probe;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o187`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o186-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o186-l2-dev-20260314-a1-r1/manual_audit.json`
+- `/tmp/booking_quality/p1.6o186-l2-dev-20260314-a1-r2/summary.json`
+- `/tmp/booking_quality/p1.6o186-l2-dev-20260314-a1-r2/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o186-post-p1.6o185-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o187-openai-llm-preflight-timeout-retry-a1.md`
+
+### 2026-03-14 — `P1.6o187` closes the repeated OpenAI `llm` preflight false-negative; `P1.6o188` is the next admissible proof lane
+
+- Completed `P1.6o187` on deterministic contour:
+  - `ops/diagnose.py` now retries OpenAI preflight once on retryable transport timeout/url failures, records retry provenance in `attempts` / `retried` / `retry_reasons`, and keeps auth/quota/rate-limit failures hard invalid on the first result;
+  - targeted tooling regressions now cover timeout recovery, URL-error recovery, and non-retryable rate-limit failure.
+- Deterministic validation for `P1.6o187`:
+  - `python3 -m py_compile ops/diagnose.py truffles-api/tests/test_booking_quality_openai_preflight.py`
+  - `pytest -q truffles-api/tests/test_booking_quality_openai_preflight.py` -> `6 passed in 3.88s`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o188` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o187`;
+  - no new runtime or proof-tooling refactor is admissible before that rerun is strict-audited and classified.
+
+Evidence:
+- `ops/diagnose.py`
+- `truffles-api/tests/test_booking_quality_openai_preflight.py`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o187-openai-llm-preflight-timeout-retry-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o188-post-p1.6o187-proof-lane-a1.md`
+- `docs/SESSIONS/SESSION-2026-02-19-llm-first-firebreak-a1.md`
+
+
+### 2026-03-14 — `P1.6o188` rerun stays invalid after bounded retry; `P1.6o189` is the next admissible deterministic blocker
+
+- Completed `P1.6o188` proof lane as a truth-first blocker classification:
+  - fresh guarded `dev L2` rerun `p1.6o188-l2-dev-20260314-a1-r1` verified runtime parity on `:18184` and then still failed before scenario generation on OpenAI `llm` preflight `probe_error:TimeoutError`;
+  - unlike `P1.6o186`, the run now carries explicit retry provenance: `attempts=2`, `retried=true`, `elapsed_ms=61927.98`;
+  - strict audit truthfully records missing `scenarios.json`, `responses.jsonl`, and `trace_bundle.jsonl`, so no admissible semantic first-fail family was surfaced.
+- Published `P1.6o189` as the next admissible continuation:
+  - close the bounded proof-lane blocker so retryable `llm` preflight failures do not keep reusing the same too-small per-attempt timeout envelope;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o189`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o188-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o188-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o188-l2-dev-20260314-a1-r1/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o188-post-p1.6o187-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o189-openai-llm-preflight-retry-timeout-escalation-a1.md`
+
+### 2026-03-14 — `P1.6o189` closes repeated `llm` preflight timeout-budget coupling; `P1.6o190` is the next admissible proof lane
+
+- Completed `P1.6o189` on deterministic contour:
+  - `ops/diagnose.py` now gives retryable `llm` preflight failures a larger bounded second-attempt timeout envelope while keeping retry count fixed at two and preserving hard fail on auth/quota/rate-limit classes;
+  - targeted tooling regressions now protect timeout-envelope escalation and preserved hard-failure behavior.
+- Deterministic validation for `P1.6o189`:
+  - `python3 -m py_compile ops/diagnose.py truffles-api/tests/test_booking_quality_openai_preflight.py`
+  - `pytest -q truffles-api/tests/test_booking_quality_openai_preflight.py` -> `7 passed in 3.65s`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o190` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o189`;
+  - no new proof-tooling refactor is admissible before that rerun is strict-audited and classified.
+
+Evidence:
+- `ops/diagnose.py`
+- `truffles-api/tests/test_booking_quality_openai_preflight.py`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o189-openai-llm-preflight-retry-timeout-escalation-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o190-post-p1.6o189-proof-lane-a1.md`
+
+### 2026-03-14 — `P1.6o190` moves OpenAI preflight off the path and surfaces scenario-generation timeout blocker; `P1.6o191` is the next admissible deterministic slice
+
+- Completed `P1.6o190` proof lane:
+  - fresh guarded `dev L2` rerun `p1.6o190-l2-dev-20260314-a1-r1` strict-audited with runtime parity confirmed and both OpenAI preflights green (`llm`/`judge` status `200`);
+  - no semantic first-fail family was surfaced because the run stopped before scenario emission: `llm-quality` exited with `scenario generation failed (scenario_generation_timeout)`, `stop_reason=system_exit`, `infra_valid=false`, `semantic_valid=false`;
+  - strict audit truthfully recorded missing `scenarios.json`, `responses.jsonl`, and `trace_bundle.jsonl`, so this remains a proof-validity blocker rather than product evidence.
+- Published `P1.6o191` as the next admissible continuation:
+  - close the bounded scenario-generation timeout evidence gap in proof tooling;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o191`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o190-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o190-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o190-l2-dev-20260314-a1-r1/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o190-post-p1.6o189-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o191-scenario-generation-timeout-progress-evidence-a1.md`
+
+
+### 2026-03-14 — `P1.6o191` closes scenario-generation progress evidence gap; `P1.6o192` is the next admissible proof lane
+
+- Completed `P1.6o191` on deterministic contour:
+  - `ops/diagnose.py` now enables scenario-generation progress stderr for generated LLM proof runs and preserves last-progress timeout normalization without changing timeout behavior;
+  - targeted tooling regressions now protect default progress pass-through and last-progress timeout reason formatting.
+- Deterministic validation for `P1.6o191`:
+  - `python3 -m py_compile ops/diagnose.py truffles-api/tests/test_diagnose_run_command.py`
+  - `pytest -q truffles-api/tests/test_diagnose_run_command.py -k "scenario_timeout or generate_batch"` -> `3 passed, 17 deselected in 4.19s`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o192` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o191`;
+  - no new proof-tooling refactor is admissible before that rerun is strict-audited and classified.
+
+Evidence:
+- `ops/diagnose.py`
+- `truffles-api/tests/test_diagnose_run_command.py`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o191-scenario-generation-timeout-progress-evidence-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o192-post-p1.6o191-proof-lane-a1.md`
+
+### 2026-03-14 — `P1.6o192` turns opaque scenario timeout into evidenceful `batch_attempt_error`; `P1.6o193` is the next admissible deterministic slice
+
+- Completed `P1.6o192` proof lane:
+  - fresh guarded `dev L2` rerun `p1.6o192-l2-dev-20260314-a1-r1` strict-audited with runtime parity confirmed and both OpenAI preflights green (`llm`/`judge` status `200`);
+  - no semantic first-fail family was surfaced because the run still stopped before scenario emission: `llm-quality` exited with `scenario_generation_timeout (batch=3 attempt=1 event=batch_attempt_error)`, `stop_reason=system_exit`, `infra_valid=false`, `semantic_valid=false`;
+  - strict audit truthfully recorded missing `scenarios.json`, `responses.jsonl`, and `trace_bundle.jsonl`, so this remains a proof-validity blocker rather than product evidence.
+- Published `P1.6o193` as the next admissible continuation:
+  - preserve the bounded last `batch_attempt_error.error` detail inside normalized timeout reasons;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o193`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o192-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o192-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o192-l2-dev-20260314-a1-r1/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o192-post-p1.6o191-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o193-scenario-generation-progress-error-detail-a1.md`

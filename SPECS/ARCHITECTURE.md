@@ -425,7 +425,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 **Живой хост — канон (in-domain):**
 - **3 исхода:** факт‑ответ (info/consult), booking intake, эскалация.
 - **Fact‑answer (info/consult):** только факты из `client_pack`/`consult_playbooks`; LLM может **только перефразировать** эти факты, новые факты/советы запрещены.
-- **Booking intake:** сбор слотов записи (`expected_reply_type`); при перебивке — факт‑ответ и возврат к последнему booking‑вопросу.
+- **Booking intake:** сбор слотов записи (`expected_reply_type`); при перебивке — факт‑ответ и возврат к последнему booking‑вопросу с сохранением `interaction_state` для active pending-question turn.
 - **Hard‑LAW:** оплата (подтверждение/проверка/возвраты), медицинка, жалобы, переносы → только эскалация.
 - **Policy‑gates:** скидки и способы оплаты разрешены **только** по явным правилам в `client_pack`; иначе эскалация.
 - **Clarify limit:** максимум 2 уточнения (`clarify_limit=2`), далее эскалация.
@@ -445,6 +445,16 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Низкая уверенность/ошибка → fallback на rule‑based parser + короткий уточняющий вопрос.
 - Если `expected_reply_match=false` → интерпретатор не применяется: слот не заполняем, идём в root‑gates, затем при активной записи возвращаем booking‑prompt.
 - Не может менять класс ответа и не влияет на Hard‑LAW/policy‑gates.
+
+### Pending-question InteractionState — канон
+- `expected_reply_type` остаётся resume axis для текущего открытого слота.
+- `pending_question_target` обозначает interaction target текущего side-question/follow-up и не является generic alias для resume slot.
+- `active_question_relation` обязателен для любого turn, который работает поверх активного pending-question state.
+- Активные pending-question family моделируются как owner-matrix rows: каждая строка задаёт semantic contract, `interaction_owner`, allowed degrade и forbidden compression.
+- На каждый inbound допустим ровно один `interaction_owner`; deterministic boundaries могут валидировать / блокировать / деградировать этот контракт, но не имеют права invent/reset owner row после policy-core без явного contract reason-code.
+- Runtime core не имеет права извлекать `active_question_relation` из raw phrase branching; relation должен приходить от semantic owner или проверяться deterministic boundary только как contract validation.
+- Allowed degrade: relation-preserving clarify/degraded reply с наблюдаемыми `reason_code`, `decision_meta`, `decision_trace`; после уже зафиксированного grounding boundary допускается только explicit transition на следующий resume slot.
+- Forbidden compression: generic `booking_prompt` без relation evidence, generic `master` truth reply как success-path для specialist live-availability row, silent reopening `service_choice` после уже grounded service, и потеря active pending-question contract без trace/meta evidence.
 
 ### Signal Snapshot (routing signals)
 - Единая точка фиксации сигналов: domain_router anchors (client_config), pack lexicons (policy/guest/service), semantic match (RAG/Qdrant), consult topic resolver.
@@ -498,6 +508,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 **Структура:**
 - `mode` — режим памяти (session/compact).
 - `slots` — подтверждённые/активные слоты (branch/service/datetime).
+- `interaction_state` — persisted active pending-question row: `resume_slot`, `interaction_target`, `interaction_relation`, `interaction_owner`, `grounded_referents`, `confirmation_state`, `degrade_reason`.
 - `summary` — краткая сводка без новых фактов/советов.
 - `last_updated` / `last_updated_at` — отметки обновления.
 - `ttl` / `ttl_hours` — срок жизни памяти (по умолчанию 24h).
@@ -508,9 +519,9 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - `unanswered_questions` — список вопросов, на которые ещё не ответили.
 
 **Точки обновления:**
-- после `question_contract` → фиксируем `last_question_type`, пополняем `pending_slots`, обновляем `unanswered_questions`.
-- после `intent_router` → обновляем `active_goal` и `slots`.
-- после `info/consult/booking` → чистим закрытые `pending_slots`, обновляем `active_goal`, синхронизируем `slots`.
+- после `question_contract` → фиксируем `last_question_type`, пополняем `pending_slots`, обновляем `unanswered_questions`, синхронизируем `interaction_state.resume_slot` и `grounded_referents` после deterministic grounding boundary.
+- после `intent_router` / policy-core → обновляем `active_goal`, `slots`, и canonical `interaction_state` (`interaction_target`, `interaction_relation`, `interaction_owner`).
+- после `info/consult/booking` → чистим закрытые `pending_slots`, обновляем `active_goal`, синхронизируем `slots`, и либо сохраняем relation-preserving `interaction_state`, либо явно закрываем/заменяем его на новый owner row.
 
 **Reset rules:**
 - gap > 24h между сообщениями → полный reset памяти.
@@ -519,7 +530,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Reset‑фразы в `pending` трактуются как `pending_ack`/`pending_close`; прямого bypass pending‑guard нет.
 
 ### Pending Resume (context snapshot)
-- При уходе в `pending` сохраняем snapshot (`expected_reply_type`, `intent_queue`, `booking`, `session_memory`).
+- При уходе в `pending` сохраняем snapshot (`expected_reply_type`, `intent_queue`, `booking`, `session_memory`, `interaction_state`).
 - На `pending_ack` восстанавливаем snapshot и продолжаем с `pre_pending_goal`.
 - На `pending_close`/auto‑close — snapshot удаляется.
 

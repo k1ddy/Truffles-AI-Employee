@@ -361,11 +361,13 @@ daypart_evening_keywords:
     - вечером
     - на вечер
     - к вечеру
+    - вечерн
 daypart_morning_keywords:
   ru:
     - утро
     - утром
     - на утро
+    - утрен
 daypart_day_keywords:
   ru:
     - день
@@ -373,6 +375,12 @@ daypart_day_keywords:
     - днём
     - на день
     - днев
+daypart_preference_markers:
+  ru:
+    - предпоч
+    - подход
+    - удоб
+    - только
 offtopic_keywords:
   ru:
     - чат бот

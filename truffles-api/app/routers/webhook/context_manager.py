@@ -10,6 +10,7 @@ from app.routers.webhook.booking import _get_booking_context
 from app.routers.webhook.runtime_primitives import SERVICE_CARRYOVER_TTL_MESSAGES
 from app.routers.webhook.session_memory import (
     _record_session_memory_update,
+    _sync_session_memory_interaction_state,
     _update_session_memory_on_question,
 )
 from app.routers.webhook.trace import (
@@ -29,6 +30,20 @@ _EXPECTED_REPLY_SLOT_BY_TYPE = {
     "name": "name",
     "phone": "phone",
 }
+_INTERACTION_TARGET_VALUES = {"time", "specialist"}
+_INTERACTION_RELATION_VALUES = {
+    "fill_requested_slot",
+    "ask_about_requested_slot",
+    "slot_constraint",
+    "slot_compare",
+    "mixed_fill_plus_question",
+    "referent_followup",
+    "generic_info_interrupt",
+    "specialist_availability_interrupt",
+    "specialist_availability_followup",
+    "tool_result_followup_specialist_missing",
+}
+_INTERACTION_REFERENT_KEYS = {"service", "specialist", "branch", "booking_ref"}
 
 
 def _canonical_text(value: Any) -> str | None:
@@ -44,6 +59,116 @@ def _canonical_int(value: Any, *, default: int = 0) -> int:
     except (TypeError, ValueError):
         return default
     return max(normalized, 0)
+
+
+def _canonical_interaction_token(value: Any, *, allowed: set[str]) -> str | None:
+    token = _canonical_text(value)
+    if token is None:
+        return None
+    normalized = token.casefold()
+    if normalized not in allowed:
+        return None
+    return normalized
+
+
+def _canonical_interaction_owner(value: Any) -> str | None:
+    owner = _canonical_text(value)
+    if owner is None:
+        return None
+    return owner[:80]
+
+
+def _canonical_degrade_reason(value: Any) -> str | None:
+    reason = _canonical_text(value)
+    if reason is None:
+        return None
+    return reason[:120]
+
+
+def _canonical_grounded_referents(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    cleaned: dict[str, str] = {}
+    for referent_key in _INTERACTION_REFERENT_KEYS:
+        referent_value = _canonical_text(value.get(referent_key))
+        if referent_value:
+            cleaned[referent_key] = referent_value[:120]
+    return cleaned
+
+
+def _canonical_confirmation_state(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    cleaned: dict[str, Any] = {}
+    required = value.get("required")
+    if isinstance(required, bool):
+        cleaned["required"] = required
+    slot = _canonical_text(value.get("slot"))
+    if slot in {"service", "datetime", "name", "phone"}:
+        cleaned["slot"] = slot
+    slot_value = _canonical_text(value.get("value"))
+    if slot_value:
+        cleaned["value"] = slot_value[:120]
+    source = _canonical_text(value.get("source"))
+    if source:
+        cleaned["source"] = source[:80]
+    return cleaned or None
+
+
+def _build_grounded_referents_from_canonical_state(state: dict[str, Any]) -> dict[str, str]:
+    referents = state.get("current_referents")
+    if not isinstance(referents, dict):
+        return {}
+    grounded: dict[str, str] = {}
+    referent_key_map = {
+        "service": "service",
+        "master": "specialist",
+        "branch": "branch",
+        "booking_ref": "booking_ref",
+    }
+    for canonical_key, target_key in referent_key_map.items():
+        payload = referents.get(canonical_key)
+        if not isinstance(payload, dict):
+            continue
+        value = _canonical_text(payload.get("value"))
+        if value:
+            grounded[target_key] = value[:120]
+    return grounded
+
+
+def _build_confirmation_state_from_booking(booking_state: dict[str, Any] | None) -> dict[str, Any] | None:
+    confirmation = booking_state.get("confirmation") if isinstance(booking_state, dict) else None
+    if not isinstance(confirmation, dict):
+        return None
+    return _canonical_confirmation_state(
+        {
+            "required": True,
+            "slot": confirmation.get("slot"),
+            "value": confirmation.get("value"),
+            "source": confirmation.get("source"),
+        }
+    )
+
+
+def _build_interaction_owner(
+    *,
+    explicit_owner: str | None,
+    interaction_relation: str | None,
+    question_reason: str | None,
+) -> str | None:
+    owner = _canonical_interaction_owner(explicit_owner)
+    if owner:
+        return owner
+    relation = _canonical_interaction_token(
+        interaction_relation,
+        allowed=_INTERACTION_RELATION_VALUES,
+    )
+    if relation:
+        return f"llm_policy_core:{relation}"[:80]
+    reason = _canonical_text(question_reason)
+    if reason:
+        return f"question_contract:{reason}"[:80]
+    return None
 
 
 def _canonical_state_base() -> dict[str, Any]:
@@ -105,6 +230,49 @@ def _get_canonical_dialog_state(manager: dict) -> dict[str, Any]:
             state.pop("pending_question_contract", None)
     else:
         state.pop("pending_question_contract", None)
+
+    interaction_state = state.get("interaction_state")
+    if isinstance(interaction_state, dict):
+        cleaned_interaction: dict[str, Any] = {}
+        resume_slot = _canonical_text(interaction_state.get("resume_slot"))
+        if resume_slot in {"service", "datetime", "name", "phone"}:
+            cleaned_interaction["resume_slot"] = resume_slot
+        interaction_target = _canonical_interaction_token(
+            interaction_state.get("interaction_target"),
+            allowed=_INTERACTION_TARGET_VALUES,
+        )
+        if interaction_target:
+            cleaned_interaction["interaction_target"] = interaction_target
+        interaction_relation = _canonical_interaction_token(
+            interaction_state.get("interaction_relation"),
+            allowed=_INTERACTION_RELATION_VALUES,
+        )
+        if interaction_relation:
+            cleaned_interaction["interaction_relation"] = interaction_relation
+        interaction_owner = _canonical_interaction_owner(
+            interaction_state.get("interaction_owner")
+        )
+        if interaction_owner:
+            cleaned_interaction["interaction_owner"] = interaction_owner
+        grounded_referents = _canonical_grounded_referents(
+            interaction_state.get("grounded_referents")
+        )
+        if grounded_referents:
+            cleaned_interaction["grounded_referents"] = grounded_referents
+        confirmation_state = _canonical_confirmation_state(
+            interaction_state.get("confirmation_state")
+        )
+        if confirmation_state:
+            cleaned_interaction["confirmation_state"] = confirmation_state
+        degrade_reason = _canonical_degrade_reason(interaction_state.get("degrade_reason"))
+        if degrade_reason:
+            cleaned_interaction["degrade_reason"] = degrade_reason
+        if cleaned_interaction.get("resume_slot"):
+            state["interaction_state"] = cleaned_interaction
+        else:
+            state.pop("interaction_state", None)
+    else:
+        state.pop("interaction_state", None)
 
     consult_state = state.get("consult_state")
     if isinstance(consult_state, dict):
@@ -278,6 +446,53 @@ def _set_canonical_pending_question_contract(
     return _set_canonical_dialog_state(manager, state)
 
 
+def _set_canonical_interaction_state(
+    manager: dict,
+    *,
+    resume_slot: str | None,
+    interaction_target: str | None,
+    interaction_relation: str | None,
+    interaction_owner: str | None,
+    grounded_referents: dict[str, str] | None,
+    confirmation_state: dict[str, Any] | None,
+    degrade_reason: str | None,
+) -> dict:
+    manager = dict(manager)
+    state = _get_canonical_dialog_state(manager)
+    resume_slot_token = _canonical_text(resume_slot)
+    if resume_slot_token not in {"service", "datetime", "name", "phone"}:
+        state.pop("interaction_state", None)
+        return _set_canonical_dialog_state(manager, state)
+
+    payload: dict[str, Any] = {"resume_slot": resume_slot_token}
+    interaction_target_token = _canonical_interaction_token(
+        interaction_target,
+        allowed=_INTERACTION_TARGET_VALUES,
+    )
+    if interaction_target_token:
+        payload["interaction_target"] = interaction_target_token
+    interaction_relation_token = _canonical_interaction_token(
+        interaction_relation,
+        allowed=_INTERACTION_RELATION_VALUES,
+    )
+    if interaction_relation_token:
+        payload["interaction_relation"] = interaction_relation_token
+    interaction_owner_token = _canonical_interaction_owner(interaction_owner)
+    if interaction_owner_token:
+        payload["interaction_owner"] = interaction_owner_token
+    grounded_referents_payload = _canonical_grounded_referents(grounded_referents)
+    if grounded_referents_payload:
+        payload["grounded_referents"] = grounded_referents_payload
+    confirmation_state_payload = _canonical_confirmation_state(confirmation_state)
+    if confirmation_state_payload:
+        payload["confirmation_state"] = confirmation_state_payload
+    degrade_reason_token = _canonical_degrade_reason(degrade_reason)
+    if degrade_reason_token:
+        payload["degrade_reason"] = degrade_reason_token
+    state["interaction_state"] = payload
+    return _set_canonical_dialog_state(manager, state)
+
+
 def _set_canonical_consult_state(
     manager: dict,
     *,
@@ -383,6 +598,10 @@ def _sync_canonical_dialog_state(
     message_count: int,
     branch_id: Any = None,
     consult_context: dict[str, Any] | None = None,
+    interaction_target: str | None = None,
+    interaction_relation: str | None = None,
+    interaction_owner: str | None = None,
+    degrade_reason: str | None = None,
 ) -> dict:
     from . import _legacy as legacy
 
@@ -475,6 +694,51 @@ def _sync_canonical_dialog_state(
         expected_reply_type=expected_reply_type,
         reason=expected_reply_reason,
         message_count=message_count,
+    )
+    state = _get_canonical_dialog_state(manager)
+    pending_question_contract = state.get("pending_question_contract")
+    if isinstance(pending_question_contract, dict):
+        resume_slot = _canonical_text(pending_question_contract.get("slot"))
+        question_reason = _canonical_text(pending_question_contract.get("reason"))
+    else:
+        resume_slot = _EXPECTED_REPLY_SLOT_BY_TYPE.get(_canonical_text(expected_reply_type))
+        question_reason = _canonical_text(expected_reply_reason)
+    existing_interaction = (
+        state.get("interaction_state") if isinstance(state.get("interaction_state"), dict) else {}
+    )
+    canonical_interaction_target = (
+        interaction_target
+        if interaction_target is not None
+        else existing_interaction.get("interaction_target")
+    )
+    canonical_interaction_relation = (
+        interaction_relation
+        if interaction_relation is not None
+        else existing_interaction.get("interaction_relation")
+    )
+    canonical_interaction_owner = _build_interaction_owner(
+        explicit_owner=(
+            interaction_owner
+            if interaction_owner is not None
+            else existing_interaction.get("interaction_owner")
+        ),
+        interaction_relation=canonical_interaction_relation,
+        question_reason=question_reason,
+    )
+    canonical_degrade_reason = (
+        degrade_reason
+        if degrade_reason is not None
+        else existing_interaction.get("degrade_reason")
+    )
+    manager = _set_canonical_interaction_state(
+        manager,
+        resume_slot=resume_slot,
+        interaction_target=canonical_interaction_target,
+        interaction_relation=canonical_interaction_relation,
+        interaction_owner=canonical_interaction_owner,
+        grounded_referents=_build_grounded_referents_from_canonical_state(state),
+        confirmation_state=_build_confirmation_state_from_booking(booking_state),
+        degrade_reason=canonical_degrade_reason,
     )
     return manager
 
@@ -628,13 +892,20 @@ def _set_expected_reply_context(
 
         context[legacy.EXPECTED_REPLY_REASON_KEY] = reason.strip()
     context_manager = _get_context_manager(context)
-    context_manager = _set_canonical_pending_question_contract(
+    context_manager = _sync_canonical_dialog_state(
         context_manager,
+        booking_state=_get_booking_context(context),
         expected_reply_type=expected_reply_type,
-        reason=reason,
         message_count=_canonical_int(context_manager.get("message_count")),
+        expected_reply_reason=reason,
     )
     context = _set_context_manager(context, context_manager)
+    interaction_state_payload = _get_canonical_dialog_state(context_manager).get("interaction_state")
+    context, _ = _sync_session_memory_interaction_state(
+        context,
+        interaction_state=interaction_state_payload if isinstance(interaction_state_payload, dict) else None,
+        now=now,
+    )
     re_entry_cleared = False
     if isinstance(expected_reply_type, str) and expected_reply_type.strip():
         if _is_re_entry_required(context):

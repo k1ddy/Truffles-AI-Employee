@@ -166,7 +166,7 @@ def test_tool_evidence_strict_policy_blocks_missing_calendar_and_confirm_evidenc
             "actions": {"reply": 7},
             "trace_stages": {},
             "tools": {"events": {}},
-            "tool_hooks": {"by_action": {}},
+            "tool_hooks": {"by_action": {}, "required_by_action": {"calendar": 1}},
         },
     )
     assert tool_evidence["valid"] is False
@@ -178,6 +178,96 @@ def test_tool_evidence_strict_policy_blocks_missing_calendar_and_confirm_evidenc
     infra = build_infra_status({}, {"valid": True, "reasons": []}, tool_evidence_status=tool_evidence)
     assert infra["valid"] is False
     assert "tool_evidence:calendar_evidence_missing" in infra["reasons"]
+
+
+def test_tool_evidence_strict_policy_allows_fail_fast_prefix_without_observed_tool_opportunity():
+    ns = _load_tool_evidence_helpers()
+    build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
+    build_infra_status = ns["_llm_quality_build_infra_status"]
+
+    tool_evidence = build_tool_evidence_status(
+        scenario_coverage="booking,info,interrupt",
+        tool_hooks_mode="auto",
+        tool_evidence_policy="strict",
+        coverage_stats={
+            "intents": {},
+            "actions": {"reply": 9},
+            "trace_stages": {},
+            "tools": {"events": {}},
+            "tool_hooks": {"by_action": {}},
+        },
+    )
+
+    assert tool_evidence["valid"] is True
+    assert tool_evidence["reasons"] == []
+    assert tool_evidence["required"]["booking"] is True
+    assert tool_evidence["required"]["calendar"] is False
+    assert tool_evidence["required"]["confirm"] is False
+    assert tool_evidence["counts"]["calendar_opportunity_total"] == 0
+    assert tool_evidence["counts"]["confirm_opportunity_total"] == 0
+
+    infra = build_infra_status({}, {"valid": True, "reasons": []}, tool_evidence_status=tool_evidence)
+    assert infra["valid"] is True
+    assert infra["reasons"] == []
+
+
+def test_tool_evidence_strict_policy_allows_provider_unavailable_calendar_failure_without_hook_candidate():
+    ns = _load_tool_evidence_helpers()
+    build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
+    build_infra_status = ns["_llm_quality_build_infra_status"]
+
+    tool_evidence = build_tool_evidence_status(
+        scenario_coverage="booking,info,interrupt",
+        tool_hooks_mode="auto",
+        tool_evidence_policy="strict",
+        coverage_stats={
+            "intents": {"calendar.book_slot": 1},
+            "actions": {"reply": 1},
+            "trace_stages": {},
+            "tools": {"events": {"calendar": 1}},
+            "tool_hooks": {"by_action": {}, "required_by_action": {}},
+        },
+    )
+
+    assert tool_evidence["valid"] is True
+    assert "calendar_hook_missing" not in tool_evidence["reasons"]
+    assert tool_evidence["required"]["calendar"] is True
+    assert tool_evidence["required"]["calendar_hook"] is False
+    assert tool_evidence["counts"]["calendar_hook_candidates"] == 0
+
+    infra = build_infra_status({}, {"valid": True, "reasons": []}, tool_evidence_status=tool_evidence)
+    assert infra["valid"] is True
+    assert infra["reasons"] == []
+
+
+def test_tool_evidence_strict_policy_keeps_confirm_requirements_once_alias_opportunity_is_observed():
+    ns = _load_tool_evidence_helpers()
+    build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
+
+    tool_evidence = build_tool_evidence_status(
+        scenario_coverage="booking,info,interrupt",
+        tool_hooks_mode="auto",
+        tool_evidence_policy="strict",
+        coverage_stats={
+            "intents": {"check_booking": 1},
+            "actions": {},
+            "trace_stages": {},
+            "tools": {"events": {}},
+            "tool_hooks": {"by_action": {}, "required_by_action": {"calendar": 1}},
+        },
+    )
+
+    assert tool_evidence["valid"] is False
+    assert "calendar_intent_missing" not in tool_evidence["reasons"]
+    assert "calendar_evidence_missing" in tool_evidence["reasons"]
+    assert "confirm_evidence_missing" in tool_evidence["reasons"]
+    assert "calendar_hook_missing" in tool_evidence["reasons"]
+    assert "confirm_hook_missing" in tool_evidence["reasons"]
+    assert tool_evidence["required"]["calendar"] is True
+    assert tool_evidence["required"]["confirm"] is True
+    assert tool_evidence["counts"]["calendar_intent_candidates"] == 1
+    assert tool_evidence["counts"]["calendar_opportunity_total"] == 1
+    assert tool_evidence["counts"]["confirm_opportunity_total"] == 1
 
 
 def test_tool_evidence_strict_policy_accepts_runs_with_calendar_and_confirm_proof():
@@ -193,12 +283,46 @@ def test_tool_evidence_strict_policy_accepts_runs_with_calendar_and_confirm_proo
             "actions": {"booking_confirm": 2},
             "trace_stages": {"booking_commit": 1, "booking_confirm": 2},
             "tools": {"events": {"calendar": 5, "confirm": 2, "commit": 1}},
-            "tool_hooks": {"by_action": {"calendar": 1, "confirm": 1}},
+            "tool_hooks": {
+                "by_action": {"calendar": 1, "confirm": 1},
+                "required_by_action": {"calendar": 1},
+            },
         },
     )
 
     assert tool_evidence["valid"] is True
     assert tool_evidence["reasons"] == []
+
+
+def test_tool_evidence_strict_policy_accepts_observed_confirm_evidence_without_explicit_candidate():
+    ns = _load_tool_evidence_helpers()
+    build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
+    build_infra_status = ns["_llm_quality_build_infra_status"]
+
+    tool_evidence = build_tool_evidence_status(
+        scenario_coverage="booking,info,interrupt",
+        tool_hooks_mode="auto",
+        tool_evidence_policy="strict",
+        coverage_stats={
+            "intents": {"calendar.book_slot": 1},
+            "actions": {},
+            "trace_stages": {"booking_confirm": 1},
+            "tools": {"events": {"calendar": 1, "confirm": 1}},
+            "tool_hooks": {"by_action": {"confirm": 1}, "required_by_action": {}},
+        },
+    )
+
+    assert tool_evidence["valid"] is True
+    assert "confirm_candidate_missing" not in tool_evidence["reasons"]
+    assert tool_evidence["required"]["confirm"] is True
+    assert tool_evidence["counts"]["check_booking_intents"] == 0
+    assert tool_evidence["counts"]["booking_confirm_actions"] == 0
+    assert tool_evidence["counts"]["confirm_observed"] is True
+    assert tool_evidence["counts"]["confirm_evidence_total"] == 3
+
+    infra = build_infra_status({}, {"valid": True, "reasons": []}, tool_evidence_status=tool_evidence)
+    assert infra["valid"] is True
+    assert infra["reasons"] == []
 
 
 def test_tool_evidence_strict_policy_counts_check_booking_alias_intents():
@@ -214,7 +338,10 @@ def test_tool_evidence_strict_policy_counts_check_booking_alias_intents():
             "actions": {},
             "trace_stages": {},
             "tools": {"events": {"calendar": 4, "confirm": 2}},
-            "tool_hooks": {"by_action": {"calendar": 1, "confirm": 1}},
+            "tool_hooks": {
+                "by_action": {"calendar": 1, "confirm": 1},
+                "required_by_action": {"calendar": 1},
+            },
         },
     )
 

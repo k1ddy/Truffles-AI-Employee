@@ -101,6 +101,24 @@ def test_tool_contract_list_slots_prefers_time_when_service_known():
     assert decision.requires_handoff is False
 
 
+def test_tool_contract_catalog_service_query_preserves_booking_progress_when_slots_look_complete():
+    decision = resolve_tool_expected_reply_contract(
+        tool_action="catalog.service_query",
+        tool_decision="truth_fallback",
+        current_expected_reply_type=EXPECTED_REPLY_TIME,
+        memory_expected_reply_type=None,
+        booking_has_service=True,
+        booking_has_datetime=True,
+        booking_has_name=True,
+        booking_active=True,
+    )
+
+    assert decision is not None
+    assert decision.expected_reply_type == EXPECTED_REPLY_TIME
+    assert decision.reason == "catalog_service_booking_progress"
+    assert decision.requires_handoff is False
+
+
 def test_tool_contract_list_slots_specialist_missing_requests_name():
     decision = resolve_tool_expected_reply_contract(
         tool_action="calendar.list_slots",
@@ -134,6 +152,24 @@ def test_tool_contract_book_slot_conflict_requires_time_followup():
     assert decision is not None
     assert decision.expected_reply_type == EXPECTED_REPLY_TIME
     assert decision.reason == "calendar_book_slot_conflict"
+
+
+def test_tool_contract_book_slot_specialist_missing_requests_name():
+    decision = resolve_tool_expected_reply_contract(
+        tool_action="calendar.book_slot",
+        tool_decision="specialist_missing",
+        current_expected_reply_type=EXPECTED_REPLY_NAME,
+        memory_expected_reply_type=None,
+        booking_has_service=True,
+        booking_has_datetime=True,
+        booking_has_name=True,
+        booking_active=True,
+    )
+
+    assert decision is not None
+    assert decision.expected_reply_type == EXPECTED_REPLY_NAME
+    assert decision.reason == "calendar_book_slot_specialist_followup"
+    assert decision.requires_handoff is False
 
 
 def test_tool_contract_reschedule_verifier_blocked_requires_handoff():

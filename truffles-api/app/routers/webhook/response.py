@@ -614,6 +614,119 @@ def _should_append_booking_followup_for_consult(
     return True
 
 
+def _should_shift_locked_consult_topic_to_service_choice(
+    *,
+    booking_goal_locked: bool,
+    booking_followup_appended: bool,
+    consult_action: str | None,
+    consult_meta: dict[str, Any] | None,
+    message_text: str | None,
+    expected_reply_type: str | None,
+    client_slug: str | None,
+) -> bool:
+    from . import _legacy as legacy
+
+    if not booking_goal_locked or booking_followup_appended:
+        return False
+    if expected_reply_type != legacy.EXPECTED_REPLY_TIME:
+        return False
+    action_token = str(consult_action or "").strip().casefold()
+    if action_token != "consult_reply":
+        return False
+    if not isinstance(message_text, str) or not message_text.strip():
+        return False
+    if legacy._is_booking_request(message_text, client_slug=client_slug):
+        return False
+    if not isinstance(consult_meta, dict):
+        return False
+    if isinstance(consult_meta.get("consult_topic"), str) and consult_meta.get("consult_topic").strip():
+        return True
+    if isinstance(consult_meta.get("consult_question"), str) and consult_meta.get("consult_question").strip():
+        return True
+    questions = consult_meta.get("consult_questions")
+    if isinstance(questions, list):
+        return any(isinstance(item, str) and item.strip() for item in questions)
+    return False
+
+
+def _apply_locked_consult_topic_shift(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    consult_meta: dict[str, Any],
+    message_count: int,
+    now: datetime,
+) -> None:
+    from . import _legacy as legacy
+
+    context = legacy._get_conversation_context(conversation)
+    context_manager = legacy._get_context_manager(context)
+    context_manager["current_goal"] = "consult"
+    context_manager = legacy._set_consult_context(
+        context_manager,
+        consult_meta=consult_meta,
+        message_count=message_count,
+    )
+    context = legacy._set_context_manager(context, context_manager)
+    legacy._set_conversation_context(conversation, context)
+    context, memory = legacy._update_session_memory_goal(
+        context,
+        active_goal="consult",
+        now=now,
+    )
+    legacy._set_conversation_context(conversation, context)
+    legacy._record_session_memory_update(
+        conversation,
+        saved_message,
+        memory=memory,
+        reason="active_goal",
+    )
+    consult_trace = {
+        "stage": "consult_context",
+        "decision": "set",
+        "current_goal": "consult",
+        "ttl": legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+    }
+    consult_topic = consult_meta.get("consult_topic")
+    if consult_topic:
+        consult_trace["consult_topic"] = consult_topic
+    legacy._record_decision_trace(conversation, consult_trace)
+    if saved_message:
+        legacy._update_message_decision_metadata(saved_message, {"current_goal": "consult"})
+
+    context = legacy._get_conversation_context(conversation)
+    legacy._set_expected_reply_context(
+        conversation=conversation,
+        saved_message=saved_message,
+        context=context,
+        expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+        reason="consult_topic_shift",
+        now=now,
+    )
+    consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+    consult_meta["expected_reply_reason"] = "consult_topic_shift"
+    consult_meta["consult_topic_shift_expected_reply"] = True
+    legacy._record_decision_trace(
+        conversation,
+        {
+            "stage": "consult_flow",
+            "decision": "consult_topic_shift_expected_reply",
+            "expected_reply_type": legacy.EXPECTED_REPLY_SERVICE,
+            "expected_reply_reason": "consult_topic_shift",
+            "previous_expected_reply_type": legacy.EXPECTED_REPLY_TIME,
+        },
+    )
+    if saved_message:
+        legacy._update_message_decision_metadata(
+            saved_message,
+            {
+                "consult_topic_shift_expected_reply": True,
+                "expected_reply_type": legacy.EXPECTED_REPLY_SERVICE,
+                "expected_reply_reason": "consult_topic_shift",
+            },
+        )
+
+
 @dataclass(frozen=True)
 class LlmPrimaryOutcome:
     response: WebhookResponse | None
@@ -1876,6 +1989,22 @@ def _handle_consult_flow(
                 )
         elif booking_goal_locked:
             consult_meta["booking_followup_suppressed"] = True
+            if _should_shift_locked_consult_topic_to_service_choice(
+                booking_goal_locked=booking_goal_locked,
+                booking_followup_appended=append_booking_followup,
+                consult_action=consult_decision.intent,
+                consult_meta=consult_meta,
+                message_text=message_text,
+                expected_reply_type=expected_reply_type,
+                client_slug=client_slug,
+            ):
+                _apply_locked_consult_topic_shift(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    consult_meta=consult_meta,
+                    message_count=message_count,
+                    now=now,
+                )
         if booking_followup:
             consult_meta["booking_followup"] = True
         bot_response = legacy._append_followup(bot_response, booking_followup)

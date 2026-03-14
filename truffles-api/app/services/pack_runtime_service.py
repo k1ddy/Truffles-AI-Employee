@@ -95,6 +95,11 @@ _MASTER_QUERY_PERSON_TERMS_KEY = "master_query_person_terms"
 _MASTER_QUERY_RELATION_TERMS_KEY = "master_query_relation_terms"
 _MASTER_QUERY_ACTION_TERMS_KEY = "master_query_action_terms"
 _MASTER_QUERY_EXPERIENCE_TERMS_KEY = "master_query_experience_terms"
+_MASTER_QUERY_PERSON_QUESTION_PATTERNS = (
+    re.compile(
+        r"\b(?:какой|какие|какого|какому|кто)\b(?:\s+\w+){0,3}\s+\b(?:мастер\w*|специалист\w*)\b"
+    ),
+)
 _MASTER_QUERY_MISSING_SERVICE_REPLY = (
     "Podskazhite, po kakoy usluge nuzhno podobrat mastera?"
 )
@@ -887,6 +892,12 @@ def _is_question_like_master_query(
     return bool(semantic_question_type(message_text, client_slug=client_slug))
 
 
+def _has_master_person_question_shape(normalized_message: str) -> bool:
+    if not normalized_message:
+        return False
+    return any(pattern.search(normalized_message) for pattern in _MASTER_QUERY_PERSON_QUESTION_PATTERNS)
+
+
 def resolve_master_intent(
     *,
     message_text: str | None,
@@ -947,9 +958,23 @@ def resolve_master_intent(
         elif person_hit and master_name_hit and question_like and resolved_service_query:
             explicit = True
             reason = "person_named_question_signal"
+        elif master_name_hit and question_like and resolved_service_query:
+            explicit = True
+            reason = "named_question_signal"
+        elif (
+            person_hit in {"мастер", "мастера", "специалист", "специалисты"}
+            and question_like
+            and resolved_service_query
+            and _has_master_person_question_shape(normalized_message)
+        ):
+            explicit = True
+            reason = "question_person_signal"
         elif person_service_relation and resolved_service_query:
             explicit = True
             reason = "person_service_signal"
+        elif person_hit in {"специалист", "специалисты"} and question_like and resolved_service_query:
+            explicit = True
+            reason = "person_question_signal"
 
     return MasterIntentResolution(
         explicit=explicit,

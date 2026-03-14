@@ -50,8 +50,19 @@ def _load_info_tag_infer():
     script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
     source = script_path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(script_path))
-    wanted_assignments = {"LLM_QUALITY_TAG_HINTS", "LLM_QUALITY_TAG_HINTS_RE"}
-    wanted_functions = {"_llm_quality_infer_info_tags"}
+    wanted_assignments = {
+        "CHAOS_BOOKING_REPLY_TYPES",
+        "LLM_QUALITY_INFO_TAGS",
+        "LLM_QUALITY_TAG_HINTS",
+        "LLM_QUALITY_TAG_HINTS_RE",
+    }
+    wanted_functions = {
+        "_llm_quality_has_pending_question_interaction_contract",
+        "_llm_quality_infer_info_tags",
+        "_llm_quality_normalize_expect_token",
+        "_llm_quality_normalize_tool_token",
+        "_llm_quality_should_infer_info_tags_from_text",
+    }
     selected_nodes = []
     for node in tree.body:
         if isinstance(node, ast.Assign):
@@ -63,10 +74,13 @@ def _load_info_tag_infer():
     module = ast.Module(body=selected_nodes, type_ignores=[])
     namespace = {"re": re}
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
-    return namespace["_llm_quality_infer_info_tags"]
+    return (
+        namespace["_llm_quality_infer_info_tags"],
+        namespace["_llm_quality_should_infer_info_tags_from_text"],
+    )
 
 
-_infer_info_tags = _load_info_tag_infer()
+_infer_info_tags, _should_infer_info_tags_from_text = _load_info_tag_infer()
 
 
 def test_expected_sections_match_promotions_synonyms():
@@ -152,6 +166,58 @@ def test_parking_signal_accepts_machine_phrase_with_parking_context():
 def test_info_tag_infer_detects_duration_from_how_long_question():
     tags = _infer_info_tags("Какая длительность процедуры?")
     assert "duration" in tags
+
+
+def test_info_tag_infer_is_suppressed_for_matched_booking_slot_constraint_contract():
+    should_infer = _should_infer_info_tags_from_text(
+        turn_tags=["slot_constraint"],
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_reply_matched=True,
+        meta={
+            "intent": "booking",
+            "expected_reply_type": "time",
+            "pending_question_act": "slot_constraint",
+            "pending_question_target": "time",
+            "pending_question_interaction": "slot_constraint",
+        },
+        trace_entries=[
+            {
+                "stage": "pending_question_interaction",
+                "decision": "slot_constraint",
+                "pending_question_act": "slot_constraint",
+                "pending_question_target": "time",
+            },
+            {
+                "stage": "question_contract",
+                "decision": "matched",
+                "expected_reply_type": "time",
+                "answer_slot": "datetime",
+                "value": "утром",
+            },
+        ],
+    )
+
+    tags = sorted(_infer_info_tags("Я предпочла бы утренние часы.")) if should_infer else []
+
+    assert should_infer is False
+    assert tags == []
+
+
+def test_info_tag_infer_keeps_plain_hours_question_without_booking_contract():
+    should_infer = _should_infer_info_tags_from_text(
+        turn_tags=[],
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_reply_matched=None,
+        meta={"intent": "hours"},
+        trace_entries=[],
+    )
+
+    tags = sorted(_infer_info_tags("Вы утром работаете?")) if should_infer else []
+
+    assert should_infer is True
+    assert "hours" in tags
 
 
 def test_parking_signal_accepts_colloquial_parking_wording():

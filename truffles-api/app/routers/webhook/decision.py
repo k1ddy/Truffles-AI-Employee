@@ -54,6 +54,7 @@ from app.models import (
     MarketingCampaignDelivery,
     Message,
     OutboxMessage,
+    Specialist,
     User,
 )
 from app.routers.webhook.booking import (
@@ -275,7 +276,10 @@ from app.routers.webhook.runtime_primitives import (
     MSG_AI_ERROR,
     MSG_BOOKING_ASK_DATETIME,
     MSG_BOOKING_ASK_NAME,
+    MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE,
+    MSG_BOOKING_SPECIALIST_AVAILABILITY_FOLLOWUP,
     MSG_BOOKING_ASK_SERVICE,
+    MSG_BOOKING_TIMEOUT_PENDING_QUESTION_TIME,
     MSG_DELIVERY_FAILED,
     MSG_EXPECTED_SERVICE_OFF_TOPIC,
     QUESTION_WORD_PREFIXES,
@@ -293,6 +297,7 @@ from app.routers.webhook.session_memory import (
     _session_memory_snapshot,
     _set_session_memory,
     _should_reset_session_memory,
+    _sync_session_memory_interaction_state,
     _update_session_memory_goal,
     _update_session_memory_on_answer,
     _update_session_memory_on_question,
@@ -329,7 +334,13 @@ from app.services.ai_service import (
     rewrite_for_service_match,
     transcribe_audio_with_fallback,
 )
-from app.services.booking_signal_service import has_daypart_stem as _has_daypart_stem
+from app.services.booking_signal_service import (
+    has_daypart_stem as _has_daypart_stem,
+    has_pending_time_question_marker as _has_pending_time_question_marker,
+    looks_like_time_preference_statement as _looks_like_time_preference_statement,
+    match_booking_hour_fallback as _match_booking_hour_fallback,
+    pick_daypart_token as _pick_daypart_token,
+)
 from app.services.booking_transition_owner import (
     BOOKING_TRANSITION_OWNER_V1,
     apply_tool_transition_owner,
@@ -347,6 +358,12 @@ from app.services.capability_manifest_service import (
 from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
+from app.services.owner_resolver import (
+    TimeoutOwnerBoundaryInput,
+    build_owner_resolution_input,
+    resolve_interaction_owner,
+    resolve_timeout_owner_boundary,
+)
 from app.services.expected_reply_contract import (
     resolve_services_overview_contract_update,
     resolve_tool_expected_reply_contract,
@@ -418,6 +435,7 @@ from app.services.pack_runtime_service import (
     semantic_question_type,
     semantic_service_match,
 )
+from app.services.signal_manifest_service import get_booking_text_tokens
 from app.services.pack_runtime_service import (
     _normalize_text as _normalize_service_text,
 )
@@ -425,6 +443,7 @@ from app.services.state_machine import ConversationState
 from app.services.state_service import (
     PENDING_RESUME_CLEAR_KEYS,
     _capture_pending_resume_context,
+    _restore_pending_resume_context,
     apply_simulation_context,
     build_simulation_context,
     escalate_to_pending,
@@ -446,6 +465,11 @@ _should_run_demo_truth_gate = _should_run_truth_gate
 
 def _normalize_message_text(message_text: str | None) -> str:
     return (message_text or "").strip()
+
+
+_SPECIALIST_SURFACE_HINT_TOKEN_RE = re.compile(
+    r"^[A-ZА-ЯЁӘІҢҒҚҮҰӨҺ][A-Za-zА-Яа-яЁёӘәІіҢңҒғҚқҮүҰұӨөҺһ'’\\-]{1,47}$"
+)
 
 
 def _compact_signal_snapshot(values: dict[str, Any]) -> dict[str, Any]:
@@ -732,6 +756,13 @@ def _should_block_expected_reply_by_info(
             value=message_text,
             client_slug=client_slug,
         )
+    question_like_time_slot_constraint = bool(
+        expected_reply_type == legacy.EXPECTED_REPLY_TIME
+        and _is_question_like_time_slot_constraint_candidate(
+            message_text=message_text,
+            candidate_value=expected_reply_candidate,
+        )
+    )
     blocked = bool(
         info_query
         or explicit_info_interrupt
@@ -750,6 +781,7 @@ def _should_block_expected_reply_by_info(
         has_clock_time_signal = bool(
             re.search(r"\b(?:[01]?\d|2[0-3])[:.][0-5]\d\b", message_text)
             or TIME_HOUR_PATTERN.search(message_text)
+            or _match_booking_hour_fallback(message_text)
         )
         try:
             has_datetime_signal = bool(
@@ -769,12 +801,18 @@ def _should_block_expected_reply_by_info(
             isinstance(expected_reply_candidate, str)
             and expected_reply_candidate.strip()
             and not explicit_info_interrupt
-            and (has_datetime_signal or booking_signal or has_daypart_candidate)
+            and (
+                has_datetime_signal
+                or booking_signal
+                or has_daypart_candidate
+                or question_like_time_slot_constraint
+            )
             and (
                 not question_like
                 or booking_signal
                 or has_clock_time_signal
                 or has_daypart_candidate
+                or question_like_time_slot_constraint
             )
         ):
             # Accept grounded booking-time replies like "на 3 часа" even when
@@ -797,6 +835,353 @@ def _should_block_expected_reply_by_info(
         # even when the message also contains a time-like token.
         return bool(info_query or price_signal or duration_signal)
     return blocked
+
+
+def _is_question_like_time_slot_constraint_candidate(
+    *,
+    message_text: str | None,
+    candidate_value: str | None,
+) -> bool:
+    from . import _legacy as legacy
+
+    if not isinstance(message_text, str) or not message_text.strip():
+        return False
+    if not isinstance(candidate_value, str) or not candidate_value.strip():
+        return False
+    normalized_message = legacy._normalize_service_text(message_text)
+    tokens = normalized_message.split()
+    question_like = "?" in message_text
+    if not question_like and tokens:
+        question_like = any(tokens[0].startswith(prefix) for prefix in QUESTION_WORD_PREFIXES)
+    if not question_like:
+        return False
+    has_clock_time_signal = bool(
+        legacy.TIME_PATTERN.search(message_text)
+        or legacy.TIME_HOUR_PATTERN.search(message_text)
+        or _match_booking_hour_fallback(message_text)
+        or legacy.TIME_PATTERN.search(candidate_value)
+        or legacy.TIME_HOUR_PATTERN.search(candidate_value)
+        or _match_booking_hour_fallback(candidate_value)
+    )
+    if has_clock_time_signal:
+        return False
+    return True
+
+
+def _is_daypart_only_time_slot_constraint_candidate(
+    *,
+    message_text: str | None,
+    candidate_value: str | None,
+) -> bool:
+    from . import _legacy as legacy
+
+    if not isinstance(message_text, str) or not message_text.strip():
+        return False
+    if not isinstance(candidate_value, str) or not candidate_value.strip():
+        return False
+    candidate_token = _pick_daypart_token(candidate_value)
+    if not isinstance(candidate_token, str) or not candidate_token.strip():
+        return False
+    normalized_candidate = legacy.normalize_for_matching(candidate_value)
+    normalized_token = legacy.normalize_for_matching(candidate_token)
+    if not normalized_candidate or normalized_candidate != normalized_token:
+        return False
+    has_clock_time_signal = bool(
+        legacy.TIME_PATTERN.search(message_text)
+        or legacy.TIME_HOUR_PATTERN.search(message_text)
+        or _match_booking_hour_fallback(message_text)
+        or legacy.TIME_PATTERN.search(candidate_value)
+        or legacy.TIME_HOUR_PATTERN.search(candidate_value)
+        or _match_booking_hour_fallback(candidate_value)
+    )
+    if has_clock_time_signal:
+        return False
+    return True
+
+
+def _extract_question_like_daypart_exact_time_fill(
+    message_text: str | None,
+) -> str | None:
+    if not isinstance(message_text, str) or not message_text.strip():
+        return None
+    if not _pick_daypart_token(message_text):
+        return None
+    match = _match_booking_hour_fallback(message_text)
+    if not match:
+        return None
+    try:
+        hour = int(match.get("hour") or 0)
+    except (TypeError, ValueError):
+        return None
+    minute = str(match.get("minute") or "00").strip() or "00"
+    return f"{hour:02d}:{minute}"
+
+
+def _is_declarative_time_window_slot_constraint_candidate(
+    *,
+    message_text: str | None,
+) -> bool:
+    if not isinstance(message_text, str) or not message_text.strip():
+        return False
+    if _is_question_like_message(message_text):
+        return False
+    return bool(
+        re.search(
+            r"\b(?:с|со|между)\s*(?:[01]?\d|2[0-3])(?::[0-5]\d)?\s*(?:до|по|и|-|–|—)\s*(?:[01]?\d|2[0-3])(?::[0-5]\d)?\b",
+            message_text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _is_declarative_partial_date_slot_constraint_candidate(
+    *,
+    message_text: str | None,
+    candidate_value: str | None,
+    client_slug: str | None,
+) -> bool:
+    if not isinstance(message_text, str) or not message_text.strip():
+        return False
+    if not isinstance(candidate_value, str) or not candidate_value.strip():
+        return False
+    if _is_question_like_message(message_text):
+        return False
+    if _is_declarative_time_window_slot_constraint_candidate(message_text=message_text):
+        return False
+    if _is_datetime_grounded_for_prompt(candidate_value, client_slug=client_slug):
+        return False
+    normalized_message = normalize_for_matching(message_text)
+    if not normalized_message or "выходн" not in normalized_message:
+        return False
+    extracted_value = _extract_datetime(message_text, client_slug=client_slug)
+    if not isinstance(extracted_value, str) or not extracted_value.strip():
+        return False
+    normalized_candidate = normalize_for_matching(candidate_value)
+    normalized_extracted = normalize_for_matching(extracted_value)
+    if not normalized_candidate or not normalized_extracted:
+        return False
+    return normalized_candidate == normalized_extracted
+
+
+def _is_time_slot_constraint_candidate(
+    *,
+    message_text: str | None,
+    candidate_value: str | None,
+    client_slug: str | None,
+) -> bool:
+    return _is_question_like_time_slot_constraint_candidate(
+        message_text=message_text,
+        candidate_value=candidate_value,
+    ) or _is_daypart_only_time_slot_constraint_candidate(
+        message_text=message_text,
+        candidate_value=candidate_value,
+    ) or _is_declarative_partial_date_slot_constraint_candidate(
+        message_text=message_text,
+        candidate_value=candidate_value,
+        client_slug=client_slug,
+    )
+
+
+def _derive_timeout_owner_boundary_pending_question_contract(
+    *,
+    source: str | None,
+    expected_reply_type: str | None,
+    booking_state: dict[str, Any] | None,
+    filled_slots: Any,
+) -> dict[str, str] | None:
+    if source != "matched_expected_reply":
+        return None
+    if expected_reply_type != EXPECTED_REPLY_TIME:
+        return None
+    if not isinstance(booking_state, dict):
+        return None
+    if _expected_reply_for_booking_question(booking_state.get("last_question")) != EXPECTED_REPLY_TIME:
+        return None
+    normalized_filled_slots = {
+        raw_slot.strip().casefold()
+        for raw_slot in (filled_slots or ())
+        if isinstance(raw_slot, str) and raw_slot.strip()
+    }
+    if "datetime" not in normalized_filled_slots:
+        return None
+    return {
+        "pending_question_act": "slot_constraint",
+        "pending_question_target": "time",
+        "pending_question_interaction": "slot_constraint",
+        "pending_question_owner": "question_contract",
+    }
+
+
+def _derive_timeout_active_name_time_availability_followup_slots(
+    *,
+    message_text: str | None,
+    client_slug: str | None,
+    expected_reply_type: str | None,
+    expected_reply_reason: str | None,
+    expected_reply_matched: bool | None,
+    expected_reply_blocked_by_info: bool,
+    booking_state: dict[str, Any] | None,
+) -> tuple[str, str] | None:
+    if expected_reply_type != EXPECTED_REPLY_NAME:
+        return None
+    if expected_reply_matched is True or not expected_reply_blocked_by_info:
+        return None
+    normalized_reason = (
+        expected_reply_reason.strip().casefold()
+        if isinstance(expected_reply_reason, str) and expected_reply_reason.strip()
+        else None
+    )
+    if normalized_reason not in {
+        "booking_prompt",
+        "booking_time_availability_followup",
+        "policy_core_timeout_owner_boundary",
+    }:
+        return None
+    if not isinstance(booking_state, dict):
+        return None
+    raw_last_question = booking_state.get("last_question")
+    normalized_last_question = (
+        raw_last_question.strip().casefold()
+        if isinstance(raw_last_question, str) and raw_last_question.strip()
+        else None
+    )
+    if normalized_last_question not in {None, "name"}:
+        return None
+    current_slot = (
+        booking_state.get("datetime")
+        if isinstance(booking_state.get("datetime"), str) and booking_state.get("datetime").strip()
+        else None
+    )
+    if not _is_datetime_grounded_for_prompt(current_slot, client_slug=client_slug):
+        return None
+    if not _is_question_like_message(message_text):
+        return None
+    alternate_slot = _extract_question_like_daypart_exact_time_fill(message_text)
+    if not alternate_slot:
+        alternate_slot = _extract_datetime(message_text or "", client_slug=client_slug)
+    if not isinstance(alternate_slot, str) or not alternate_slot.strip():
+        return None
+    return current_slot.strip(), alternate_slot.strip()
+
+
+def _is_question_like_message(message_text: str | None) -> bool:
+    from . import _legacy as legacy
+
+    if not isinstance(message_text, str) or not message_text.strip():
+        return False
+    if "?" in message_text:
+        return True
+    normalized_message = legacy._normalize_service_text(message_text)
+    tokens = normalized_message.split()
+    return bool(tokens) and any(tokens[0].startswith(prefix) for prefix in QUESTION_WORD_PREFIXES)
+
+
+def _format_specialist_followup_prompt(
+    *,
+    specialist_name: str | None,
+    base_prompt: str,
+    question_like: bool,
+) -> str:
+    prompt = (base_prompt or "").strip()
+    if not prompt or not question_like:
+        return prompt
+    if not isinstance(specialist_name, str) or not specialist_name.strip():
+        return prompt
+    specialist_token = specialist_name.strip()
+    return f"Понял, ориентир по специалисту — {specialist_token}. {prompt}"
+
+
+def _specialist_availability_followup_prompt(*, requested_slot: str | None) -> str:
+    slot_token = (
+        requested_slot.strip().casefold()
+        if isinstance(requested_slot, str) and requested_slot.strip()
+        else None
+    )
+    if slot_token == "name":
+        return MSG_BOOKING_ASK_NAME
+    return MSG_BOOKING_SPECIALIST_AVAILABILITY_FOLLOWUP
+
+
+def _build_specialist_availability_followup_response(
+    *,
+    service_query: str | None,
+    client_slug: str | None,
+    message_text: str | None,
+    requested_slot: str | None = None,
+) -> tuple[str, dict[str, Any] | None]:
+    prompt = _specialist_availability_followup_prompt(requested_slot=requested_slot)
+    normalized_service = (
+        service_query.strip()
+        if isinstance(service_query, str) and service_query.strip()
+        else None
+    )
+    if not normalized_service:
+        return prompt, None
+    info_reply, info_meta = _build_info_intent_reply(
+        "master",
+        service_query=normalized_service,
+        client_slug=client_slug,
+        message_text=message_text,
+    )
+    if not isinstance(info_reply, str) or not info_reply.strip():
+        return prompt, info_meta if isinstance(info_meta, dict) else None
+    return (
+        _combine_sidecar(info_reply.strip(), prompt),
+        info_meta if isinstance(info_meta, dict) else None,
+    )
+
+
+def _build_active_name_time_availability_followup_response(
+    *,
+    current_slot: str | None,
+    alternate_slot: str | None,
+) -> str:
+    prompt = MSG_BOOKING_ASK_NAME
+    current_token = (
+        current_slot.strip() if isinstance(current_slot, str) and current_slot.strip() else None
+    )
+    alternate_token = (
+        alternate_slot.strip()
+        if isinstance(alternate_slot, str) and alternate_slot.strip()
+        else None
+    )
+    if alternate_token and current_token and alternate_token != current_token:
+        return _combine_sidecar(
+            (
+                f"Сейчас в заявке отмечено {current_token}. "
+                f"Слот {alternate_token} не меняю автоматически: если хотите проверить "
+                "или выбрать его вместо текущего, скажите об этом отдельно."
+            ),
+            prompt,
+        )
+    if current_token and alternate_token == current_token:
+        return _combine_sidecar(
+            (
+                f"Сейчас в заявке отмечено {current_token}. "
+                "Если хотите оставить именно это время и продолжить запись, скажите об этом."
+            ),
+            prompt,
+        )
+    if current_token:
+        return _combine_sidecar(
+            (
+                f"Сейчас в заявке отмечено {current_token}. "
+                "Если хотите продолжить запись на это время, скажите об этом."
+            ),
+            prompt,
+        )
+    if alternate_token:
+        return _combine_sidecar(
+            (
+                f"Слот {alternate_token} не меняю автоматически: если хотите проверить "
+                "или выбрать его отдельно, скажите об этом."
+            ),
+            prompt,
+        )
+    return _combine_sidecar(
+        "Если хотите проверить другое время отдельно от текущей заявки, скажите об этом.",
+        prompt,
+    )
 
 
 def _apply_expected_reply_contract(
@@ -874,6 +1259,11 @@ def _apply_expected_reply_contract(
     expected_reply_matched: bool | None = None
     expected_reply_shortcircuit = False
     expected_reply_blocked_by_info = False
+    matched_expected_reply_type: str | None = None
+    matched_booking_followup_state: dict[str, Any] | None = None
+    matched_booking_followup_prompt: str | None = None
+    matched_booking_followup_expected: str | None = None
+    matched_booking_filled_slots: tuple[str, ...] = ()
     expected_reply_text = (
         legacy._select_expected_reply_message(
             batch_messages,
@@ -922,6 +1312,63 @@ def _apply_expected_reply_contract(
                     "expected_reply_type": None,
                     "expected_reply_matched": False,
                     "expected_reply_bypassed": "human_request",
+                    "session_memory_expected_reply_cleared": memory_cleared,
+                },
+            )
+        context = legacy._get_conversation_context(conversation)
+        context_manager = legacy._get_context_manager(context)
+        return ExpectedReplyState(
+            context=context,
+            context_manager=context_manager,
+            expected_reply_type=None,
+            intent_queue=legacy._get_intent_queue(context),
+            expected_reply_matched=False,
+            expected_reply_shortcircuit=False,
+            expected_reply_blocked_by_info=False,
+            memory_expected_reply_type=memory_expected_reply_type,
+            current_goal=current_goal,
+        )
+    booking_verification_bypass = bool(
+        expected_reply_type
+        in {
+            legacy.EXPECTED_REPLY_SERVICE,
+            legacy.EXPECTED_REPLY_TIME,
+            legacy.EXPECTED_REPLY_NAME,
+        }
+        and message_text
+        and _looks_like_booking_verification_request(message_text)
+    )
+    if booking_verification_bypass:
+        context = legacy._set_expected_reply_type(context, None)
+        context, memory_payload, memory_cleared = legacy._clear_session_memory_expected_reply(
+            context,
+            expected_reply_type=expected_reply_type,
+            now=now,
+        )
+        legacy._set_conversation_context(conversation, context)
+        legacy._record_decision_trace(
+            conversation,
+            {
+                "stage": "question_contract",
+                "decision": "bypass",
+                "expected_reply_type": expected_reply_type,
+                "expected_reply_bypassed": "booking_verification",
+            },
+        )
+        if memory_cleared:
+            legacy._record_session_memory_update(
+                conversation,
+                saved_message,
+                memory=memory_payload,
+                reason="expected_reply_bypass",
+            )
+        if saved_message:
+            legacy._update_message_decision_metadata(
+                saved_message,
+                {
+                    "expected_reply_type": None,
+                    "expected_reply_matched": False,
+                    "expected_reply_bypassed": "booking_verification",
                     "session_memory_expected_reply_cleared": memory_cleared,
                 },
             )
@@ -1252,6 +1699,10 @@ def _apply_expected_reply_contract(
         expected_reply_matched = matched
         if matched and not slot_confirmation_required:
             expected_reply_shortcircuit = True
+        if matched and not slot_confirmation_required and isinstance(expected_reply_type, str):
+            matched_expected_reply_type = expected_reply_type
+            if expected_slot_key:
+                matched_booking_filled_slots = (expected_slot_key,)
         if matched and not slot_confirmation_required and isinstance(value, str) and expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
             context = legacy._set_service_hint(context, value, now)
             legacy._set_conversation_context(conversation, context)
@@ -1366,6 +1817,41 @@ def _apply_expected_reply_contract(
             expected_reply_blocked_by_info = False
             if answer_meta.get("answer_error") == "blocked_by_info":
                 answer_meta["answer_error"] = "none"
+        pending_question_slot_constraint = bool(
+            matched
+            and expected_reply_type == legacy.EXPECTED_REPLY_TIME
+            and _is_time_slot_constraint_candidate(
+                message_text=message_text,
+                candidate_value=value if isinstance(value, str) and value.strip() else answer_value,
+                client_slug=client_slug,
+            )
+        )
+        if pending_question_slot_constraint:
+            current_expected_reply = legacy._get_expected_reply_type(
+                legacy._get_conversation_context(conversation)
+            )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "pending_question_interaction",
+                    "decision": "slot_constraint",
+                    "state": conversation.state,
+                    "source": "question_contract",
+                    "pending_question_act": "slot_constraint",
+                    "pending_question_target": "time",
+                    "expected_reply_type": current_expected_reply or expected_reply_type,
+                },
+            )
+            if saved_message:
+                legacy._update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_question_act": "slot_constraint",
+                        "pending_question_target": "time",
+                        "pending_question_interaction": "slot_constraint",
+                        "pending_question_owner": "question_contract",
+                    },
+                )
         trace_payload = {
             "stage": "question_contract",
             "decision": "matched" if matched else "missed",
@@ -1401,6 +1887,19 @@ def _apply_expected_reply_contract(
             if not answer_value_validated:
                 updates["expected_reply_value_validated"] = False
             legacy._update_message_decision_metadata(saved_message, updates)
+        if matched_expected_reply_type:
+            followup_context = legacy._get_conversation_context(conversation)
+            followup_booking_state = legacy._get_booking_context(followup_context)
+            (
+                matched_booking_followup_state,
+                matched_booking_followup_expected,
+                matched_booking_followup_prompt,
+            ) = _derive_booking_followup_contract(
+                expected_reply_type=matched_expected_reply_type,
+                booking_state=followup_booking_state,
+                merged_slots=None,
+                client_slug=client_slug,
+            )
         context = legacy._get_conversation_context(conversation)
         expected_reply_type = legacy._get_expected_reply_type(context)
         intent_queue = legacy._get_intent_queue(context)
@@ -1417,6 +1916,11 @@ def _apply_expected_reply_contract(
         expected_reply_blocked_by_info=expected_reply_blocked_by_info,
         memory_expected_reply_type=memory_expected_reply_type,
         current_goal=current_goal,
+        matched_expected_reply_type=matched_expected_reply_type,
+        matched_booking_followup_state=matched_booking_followup_state,
+        matched_booking_followup_prompt=matched_booking_followup_prompt,
+        matched_booking_followup_expected=matched_booking_followup_expected,
+        matched_booking_filled_slots=matched_booking_filled_slots,
     )
 
 
@@ -3645,6 +4149,10 @@ def _match_expected_reply_candidates(
     if matched:
         flags = list(inner_flags) if isinstance(inner_flags, list) else []
         return True, value, flags
+    if expected_reply_type == EXPECTED_REPLY_TIME:
+        exact_daypart_fill = _extract_question_like_daypart_exact_time_fill(message_text)
+        if exact_daypart_fill:
+            return True, exact_daypart_fill, ["question_like_daypart_exact_time"]
     transliterated = _transliterate_latin_to_cyrillic(message_text)
     if transliterated:
         matched, value, inner_flags = _match_expected_reply(
@@ -3684,6 +4192,67 @@ def _booking_prompt_for_expected_reply_type(expected_reply_type: str | None) -> 
     return None
 
 
+PENDING_QUESTION_ACT_VALUES = {
+    "fill_requested_slot",
+    "ask_about_requested_slot",
+    "slot_constraint",
+    "slot_compare",
+    "mixed_fill_plus_question",
+}
+PENDING_QUESTION_TARGET_VALUES = {
+    "time",
+    "specialist",
+}
+ACTIVE_QUESTION_RELATION_VALUES = {
+    "fill_requested_slot",
+    "ask_about_requested_slot",
+    "slot_constraint",
+    "slot_compare",
+    "mixed_fill_plus_question",
+    "referent_followup",
+    "generic_info_interrupt",
+    "specialist_availability_interrupt",
+    "specialist_availability_followup",
+    "tool_result_followup_specialist_missing",
+}
+
+
+def _normalize_pending_question_act(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    token = value.strip().casefold()
+    if token in PENDING_QUESTION_ACT_VALUES:
+        return token
+    return None
+
+
+def _normalize_pending_question_target(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    token = value.strip().casefold()
+    if token in PENDING_QUESTION_TARGET_VALUES:
+        return token
+    return None
+
+
+def _normalize_active_question_relation(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    token = value.strip().casefold()
+    if token in ACTIVE_QUESTION_RELATION_VALUES:
+        return token
+    return None
+
+
+def _is_time_pending_question_guidance_act(
+    pending_question_act: str | None,
+    pending_question_target: str | None,
+) -> bool:
+    if pending_question_act not in {"ask_about_requested_slot", "slot_compare"}:
+        return False
+    return pending_question_target in {None, "time"}
+
+
 def _expected_reply_type_for_slot_key(slot_key: str | None) -> str | None:
     if slot_key == "service":
         return EXPECTED_REPLY_SERVICE
@@ -3703,13 +4272,30 @@ def _derive_booking_followup_prompt(
     merged_slots: dict[str, str] | None,
     client_slug: str | None,
 ) -> tuple[str | None, str | None]:
+    followup_state, derived_expected, prompt = _derive_booking_followup_contract(
+        expected_reply_type=expected_reply_type,
+        booking_state=booking_state,
+        merged_slots=merged_slots,
+        client_slug=client_slug,
+    )
+    del followup_state
+    return derived_expected, prompt
+
+
+def _derive_booking_followup_contract(
+    *,
+    expected_reply_type: str | None,
+    booking_state: dict | None,
+    merged_slots: dict[str, str] | None,
+    client_slug: str | None,
+) -> tuple[dict[str, Any] | None, str | None, str | None]:
     if expected_reply_type not in {
         EXPECTED_REPLY_SERVICE,
         EXPECTED_REPLY_TIME,
         EXPECTED_REPLY_NAME,
         EXPECTED_REPLY_PHONE,
     }:
-        return None, None
+        return None, None, None
     followup_state = dict(booking_state) if isinstance(booking_state, dict) else {}
     if followup_state.get("active") is not True:
         followup_state["active"] = True
@@ -3734,8 +4320,61 @@ def _derive_booking_followup_prompt(
         EXPECTED_REPLY_NAME,
         EXPECTED_REPLY_PHONE,
     }:
-        return None, None
-    return derived_expected, (prompt or _booking_prompt_for_expected_reply_type(derived_expected))
+        return None, None, None
+    return (
+        followup_state,
+        derived_expected,
+        prompt or _booking_prompt_for_expected_reply_type(derived_expected),
+    )
+
+
+def _derive_timeout_completed_booking_state(
+    *,
+    matched_expected_reply_type: str | None,
+    booking_state: dict[str, Any] | None,
+    filled_slots: Any,
+    client_slug: str | None,
+) -> tuple[dict[str, Any] | None, tuple[str, ...]]:
+    if matched_expected_reply_type not in {
+        EXPECTED_REPLY_SERVICE,
+        EXPECTED_REPLY_TIME,
+        EXPECTED_REPLY_NAME,
+        EXPECTED_REPLY_PHONE,
+    }:
+        return None, ()
+    if not isinstance(booking_state, dict):
+        return None, ()
+    normalized_filled_slots = tuple(
+        slot_key.strip()
+        for slot_key in (filled_slots or ())
+        if isinstance(slot_key, str) and slot_key.strip()
+    )
+    if not normalized_filled_slots:
+        return None, ()
+    completed_booking_state = dict(booking_state)
+    if completed_booking_state.get("active") is not True:
+        completed_booking_state["active"] = True
+    if _booking_has_reference(completed_booking_state):
+        return None, ()
+    if not _plan_has_complete_booking_slots(
+        completed_booking_state,
+        client_slug=client_slug,
+    ):
+        return None, ()
+    return completed_booking_state, normalized_filled_slots
+
+
+def _timeout_booking_completion_override(action: str | None) -> tuple[str, str]:
+    normalized_action = (
+        action.strip().casefold() if isinstance(action, str) and action.strip() else ""
+    )
+    if normalized_action in {"escalate", "handoff", "pending_escalation"}:
+        return "escalate", "handoff"
+    if normalized_action in {"booking_confirm", "booking_prompt", "check_booking_prompt"}:
+        return normalized_action, "collect"
+    if normalized_action == "reply":
+        return "reply", "reply"
+    return "booking_prompt", "collect"
 
 
 def _validate_expected_reply_value(
@@ -4117,6 +4756,188 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
     return has_time_token
 
 
+def _count_pending_time_question_markers(normalized_message: str | None) -> int:
+    if not isinstance(normalized_message, str) or not normalized_message.strip():
+        return 0
+    markers = get_booking_text_tokens("pending_time_question_markers")
+    if not markers:
+        return 0
+    normalized = normalized_message.strip()
+    return sum(1 for marker in markers if marker and marker in normalized)
+
+
+def _has_timeout_slot_question_info_lock_surface(
+    *,
+    message_text: str | None,
+    client_slug: str | None,
+) -> bool:
+    if not isinstance(message_text, str) or not message_text.strip():
+        return False
+    if not _is_question_like_message(message_text):
+        return False
+    normalized_message = normalize_for_matching(message_text)
+    if not normalized_message:
+        return False
+    if _count_pending_time_question_markers(normalized_message) < 2:
+        return False
+    if _validate_expected_reply_value(
+        expected_reply_type=EXPECTED_REPLY_TIME,
+        value=message_text,
+        client_slug=client_slug,
+    ):
+        return False
+    return True
+
+
+def _is_timeout_pending_time_slot_question(
+    *,
+    message_text: str | None,
+    client_slug: str | None,
+    expected_reply_type: str | None,
+    expected_reply_matched: bool | None,
+    expected_reply_blocked_by_info: bool,
+    booking_service: str | None,
+    intent_decomp_payload: dict[str, Any] | None,
+    now: datetime,
+) -> bool:
+    if (
+        expected_reply_type != EXPECTED_REPLY_TIME
+        or not isinstance(message_text, str)
+        or not message_text.strip()
+        or expected_reply_matched is True
+        or not expected_reply_blocked_by_info
+    ):
+        return False
+    normalized_message = normalize_for_matching(message_text)
+    if not normalized_message:
+        return False
+    time_preference_statement = _looks_like_time_preference_statement(
+        message_text,
+        normalized_text=normalized_message,
+    )
+    question_like = "?" in message_text
+    if not question_like:
+        tokens = normalized_message.split()
+        if tokens:
+            question_like = any(tokens[0].startswith(prefix) for prefix in QUESTION_WORD_PREFIXES)
+    if not question_like and not time_preference_statement:
+        return False
+    time_only_request = _looks_like_time_only_request(message_text)
+    # Keep the first-time requested-slot row alive when the question is phrased
+    # as "в какое время..." and still carries pending-slot markers.
+    if time_only_request and not _has_pending_time_question_marker(normalized_message):
+        return False
+    if _validate_expected_reply_value(
+        expected_reply_type=expected_reply_type,
+        value=message_text,
+        client_slug=client_slug,
+    ):
+        return False
+    normalized_service_message = _normalize_service_text(message_text)
+    if _has_price_signal(normalized_service_message, message_text):
+        return False
+    if (
+        _has_duration_signal(normalized_service_message, message_text)
+        and not time_preference_statement
+    ):
+        return False
+    if _has_explicit_location_or_hours_request(
+        message_text,
+        client_slug=client_slug,
+        strict=True,
+    ):
+        return False
+    if _is_style_reference_request(message_text, has_media=False):
+        return False
+    if _looks_like_booking_verification_request(message_text):
+        return False
+    if _looks_like_booking_reschedule_request(
+        message_text,
+        client_slug=client_slug,
+    ):
+        return False
+    try:
+        if _extract_datetime(
+            message_text,
+            client_slug=client_slug,
+            relative_base=now,
+        ):
+            return False
+    except TypeError:
+        if _extract_datetime(message_text, client_slug=client_slug):
+            return False
+    master_resolution = resolve_master_intent(
+        message_text=message_text,
+        client_slug=client_slug,
+        service_query=booking_service,
+        intent_decomp=intent_decomp_payload,
+    )
+    if master_resolution.explicit:
+        return False
+    return bool(
+        time_preference_statement
+        or
+        _has_daypart_stem(normalized_message)
+        or _has_pending_time_question_marker(normalized_message)
+    )
+
+
+def _is_timeout_master_info_interrupt_candidate(
+    *,
+    message_text: str | None,
+    client_slug: str | None,
+    expected_reply_type: str | None,
+    expected_reply_matched: bool | None,
+    expected_reply_blocked_by_info: bool,
+    booking_service: str | None,
+    intent_decomp_payload: dict[str, Any] | None,
+) -> bool:
+    if (
+        expected_reply_type != EXPECTED_REPLY_NAME
+        or not isinstance(message_text, str)
+        or not message_text.strip()
+        or expected_reply_matched is True
+        or not expected_reply_blocked_by_info
+    ):
+        return False
+    master_resolution = resolve_master_intent(
+        message_text=message_text,
+        client_slug=client_slug,
+        service_query=booking_service,
+        intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
+        force_master_intent=False,
+    )
+    return bool(master_resolution.explicit)
+
+
+def _is_timeout_active_time_specialist_interrupt_candidate(
+    *,
+    message_text: str | None,
+    client_slug: str | None,
+    expected_reply_type: str | None,
+    expected_reply_matched: bool | None,
+    expected_reply_blocked_by_info: bool,
+    booking_service: str | None,
+    intent_decomp_payload: dict[str, Any] | None,
+) -> bool:
+    if (
+        expected_reply_type != EXPECTED_REPLY_TIME
+        or not isinstance(message_text, str)
+        or not message_text.strip()
+        or expected_reply_matched is True
+        or not expected_reply_blocked_by_info
+    ):
+        return False
+    master_resolution = resolve_master_intent(
+        message_text=message_text,
+        client_slug=client_slug,
+        service_query=booking_service,
+        intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
+        force_master_intent=False,
+    )
+    return bool(master_resolution.explicit)
+
+
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration", "location", "parking", "master"}
 TOOL_INFO_SECTION_MAP = {
     "catalog.location": ["location"],
@@ -4163,6 +4984,7 @@ POLICY_OVERRIDE_REASON_CODES = {
 POLICY_OVERRIDE_REASON_DEFAULT = "contract_validation_failure"
 SEMANTIC_ARBITER_CONTRACT_VERSION = "v1"
 POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT = "policy_timeout_degrade"
+POLICY_TIMEOUT_PENDING_SLOT_QUESTION_INTENT = "policy_timeout_pending_slot_question"
 POLICY_TIMEOUT_DEGRADE_MAX_RETRIES = max(
     int(os.environ.get("POLICY_TIMEOUT_DEGRADE_MAX_RETRIES", "1")),
     0,
@@ -4693,6 +5515,9 @@ def _build_semantic_arbiter_contract(
     capability: str | None,
     temporal_scope: str | None,
     resolution_mode: str | None,
+    pending_question_act: str | None,
+    pending_question_target: str | None,
+    active_question_relation: str | None,
     resolver_id: str | None,
     resolver_version: str | None,
     override_reason_codes: list[str] | None,
@@ -4730,6 +5555,21 @@ def _build_semantic_arbiter_contract(
         if isinstance(resolution_mode, str) and resolution_mode.strip()
         else None
     )
+    pending_question_act_token = (
+        pending_question_act.strip().casefold()
+        if isinstance(pending_question_act, str) and pending_question_act.strip()
+        else None
+    )
+    pending_question_target_token = (
+        pending_question_target.strip().casefold()
+        if isinstance(pending_question_target, str) and pending_question_target.strip()
+        else None
+    )
+    active_question_relation_token = (
+        active_question_relation.strip().casefold()
+        if isinstance(active_question_relation, str) and active_question_relation.strip()
+        else None
+    )
     return {
         "intent_class": intent or None,
         "action_class": action or None,
@@ -4740,6 +5580,9 @@ def _build_semantic_arbiter_contract(
         "capability": capability_token,
         "temporal_scope": temporal_scope_token,
         "resolution_mode": resolution_mode_token,
+        "pending_question_act": pending_question_act_token,
+        "pending_question_target": pending_question_target_token,
+        "active_question_relation": active_question_relation_token,
         "slot_candidates": _normalize_semantic_slots(slots),
         "confidence": confidence_value,
         "abstain_reason": reason or None,
@@ -5128,8 +5971,16 @@ def _resolve_policy_collect_interrupt_arbitration(
     *,
     policy_tool_action: str | None,
     policy_intent: str | None,
+    policy_subject_kind: str | None = None,
     policy_capability: str | None = None,
     policy_pack_refs: list[str] | None,
+    policy_tool_args: dict[str, Any] | None = None,
+    policy_entity_refs: list[dict[str, Any]] | None = None,
+    policy_pending_question_act: str | None = None,
+    policy_pending_question_target: str | None = None,
+    policy_temporal_scope: str | None = None,
+    policy_resolution_mode: str | None = None,
+    policy_active_question_relation: str | None = None,
     message_text: str | None,
     client_slug: str | None,
     service_query: str | None = None,
@@ -5137,6 +5988,8 @@ def _resolve_policy_collect_interrupt_arbitration(
     booking_wants_flow: bool,
     booking_active: bool,
     policy_goal: str | None,
+    expected_reply_type: str | None = None,
+    expected_reply_matched: bool | None = None,
 ) -> tuple[str | None, list[str], str | None]:
     normalized_tool_action = (
         policy_tool_action.strip().casefold()
@@ -5152,6 +6005,42 @@ def _resolve_policy_collect_interrupt_arbitration(
         )
     )
     if not booking_scope or normalized_tool_action != "collect":
+        return policy_tool_action, [], None
+    if bool(expected_reply_matched):
+        # Preserve active collect ownership whenever question_contract already
+        # matched on this turn. The local expected_reply_type may already be
+        # cleared after shortcircuit, so the matched signal is the stable
+        # contract boundary here.
+        return policy_tool_action, [], None
+    if _should_preserve_specialist_availability_followup_owner(
+        policy_goal=policy_goal,
+        policy_collect_slot=None,
+        policy_pending_question_target=policy_pending_question_target,
+        policy_subject_kind=policy_subject_kind,
+        policy_capability=policy_capability,
+        policy_temporal_scope=policy_temporal_scope,
+        policy_active_question_relation=policy_active_question_relation,
+    ):
+        return policy_tool_action, [], None
+    specialist_name, specialist_id = _extract_semantic_specialist_preference(
+        tool_args=policy_tool_args,
+        entity_refs=policy_entity_refs,
+    )
+    if _should_preserve_specialist_followup_owner(
+        policy_goal=policy_goal,
+        policy_collect_slot=None,
+        policy_pending_question_target=policy_pending_question_target,
+        policy_subject_kind=policy_subject_kind,
+        policy_capability=policy_capability,
+        policy_resolution_mode=policy_resolution_mode,
+        policy_active_question_relation=policy_active_question_relation,
+        expected_reply_type=expected_reply_type,
+        specialist_name=specialist_name,
+        specialist_id=specialist_id,
+    ):
+        # Named specialist follow-ups are booking-state operations.
+        # Keep them in collect ownership and let the dedicated specialist
+        # follow-up owner resume the active pending question.
         return policy_tool_action, [], None
 
     effective_service_query = service_query
@@ -5175,9 +6064,101 @@ def _resolve_policy_collect_interrupt_arbitration(
         if ref in INFO_INTENTS and ref not in info_refs:
             info_refs.append(ref)
 
+    preserve_active_time_slot_question = _should_preserve_active_time_slot_question_owner(
+        policy_goal=policy_goal,
+        policy_pending_question_act=policy_pending_question_act,
+        policy_pending_question_target=policy_pending_question_target,
+        policy_active_question_relation=policy_active_question_relation,
+    )
+    if preserve_active_time_slot_question and not _should_admit_active_time_duration_info_interrupt(
+        policy_goal=policy_goal,
+        policy_capability=policy_capability,
+        policy_pending_question_act=policy_pending_question_act,
+        policy_pending_question_target=policy_pending_question_target,
+        policy_active_question_relation=policy_active_question_relation,
+        message_text=message_text,
+        info_refs=info_refs,
+    ):
+        return policy_tool_action, [], None
     if not info_refs:
         return policy_tool_action, [], None
     return "info", info_refs, "policy_collect_info_interrupt_owner"
+
+
+def _resolve_active_time_collect_service_info_interrupt_query(
+    *,
+    policy_tool_action: str | None,
+    policy_collect_slot: str | None,
+    policy_intent: str | None,
+    policy_subject_kind: str | None,
+    policy_resolution_mode: str | None,
+    message_text: str | None,
+    client_slug: str | None,
+    service_query: str | None,
+    booking_state: dict[str, Any] | None,
+    booking_wants_flow: bool,
+    booking_active: bool,
+    policy_goal: str | None,
+    expected_reply_type: str | None,
+    expected_reply_matched: bool | None,
+) -> str | None:
+    def _clean(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    normalized_tool_action = (
+        policy_tool_action.strip().casefold()
+        if isinstance(policy_tool_action, str) and policy_tool_action.strip()
+        else None
+    )
+    if normalized_tool_action != "collect":
+        return None
+    normalized_collect_slot = (
+        policy_collect_slot.strip().casefold()
+        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
+        else None
+    )
+    if normalized_collect_slot not in {None, "service"}:
+        return None
+    booking_scope = bool(
+        booking_wants_flow
+        or booking_active
+        or (
+            isinstance(policy_goal, str)
+            and policy_goal.strip().casefold() == "booking"
+        )
+    )
+    if not booking_scope or bool(expected_reply_matched):
+        return None
+    if _normalize_semantic_followup_token(expected_reply_type) != _normalize_semantic_followup_token(
+        EXPECTED_REPLY_TIME
+    ):
+        return None
+    if _normalize_semantic_followup_token(policy_intent) != "info":
+        return None
+    if _normalize_semantic_followup_token(policy_subject_kind) != "service":
+        return None
+    if _normalize_semantic_followup_token(policy_resolution_mode) != "clarify_missing_subject":
+        return None
+
+    effective_service_query = _clean(service_query)
+    if not effective_service_query and isinstance(booking_state, dict):
+        effective_service_query = _clean(booking_state.get("service"))
+    if not effective_service_query:
+        return None
+
+    try:
+        from app.services.info_signal_service import looks_like_services_overview_message
+    except Exception:
+        looks_like_services_overview_message = None
+    if not looks_like_services_overview_message:
+        return None
+    if not looks_like_services_overview_message(message_text, client_slug=client_slug):
+        return None
+
+    return effective_service_query
 
 
 def _derive_service_clarify_info_sections(*sources: Any) -> list[str]:
@@ -5371,6 +6352,796 @@ def _normalize_specialist_tool_args(tool_args: dict[str, Any] | None) -> None:
     # LLM can place master name into specialist_id; preserve semantics by moving it to specialist_name.
     tool_args["specialist_name"] = specialist_token
     tool_args.pop("specialist_id", None)
+
+
+def _decode_semantic_specialist_entity_id(entity_id: Any) -> tuple[str | None, str | None]:
+    if not isinstance(entity_id, str) or not entity_id.strip():
+        return None, None
+    token = entity_id.strip()
+    prefix, separator, raw_value = token.partition(":")
+    if separator and prefix.strip().casefold() in {"master", "specialist"}:
+        token = raw_value.strip()
+    specialist_uuid = _coerce_uuid(token)
+    if specialist_uuid:
+        return None, str(specialist_uuid)
+    if token:
+        return token, None
+    return None, None
+
+
+def _extract_semantic_specialist_preference(
+    *,
+    tool_args: dict[str, Any] | None,
+    entity_refs: list[dict[str, Any]] | None,
+) -> tuple[str | None, str | None]:
+    specialist_name = None
+    specialist_id = None
+    if isinstance(tool_args, dict):
+        raw_name = tool_args.get("specialist_name")
+        if isinstance(raw_name, str) and raw_name.strip():
+            specialist_name = raw_name.strip()
+        raw_id = tool_args.get("specialist_id")
+        if isinstance(raw_id, str) and raw_id.strip():
+            normalized_uuid = _coerce_uuid(raw_id.strip())
+            if normalized_uuid:
+                specialist_id = str(normalized_uuid)
+            elif specialist_name is None:
+                specialist_name = raw_id.strip()
+    if specialist_name is not None or specialist_id is not None:
+        return specialist_name, specialist_id
+    if not isinstance(entity_refs, list):
+        return None, None
+    for ref in entity_refs:
+        if not isinstance(ref, dict):
+            continue
+        entity_type = ref.get("entity_type")
+        if not isinstance(entity_type, str) or entity_type.strip().casefold() not in {
+            "specialist",
+            "master",
+        }:
+            continue
+        candidate_name, candidate_id = _decode_semantic_specialist_entity_id(ref.get("entity_id"))
+        if candidate_name is None and candidate_id is None:
+            continue
+        return candidate_name, candidate_id
+    return None, None
+
+
+def _should_preserve_specialist_followup_owner(
+    *,
+    policy_goal: str | None,
+    policy_collect_slot: str | None,
+    policy_pending_question_target: str | None,
+    policy_subject_kind: str | None,
+    policy_capability: str | None,
+    policy_resolution_mode: str | None,
+    policy_active_question_relation: str | None,
+    expected_reply_type: str | None,
+    specialist_name: str | None,
+    specialist_id: str | None,
+) -> bool:
+    normalized_goal = (
+        policy_goal.strip().casefold()
+        if isinstance(policy_goal, str) and policy_goal.strip()
+        else None
+    )
+    normalized_target = (
+        policy_pending_question_target.strip().casefold()
+        if isinstance(policy_pending_question_target, str) and policy_pending_question_target.strip()
+        else None
+    )
+    normalized_subject = (
+        policy_subject_kind.strip().casefold()
+        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
+        else None
+    )
+    normalized_capability = (
+        policy_capability.strip().casefold()
+        if isinstance(policy_capability, str) and policy_capability.strip()
+        else None
+    )
+    normalized_collect_slot = (
+        policy_collect_slot.strip().casefold()
+        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
+        else None
+    )
+    if normalized_goal != "booking":
+        return False
+    relation_token = _normalize_active_question_relation(policy_active_question_relation)
+    if relation_token not in {None, "referent_followup"}:
+        return False
+    if normalized_target == "specialist":
+        if specialist_name or specialist_id:
+            return True
+        if normalized_collect_slot not in {None, "datetime"}:
+            return False
+        if expected_reply_type != EXPECTED_REPLY_TIME:
+            return False
+        return _normalize_semantic_followup_token(policy_resolution_mode) == "referent_followup"
+    if normalized_target is not None:
+        return False
+    if normalized_collect_slot not in {None, "datetime"}:
+        return False
+    if expected_reply_type != EXPECTED_REPLY_TIME:
+        return False
+    if normalized_subject != "specialist" or normalized_capability != "bookability":
+        return False
+    return bool(specialist_name or specialist_id)
+
+
+def _should_preserve_generic_specialist_choice_followup_owner(
+    *,
+    policy_goal: str | None,
+    policy_collect_slot: str | None,
+    policy_pending_question_target: str | None,
+    policy_subject_kind: str | None,
+    policy_capability: str | None,
+    policy_resolution_mode: str | None,
+    policy_active_question_relation: str | None,
+    expected_reply_type: str | None,
+    specialist_name: str | None,
+    specialist_id: str | None,
+    message_text: str | None,
+    client_slug: str | None,
+    service_query: str | None,
+) -> bool:
+    normalized_goal = (
+        policy_goal.strip().casefold()
+        if isinstance(policy_goal, str) and policy_goal.strip()
+        else None
+    )
+    normalized_collect_slot = (
+        policy_collect_slot.strip().casefold()
+        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
+        else None
+    )
+    normalized_target = _normalize_pending_question_target(policy_pending_question_target)
+    normalized_subject = (
+        policy_subject_kind.strip().casefold()
+        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
+        else None
+    )
+    normalized_capability = (
+        policy_capability.strip().casefold()
+        if isinstance(policy_capability, str) and policy_capability.strip()
+        else None
+    )
+    relation_token = _normalize_active_question_relation(policy_active_question_relation)
+    if normalized_goal != "booking":
+        return False
+    if expected_reply_type != EXPECTED_REPLY_TIME:
+        return False
+    if normalized_collect_slot != "name":
+        return False
+    if normalized_target not in {None, "specialist"}:
+        return False
+    if normalized_subject != "specialist" or normalized_capability != "bookability":
+        return False
+    if _normalize_semantic_followup_token(policy_resolution_mode) != "referent_followup":
+        return False
+    if relation_token not in {None, "referent_followup"}:
+        return False
+    if specialist_name or specialist_id:
+        return False
+    master_resolution = resolve_master_intent(
+        message_text=message_text,
+        client_slug=client_slug,
+        service_query=service_query,
+        intent_decomp=None,
+        force_master_intent=False,
+    )
+    if master_resolution.explicit:
+        choice_signals = {
+            _normalize_text(signal)
+            for signal in (master_resolution.matched_signals or [])
+            if isinstance(signal, str) and signal.strip()
+        }
+        if not (choice_signals & {"выбрать", "подобрать"}):
+            return False
+    return _is_question_like_message(message_text)
+
+
+def _should_interrupt_generic_master_info_specialist_followup(
+    *,
+    policy_goal: str | None,
+    policy_collect_slot: str | None,
+    policy_pending_question_target: str | None,
+    policy_subject_kind: str | None,
+    policy_capability: str | None,
+    policy_resolution_mode: str | None,
+    policy_active_question_relation: str | None,
+    expected_reply_type: str | None,
+    specialist_name: str | None,
+    specialist_id: str | None,
+    message_text: str | None,
+    client_slug: str | None,
+    service_query: str | None,
+) -> bool:
+    normalized_goal = (
+        policy_goal.strip().casefold()
+        if isinstance(policy_goal, str) and policy_goal.strip()
+        else None
+    )
+    normalized_collect_slot = (
+        policy_collect_slot.strip().casefold()
+        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
+        else None
+    )
+    normalized_target = _normalize_pending_question_target(policy_pending_question_target)
+    normalized_subject = (
+        policy_subject_kind.strip().casefold()
+        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
+        else None
+    )
+    normalized_capability = (
+        policy_capability.strip().casefold()
+        if isinstance(policy_capability, str) and policy_capability.strip()
+        else None
+    )
+    relation_token = _normalize_active_question_relation(policy_active_question_relation)
+    if normalized_goal != "booking":
+        return False
+    if expected_reply_type != EXPECTED_REPLY_TIME:
+        return False
+    if normalized_collect_slot != "datetime":
+        return False
+    if normalized_target != "specialist":
+        return False
+    if normalized_subject != "specialist" or normalized_capability != "bookability":
+        return False
+    if _normalize_semantic_followup_token(policy_resolution_mode) != "referent_followup":
+        return False
+    if relation_token not in {None, "referent_followup"}:
+        return False
+    if specialist_name or specialist_id:
+        return False
+    if not _is_question_like_message(message_text):
+        return False
+    master_resolution = resolve_master_intent(
+        message_text=message_text,
+        client_slug=client_slug,
+        service_query=service_query,
+        intent_decomp=None,
+        force_master_intent=False,
+    )
+    if not master_resolution.explicit:
+        return False
+    if master_resolution.reason in {"named_question_signal", "person_named_question_signal"}:
+        return False
+    # Generic choose-specialist questions still need a factual master interrupt
+    # answer before the active time collect resumes.
+    return True
+
+
+def _should_recover_active_name_specialist_followup(
+    *,
+    policy_goal: str | None,
+    policy_tool_action: str | None,
+    policy_collect_slot: str | None,
+    policy_subject_kind: str | None,
+    policy_capability: str | None,
+    expected_reply_type: str | None,
+    specialist_name: str | None,
+    specialist_id: str | None,
+    customer_name_candidate: str | None,
+    explicit_customer_name_provided: bool,
+) -> bool:
+    normalized_goal = (
+        policy_goal.strip().casefold()
+        if isinstance(policy_goal, str) and policy_goal.strip()
+        else None
+    )
+    normalized_tool_action = (
+        policy_tool_action.strip().casefold()
+        if isinstance(policy_tool_action, str) and policy_tool_action.strip()
+        else None
+    )
+    normalized_collect_slot = (
+        policy_collect_slot.strip().casefold()
+        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
+        else None
+    )
+    normalized_subject = (
+        policy_subject_kind.strip().casefold()
+        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
+        else None
+    )
+    normalized_capability = (
+        policy_capability.strip().casefold()
+        if isinstance(policy_capability, str) and policy_capability.strip()
+        else None
+    )
+    if normalized_goal != "booking":
+        return False
+    if expected_reply_type != EXPECTED_REPLY_NAME:
+        return False
+    if normalized_tool_action != "calendar.book_slot":
+        return False
+    if normalized_collect_slot not in {None, "name"}:
+        return False
+    if normalized_subject != "specialist" or normalized_capability != "bookability":
+        return False
+    if not (specialist_name or specialist_id):
+        return False
+    if explicit_customer_name_provided:
+        return False
+    normalized_customer_name = (
+        normalize_for_matching(customer_name_candidate)
+        if isinstance(customer_name_candidate, str) and customer_name_candidate.strip()
+        else None
+    )
+    specialist_name_token = specialist_name or specialist_id
+    normalized_specialist_name = (
+        normalize_for_matching(specialist_name_token)
+        if isinstance(specialist_name_token, str) and specialist_name_token.strip()
+        else None
+    )
+    if normalized_customer_name and normalized_specialist_name:
+        return normalized_customer_name == normalized_specialist_name
+    return normalized_customer_name is None
+
+
+def _should_preserve_specialist_availability_followup_owner(
+    *,
+    policy_goal: str | None,
+    policy_collect_slot: str | None,
+    policy_pending_question_target: str | None,
+    policy_subject_kind: str | None,
+    policy_capability: str | None,
+    policy_temporal_scope: str | None,
+    policy_active_question_relation: str | None,
+) -> bool:
+    normalized_goal = (
+        policy_goal.strip().casefold()
+        if isinstance(policy_goal, str) and policy_goal.strip()
+        else None
+    )
+    normalized_collect_slot = (
+        policy_collect_slot.strip().casefold()
+        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
+        else None
+    )
+    normalized_target = (
+        policy_pending_question_target.strip().casefold()
+        if isinstance(policy_pending_question_target, str) and policy_pending_question_target.strip()
+        else None
+    )
+    normalized_subject = (
+        policy_subject_kind.strip().casefold()
+        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
+        else None
+    )
+    normalized_capability = (
+        policy_capability.strip().casefold()
+        if isinstance(policy_capability, str) and policy_capability.strip()
+        else None
+    )
+    normalized_temporal_scope = (
+        policy_temporal_scope.strip().casefold()
+        if isinstance(policy_temporal_scope, str) and policy_temporal_scope.strip()
+        else None
+    )
+    relation_token = _normalize_active_question_relation(policy_active_question_relation)
+    if normalized_goal != "booking":
+        return False
+    if normalized_collect_slot == "name":
+        if normalized_temporal_scope not in {"specific_time", "day", "weekday", "weekend"}:
+            return False
+    elif normalized_collect_slot not in {None, "datetime"}:
+        return False
+    if normalized_target != "specialist":
+        return False
+    if normalized_subject not in {None, "specialist"}:
+        return False
+    if normalized_capability not in {None, "live_availability", "bookability"}:
+        return False
+    if normalized_temporal_scope not in {
+        "specific_time",
+        "day",
+        "weekday",
+        "weekend",
+        "date_range",
+    }:
+        return False
+    return relation_token == "specialist_availability_followup"
+
+
+def _should_preserve_service_choice_specialist_availability_followup_owner(
+    *,
+    policy_goal: str | None,
+    policy_collect_slot: str | None,
+    expected_reply_type: str | None,
+    policy_resolution_mode: str | None,
+    policy_pending_question_act: str | None,
+    policy_pending_question_target: str | None,
+    policy_subject_kind: str | None,
+    policy_capability: str | None,
+    policy_temporal_scope: str | None,
+    policy_active_question_relation: str | None,
+) -> bool:
+    normalized_goal = (
+        policy_goal.strip().casefold()
+        if isinstance(policy_goal, str) and policy_goal.strip()
+        else None
+    )
+    normalized_collect_slot = (
+        policy_collect_slot.strip().casefold()
+        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
+        else None
+    )
+    normalized_subject = (
+        policy_subject_kind.strip().casefold()
+        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
+        else None
+    )
+    normalized_capability = (
+        policy_capability.strip().casefold()
+        if isinstance(policy_capability, str) and policy_capability.strip()
+        else None
+    )
+    normalized_resolution_mode = (
+        policy_resolution_mode.strip().casefold()
+        if isinstance(policy_resolution_mode, str) and policy_resolution_mode.strip()
+        else None
+    )
+    normalized_temporal_scope = (
+        policy_temporal_scope.strip().casefold()
+        if isinstance(policy_temporal_scope, str) and policy_temporal_scope.strip()
+        else None
+    )
+    pending_question_act = _normalize_pending_question_act(policy_pending_question_act)
+    pending_question_target = _normalize_pending_question_target(policy_pending_question_target)
+    relation_token = _normalize_active_question_relation(policy_active_question_relation)
+    if normalized_goal != "info":
+        return False
+    if normalized_collect_slot != "datetime":
+        return False
+    if expected_reply_type != EXPECTED_REPLY_SERVICE:
+        return False
+    if pending_question_act != "ask_about_requested_slot":
+        return False
+    if pending_question_target != "specialist":
+        return False
+    if normalized_subject not in {None, "specialist"}:
+        return False
+    if normalized_capability != "live_availability":
+        return False
+    if normalized_temporal_scope not in {"specific_time", "day", "weekday", "weekend"}:
+        return False
+    if relation_token not in {None, "ask_about_requested_slot"}:
+        return False
+    return normalized_resolution_mode == "clarify_missing_time"
+
+
+def _should_preserve_active_name_time_availability_followup_owner(
+    *,
+    policy_goal: str | None,
+    policy_collect_slot: str | None,
+    expected_reply_type: str | None,
+    policy_resolution_mode: str | None,
+    policy_pending_question_act: str | None,
+    policy_pending_question_target: str | None,
+    policy_subject_kind: str | None,
+    policy_capability: str | None,
+    policy_temporal_scope: str | None,
+    policy_active_question_relation: str | None,
+) -> bool:
+    normalized_goal = (
+        policy_goal.strip().casefold()
+        if isinstance(policy_goal, str) and policy_goal.strip()
+        else None
+    )
+    normalized_collect_slot = (
+        policy_collect_slot.strip().casefold()
+        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
+        else None
+    )
+    normalized_subject = (
+        policy_subject_kind.strip().casefold()
+        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
+        else None
+    )
+    normalized_capability = (
+        policy_capability.strip().casefold()
+        if isinstance(policy_capability, str) and policy_capability.strip()
+        else None
+    )
+    normalized_resolution_mode = (
+        policy_resolution_mode.strip().casefold()
+        if isinstance(policy_resolution_mode, str) and policy_resolution_mode.strip()
+        else None
+    )
+    normalized_temporal_scope = (
+        policy_temporal_scope.strip().casefold()
+        if isinstance(policy_temporal_scope, str) and policy_temporal_scope.strip()
+        else None
+    )
+    pending_question_act = _normalize_pending_question_act(policy_pending_question_act)
+    pending_question_target = _normalize_pending_question_target(policy_pending_question_target)
+    relation_token = _normalize_active_question_relation(policy_active_question_relation)
+    if normalized_goal != "booking" or normalized_collect_slot != "name":
+        return False
+    if expected_reply_type != EXPECTED_REPLY_NAME:
+        return False
+    if normalized_subject not in {None, "time", "booking"}:
+        return False
+    if normalized_capability not in {None, "live_availability", "bookability"}:
+        return False
+    if normalized_temporal_scope != "specific_time":
+        return False
+    if pending_question_act == "ask_about_requested_slot" and pending_question_target == "time":
+        return relation_token in {None, "ask_about_requested_slot"}
+    if pending_question_act is not None or pending_question_target is not None:
+        return False
+    if relation_token not in {None, "ask_about_requested_slot"}:
+        return False
+    return normalized_resolution_mode == "referent_followup"
+
+
+def _should_preserve_active_time_slot_question_owner(
+    *,
+    policy_goal: str | None,
+    policy_pending_question_act: str | None,
+    policy_pending_question_target: str | None,
+    policy_active_question_relation: str | None,
+) -> bool:
+    normalized_goal = (
+        policy_goal.strip().casefold()
+        if isinstance(policy_goal, str) and policy_goal.strip()
+        else None
+    )
+    if normalized_goal != "booking":
+        return False
+    pending_question_target = _normalize_pending_question_target(policy_pending_question_target)
+    if pending_question_target != "time":
+        return False
+    pending_question_act = _normalize_pending_question_act(policy_pending_question_act)
+    if pending_question_act not in {None, "ask_about_requested_slot", "slot_constraint", "slot_compare"}:
+        return False
+    relation_token = _normalize_active_question_relation(policy_active_question_relation)
+    return relation_token in {"ask_about_requested_slot", "slot_constraint", "slot_compare"}
+
+
+def _should_admit_active_time_duration_info_interrupt(
+    *,
+    policy_goal: str | None,
+    policy_capability: str | None,
+    policy_pending_question_act: str | None,
+    policy_pending_question_target: str | None,
+    policy_active_question_relation: str | None,
+    message_text: str | None,
+    info_refs: list[str] | None,
+) -> bool:
+    if not _should_preserve_active_time_slot_question_owner(
+        policy_goal=policy_goal,
+        policy_pending_question_act=policy_pending_question_act,
+        policy_pending_question_target=policy_pending_question_target,
+        policy_active_question_relation=policy_active_question_relation,
+    ):
+        return False
+    normalized_info_refs = {
+        ref.strip().casefold()
+        for ref in info_refs or []
+        if isinstance(ref, str) and ref.strip()
+    }
+    if "duration" not in normalized_info_refs:
+        return False
+    normalized_capability = (
+        policy_capability.strip().casefold()
+        if isinstance(policy_capability, str) and policy_capability.strip()
+        else None
+    )
+    if normalized_capability != "duration":
+        if not isinstance(message_text, str) or not message_text.strip():
+            return False
+        normalized_service_message = _normalize_service_text(message_text)
+        if not _has_duration_signal(normalized_service_message, message_text):
+            return False
+    normalized_message = (
+        normalize_for_matching(message_text)
+        if isinstance(message_text, str) and message_text.strip()
+        else None
+    )
+    if normalized_message and _looks_like_time_preference_statement(
+        message_text,
+        normalized_text=normalized_message,
+    ):
+        return False
+    return True
+
+
+def _resolve_specialist_name_hint_with_trace(
+    *,
+    db: Session,
+    message_text: str | None,
+    client_slug: str | None,
+    timing_context: dict | None,
+    conversation: Any,
+    saved_message: Any,
+    tool_action: str | None,
+) -> str | None:
+    def _extract_surface_specialist_name_hint() -> str | None:
+        if not isinstance(message_text, str) or not message_text.strip():
+            return None
+        person_terms = {
+            normalize_for_matching(term)
+            for term in get_signal_lexicon_list(client_slug, "master_query_person_terms")
+            if isinstance(term, str) and term.strip()
+        }
+        # Keep the runtime lexicon as the primary source, but retain the
+        # inflected booking forms needed for the bounded followup recovery.
+        person_terms.update(
+            {
+                "мастер",
+                "мастеру",
+                "мастера",
+                "специалист",
+                "специалисту",
+                "специалиста",
+            }
+        )
+        person_terms.discard("")
+        raw_tokens = [
+            token.strip(" \t\n\r.,!?;:()[]{}\"'`«»")
+            for token in str(message_text or "").split()
+        ]
+        normalized_tokens = [normalize_for_matching(token) for token in raw_tokens]
+        for idx, normalized_token in enumerate(normalized_tokens[:-1]):
+            if normalized_token not in person_terms:
+                continue
+            candidate = raw_tokens[idx + 1]
+            if not candidate or not _SPECIALIST_SURFACE_HINT_TOKEN_RE.match(candidate):
+                continue
+            validated_candidate = _validate_name_slot(
+                candidate,
+                allow_freeform=True,
+                client_slug=client_slug,
+            )
+            if validated_candidate:
+                return validated_candidate
+        return None
+
+    if not isinstance(message_text, str) or not message_text.strip():
+        return None
+    branch_id = getattr(conversation, "branch_id", None)
+    if branch_id:
+        normalized_message = normalize_for_matching(message_text)
+        if normalized_message:
+            specialist_matches: list[str] = []
+            specialists = (
+                db.query(Specialist)
+                .filter(
+                    Specialist.branch_id == branch_id,
+                    Specialist.is_active == True,
+                )
+                .all()
+            )
+            padded_message = f" {normalized_message} "
+            for specialist in specialists:
+                specialist_name = getattr(specialist, "name", None)
+                if not isinstance(specialist_name, str) or not specialist_name.strip():
+                    continue
+                normalized_specialist_name = normalize_for_matching(specialist_name)
+                if not normalized_specialist_name:
+                    continue
+                if f" {normalized_specialist_name} " not in padded_message:
+                    continue
+                specialist_matches.append(specialist_name.strip())
+            if len(specialist_matches) == 1:
+                specialist_name_hint = specialist_matches[0]
+                hint_meta = {
+                    "specialist_hint_attempted": False,
+                    "specialist_hint_ok": True,
+                    "specialist_hint_error": None,
+                    "specialist_hint_source": "branch_catalog",
+                }
+                if saved_message:
+                    _update_message_decision_metadata(saved_message, hint_meta)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "specialist_hint",
+                        "decision": "ok",
+                        "tool_action": tool_action,
+                        "attempted": False,
+                        "confidence": 1.0,
+                        "error": None,
+                        "source": "branch_catalog",
+                        "specialist_name": specialist_name_hint,
+                    },
+                )
+                return specialist_name_hint
+    skip_hint_stage, hint_budget_remaining_ms = _should_skip_secondary_llm_stage(
+        timing_context=timing_context,
+        min_remaining_ms=WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS,
+    )
+    if skip_hint_stage:
+        specialist_name_hint = _extract_surface_specialist_name_hint()
+        if isinstance(specialist_name_hint, str) and specialist_name_hint.strip():
+            hint_meta = {
+                "specialist_hint_attempted": False,
+                "specialist_hint_ok": True,
+                "specialist_hint_error": None,
+                "specialist_hint_source": "message_surface",
+            }
+            if saved_message:
+                _update_message_decision_metadata(saved_message, hint_meta)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "specialist_hint",
+                    "decision": "ok",
+                    "tool_action": tool_action,
+                    "attempted": False,
+                    "confidence": 1.0,
+                    "error": None,
+                    "source": "message_surface",
+                    "specialist_name": specialist_name_hint,
+                },
+            )
+            return specialist_name_hint
+        hint_meta = {
+            "specialist_hint_attempted": False,
+            "specialist_hint_ok": False,
+            "specialist_hint_error": "budget_reserved",
+        }
+        if isinstance(hint_budget_remaining_ms, (int, float)):
+            hint_meta["specialist_hint_budget_remaining_ms"] = round(
+                hint_budget_remaining_ms, 2
+            )
+        if saved_message:
+            _update_message_decision_metadata(saved_message, hint_meta)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "specialist_hint",
+                "decision": "skipped",
+                "tool_action": tool_action,
+                "reason": "budget_reserved",
+                "budget_remaining_ms": (
+                    round(hint_budget_remaining_ms, 2)
+                    if isinstance(hint_budget_remaining_ms, (int, float))
+                    else None
+                ),
+                "budget_required_ms": round(WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS, 2),
+            },
+        )
+        return None
+
+    specialist_hint = extract_specialist_hint_llm(
+        message_text,
+        client_slug=client_slug,
+        timing_context=timing_context,
+    )
+    specialist_name_hint = None
+    if isinstance(specialist_hint, dict):
+        candidate = specialist_hint.get("specialist_name")
+        if isinstance(candidate, str) and candidate.strip():
+            specialist_name_hint = candidate.strip()
+        hint_meta = {
+            "specialist_hint_attempted": bool(specialist_hint.get("attempted")),
+            "specialist_hint_ok": bool(specialist_hint.get("ok")),
+            "specialist_hint_confidence": specialist_hint.get("confidence"),
+            "specialist_hint_error": specialist_hint.get("error"),
+            "specialist_hint_language": specialist_hint.get("language"),
+            "specialist_hint_source": "llm",
+        }
+        if saved_message:
+            _update_message_decision_metadata(saved_message, hint_meta)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "specialist_hint",
+                "decision": "ok" if specialist_name_hint else "empty",
+                "tool_action": tool_action,
+                "attempted": bool(specialist_hint.get("attempted")),
+                "confidence": specialist_hint.get("confidence"),
+                "error": specialist_hint.get("error"),
+                "language": specialist_hint.get("language"),
+                "source": "llm",
+            },
+        )
+    return specialist_name_hint
 
 
 def _normalize_booking_start_at_tool_arg(
@@ -5721,11 +7492,15 @@ def _is_timeout_degrade_failure(failure: dict[str, Any] | None) -> bool:
     return False
 
 
-def _timeout_degrade_retry_status(context_manager: dict[str, Any] | None) -> tuple[int, bool]:
+def _timeout_degrade_retry_status(
+    context_manager: dict[str, Any] | None,
+    *,
+    intent: str = POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT,
+) -> tuple[int, bool]:
     manager = context_manager if isinstance(context_manager, dict) else {}
     retry_count, _ = _get_clarify_attempt_state(
         manager,
-        POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT,
+        intent,
     )
     retry_count = max(0, int(retry_count))
     exhausted = retry_count >= POLICY_TIMEOUT_DEGRADE_MAX_RETRIES
@@ -6644,6 +8419,326 @@ def _reuse_active_handover(
         },
     )
     return handover, True, telegram_sent
+
+
+def _has_pending_booking_resume_contract(context: dict[str, Any] | None) -> bool:
+    return _derive_pending_booking_resume_boundary_payload(context) is not None
+
+
+def _derive_pending_booking_resume_reason(context: dict[str, Any] | None) -> str | None:
+    if not isinstance(context, dict):
+        return None
+
+    def _extract_reason(*, candidate_context: dict[str, Any] | None) -> str | None:
+        if not isinstance(candidate_context, dict):
+            return None
+        direct_reason = _get_expected_reply_reason(candidate_context)
+        if isinstance(direct_reason, str) and direct_reason.strip():
+            return direct_reason.strip()
+
+        candidate_manager = _get_context_manager(candidate_context)
+        pending_contract = _get_canonical_dialog_state(candidate_manager).get(
+            "pending_question_contract"
+        )
+        pending_reason = (
+            pending_contract.get("reason")
+            if isinstance(pending_contract, dict)
+            else None
+        )
+        if isinstance(pending_reason, str) and pending_reason.strip():
+            return pending_reason.strip()
+
+        candidate_session_memory = _get_session_memory(candidate_context)
+        memory_pending_contract = (
+            candidate_session_memory.get("pending_question_contract")
+            if isinstance(candidate_session_memory, dict)
+            else None
+        )
+        memory_pending_reason = (
+            memory_pending_contract.get("reason")
+            if isinstance(memory_pending_contract, dict)
+            else None
+        )
+        if isinstance(memory_pending_reason, str) and memory_pending_reason.strip():
+            return memory_pending_reason.strip()
+        return None
+
+    reason = _extract_reason(candidate_context=context)
+    if reason:
+        return reason
+
+    pending_resume = context.get(PENDING_RESUME_KEY)
+    if not isinstance(pending_resume, dict):
+        return None
+
+    pending_context: dict[str, Any] = {}
+    for key in (
+        "context_manager",
+        "expected_reply_type",
+        "expected_reply_reason",
+        "booking",
+        "session_memory",
+    ):
+        if key in pending_resume:
+            pending_context[key] = pending_resume.get(key)
+    return _extract_reason(candidate_context=pending_context)
+
+
+def _derive_pending_booking_resume_boundary_payload(
+    context: dict[str, Any] | None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    if not isinstance(context, dict):
+        return None
+
+    def _build_boundary_payload(
+        *,
+        expected_reply_type: str | None,
+        booking_state: dict[str, Any] | None,
+        current_goal: str | None,
+        session_memory: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        booking_payload = dict(booking_state) if isinstance(booking_state, dict) else {}
+        session_payload = dict(session_memory) if isinstance(session_memory, dict) else {}
+        normalized_goal = (
+            current_goal.strip().casefold()
+            if isinstance(current_goal, str) and current_goal.strip()
+            else None
+        )
+        memory_goal = (
+            session_payload.get("active_goal").strip().casefold()
+            if isinstance(session_payload.get("active_goal"), str)
+            and session_payload.get("active_goal").strip()
+            else None
+        )
+        booking_resume_active = bool(
+            booking_payload.get("active") is True
+            or normalized_goal == "booking"
+            or memory_goal == "booking"
+        )
+        if not booking_resume_active:
+            return None
+
+        normalized_expected_reply = (
+            expected_reply_type.strip()
+            if isinstance(expected_reply_type, str)
+            and expected_reply_type.strip()
+            in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+            else None
+        )
+        if normalized_expected_reply is None:
+            booking_slot = booking_payload.get("last_question")
+            if (
+                isinstance(booking_slot, str)
+                and booking_slot.strip() in BOOKING_SLOT_ORDER
+            ):
+                derived_expected_reply = _expected_reply_for_booking_question(
+                    booking_slot.strip()
+                )
+                if derived_expected_reply in {
+                    EXPECTED_REPLY_SERVICE,
+                    EXPECTED_REPLY_TIME,
+                    EXPECTED_REPLY_NAME,
+                }:
+                    normalized_expected_reply = derived_expected_reply
+        if normalized_expected_reply is None:
+            last_question_type = session_payload.get("last_question_type")
+            if (
+                isinstance(last_question_type, str)
+                and last_question_type.strip()
+                in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+            ):
+                normalized_expected_reply = last_question_type.strip()
+        if normalized_expected_reply is None:
+            return None
+
+        resume_slot = _expected_reply_slot_key(normalized_expected_reply)
+        if not resume_slot and isinstance(booking_payload.get("last_question"), str):
+            raw_resume_slot = booking_payload.get("last_question").strip()
+            if raw_resume_slot in BOOKING_SLOT_ORDER:
+                resume_slot = raw_resume_slot
+        if not resume_slot:
+            return None
+
+        boundary_booking_state = dict(booking_payload)
+        if not boundary_booking_state.get("active"):
+            boundary_booking_state["active"] = True
+            if now is not None:
+                boundary_booking_state["started_at"] = now.isoformat()
+        boundary_booking_state["last_question"] = resume_slot
+        boundary_prompt = _booking_prompt_for_expected_reply_type(normalized_expected_reply)
+        if not boundary_prompt:
+            return None
+        return {
+            "booking_state": boundary_booking_state,
+            "expected_reply_type": normalized_expected_reply,
+            "prompt": boundary_prompt,
+            "resume_slot": resume_slot,
+        }
+
+    live_context_manager = _get_context_manager(context)
+    live_session_memory = _get_session_memory(context)
+    live_boundary_payload = _build_boundary_payload(
+        expected_reply_type=_get_expected_reply_type(context),
+        booking_state=_get_booking_context(context),
+        current_goal=(
+            live_context_manager.get("current_goal")
+            if isinstance(live_context_manager, dict)
+            else None
+        ),
+        session_memory=live_session_memory,
+    )
+    if live_boundary_payload is not None:
+        return live_boundary_payload
+
+    pending_resume = context.get(PENDING_RESUME_KEY)
+    if not isinstance(pending_resume, dict):
+        return None
+
+    pending_context_manager = pending_resume.get("context_manager")
+    pending_boundary_payload = _build_boundary_payload(
+        expected_reply_type=pending_resume.get("expected_reply_type"),
+        booking_state=pending_resume.get("booking"),
+        current_goal=(
+            pending_context_manager.get("current_goal")
+            if isinstance(pending_context_manager, dict)
+            else None
+        ),
+        session_memory=(
+            pending_resume.get("session_memory")
+            if isinstance(pending_resume.get("session_memory"), dict)
+            else None
+        ),
+    )
+    return pending_boundary_payload
+
+
+def _restore_pending_handoff_resume_boundary(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    context: dict[str, Any],
+    now: datetime,
+) -> tuple[dict[str, Any], bool]:
+    if not isinstance(context, dict):
+        return {}, False
+
+    restored_context, restored = _restore_pending_resume_context(context, now=now)
+    if not restored:
+        return context, False
+
+    pending_reason = _derive_pending_booking_resume_reason(restored_context)
+    pending_expected_reply_type = _get_expected_reply_type(restored_context)
+    if not pending_expected_reply_type:
+        pending_boundary_payload = _derive_pending_booking_resume_boundary_payload(
+            restored_context,
+            now=now,
+        )
+        if pending_boundary_payload is not None:
+            pending_expected_reply_type = pending_boundary_payload.get("expected_reply_type")
+            restored_context = _set_booking_context(
+                restored_context,
+                pending_boundary_payload.get("booking_state"),
+            )
+    if (
+        pending_expected_reply_type
+        and isinstance(pending_reason, str)
+        and pending_reason.strip()
+    ):
+        restored_context = _set_expected_reply_context(
+            conversation=conversation,
+            saved_message=saved_message,
+            context=restored_context,
+            expected_reply_type=pending_expected_reply_type,
+            reason=pending_reason.strip(),
+            now=now,
+        )
+    else:
+        _set_conversation_context(conversation, restored_context)
+
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "pending_resume",
+            "decision": "restore_soft_pass",
+            "reason": "handover_soft_pass",
+        },
+    )
+    if saved_message:
+        _update_message_decision_metadata(
+            saved_message,
+            {
+                "pending_resume_restored": True,
+                "pending_resume_restore_reason": "handover_soft_pass",
+            },
+    )
+    return restored_context, True
+
+
+def _restore_resolved_handoff_resume_boundary(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    context: dict[str, Any],
+    now: datetime,
+) -> tuple[dict[str, Any], bool]:
+    if not isinstance(context, dict):
+        return {}, False
+    if conversation.state != ConversationState.BOT_ACTIVE.value:
+        return context, False
+    if not _is_re_entry_required(context):
+        return context, False
+    if _get_expected_reply_type(context):
+        return context, False
+
+    pending_boundary_payload = _derive_pending_booking_resume_boundary_payload(
+        context,
+        now=now,
+    )
+    if pending_boundary_payload is None:
+        return context, False
+
+    pending_expected_reply_type = pending_boundary_payload.get("expected_reply_type")
+    pending_reason = _derive_pending_booking_resume_reason(context)
+    if not (
+        isinstance(pending_expected_reply_type, str)
+        and pending_expected_reply_type.strip()
+        and isinstance(pending_reason, str)
+        and pending_reason.strip()
+    ):
+        return context, False
+
+    restored_context = _set_booking_context(
+        context,
+        pending_boundary_payload.get("booking_state"),
+    )
+    restored_context = _set_expected_reply_context(
+        conversation=conversation,
+        saved_message=saved_message,
+        context=restored_context,
+        expected_reply_type=pending_expected_reply_type.strip(),
+        reason=pending_reason.strip(),
+        now=now,
+    )
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "pending_resume",
+            "decision": "restore_resolved_handoff_boundary",
+            "reason": "resolved_handoff_resume_boundary",
+        },
+    )
+    if saved_message:
+        _update_message_decision_metadata(
+            saved_message,
+            {
+                "pending_resume_restored": True,
+                "pending_resume_restore_reason": "resolved_handoff_resume_boundary",
+                "resolved_handoff_resume_boundary": True,
+            },
+        )
+    return restored_context, True
 
 
 def _build_minimum_data_contract_status(
@@ -8604,6 +10699,19 @@ async def _handle_webhook_payload(
     _record_minimum_data_contract_meta(saved_message, minimum_data_status)
     previous_last_message_at = conversation.last_message_at
     conversation.last_message_at = now
+    pending_domain_signal = False
+    if llm_policy_core_guard_only and message_text:
+        pending_domain_signal = bool(
+            _looks_like_info_query(message_text, client_slug=payload.client_slug)
+            or _is_booking_request(message_text, client_slug=payload.client_slug)
+            or _is_booking_slot_signal(message_text, client_slug=payload.client_slug)
+            or _looks_like_policy_topic(
+                message_text,
+                policy_type=policy_type,
+                policy_pack=policy_pack,
+                client_slug=payload.client_slug,
+            )
+        )
     if asr_inflight_blocked:
         _record_decision_trace(
             conversation,
@@ -8630,6 +10738,35 @@ async def _handle_webhook_payload(
             bot_response=bot_response,
         )
     context = _get_conversation_context(conversation)
+    pending_resume_control_message = bool(
+        message_text
+        and (
+            is_handover_status_question(message_text)
+            or is_opt_out_message(message_text)
+        )
+    )
+    pending_resume_boundary_payload = _derive_pending_booking_resume_boundary_payload(
+        context,
+        now=now,
+    )
+    pending_resume_boundary_active = bool(
+        conversation.state == ConversationState.PENDING.value
+        and not pending_resume_control_message
+        and pending_resume_boundary_payload is not None
+    )
+    pending_resume_boundary_restored = False
+    if pending_resume_boundary_active and isinstance(context.get(PENDING_RESUME_KEY), dict):
+        context, pending_resume_boundary_restored = _restore_pending_handoff_resume_boundary(
+            conversation=conversation,
+            saved_message=saved_message,
+            context=context,
+            now=now,
+        )
+        pending_resume_boundary_payload = _derive_pending_booking_resume_boundary_payload(
+            context,
+            now=now,
+        )
+        pending_resume_boundary_active = pending_resume_boundary_payload is not None
     context_manager = _get_context_manager(context)
     session_memory = _get_session_memory(context)
     session_memory, memory_contract_error = _normalize_session_memory(session_memory)
@@ -8667,7 +10804,27 @@ async def _handle_webhook_payload(
         ConversationState.PENDING.value,
         ConversationState.MANAGER_ACTIVE.value,
     ]:
-        session_memory_reset_reason = "handover"
+        if pending_resume_boundary_active:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "session_memory",
+                    "decision": "preserve",
+                    "reason": "pending_handoff_resume_boundary",
+                    "state": conversation.state,
+                    "restored_from_pending_resume": pending_resume_boundary_restored,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "session_memory_reset_skipped": "pending_handoff_resume_boundary",
+                        "pending_handoff_resume_boundary": True,
+                    },
+                )
+        else:
+            session_memory_reset_reason = "handover"
     if session_memory_reset_reason:
         reset_snapshot = _session_memory_snapshot(session_memory)
         reset_snapshot["memory_keys"] = sorted(
@@ -8799,6 +10956,14 @@ async def _handle_webhook_payload(
             now=now,
         )
         context = _get_conversation_context(conversation)
+    context, resolved_handoff_resume_restored = _restore_resolved_handoff_resume_boundary(
+        conversation=conversation,
+        saved_message=saved_message,
+        context=context,
+        now=now,
+    )
+    if resolved_handoff_resume_restored:
+        context_manager = _get_context_manager(context)
     current_goal = context_manager.get("current_goal") if isinstance(context_manager, dict) else None
     consult_context = _get_consult_context(context_manager, message_count=message_count)
     consult_return_prompt = None
@@ -8816,6 +10981,12 @@ async def _handle_webhook_payload(
         consult_context=consult_context if isinstance(consult_context, dict) else None,
     )
     context = _set_context_manager(context, context_manager)
+    interaction_state_payload = _get_canonical_dialog_state(context_manager).get("interaction_state")
+    context, session_memory = _sync_session_memory_interaction_state(
+        context,
+        interaction_state=interaction_state_payload if isinstance(interaction_state_payload, dict) else None,
+        now=now,
+    )
     _set_conversation_context(conversation, context)
 
     expected_reply_state = _apply_expected_reply_contract(
@@ -8842,6 +11013,11 @@ async def _handle_webhook_payload(
     expected_reply_shortcircuit = expected_reply_state.expected_reply_shortcircuit
     expected_reply_blocked_by_info = expected_reply_state.expected_reply_blocked_by_info
     memory_expected_reply_type = expected_reply_state.memory_expected_reply_type
+    matched_expected_reply_type = expected_reply_state.matched_expected_reply_type
+    matched_booking_followup_state = expected_reply_state.matched_booking_followup_state
+    matched_booking_followup_prompt = expected_reply_state.matched_booking_followup_prompt
+    matched_booking_followup_expected = expected_reply_state.matched_booking_followup_expected
+    matched_booking_filled_slots = expected_reply_state.matched_booking_filled_slots
     expected_reply_shortcircuit_effective = bool(expected_reply_shortcircuit)
     policy_memory_summary_seed = None
     compact_summary_seed = context_manager.get("compact_summary") if isinstance(context_manager, dict) else None
@@ -9155,19 +11331,6 @@ async def _handle_webhook_payload(
                     bot_response=bot_response,
                 )
 
-    pending_domain_signal = False
-    if llm_policy_core_guard_only and message_text:
-        pending_domain_signal = bool(
-            _looks_like_info_query(message_text, client_slug=payload.client_slug)
-            or _is_booking_request(message_text, client_slug=payload.client_slug)
-            or _is_booking_slot_signal(message_text, client_slug=payload.client_slug)
-            or _looks_like_policy_topic(
-                message_text,
-                policy_type=policy_type,
-                policy_pack=policy_pack,
-                client_slug=payload.client_slug,
-            )
-        )
     pending_response = _handle_pending_gate(
         db=db,
         conversation=conversation,
@@ -9881,6 +12044,9 @@ async def _handle_webhook_payload(
     policy_capability: str | None = None
     policy_temporal_scope: str | None = None
     policy_resolution_mode: str | None = None
+    policy_pending_question_act: str | None = None
+    policy_pending_question_target: str | None = None
+    policy_active_question_relation: str | None = None
     policy_resolver_id: str | None = "llm_policy_core"
     policy_resolver_version: str | None = SEMANTIC_ARBITER_CONTRACT_VERSION
     policy_intent_contract: dict[str, Any] | None = None
@@ -9897,6 +12063,7 @@ async def _handle_webhook_payload(
     policy_referent_resolution: dict[str, Any] | None = None
     policy_handoff_policy_blocked = False
     policy_service_query: str | None = None
+    policy_generic_specialist_choice_followup = False
 
     def _sync_policy_plan_audit(*, emit_trace: bool = False) -> None:
         if not policy_plan_action and not policy_plan_tool_action:
@@ -9993,6 +12160,9 @@ async def _handle_webhook_payload(
                 capability=policy_capability,
                 temporal_scope=policy_temporal_scope,
                 resolution_mode=policy_resolution_mode,
+                pending_question_act=policy_pending_question_act,
+                pending_question_target=policy_pending_question_target,
+                active_question_relation=policy_active_question_relation,
                 resolver_id=policy_resolver_id,
                 resolver_version=policy_resolver_version,
                 override_reason_codes=override_reason_codes,
@@ -10014,6 +12184,9 @@ async def _handle_webhook_payload(
             capability=policy_capability,
             temporal_scope=policy_temporal_scope,
             resolution_mode=policy_resolution_mode,
+            pending_question_act=policy_pending_question_act,
+            pending_question_target=policy_pending_question_target,
+            active_question_relation=policy_active_question_relation,
             resolver_id=policy_resolver_id,
             resolver_version=policy_resolver_version,
             override_reason_codes=override_reason_codes,
@@ -10050,6 +12223,9 @@ async def _handle_webhook_payload(
         llm_policy_core_meta["capability"] = policy_capability
         llm_policy_core_meta["temporal_scope"] = policy_temporal_scope
         llm_policy_core_meta["resolution_mode"] = policy_resolution_mode
+        llm_policy_core_meta["pending_question_act"] = policy_pending_question_act
+        llm_policy_core_meta["pending_question_target"] = policy_pending_question_target
+        llm_policy_core_meta["active_question_relation"] = policy_active_question_relation
 
     def _register_policy_override(
         *,
@@ -10194,6 +12370,144 @@ async def _handle_webhook_payload(
         else:
             _sync_policy_plan_audit()
 
+    def _backfill_policy_degraded_referent_evidence() -> None:
+        nonlocal policy_capability_contract
+        nonlocal policy_capability_resolution_mode
+        nonlocal policy_referent_resolution
+
+        if _normalize_semantic_followup_token(policy_subject_kind) != "service":
+            return
+        if _normalize_semantic_followup_token(policy_resolution_mode) != "referent_followup":
+            return
+
+        if not isinstance(policy_capability_contract, dict):
+            policy_capability_contract = build_capability_question_contract(
+                subject_kind=policy_subject_kind,
+                capability=policy_capability,
+                temporal_scope=policy_temporal_scope,
+                requested_resolution_mode=policy_resolution_mode,
+            )
+        if not isinstance(policy_capability_contract, dict):
+            return
+        if not (
+            policy_capability_contract.get("prefers_referent")
+            or policy_capability_contract.get("requires_referent")
+        ):
+            return
+
+        if not (
+            isinstance(policy_capability_resolution_mode, str)
+            and policy_capability_resolution_mode.strip()
+        ):
+            contract_resolution_mode = policy_capability_contract.get(
+                "contract_resolution_mode"
+            )
+            if (
+                isinstance(contract_resolution_mode, str)
+                and contract_resolution_mode.strip()
+            ):
+                policy_capability_resolution_mode = (
+                    contract_resolution_mode.strip().casefold()
+                )
+
+        explicit_service_value: str | None = None
+        explicit_service_source: str | None = None
+        slot_service_value = policy_slot_state_validated.get("service")
+        if isinstance(slot_service_value, str) and slot_service_value.strip():
+            explicit_service_value = slot_service_value.strip()
+            explicit_service_source = "policy_slot_state"
+        elif isinstance(policy_payload, dict):
+            raw_slots = policy_payload.get("slots")
+            raw_service_value = raw_slots.get("service") if isinstance(raw_slots, dict) else None
+            if isinstance(raw_service_value, str) and raw_service_value.strip():
+                validated_service_value = _validate_plan_slot_value(
+                    "service",
+                    raw_service_value.strip(),
+                    client_slug=payload.client_slug,
+                )
+                explicit_service_value = validated_service_value or raw_service_value.strip()
+                explicit_service_source = "policy_payload"
+
+        if not isinstance(policy_referent_resolution, dict) or not (
+            policy_referent_resolution.get("decision") in {"resolved", "missing"}
+        ):
+            policy_referent_resolution = _resolve_semantic_referent(
+                subject_kind=policy_subject_kind,
+                explicit_value=explicit_service_value,
+                explicit_source=explicit_service_source,
+                context_manager=context_manager,
+                message_count=message_count,
+                booking_state=booking if isinstance(booking, dict) else None,
+            )
+
+        if (
+            policy_capability_contract.get("requires_referent")
+            and (
+                not isinstance(policy_referent_resolution, dict)
+                or policy_referent_resolution.get("decision") != "resolved"
+            )
+        ):
+            policy_capability_resolution_mode = "clarify_missing_subject"
+
+        if isinstance(llm_policy_core_meta, dict):
+            llm_policy_core_meta["capability_contract"] = policy_capability_contract
+            llm_policy_core_meta["capability_resolution_mode"] = (
+                policy_capability_resolution_mode
+            )
+            llm_policy_core_meta["referent_resolution"] = policy_referent_resolution
+            _sync_semantic_arbiter_meta()
+            _sync_policy_plan_audit()
+
+        if not isinstance(policy_referent_resolution, dict):
+            return
+
+        referent_trace_payload = {
+            "stage": "referent_resolver",
+            "decision": policy_referent_resolution.get("decision") or "missing",
+            "state": conversation.state,
+            "subject_kind": policy_subject_kind,
+            "capability": policy_capability,
+            "temporal_scope": policy_temporal_scope,
+            "requested_resolution_mode": policy_resolution_mode,
+            "capability_resolution_mode": policy_capability_resolution_mode,
+            "referent_key": policy_referent_resolution.get("referent_key"),
+        }
+        for key in (
+            "resolved_referent",
+            "referent_source",
+            "projection_source",
+            "canonical_state_owner",
+            "age",
+            "ttl",
+            "remaining",
+        ):
+            value = policy_referent_resolution.get(key)
+            if value is not None:
+                referent_trace_payload[key] = value
+        _record_decision_trace(conversation, referent_trace_payload)
+
+        if not saved_message:
+            return
+        semantic_meta_updates: dict[str, Any] = {
+            "subject_kind": policy_subject_kind,
+            "capability": policy_capability,
+            "temporal_scope": policy_temporal_scope,
+            "resolution_mode": policy_resolution_mode,
+            "capability_resolution_mode": policy_capability_resolution_mode,
+            "referent_resolution_decision": policy_referent_resolution.get("decision"),
+            "referent_key": policy_referent_resolution.get("referent_key"),
+        }
+        for key in (
+            "resolved_referent",
+            "referent_source",
+            "projection_source",
+            "canonical_state_owner",
+        ):
+            value = policy_referent_resolution.get(key)
+            if value is not None:
+                semantic_meta_updates[key] = value
+        _update_message_decision_metadata(saved_message, semantic_meta_updates)
+
     def _send_policy_validation_clarify(
         *,
         validation_error: str,
@@ -10222,6 +12536,7 @@ async def _handle_webhook_payload(
                 llm_policy_core_meta["override_reason_missing_detected"] = True
             _sync_semantic_arbiter_meta()
             _sync_policy_plan_audit()
+        _backfill_policy_degraded_referent_evidence()
         if saved_message:
             updates: dict[str, Any] = {
                 "policy_core_mode": policy_core_mode,
@@ -10298,6 +12613,7 @@ async def _handle_webhook_payload(
             llm_policy_core_meta["validation_error"] = validation_error
             _sync_semantic_arbiter_meta()
             _sync_policy_plan_audit()
+        _backfill_policy_degraded_referent_evidence()
         if saved_message:
             updates: dict[str, Any] = {
                 "policy_core_mode": policy_core_mode,
@@ -10368,6 +12684,152 @@ async def _handle_webhook_payload(
             f"Policy core {validation_error} booking prompt sent"
             if sent
             else f"Policy core {validation_error} booking prompt failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    def _send_policy_validation_pending_question_guidance(
+        *,
+        validation_error: str,
+        collect_slot: str,
+        guard_reason: str,
+        trace_decision: str,
+        requested_slot: str | None = None,
+        pending_question_act: str,
+        pending_question_target: str | None,
+    ) -> WebhookResponse:
+        nonlocal policy_valid
+        nonlocal policy_validation_error
+        nonlocal policy_core_mode
+        nonlocal policy_core_degrade_reason
+        nonlocal policy_core_failure
+        policy_valid = False
+        policy_validation_error = validation_error
+        policy_core_mode = "degraded_fallback"
+        policy_core_degrade_reason = f"policy_validation:{validation_error}"
+        policy_core_failure = _classify_policy_core_degrade_reason(policy_core_degrade_reason)
+        if isinstance(llm_policy_core_meta, dict):
+            llm_policy_core_meta["validated"] = False
+            llm_policy_core_meta["validation_error"] = validation_error
+            _sync_semantic_arbiter_meta()
+            _sync_policy_plan_audit()
+        _backfill_policy_degraded_referent_evidence()
+        if saved_message:
+            updates: dict[str, Any] = {
+                "policy_core_mode": policy_core_mode,
+                "policy_core_degrade_reason": policy_core_degrade_reason,
+                "policy_core_failure": policy_core_failure,
+                "llm_policy_core_guard": trace_decision,
+                "policy_core_guard_slot_override": collect_slot,
+            }
+            if isinstance(requested_slot, str) and requested_slot.strip():
+                updates["policy_core_guard_requested_slot"] = requested_slot.strip()
+            if isinstance(llm_policy_core_meta, dict):
+                updates["llm_policy_core"] = llm_policy_core_meta
+            _update_message_decision_metadata(saved_message, updates)
+        _apply_policy_guard_override(
+            final_action="collect",
+            final_tool_action="collect",
+            reason_code="contract_validation_failure",
+            reason=guard_reason,
+        )
+        _sync_policy_plan_audit(emit_trace=True)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "policy_core_guard",
+                "decision": trace_decision,
+                "state": conversation.state,
+                "mode": policy_core_mode,
+                "reason": policy_core_degrade_reason,
+                "validation_error": validation_error,
+                "missing_slot": collect_slot,
+                "requested_slot": requested_slot,
+            },
+        )
+        booking_state = dict(booking) if isinstance(booking, dict) else {}
+        if not booking_state.get("active"):
+            booking_state["active"] = True
+            booking_state["started_at"] = now.isoformat()
+        for slot_key, value in policy_slot_state_validated.items():
+            if not booking_state.get(slot_key):
+                booking_state[slot_key] = value
+        booking_state["last_question"] = collect_slot
+        context = _get_conversation_context(conversation)
+        context = _set_booking_context(context, booking_state)
+        expected_reply_slot = _expected_reply_for_booking_question(collect_slot)
+        if expected_reply_slot:
+            context = _set_expected_reply_context(
+                conversation=conversation,
+                saved_message=saved_message,
+                context=context,
+                expected_reply_type=expected_reply_slot,
+                reason="booking_slot_guidance",
+                now=now,
+            )
+        _set_conversation_context(conversation, context)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_slot_guidance",
+                "state": conversation.state,
+                "source": "policy_core_guard",
+                "pending_question_act": pending_question_act,
+                "pending_question_target": pending_question_target or "time",
+                "requested_slot": collect_slot,
+                "expected_reply_type": expected_reply_slot,
+                "validation_error": validation_error,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="reply",
+            intent="booking",
+            source="booking_slot_guidance",
+            fast_intent=False,
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "pending_question_act": pending_question_act,
+                    "pending_question_target": pending_question_target or "time",
+                    "pending_question_interaction": pending_question_act,
+                    "pending_question_owner": "booking_slot_guidance",
+                    "expected_reply_type": expected_reply_slot,
+                    "expected_reply_reason": "booking_slot_guidance",
+                    "expected_reply_matched": False,
+                    "expected_reply_blocked_by_info": True,
+                    "policy_core_guard_recovery": trace_decision,
+                },
+            )
+        bot_response = MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE
+        pending_style_reference_signal = bool(
+            message_text and _is_style_reference_request(message_text, has_media=has_media)
+        )
+        if pending_style_reference_signal and not has_media:
+            bot_response = _combine_sidecar(MSG_STYLE_REFERENCE_NEED_MEDIA, bot_response)
+        bot_response = _maybe_apply_consult_return(
+            conversation=conversation,
+            saved_message=saved_message,
+            bot_response=bot_response,
+            consult_return_pending=consult_return_pending,
+            consult_return_prompt=consult_return_prompt,
+            consult_context=consult_context,
+            reason=consult_return_reason or "booking_slot_guidance",
+        )
+        _reset_low_confidence_retry(conversation)
+        bot_response, sent = _send_and_save(bot_response)
+        result_message = (
+            f"Policy core {validation_error} pending-slot guidance sent"
+            if sent
+            else f"Policy core {validation_error} pending-slot guidance failed"
         )
         db.commit()
         return WebhookResponse(
@@ -10642,6 +13104,15 @@ async def _handle_webhook_payload(
             raw_resolution_mode = policy_payload.get("resolution_mode")
             if isinstance(raw_resolution_mode, str) and raw_resolution_mode.strip():
                 policy_resolution_mode = raw_resolution_mode.strip().casefold()
+            policy_pending_question_act = _normalize_pending_question_act(
+                policy_payload.get("pending_question_act")
+            )
+            policy_pending_question_target = _normalize_pending_question_target(
+                policy_payload.get("pending_question_target")
+            )
+            policy_active_question_relation = _normalize_active_question_relation(
+                policy_payload.get("active_question_relation")
+            )
             raw_resolver_id = policy_payload.get("resolver_id")
             if isinstance(raw_resolver_id, str) and raw_resolver_id.strip():
                 policy_resolver_id = raw_resolver_id.strip()
@@ -10665,6 +13136,9 @@ async def _handle_webhook_payload(
                 capability=policy_capability,
                 temporal_scope=policy_temporal_scope,
                 resolution_mode=policy_resolution_mode,
+                pending_question_act=policy_pending_question_act,
+                pending_question_target=policy_pending_question_target,
+                active_question_relation=policy_active_question_relation,
                 resolver_id=policy_resolver_id,
                 resolver_version=policy_resolver_version,
                 override_reason_codes=_collect_policy_override_reason_codes(),
@@ -10840,6 +13314,19 @@ async def _handle_webhook_payload(
                                         policy_resolution_mode = (
                                             rescue_resolution_mode.strip().casefold()
                                         )
+                                    policy_pending_question_act = _normalize_pending_question_act(
+                                        rescue_payload.get("pending_question_act")
+                                    )
+                                    policy_pending_question_target = (
+                                        _normalize_pending_question_target(
+                                            rescue_payload.get("pending_question_target")
+                                        )
+                                    )
+                                    policy_active_question_relation = (
+                                        _normalize_active_question_relation(
+                                            rescue_payload.get("active_question_relation")
+                                        )
+                                    )
                                     rescue_resolver_id = rescue_payload.get("resolver_id")
                                     if (
                                         isinstance(rescue_resolver_id, str)
@@ -11120,6 +13607,18 @@ async def _handle_webhook_payload(
                     booking_state=booking if isinstance(booking, dict) else None,
                     plan_slots=policy_slot_state_validated,
                 )
+                generic_specialist_service_query = policy_service_query
+                if not generic_specialist_service_query:
+                    merged_service_value = (
+                        merged_policy_slots.get("service")
+                        if isinstance(merged_policy_slots, dict)
+                        else None
+                    )
+                    if (
+                        isinstance(merged_service_value, str)
+                        and merged_service_value.strip()
+                    ):
+                        generic_specialist_service_query = merged_service_value.strip()
                 if policy_next_question:
                     policy_collect_slot = policy_next_question
                 else:
@@ -11153,6 +13652,55 @@ async def _handle_webhook_payload(
                             ):
                                 policy_collect_slot = slot_key
                                 break
+                policy_specialist_name, policy_specialist_id = (
+                    _extract_semantic_specialist_preference(
+                        tool_args=policy_tool_args,
+                        entity_refs=policy_entity_refs,
+                    )
+                )
+                if _should_preserve_generic_specialist_choice_followup_owner(
+                    policy_goal=policy_goal,
+                    policy_collect_slot=policy_collect_slot,
+                    policy_pending_question_target=policy_pending_question_target,
+                    policy_subject_kind=policy_subject_kind,
+                    policy_capability=policy_capability,
+                    policy_resolution_mode=policy_resolution_mode,
+                    policy_active_question_relation=policy_active_question_relation,
+                    expected_reply_type=expected_reply_type,
+                    specialist_name=policy_specialist_name,
+                    specialist_id=policy_specialist_id,
+                    message_text=message_text,
+                    client_slug=payload.client_slug,
+                    service_query=generic_specialist_service_query,
+                ):
+                    policy_generic_specialist_choice_followup = True
+                    if not policy_pending_question_target:
+                        policy_pending_question_target = "specialist"
+                    if not policy_active_question_relation:
+                        policy_active_question_relation = "referent_followup"
+                    policy_collect_slot = "datetime"
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "policy_core_guard",
+                            "decision": "generic_specialist_choice_followup",
+                            "state": conversation.state,
+                            "reason": "success_path_blank_interaction_axes",
+                            "requested_slot": "datetime",
+                            "expected_reply_type": EXPECTED_REPLY_TIME,
+                        },
+                    )
+                    if saved_message:
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "policy_collect_guard_recovery": (
+                                    "generic_specialist_choice_followup"
+                                ),
+                            },
+                        )
+                    if isinstance(llm_policy_core_meta, dict):
+                        _sync_semantic_arbiter_meta()
                 booking_collect_scope = bool(
                     policy_collect_slot in {"datetime", "name"}
                     or policy_goal == "booking"
@@ -11183,6 +13731,11 @@ async def _handle_webhook_payload(
                         policy_intent=policy_intent,
                         policy_capability=policy_capability,
                         policy_pack_refs=policy_pack_refs,
+                        policy_tool_args=policy_tool_args,
+                        policy_entity_refs=policy_entity_refs,
+                        policy_pending_question_act=policy_pending_question_act,
+                        policy_pending_question_target=policy_pending_question_target,
+                        policy_resolution_mode=policy_resolution_mode,
                         message_text=message_text,
                         client_slug=payload.client_slug,
                         service_query=collect_interrupt_service_query,
@@ -11190,6 +13743,8 @@ async def _handle_webhook_payload(
                         booking_wants_flow=booking_wants_flow,
                         booking_active=booking_active,
                         policy_goal=policy_goal,
+                        expected_reply_type=expected_reply_type,
+                        expected_reply_matched=expected_reply_matched,
                     )
                     collect_interrupt_owner_candidate = bool(
                         interrupt_owner_tool_action == "info"
@@ -11200,6 +13755,8 @@ async def _handle_webhook_payload(
                     client_slug=payload.client_slug,
                 )
                 list_slots_datetime_carryover_ok = False
+                raw_slots = policy_payload.get("slots")
+                raw_datetime_value = raw_slots.get("datetime") if isinstance(raw_slots, dict) else None
                 if (
                     policy_tool_action == "calendar.list_slots"
                     and policy_collect_slot == "name"
@@ -11221,6 +13778,26 @@ async def _handle_webhook_payload(
                             or _looks_like_time_only_request(message_text)
                         )
                     )
+                elif (
+                    policy_tool_action == "collect"
+                    and policy_collect_slot == "name"
+                    and earliest_missing_booking_slot == "datetime"
+                    and isinstance(merged_policy_slots.get("service"), str)
+                    and merged_policy_slots.get("service").strip()
+                    and isinstance(raw_datetime_value, str)
+                    and raw_datetime_value.strip()
+                    and expected_reply_type == EXPECTED_REPLY_TIME
+                    and _should_preserve_specialist_availability_followup_owner(
+                        policy_goal=policy_goal,
+                        policy_collect_slot=policy_collect_slot,
+                        policy_pending_question_target=policy_pending_question_target,
+                        policy_subject_kind=policy_subject_kind,
+                        policy_capability=policy_capability,
+                        policy_temporal_scope=policy_temporal_scope,
+                        policy_active_question_relation=policy_active_question_relation,
+                    )
+                ):
+                    list_slots_datetime_carryover_ok = True
                 slot_order_invalid = bool(
                     policy_collect_slot in BOOKING_SLOT_ORDER
                     and booking_collect_scope
@@ -11522,6 +14099,9 @@ async def _handle_webhook_payload(
             "capability": policy_capability,
             "temporal_scope": policy_temporal_scope,
             "resolution_mode": policy_resolution_mode,
+            "pending_question_act": policy_pending_question_act,
+            "pending_question_target": policy_pending_question_target,
+            "active_question_relation": policy_active_question_relation,
             "referent_resolution": policy_referent_resolution,
             "intent_contract": policy_intent_contract,
             "intent_contract_error": policy_intent_contract_error,
@@ -11606,6 +14186,9 @@ async def _handle_webhook_payload(
                 "capability": policy_capability,
                 "temporal_scope": policy_temporal_scope,
                 "resolution_mode": policy_resolution_mode,
+                "pending_question_act": policy_pending_question_act,
+                "pending_question_target": policy_pending_question_target,
+                "active_question_relation": policy_active_question_relation,
                 "capability_resolution_mode": policy_capability_resolution_mode,
                 "referent_resolution_decision": (
                     policy_referent_resolution.get("decision")
@@ -11683,6 +14266,45 @@ async def _handle_webhook_payload(
                 "tool_action": policy_tool_action,
             },
         )
+        context = _get_conversation_context(conversation)
+        context_manager = _get_context_manager(context)
+        context_manager = _sync_canonical_dialog_state(
+            context_manager,
+            booking_state=_get_booking_context(context),
+            expected_reply_type=expected_reply_type,
+            expected_reply_reason=_get_expected_reply_reason(context),
+            message_count=message_count,
+            branch_id=conversation.branch_id,
+            consult_context=consult_context if isinstance(consult_context, dict) else None,
+            interaction_target=policy_pending_question_target,
+            interaction_relation=policy_active_question_relation,
+            degrade_reason=policy_core_degrade_reason,
+        )
+        context = _set_context_manager(context, context_manager)
+        interaction_state_payload = _get_canonical_dialog_state(context_manager).get("interaction_state")
+        context, session_memory = _sync_session_memory_interaction_state(
+            context,
+            interaction_state=interaction_state_payload if isinstance(interaction_state_payload, dict) else None,
+            now=now,
+        )
+        _set_conversation_context(conversation, context)
+        if saved_message and isinstance(interaction_state_payload, dict):
+            interaction_meta: dict[str, Any] = {}
+            for key in (
+                "interaction_target",
+                "interaction_relation",
+                "interaction_owner",
+                "degrade_reason",
+            ):
+                value = interaction_state_payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    interaction_meta[key] = value
+            if interaction_meta:
+                _update_message_decision_metadata(saved_message, interaction_meta)
+        if isinstance(llm_policy_core_meta, dict) and isinstance(interaction_state_payload, dict):
+            llm_policy_core_meta["interaction_owner"] = interaction_state_payload.get(
+                "interaction_owner"
+            )
 
     # 9.03 Policy escalation gate (policy-pack keywords + intent fallback).
     policy_response = _handle_policy_escalation_gate(
@@ -11760,6 +14382,75 @@ async def _handle_webhook_payload(
         }
         and not expected_reply_blocked_by_info
     )
+    timeout_time_preference_statement = bool(
+        expected_reply_type == EXPECTED_REPLY_TIME
+        and isinstance(message_text, str)
+        and message_text.strip()
+        and _looks_like_time_preference_statement(
+            message_text,
+            normalized_text=normalize_for_matching(message_text),
+        )
+    )
+    timeout_slot_question_info_lock_surface = bool(
+        policy_core_mode == "degraded_fallback"
+        and expected_reply_type == EXPECTED_REPLY_TIME
+        and expected_reply_reason == "policy_core_timeout_booking_slot_fill_followup"
+        and basic_info_message
+        and (
+            booking_wants_flow
+            or booking_active
+            or current_goal == "booking"
+        )
+        and _has_timeout_slot_question_info_lock_surface(
+            message_text=message_text,
+            client_slug=payload.client_slug,
+        )
+    )
+    suppressed_time_preference_info_intents: set[str] = set()
+    if (
+        policy_core_mode == "degraded_fallback"
+        and (timeout_time_preference_statement or timeout_slot_question_info_lock_surface)
+        and info_class_intents
+    ):
+        suppressed_time_preference_info_intents = {
+            intent
+            for intent in info_class_intents
+            if isinstance(intent, str) and intent in {"duration", "hours"}
+        }
+        if suppressed_time_preference_info_intents:
+            info_class_intents = set(info_class_intents) - suppressed_time_preference_info_intents
+            if saved_message:
+                suppressed_meta: dict[str, Any] = {
+                    "suppressed_info_intents": sorted(
+                        suppressed_time_preference_info_intents
+                    ),
+                }
+                if timeout_time_preference_statement:
+                    suppressed_meta["time_preference_statement"] = True
+                if timeout_slot_question_info_lock_surface:
+                    suppressed_meta["timeout_slot_question_info_lock_surface"] = True
+                _update_message_decision_metadata(
+                    saved_message,
+                    suppressed_meta,
+                )
+            suppression_surfaces: list[str] = []
+            if timeout_time_preference_statement:
+                suppression_surfaces.append("time_preference_statement")
+            if timeout_slot_question_info_lock_surface:
+                suppression_surfaces.append("timeout_slot_question_info_lock_surface")
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "suppress_time_preference_info_signal",
+                    "state": conversation.state,
+                    "reason": policy_core_degrade_reason,
+                    "suppressed_info_intents": sorted(
+                        suppressed_time_preference_info_intents
+                    ),
+                    "suppression_surfaces": suppression_surfaces,
+                },
+            )
     pending_info_signal = bool(info_class_intents)
     degraded_guard_info_hints: list[str] = []
     if (
@@ -11776,6 +14467,8 @@ async def _handle_webhook_payload(
             intent_decomp_set=intent_decomp_set,
             client_slug=payload.client_slug,
         )
+        if suppressed_time_preference_info_intents:
+            rescue_info_intents = set(rescue_info_intents) - suppressed_time_preference_info_intents
         if _looks_like_promotions_request(
             message_text,
             policy_type=policy_type,
@@ -11885,6 +14578,68 @@ async def _handle_webhook_payload(
         )
     )
     policy_core_timeout_degrade = _is_timeout_degrade_failure(policy_core_failure)
+    timeout_active_time_specialist_interrupt_pre_guard = False
+    if (
+        POLICY_CORE_RESCUE_MATRIX_ENABLED
+        and policy_core_runtime_active
+        and policy_core_mode == "degraded_fallback"
+        and policy_core_timeout_degrade
+        and message_text
+    ):
+        timeout_pre_guard_booking_request_signal = bool(
+            _is_booking_request(message_text, client_slug=payload.client_slug)
+        )
+        if not timeout_pre_guard_booking_request_signal:
+            timeout_pre_guard_booking_request_signal = bool(
+                booking_wants_flow
+                and booking_signal
+                and bool(intent_decomp_set & {"booking"})
+                and not bool(intent_decomp_set & INFO_INTENTS)
+            )
+        timeout_pre_guard_booking_service_query = None
+        for candidate in (
+            booking.get("service") if isinstance(booking, dict) else None,
+            intent_decomp_service_query,
+            (
+                get_pack_service_hint(message_text, client_slug=payload.client_slug)
+                if timeout_pre_guard_booking_request_signal
+                else None
+            ),
+        ):
+            if isinstance(candidate, str) and candidate.strip():
+                timeout_pre_guard_booking_service_query = candidate.strip()
+                break
+        timeout_pre_guard_collect_contract_signal = bool(
+            booking_verification_request
+            or expected_reply_type
+            in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+            or memory_expected_reply_type
+            in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+            or _looks_like_time_only_request(message_text)
+            or bool(
+                _extract_datetime(
+                    message_text,
+                    client_slug=payload.client_slug,
+                    relative_base=now,
+                )
+            )
+            or bool(
+                timeout_pre_guard_booking_request_signal
+                and timeout_pre_guard_booking_service_query
+            )
+        )
+        timeout_active_time_specialist_interrupt_pre_guard = bool(
+            timeout_pre_guard_collect_contract_signal
+            and _is_timeout_active_time_specialist_interrupt_candidate(
+                message_text=message_text,
+                client_slug=payload.client_slug,
+                expected_reply_type=expected_reply_type,
+                expected_reply_matched=expected_reply_matched,
+                expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+                booking_service=timeout_pre_guard_booking_service_query,
+                intent_decomp_payload=intent_decomp_payload,
+            )
+        )
     if (
         POLICY_CORE_RESCUE_MATRIX_ENABLED
         and policy_core_runtime_active
@@ -11892,6 +14647,8 @@ async def _handle_webhook_payload(
         and policy_core_timeout_degrade
         and not pending_info_signal
     ):
+        degraded_policy_core_critical = True
+    if timeout_active_time_specialist_interrupt_pre_guard:
         degraded_policy_core_critical = True
     if policy_override_reason_missing_detected:
         return _send_override_reason_missing_clarify(
@@ -11921,6 +14678,23 @@ async def _handle_webhook_payload(
         policy_validation_error == "collect_slot_order_invalid"
         and policy_collect_guard_slot in BOOKING_SLOT_ORDER
     ):
+        if (
+            policy_collect_guard_slot == "datetime"
+            and policy_collect_slot == "name"
+            and expected_reply_type == EXPECTED_REPLY_TIME
+            and _is_declarative_time_window_slot_constraint_candidate(
+                message_text=message_text
+            )
+        ):
+            return _send_policy_validation_pending_question_guidance(
+                validation_error="collect_slot_order_invalid",
+                collect_slot="datetime",
+                guard_reason="policy_core_collect_slot_order_slot_constraint_guidance",
+                trace_decision="collect_slot_order_slot_constraint_guidance",
+                requested_slot=policy_collect_slot,
+                pending_question_act="slot_constraint",
+                pending_question_target="time",
+            )
         return _send_policy_validation_collect_prompt(
             validation_error="collect_slot_order_invalid",
             collect_slot=policy_collect_guard_slot,
@@ -11928,6 +14702,293 @@ async def _handle_webhook_payload(
             trace_decision="collect_slot_order_collect_prompt",
             requested_slot=policy_collect_slot,
         )
+
+    policy_core_invalid_schema_degrade = bool(
+        isinstance(policy_core_failure, dict)
+        and policy_core_failure.get("code") == "invalid_schema"
+    )
+
+    def _maybe_send_invalid_schema_specialist_followup_response() -> WebhookResponse | None:
+        if (
+            not policy_core_runtime_active
+            or policy_core_mode != "degraded_fallback"
+            or not policy_core_invalid_schema_degrade
+            or expected_reply_type != EXPECTED_REPLY_TIME
+            or expected_reply_matched is True
+            or not isinstance(message_text, str)
+            or not message_text.strip()
+            or not (booking_wants_flow or booking_active or current_goal == "booking")
+        ):
+            return None
+
+        invalid_schema_booking_state = dict(booking) if isinstance(booking, dict) else {}
+        invalid_schema_specialist_name = None
+        raw_specialist_name = invalid_schema_booking_state.get("specialist_name")
+        if isinstance(raw_specialist_name, str) and raw_specialist_name.strip():
+            invalid_schema_specialist_name = raw_specialist_name.strip()
+
+        invalid_schema_master_service_query = None
+        for candidate in (
+            invalid_schema_booking_state.get("service"),
+            intent_decomp_service_query,
+        ):
+            if isinstance(candidate, str) and candidate.strip():
+                invalid_schema_master_service_query = candidate.strip()
+                break
+
+        master_resolution = resolve_master_intent(
+            message_text=message_text,
+            client_slug=payload.client_slug,
+            service_query=invalid_schema_master_service_query,
+            intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
+            force_master_intent=False,
+        )
+        invalid_schema_booking_request_signal = bool(
+            _is_booking_request(message_text, client_slug=payload.client_slug)
+        )
+        if (
+            not master_resolution.explicit
+            and invalid_schema_specialist_name is None
+            and not invalid_schema_booking_request_signal
+        ):
+            return None
+
+        if invalid_schema_specialist_name is None:
+            specialist_name_hint = _resolve_specialist_name_hint_with_trace(
+                db=db,
+                message_text=message_text,
+                client_slug=payload.client_slug,
+                timing_context=timing_context,
+                conversation=conversation,
+                saved_message=saved_message,
+                tool_action="collect",
+            )
+            if isinstance(specialist_name_hint, str) and specialist_name_hint.strip():
+                invalid_schema_specialist_name = specialist_name_hint.strip()
+        if invalid_schema_specialist_name is None:
+            return None
+
+        if (
+            invalid_schema_master_service_query
+            and not invalid_schema_booking_state.get("service")
+        ):
+            invalid_schema_booking_state["service"] = invalid_schema_master_service_query
+        if not invalid_schema_booking_state.get("active"):
+            invalid_schema_booking_state["active"] = True
+            invalid_schema_booking_state["started_at"] = now.isoformat()
+        invalid_schema_booking_state["specialist_name"] = invalid_schema_specialist_name
+        invalid_schema_booking_state["last_question"] = "datetime"
+        context = _get_conversation_context(conversation)
+        context = _set_booking_context(context, invalid_schema_booking_state)
+        context = _set_expected_reply_context(
+            conversation=conversation,
+            saved_message=saved_message,
+            context=context,
+            expected_reply_type=EXPECTED_REPLY_TIME,
+            reason="policy_core_invalid_schema_specialist_followup",
+            now=now,
+        )
+        _set_conversation_context(conversation, context)
+        _apply_policy_guard_override(
+            final_action="collect",
+            final_tool_action="collect",
+            reason_code="contract_validation_failure",
+            reason="policy_core_invalid_schema_specialist_followup",
+        )
+        _sync_policy_plan_audit(emit_trace=True)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "policy_core_guard",
+                "decision": "invalid_schema_specialist_followup",
+                "state": conversation.state,
+                "mode": policy_core_mode,
+                "reason": policy_core_degrade_reason,
+                "missing_slot": "datetime",
+            },
+        )
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_specialist_followup",
+                "state": conversation.state,
+                "source": "policy_core_guard",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+                "requested_slot": "datetime",
+                "expected_reply_type": EXPECTED_REPLY_TIME,
+                "specialist_name": invalid_schema_specialist_name,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="booking_prompt",
+            intent="booking",
+            source="policy_core_guard",
+            fast_intent=False,
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "pending_question_target": "specialist",
+                    "pending_question_interaction": "specialist_followup",
+                    "pending_question_owner": "policy_core_invalid_schema_specialist_followup",
+                    "active_question_relation": "referent_followup",
+                    "specialist_name": invalid_schema_specialist_name,
+                    "expected_reply_type": EXPECTED_REPLY_TIME,
+                    "expected_reply_reason": "policy_core_invalid_schema_specialist_followup",
+                    "policy_core_guard_recovery": "invalid_schema_specialist_followup",
+                },
+            )
+        bot_response = _format_specialist_followup_prompt(
+            specialist_name=invalid_schema_specialist_name,
+            base_prompt=MSG_BOOKING_ASK_DATETIME,
+            question_like=_is_question_like_message(message_text),
+        )
+        bot_response, sent = _send_and_save(bot_response)
+        result_message = (
+            "Policy core invalid-schema specialist-followup response sent"
+            if sent
+            else "Policy core invalid-schema specialist-followup response failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    invalid_schema_specialist_followup_response = (
+        _maybe_send_invalid_schema_specialist_followup_response()
+    )
+    if invalid_schema_specialist_followup_response is not None:
+        return invalid_schema_specialist_followup_response
+
+    def _maybe_send_invalid_schema_service_grounded_booking_response() -> (
+        WebhookResponse | None
+    ):
+        if (
+            not policy_core_runtime_active
+            or policy_core_mode != "degraded_fallback"
+            or not policy_core_invalid_schema_degrade
+            or expected_reply_matched is True
+            or expected_reply_type not in {None, EXPECTED_REPLY_SERVICE}
+            or not isinstance(message_text, str)
+            or not message_text.strip()
+        ):
+            return None
+
+        booking_request_signal = bool(
+            _is_booking_request(message_text, client_slug=payload.client_slug)
+        )
+        if not (
+            booking_request_signal
+            or booking_wants_flow
+            or booking_active
+            or current_goal == "booking"
+        ):
+            return None
+
+        invalid_schema_booking_state = dict(booking) if isinstance(booking, dict) else {}
+        invalid_schema_service_query = None
+        invalid_schema_service_query_source = None
+        for source, candidate in (
+            ("booking_context", invalid_schema_booking_state.get("service")),
+            ("intent_decomp", intent_decomp_service_query),
+            (
+                "pack_service_hint",
+                get_pack_service_hint(message_text, client_slug=payload.client_slug),
+            ),
+        ):
+            if isinstance(candidate, str) and candidate.strip():
+                invalid_schema_service_query = candidate.strip()
+                invalid_schema_service_query_source = source
+                break
+        if invalid_schema_service_query is None:
+            return None
+
+        invalid_schema_booking_state["service"] = invalid_schema_service_query
+        if not invalid_schema_booking_state.get("active"):
+            invalid_schema_booking_state["active"] = True
+            invalid_schema_booking_state["started_at"] = now.isoformat()
+        invalid_schema_booking_state["last_question"] = "datetime"
+        context = _get_conversation_context(conversation)
+        context = _set_booking_context(context, invalid_schema_booking_state)
+        context = _set_service_hint(context, invalid_schema_service_query, now)
+        context = _set_expected_reply_context(
+            conversation=conversation,
+            saved_message=saved_message,
+            context=context,
+            expected_reply_type=EXPECTED_REPLY_TIME,
+            reason="policy_core_invalid_schema_service_grounded_booking",
+            now=now,
+        )
+        _set_conversation_context(conversation, context)
+        _apply_policy_guard_override(
+            final_action="collect",
+            final_tool_action="collect",
+            reason_code="contract_validation_failure",
+            reason="policy_core_invalid_schema_service_grounded_booking",
+        )
+        _sync_policy_plan_audit(emit_trace=True)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "policy_core_guard",
+                "decision": "invalid_schema_service_grounded_booking",
+                "state": conversation.state,
+                "mode": policy_core_mode,
+                "reason": policy_core_degrade_reason,
+                "missing_slot": "datetime",
+                "service_query": invalid_schema_service_query,
+                "service_query_source": invalid_schema_service_query_source,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="booking_prompt",
+            intent="booking",
+            source="policy_core_guard",
+            fast_intent=False,
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "service_query": invalid_schema_service_query,
+                    "service_query_source": invalid_schema_service_query_source,
+                    "expected_reply_type": EXPECTED_REPLY_TIME,
+                    "expected_reply_reason": (
+                        "policy_core_invalid_schema_service_grounded_booking"
+                    ),
+                    "policy_core_guard_recovery": (
+                        "invalid_schema_service_grounded_booking"
+                    ),
+                },
+            )
+        bot_response, sent = _send_and_save(MSG_BOOKING_ASK_DATETIME)
+        result_message = (
+            "Policy core invalid-schema service-grounded booking response sent"
+            if sent
+            else "Policy core invalid-schema service-grounded booking response failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    invalid_schema_service_grounded_booking_response = (
+        _maybe_send_invalid_schema_service_grounded_booking_response()
+    )
+    if invalid_schema_service_grounded_booking_response is not None:
+        return invalid_schema_service_grounded_booking_response
+
     if degraded_policy_core_critical:
         policy_guard_reason_code = (
             "timeout_degrade" if policy_core_timeout_degrade else "contract_validation_failure"
@@ -12012,6 +15073,175 @@ async def _handle_webhook_payload(
                 bot_response=bot_response,
             )
 
+        pending_timeout_resume_boundary_payload = None
+        if (
+            conversation.state == ConversationState.PENDING.value
+            and policy_core_timeout_degrade
+            and pending_resume_boundary_active
+        ):
+            pending_timeout_resume_boundary_payload = (
+                _derive_pending_booking_resume_boundary_payload(
+                    _get_conversation_context(conversation),
+                    now=now,
+                )
+            )
+            if (
+                pending_timeout_resume_boundary_payload is not None
+                and pending_timeout_resume_boundary_payload.get("expected_reply_type")
+                == EXPECTED_REPLY_TIME
+            ):
+                pending_timeout_boundary_resolution = resolve_timeout_owner_boundary(
+                    TimeoutOwnerBoundaryInput(
+                        booking_active=booking_active,
+                        current_goal=current_goal,
+                        resume_contract_state=pending_timeout_resume_boundary_payload.get(
+                            "booking_state"
+                        ),
+                        resume_contract_prompt=pending_timeout_resume_boundary_payload.get(
+                            "prompt"
+                        ),
+                        resume_contract_expected=pending_timeout_resume_boundary_payload.get(
+                            "expected_reply_type"
+                        ),
+                    )
+                )
+                if pending_timeout_boundary_resolution is not None:
+                    context = _get_conversation_context(conversation)
+                    context = _set_booking_context(
+                        context,
+                        pending_timeout_boundary_resolution.booking_state,
+                    )
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=pending_timeout_boundary_resolution.expected_reply_type,
+                        reason=pending_timeout_boundary_resolution.expected_reply_reason,
+                        now=now,
+                    )
+                    context_manager = _sync_canonical_dialog_state(
+                        _get_context_manager(context),
+                        booking_state=_get_booking_context(context),
+                        expected_reply_type=_get_expected_reply_type(context),
+                        expected_reply_reason=_get_expected_reply_reason(context),
+                        message_count=message_count,
+                        branch_id=conversation.branch_id,
+                        consult_context=(
+                            consult_context if isinstance(consult_context, dict) else None
+                        ),
+                        interaction_owner=pending_timeout_boundary_resolution.execution_owner,
+                    )
+                    context = _set_context_manager(context, context_manager)
+                    interaction_state_payload = _get_canonical_dialog_state(context_manager).get(
+                        "interaction_state"
+                    )
+                    context, session_memory = _sync_session_memory_interaction_state(
+                        context,
+                        interaction_state=(
+                            interaction_state_payload
+                            if isinstance(interaction_state_payload, dict)
+                            else None
+                        ),
+                        now=now,
+                    )
+                    _set_conversation_context(conversation, context)
+                    _apply_policy_guard_override(
+                        final_action="collect",
+                        final_tool_action="collect",
+                        reason_code="timeout_degrade",
+                        reason=pending_timeout_boundary_resolution.expected_reply_reason,
+                    )
+                    _sync_policy_plan_audit(emit_trace=True)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "owner_resolver",
+                            "decision": "timeout_owner_boundary_match",
+                            "reason_code": pending_timeout_boundary_resolution.reason_code,
+                            "execution_owner": (
+                                pending_timeout_boundary_resolution.execution_owner
+                            ),
+                            "source": pending_timeout_boundary_resolution.source,
+                        },
+                    )
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "boundary_state",
+                            "decision": "resume_collect",
+                            "state": conversation.state,
+                            "mode": policy_core_mode,
+                            "reason": policy_core_degrade_reason,
+                            "source": "pending_handoff",
+                            "missing_slot": pending_timeout_boundary_resolution.missing_slot,
+                        },
+                    )
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "policy_core_guard",
+                            "decision": pending_timeout_boundary_resolution.trace_decision,
+                            "state": conversation.state,
+                            "mode": policy_core_mode,
+                            "reason": policy_core_degrade_reason,
+                            "owner_reason_code": pending_timeout_boundary_resolution.reason_code,
+                            "missing_slot": pending_timeout_boundary_resolution.missing_slot,
+                            "filled_slots": list(pending_timeout_boundary_resolution.filled_slots),
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="booking_prompt",
+                        intent="booking",
+                        source="policy_core_guard",
+                        fast_intent=False,
+                    )
+                    if saved_message:
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "pending_action": "pending_pass",
+                                "pending_guard": "soft_pass",
+                                "pending_handoff_resume_boundary": True,
+                                "expected_reply_type": (
+                                    pending_timeout_boundary_resolution.expected_reply_type
+                                ),
+                                "expected_reply_reason": (
+                                    pending_timeout_boundary_resolution.expected_reply_reason
+                                ),
+                                "policy_core_guard_recovery": (
+                                    pending_timeout_boundary_resolution.recovery
+                                ),
+                                "policy_core_timeout_retry_path": (
+                                    "booking_resume_collect_boundary"
+                                ),
+                                "owner_resolution_reason_code": (
+                                    pending_timeout_boundary_resolution.reason_code
+                                ),
+                                "interaction_owner": (
+                                    pending_timeout_boundary_resolution.execution_owner
+                                ),
+                                "timeout_owner_boundary_source": (
+                                    pending_timeout_boundary_resolution.source
+                                ),
+                            },
+                        )
+                    bot_response, sent = _send_and_save(
+                        pending_timeout_boundary_resolution.prompt
+                    )
+                    result_message = (
+                        "Policy core timeout pending resume-boundary collect response sent"
+                        if sent
+                        else "Policy core timeout pending resume-boundary collect response failed"
+                    )
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
+
         if conversation.state in {ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value}:
             if conversation.state == ConversationState.PENDING.value:
                 bot_response = MSG_PENDING_WAIT
@@ -12059,10 +15289,11 @@ async def _handle_webhook_payload(
             message_text,
             client_slug=payload.client_slug,
         )
+        # Timeout degrade must preserve booking-collect protection even when the
+        # same surface also trips generic info-query heuristics.
         timeout_booking_request_signal = bool(
             message_text
             and _is_booking_request(message_text, client_slug=payload.client_slug)
-            and not _looks_like_info_query(message_text, client_slug=payload.client_slug)
         )
         if not timeout_booking_request_signal:
             timeout_booking_request_signal = bool(
@@ -12084,9 +15315,8 @@ async def _handle_webhook_payload(
             if isinstance(candidate, str) and candidate.strip():
                 timeout_booking_service_query = candidate.strip()
                 break
-        timeout_needs_booking_collect = bool(
+        booking_collect_contract_signal = bool(
             message_text
-            and not pending_info_signal
             and (
                 booking_verification_request
                 or expected_reply_type
@@ -12104,6 +15334,462 @@ async def _handle_webhook_payload(
                 or bool(timeout_booking_request_signal and timeout_booking_service_query)
             )
         )
+        timeout_active_time_specialist_interrupt_safe_fallback = bool(
+            policy_core_timeout_degrade
+            and booking_collect_contract_signal
+            and _is_timeout_active_time_specialist_interrupt_candidate(
+                message_text=message_text,
+                client_slug=payload.client_slug,
+                expected_reply_type=expected_reply_type,
+                expected_reply_matched=expected_reply_matched,
+                expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+                booking_service=timeout_booking_service_query,
+                intent_decomp_payload=intent_decomp_payload,
+            )
+        )
+        timeout_needs_booking_collect = bool(
+            booking_collect_contract_signal
+            and (
+                not pending_info_signal
+                or timeout_active_time_specialist_interrupt_safe_fallback
+            )
+        )
+        timeout_booking_slot_fill_followup_state: dict[str, Any] | None = None
+        timeout_booking_slot_fill_followup_prompt: str | None = None
+        timeout_booking_slot_fill_followup_expected: str | None = None
+        timeout_booking_slot_fill_applied: list[str] = []
+        if (
+            policy_core_timeout_degrade
+            and not pending_info_signal
+            and isinstance(message_text, str)
+            and message_text.strip()
+        ):
+            timeout_booking_followup_state = dict(booking) if isinstance(booking, dict) else {}
+            timeout_booking_followup_context = bool(
+                booking_wants_flow
+                or booking_active
+                or current_goal == "booking"
+                or timeout_booking_followup_state.get("active")
+            )
+            if (
+                timeout_booking_followup_context
+                and not _plan_has_complete_booking_slots(
+                    timeout_booking_followup_state,
+                    client_slug=payload.client_slug,
+                )
+            ):
+                if (
+                    timeout_booking_service_query
+                    and not timeout_booking_followup_state.get("service")
+                ):
+                    timeout_booking_followup_state["service"] = timeout_booking_service_query
+                has_grounded_booking_context = bool(
+                    any(
+                        isinstance(timeout_booking_followup_state.get(slot_key), str)
+                        and timeout_booking_followup_state.get(slot_key).strip()
+                        for slot_key in ("service", "datetime")
+                    )
+                )
+                if has_grounded_booking_context:
+                    if not timeout_booking_followup_state.get("active"):
+                        timeout_booking_followup_state["active"] = True
+                        timeout_booking_followup_state["started_at"] = now.isoformat()
+                    timeout_updated_booking = _update_booking_from_messages(
+                        timeout_booking_followup_state,
+                        [message_text],
+                        client_slug=payload.client_slug,
+                    )
+                    timeout_booking_slot_fill_applied = [
+                        slot_key
+                        for slot_key in (*BOOKING_SLOT_ORDER, "phone")
+                        if (
+                            (
+                                timeout_booking_followup_state.get(slot_key).strip()
+                                if isinstance(timeout_booking_followup_state.get(slot_key), str)
+                                and timeout_booking_followup_state.get(slot_key).strip()
+                                else None
+                            )
+                            != (
+                                timeout_updated_booking.get(slot_key).strip()
+                                if isinstance(timeout_updated_booking.get(slot_key), str)
+                                and timeout_updated_booking.get(slot_key).strip()
+                                else None
+                            )
+                        )
+                    ]
+                    if timeout_booking_slot_fill_applied:
+                        timeout_followup_context = _get_conversation_context(conversation)
+                        timeout_followup_manager = _get_context_manager(timeout_followup_context)
+                        refusal_flags = (
+                            timeout_followup_manager.get("refusal_flags")
+                            if isinstance(timeout_followup_manager, dict)
+                            else None
+                        )
+                        (
+                            timeout_followup_state,
+                            timeout_followup_prompt,
+                        ) = _next_booking_prompt(
+                            timeout_updated_booking,
+                            refusal_flags=refusal_flags,
+                            client_slug=payload.client_slug,
+                        )
+                        timeout_followup_expected = _expected_reply_for_booking_question(
+                            timeout_followup_state.get("last_question")
+                        )
+                        if (
+                            isinstance(timeout_followup_prompt, str)
+                            and timeout_followup_prompt.strip()
+                            and timeout_followup_expected
+                            in {
+                                EXPECTED_REPLY_SERVICE,
+                                EXPECTED_REPLY_TIME,
+                                EXPECTED_REPLY_NAME,
+                                EXPECTED_REPLY_PHONE,
+                            }
+                        ):
+                            timeout_booking_slot_fill_followup_state = timeout_followup_state
+                            timeout_booking_slot_fill_followup_prompt = (
+                                timeout_followup_prompt.strip()
+                            )
+                            timeout_booking_slot_fill_followup_expected = (
+                                timeout_followup_expected
+                            )
+        timeout_resume_contract_state: dict[str, Any] | None = None
+        timeout_resume_contract_prompt: str | None = None
+        timeout_resume_contract_expected: str | None = None
+        timeout_resume_slot = _expected_reply_slot_key(expected_reply_type)
+        if not timeout_resume_slot and isinstance(booking, dict):
+            raw_timeout_resume_slot = booking.get("last_question")
+            if isinstance(raw_timeout_resume_slot, str) and raw_timeout_resume_slot.strip():
+                timeout_resume_slot = raw_timeout_resume_slot.strip()
+        timeout_resume_pending_slot_question = bool(
+            policy_core_timeout_degrade
+            and timeout_needs_booking_collect
+            and timeout_resume_slot == "datetime"
+            and _is_timeout_pending_time_slot_question(
+                message_text=message_text,
+                client_slug=payload.client_slug,
+                expected_reply_type=expected_reply_type,
+                expected_reply_matched=expected_reply_matched,
+                expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+                booking_service=timeout_booking_service_query,
+                intent_decomp_payload=intent_decomp_payload,
+                now=now,
+            )
+        )
+        if (
+            policy_core_timeout_degrade
+            and timeout_needs_booking_collect
+            and not pending_info_signal
+            and not timeout_resume_pending_slot_question
+            and expected_reply_reason == "booking_interrupt"
+            and timeout_resume_slot == "datetime"
+        ):
+            timeout_resume_state = dict(booking) if isinstance(booking, dict) else {}
+            if timeout_booking_service_query and not timeout_resume_state.get("service"):
+                timeout_resume_state["service"] = timeout_booking_service_query
+            if not timeout_resume_state.get("active"):
+                timeout_resume_state["active"] = True
+                timeout_resume_state["started_at"] = now.isoformat()
+            timeout_resume_state["last_question"] = timeout_resume_slot
+            timeout_resume_context = _get_conversation_context(conversation)
+            timeout_resume_manager = _get_context_manager(timeout_resume_context)
+            timeout_resume_refusal_flags = (
+                timeout_resume_manager.get("refusal_flags")
+                if isinstance(timeout_resume_manager, dict)
+                else None
+            )
+            (
+                timeout_resume_contract_state,
+                timeout_resume_contract_prompt,
+            ) = _next_booking_prompt(
+                timeout_resume_state,
+                refusal_flags=timeout_resume_refusal_flags,
+                client_slug=payload.client_slug,
+            )
+            timeout_resume_contract_expected = _expected_reply_for_booking_question(
+                timeout_resume_contract_state.get("last_question")
+                if isinstance(timeout_resume_contract_state, dict)
+                else None
+            )
+        timeout_owner_boundary_resolution = resolve_timeout_owner_boundary(
+            TimeoutOwnerBoundaryInput(
+                booking_active=booking_active,
+                current_goal=current_goal,
+                matched_booking_followup_state=matched_booking_followup_state,
+                matched_booking_followup_prompt=matched_booking_followup_prompt,
+                matched_booking_followup_expected=matched_booking_followup_expected,
+                matched_booking_filled_slots=matched_booking_filled_slots,
+                slot_fill_followup_state=timeout_booking_slot_fill_followup_state,
+                slot_fill_followup_prompt=timeout_booking_slot_fill_followup_prompt,
+                slot_fill_followup_expected=timeout_booking_slot_fill_followup_expected,
+                slot_fill_applied=tuple(timeout_booking_slot_fill_applied),
+                resume_contract_state=timeout_resume_contract_state,
+                resume_contract_prompt=timeout_resume_contract_prompt,
+                resume_contract_expected=timeout_resume_contract_expected,
+            )
+        )
+        if timeout_owner_boundary_resolution:
+            timeout_pending_question_contract = (
+                _derive_timeout_owner_boundary_pending_question_contract(
+                    source=timeout_owner_boundary_resolution.source,
+                    expected_reply_type=timeout_owner_boundary_resolution.expected_reply_type,
+                    booking_state=timeout_owner_boundary_resolution.booking_state,
+                    filled_slots=timeout_owner_boundary_resolution.filled_slots,
+                )
+            )
+            context = _get_conversation_context(conversation)
+            context = _set_booking_context(
+                context,
+                timeout_owner_boundary_resolution.booking_state,
+            )
+            context = _set_expected_reply_context(
+                conversation=conversation,
+                saved_message=saved_message,
+                context=context,
+                expected_reply_type=timeout_owner_boundary_resolution.expected_reply_type,
+                reason=timeout_owner_boundary_resolution.expected_reply_reason,
+                now=now,
+            )
+            context_manager = _sync_canonical_dialog_state(
+                _get_context_manager(context),
+                booking_state=_get_booking_context(context),
+                expected_reply_type=_get_expected_reply_type(context),
+                expected_reply_reason=_get_expected_reply_reason(context),
+                message_count=message_count,
+                branch_id=conversation.branch_id,
+                consult_context=consult_context if isinstance(consult_context, dict) else None,
+                interaction_owner=timeout_owner_boundary_resolution.execution_owner,
+            )
+            context = _set_context_manager(context, context_manager)
+            interaction_state_payload = _get_canonical_dialog_state(context_manager).get(
+                "interaction_state"
+            )
+            context, session_memory = _sync_session_memory_interaction_state(
+                context,
+                interaction_state=(
+                    interaction_state_payload
+                    if isinstance(interaction_state_payload, dict)
+                    else None
+                ),
+                now=now,
+            )
+            _set_conversation_context(conversation, context)
+            _apply_policy_guard_override(
+                final_action="collect",
+                final_tool_action="collect",
+                reason_code="timeout_degrade",
+                reason=timeout_owner_boundary_resolution.expected_reply_reason,
+            )
+            _sync_policy_plan_audit(emit_trace=True)
+            owner_trace = {
+                "stage": "owner_resolver",
+                "decision": "timeout_owner_boundary_match",
+                "reason_code": timeout_owner_boundary_resolution.reason_code,
+                "execution_owner": timeout_owner_boundary_resolution.execution_owner,
+                "source": timeout_owner_boundary_resolution.source,
+            }
+            _record_decision_trace(conversation, owner_trace)
+            if timeout_owner_boundary_resolution.source == "resume_contract":
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "boundary_state",
+                        "decision": "resume_collect",
+                        "state": conversation.state,
+                        "mode": policy_core_mode,
+                        "reason": policy_core_degrade_reason,
+                        "source": "booking_interrupt",
+                        "missing_slot": timeout_owner_boundary_resolution.missing_slot,
+                    },
+                )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": timeout_owner_boundary_resolution.trace_decision,
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                    "owner_reason_code": timeout_owner_boundary_resolution.reason_code,
+                    "missing_slot": timeout_owner_boundary_resolution.missing_slot,
+                    "filled_slots": list(timeout_owner_boundary_resolution.filled_slots),
+                },
+            )
+            if timeout_pending_question_contract:
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "pending_question_interaction",
+                        "decision": timeout_pending_question_contract["pending_question_act"],
+                        "state": conversation.state,
+                        "source": timeout_pending_question_contract["pending_question_owner"],
+                        "pending_question_act": timeout_pending_question_contract[
+                            "pending_question_act"
+                        ],
+                        "pending_question_target": timeout_pending_question_contract[
+                            "pending_question_target"
+                        ],
+                        "expected_reply_type": timeout_owner_boundary_resolution.expected_reply_type,
+                    },
+                )
+            _record_message_decision_meta(
+                saved_message,
+                action="booking_prompt",
+                intent="booking",
+                source="policy_core_guard",
+                fast_intent=False,
+            )
+            if saved_message:
+                meta_updates = {
+                    "expected_reply_type": timeout_owner_boundary_resolution.expected_reply_type,
+                    "expected_reply_reason": timeout_owner_boundary_resolution.expected_reply_reason,
+                    "policy_core_guard_recovery": timeout_owner_boundary_resolution.recovery,
+                    "policy_core_timeout_retry_path": (
+                        "booking_owner_boundary_collect"
+                        if timeout_owner_boundary_resolution.source == "matched_expected_reply"
+                        else (
+                            "booking_slot_fill_followup"
+                            if timeout_owner_boundary_resolution.source == "slot_fill_followup"
+                            else "booking_resume_collect_boundary"
+                        )
+                    ),
+                    "booking_slot_fill_applied": list(timeout_owner_boundary_resolution.filled_slots),
+                    "owner_resolution_reason_code": timeout_owner_boundary_resolution.reason_code,
+                    "interaction_owner": timeout_owner_boundary_resolution.execution_owner,
+                    "timeout_owner_boundary_source": timeout_owner_boundary_resolution.source,
+                }
+                if timeout_pending_question_contract:
+                    meta_updates.update(timeout_pending_question_contract)
+                _update_message_decision_metadata(saved_message, meta_updates)
+            bot_response, sent = _send_and_save(timeout_owner_boundary_resolution.prompt)
+            result_message = (
+                (
+                    "Policy core timeout owner-boundary collect response sent"
+                    if timeout_owner_boundary_resolution.source == "matched_expected_reply"
+                    else (
+                        "Policy core timeout booking slot-fill follow-up response sent"
+                        if timeout_owner_boundary_resolution.source == "slot_fill_followup"
+                        else "Policy core timeout resume-boundary collect response sent"
+                    )
+                )
+                if sent
+                else (
+                    "Policy core timeout owner-boundary collect response failed"
+                    if timeout_owner_boundary_resolution.source == "matched_expected_reply"
+                    else (
+                        "Policy core timeout booking slot-fill follow-up response failed"
+                        if timeout_owner_boundary_resolution.source == "slot_fill_followup"
+                        else "Policy core timeout resume-boundary collect response failed"
+                    )
+                )
+            )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+        (
+            timeout_completed_booking_state,
+            timeout_completed_booking_filled_slots,
+        ) = _derive_timeout_completed_booking_state(
+            matched_expected_reply_type=matched_expected_reply_type,
+            booking_state=_get_booking_context(_get_conversation_context(conversation)),
+            filled_slots=matched_booking_filled_slots,
+            client_slug=payload.client_slug,
+        )
+        if (
+            policy_core_timeout_degrade
+            and not pending_info_signal
+            and timeout_completed_booking_state
+        ):
+            timeout_completion_context = _get_conversation_context(conversation)
+            timeout_completion_context = _set_booking_context(
+                timeout_completion_context,
+                timeout_completed_booking_state,
+            )
+            _set_conversation_context(conversation, timeout_completion_context)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "timeout_completed_booking_continuity",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                    "filled_slots": list(timeout_completed_booking_filled_slots),
+                    "booking_complete": True,
+                },
+            )
+            booking_completion_result = _handle_booking_flow(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message_text=message_text,
+                saved_message=saved_message,
+                client_slug=payload.client_slug,
+                routing=routing,
+                bypass_domain_flows=bypass_domain_flows,
+                booking_wants_flow=True,
+                booking_active=True,
+                booking_signal=True,
+                booking_messages=booking_messages,
+                booking_context=timeout_completion_context,
+                booking=timeout_completed_booking_state,
+                expected_reply_type=None,
+                expected_reply_matched=True,
+                expected_reply_blocked_by_info=False,
+                basic_info_message=basic_info_message,
+                session_memory_reset_reason=session_memory_reset_reason,
+                memory_expected_reply_type=memory_expected_reply_type,
+                policy_handler=policy_handler,
+                policy_pack=policy_pack,
+                now=now,
+                message_count=message_count,
+                multi_intent_booking_followup=multi_intent_booking_followup,
+                consult_return_pending=consult_return_pending,
+                consult_return_prompt=consult_return_prompt,
+                consult_context=consult_context,
+                consult_return_reason=consult_return_reason,
+                send_and_save=_send_and_save,
+                send_response=_send_response,
+                finalize_response=_finalize_bot_response,
+                log_timing=_log_timing,
+                record_escalation_metric=_record_escalation_metric,
+            )
+            if booking_completion_result.response:
+                completion_action = None
+                if saved_message:
+                    completion_meta = (
+                        saved_message.message_metadata.get("decision_meta", {})
+                        if isinstance(saved_message.message_metadata, dict)
+                        else {}
+                    )
+                    completion_action = completion_meta.get("action")
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "policy_core_guard_recovery": "timeout_completed_booking_continuity",
+                            "policy_core_timeout_retry_path": "booking_completion_continuity",
+                            "booking_slot_fill_applied": list(
+                                timeout_completed_booking_filled_slots
+                            ),
+                        },
+                    )
+                override_action, override_tool_action = _timeout_booking_completion_override(
+                    completion_action
+                )
+                _apply_policy_guard_override(
+                    final_action=override_action,
+                    final_tool_action=override_tool_action,
+                    reason_code="timeout_degrade",
+                    reason="policy_core_timeout_booking_completion",
+                )
+                _sync_policy_plan_audit(emit_trace=True)
+                db.commit()
+                return booking_completion_result.response
         timeout_factual_fallback_reply: str | None = None
         timeout_factual_fallback_meta: dict[str, Any] | None = None
         timeout_factual_fallback_intent: str | None = None
@@ -12565,11 +16251,558 @@ async def _handle_webhook_payload(
             # never fall back to generic clarify.
             collect_slot = "datetime" if timeout_booking_service_query else "service"
         original_collect_slot = collect_slot
+        timeout_specialist_followup_name = None
+        if (
+            policy_core_timeout_degrade
+            and timeout_booking_safe_fallback
+            and collect_slot == "datetime"
+            and expected_reply_type == EXPECTED_REPLY_TIME
+            and expected_reply_matched is not True
+        ):
+            if isinstance(booking, dict):
+                raw_specialist_name = booking.get("specialist_name")
+                if isinstance(raw_specialist_name, str) and raw_specialist_name.strip():
+                    timeout_specialist_followup_name = raw_specialist_name.strip()
+            if (
+                timeout_specialist_followup_name is None
+                and isinstance(message_text, str)
+                and message_text.strip()
+                and _is_booking_request(message_text, client_slug=payload.client_slug)
+            ):
+                specialist_name_hint = _resolve_specialist_name_hint_with_trace(
+                    db=db,
+                    message_text=message_text,
+                    client_slug=payload.client_slug,
+                    timing_context=timing_context,
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    tool_action="collect",
+                )
+                if isinstance(specialist_name_hint, str) and specialist_name_hint.strip():
+                    timeout_specialist_followup_name = specialist_name_hint.strip()
+            if isinstance(timeout_specialist_followup_name, str) and timeout_specialist_followup_name.strip():
+                timeout_specialist_followup_name = timeout_specialist_followup_name.strip()
+                timeout_booking_state = dict(booking) if isinstance(booking, dict) else {}
+                if timeout_booking_service_query and not timeout_booking_state.get("service"):
+                    timeout_booking_state["service"] = timeout_booking_service_query
+                if not timeout_booking_state.get("active"):
+                    timeout_booking_state["active"] = True
+                    timeout_booking_state["started_at"] = now.isoformat()
+                timeout_booking_state["specialist_name"] = timeout_specialist_followup_name
+                timeout_booking_state["last_question"] = collect_slot
+                context = _get_conversation_context(conversation)
+                context = _set_booking_context(context, timeout_booking_state)
+                booking_expected = _expected_reply_for_booking_question(collect_slot)
+                if booking_expected:
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=booking_expected,
+                        reason="policy_core_timeout_specialist_followup",
+                        now=now,
+                    )
+                _set_conversation_context(conversation, context)
+                _apply_policy_guard_override(
+                    final_action="collect",
+                    final_tool_action="collect",
+                    reason_code="timeout_degrade",
+                    reason="policy_core_timeout_specialist_followup",
+                )
+                _sync_policy_plan_audit(emit_trace=True)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "policy_core_guard",
+                        "decision": "timeout_specialist_followup",
+                        "state": conversation.state,
+                        "mode": policy_core_mode,
+                        "reason": policy_core_degrade_reason,
+                        "missing_slot": collect_slot,
+                    },
+                )
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "pending_question_interaction",
+                        "decision": "booking_specialist_followup",
+                        "state": conversation.state,
+                        "source": "policy_core_guard",
+                        "pending_question_target": "specialist",
+                        "requested_slot": collect_slot,
+                        "expected_reply_type": booking_expected,
+                        "specialist_name": timeout_specialist_followup_name,
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="booking_prompt",
+                    intent="booking",
+                    source="policy_core_guard",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "pending_question_target": "specialist",
+                            "pending_question_interaction": "specialist_followup",
+                            "pending_question_owner": "policy_core_timeout_specialist_followup",
+                            "specialist_name": timeout_specialist_followup_name,
+                            "expected_reply_type": booking_expected,
+                            "expected_reply_reason": "policy_core_timeout_specialist_followup",
+                            "policy_core_guard_recovery": "timeout_specialist_followup",
+                            "policy_core_timeout_retry_path": "booking_collect_specialist_followup",
+                        },
+                    )
+                bot_response = _format_specialist_followup_prompt(
+                    specialist_name=timeout_specialist_followup_name,
+                    base_prompt=MSG_BOOKING_ASK_DATETIME,
+                    question_like=_is_question_like_message(message_text),
+                )
+                bot_response, sent = _send_and_save(bot_response)
+                result_message = (
+                    "Policy core timeout specialist-followup response sent"
+                    if sent
+                    else "Policy core timeout specialist-followup response failed"
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+        timeout_active_time_specialist_interrupt = bool(
+            policy_core_timeout_degrade
+            and timeout_booking_safe_fallback
+            and collect_slot == "datetime"
+            and _is_timeout_active_time_specialist_interrupt_candidate(
+                message_text=message_text,
+                client_slug=payload.client_slug,
+                expected_reply_type=expected_reply_type,
+                expected_reply_matched=expected_reply_matched,
+                expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+                booking_service=(
+                    timeout_booking_service_query
+                    or (
+                        booking.get("service")
+                        if isinstance(booking, dict)
+                        and isinstance(booking.get("service"), str)
+                        and booking.get("service").strip()
+                        else None
+                    )
+                ),
+                intent_decomp_payload=intent_decomp_payload,
+            )
+        )
+        if timeout_active_time_specialist_interrupt:
+            timeout_booking_state = dict(booking) if isinstance(booking, dict) else {}
+            if timeout_booking_service_query and not timeout_booking_state.get("service"):
+                timeout_booking_state["service"] = timeout_booking_service_query
+            if not timeout_booking_state.get("active"):
+                timeout_booking_state["active"] = True
+                timeout_booking_state["started_at"] = now.isoformat()
+            timeout_booking_state["last_question"] = collect_slot
+            _apply_policy_guard_override(
+                final_action="fact",
+                final_tool_action="info",
+                reason_code=policy_guard_reason_code,
+                reason="policy_core_timeout_master_info_interrupt",
+            )
+            _sync_policy_plan_audit(emit_trace=True)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "timeout_master_info_interrupt",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                    "missing_slot": collect_slot,
+                    "pending_question_target": "specialist",
+                    "active_question_relation": "specialist_availability_interrupt",
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "policy_core_guard_recovery": "timeout_master_info_interrupt",
+                        "policy_core_timeout_retry_path": "booking_interrupt_master_info",
+                        "active_question_relation": "specialist_availability_interrupt",
+                    },
+                )
+            timeout_master_info_response = _handle_booking_interrupt(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message_text=message_text,
+                saved_message=saved_message,
+                client_slug=payload.client_slug,
+                routing=routing,
+                has_media=has_media,
+                bypass_domain_flows=bypass_domain_flows,
+                booking_wants_flow=booking_wants_flow,
+                consult_intent=consult_intent,
+                intent_decomp_used=intent_decomp_used,
+                intent_decomp_set=intent_decomp_set,
+                intent_decomp_payload=intent_decomp_payload,
+                multi_intent_primary=multi_intent_primary,
+                info_class_intents=info_class_intents,
+                early_domain_intent=None,
+                expected_reply_type=expected_reply_type,
+                expected_reply_matched=expected_reply_matched,
+                expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
+                expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+                pending_question_act=None,
+                pending_question_target="specialist",
+                batch_non_booking_message=batch_non_booking_message,
+                booking_messages=booking_messages,
+                booking_context=booking_context,
+                booking=timeout_booking_state,
+                current_goal=current_goal,
+                basic_info_message=basic_info_message,
+                session_memory_reset_reason=session_memory_reset_reason,
+                memory_expected_reply_type=memory_expected_reply_type,
+                policy_handler=policy_handler,
+                policy_type=policy_type,
+                now=now,
+                message_count=message_count,
+                consult_return_pending=consult_return_pending,
+                consult_return_prompt=consult_return_prompt,
+                consult_context=consult_context,
+                consult_return_reason=consult_return_reason,
+                maybe_apply_fact_guard=_maybe_apply_fact_guard,
+                send_and_save=_send_and_save,
+                send_response=_send_response,
+                finalize_response=_finalize_bot_response,
+            )
+            if timeout_master_info_response:
+                return timeout_master_info_response
+        timeout_active_name_specialist_followup_name = None
+        timeout_active_name_specialist_followup_id = None
+        if (
+            policy_core_timeout_degrade
+            and timeout_booking_safe_fallback
+            and collect_slot == "name"
+            and expected_reply_type == EXPECTED_REPLY_NAME
+            and expected_reply_matched is not True
+            and isinstance(message_text, str)
+            and message_text.strip()
+            and _is_question_like_message(message_text)
+            and not _detect_explicit_name_provided(
+                message_text, client_slug=payload.client_slug
+            )
+        ):
+            if isinstance(booking, dict):
+                raw_specialist_name = booking.get("specialist_name")
+                if isinstance(raw_specialist_name, str) and raw_specialist_name.strip():
+                    timeout_active_name_specialist_followup_name = (
+                        raw_specialist_name.strip()
+                    )
+                raw_specialist_id = booking.get("specialist_id")
+                if isinstance(raw_specialist_id, str) and raw_specialist_id.strip():
+                    timeout_active_name_specialist_followup_id = raw_specialist_id.strip()
+            if timeout_active_name_specialist_followup_name is None:
+                specialist_name_hint = _resolve_specialist_name_hint_with_trace(
+                    db=db,
+                    message_text=message_text,
+                    client_slug=payload.client_slug,
+                    timing_context=timing_context,
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    tool_action="collect",
+                )
+                if isinstance(specialist_name_hint, str) and specialist_name_hint.strip():
+                    timeout_active_name_specialist_followup_name = (
+                        specialist_name_hint.strip()
+                    )
+            specialist_name_token = (
+                timeout_active_name_specialist_followup_name
+                or timeout_active_name_specialist_followup_id
+            )
+            customer_name_candidate = None
+            if isinstance(booking, dict):
+                raw_customer_name = booking.get("name")
+                if isinstance(raw_customer_name, str) and raw_customer_name.strip():
+                    customer_name_candidate = raw_customer_name.strip()
+            normalized_customer_name = (
+                normalize_for_matching(customer_name_candidate)
+                if isinstance(customer_name_candidate, str)
+                and customer_name_candidate.strip()
+                else None
+            )
+            normalized_specialist_name = (
+                normalize_for_matching(specialist_name_token)
+                if isinstance(specialist_name_token, str) and specialist_name_token.strip()
+                else None
+            )
+            same_name_collision = bool(
+                normalized_customer_name
+                and normalized_specialist_name
+                and normalized_customer_name == normalized_specialist_name
+            )
+            if isinstance(specialist_name_token, str) and specialist_name_token.strip():
+                timeout_booking_state = dict(booking) if isinstance(booking, dict) else {}
+                if timeout_booking_service_query and not timeout_booking_state.get("service"):
+                    timeout_booking_state["service"] = timeout_booking_service_query
+                if not timeout_booking_state.get("active"):
+                    timeout_booking_state["active"] = True
+                    timeout_booking_state["started_at"] = now.isoformat()
+                if (
+                    isinstance(timeout_active_name_specialist_followup_name, str)
+                    and timeout_active_name_specialist_followup_name.strip()
+                ):
+                    timeout_booking_state["specialist_name"] = (
+                        timeout_active_name_specialist_followup_name.strip()
+                    )
+                if (
+                    isinstance(timeout_active_name_specialist_followup_id, str)
+                    and timeout_active_name_specialist_followup_id.strip()
+                ):
+                    timeout_booking_state["specialist_id"] = (
+                        timeout_active_name_specialist_followup_id.strip()
+                    )
+                if same_name_collision:
+                    timeout_booking_state.pop("name", None)
+                timeout_booking_state["last_question"] = collect_slot
+                context = _get_conversation_context(conversation)
+                context = _set_booking_context(context, timeout_booking_state)
+                context = _set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=context,
+                    expected_reply_type=EXPECTED_REPLY_NAME,
+                    reason="policy_core_timeout_specialist_followup",
+                    now=now,
+                )
+                _set_conversation_context(conversation, context)
+                _apply_policy_guard_override(
+                    final_action="collect",
+                    final_tool_action="collect",
+                    reason_code="timeout_degrade",
+                    reason="policy_core_timeout_specialist_followup",
+                )
+                _sync_policy_plan_audit(emit_trace=True)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "policy_core_guard",
+                        "decision": "timeout_specialist_followup",
+                        "state": conversation.state,
+                        "mode": policy_core_mode,
+                        "reason": policy_core_degrade_reason,
+                        "missing_slot": collect_slot,
+                    },
+                )
+                pending_trace = {
+                    "stage": "pending_question_interaction",
+                    "decision": "booking_specialist_followup",
+                    "state": conversation.state,
+                    "source": "policy_core_guard",
+                    "pending_question_target": "specialist",
+                    "active_question_relation": "referent_followup",
+                    "requested_slot": collect_slot,
+                    "expected_reply_type": EXPECTED_REPLY_NAME,
+                }
+                if (
+                    isinstance(timeout_active_name_specialist_followup_name, str)
+                    and timeout_active_name_specialist_followup_name.strip()
+                ):
+                    pending_trace["specialist_name"] = (
+                        timeout_active_name_specialist_followup_name.strip()
+                    )
+                _record_decision_trace(conversation, pending_trace)
+                _record_message_decision_meta(
+                    saved_message,
+                    action="booking_prompt",
+                    intent="booking",
+                    source="policy_core_guard",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    specialist_meta_updates = {
+                        "pending_question_target": "specialist",
+                        "pending_question_interaction": "specialist_followup",
+                        "pending_question_owner": "policy_core_timeout_specialist_followup",
+                        "active_question_relation": "referent_followup",
+                        "expected_reply_type": EXPECTED_REPLY_NAME,
+                        "expected_reply_reason": "policy_core_timeout_specialist_followup",
+                        "policy_core_guard_recovery": "timeout_specialist_followup",
+                        "policy_core_timeout_retry_path": "booking_collect_specialist_followup",
+                    }
+                    if (
+                        isinstance(timeout_active_name_specialist_followup_name, str)
+                        and timeout_active_name_specialist_followup_name.strip()
+                    ):
+                        specialist_meta_updates["specialist_name"] = (
+                            timeout_active_name_specialist_followup_name.strip()
+                        )
+                    if (
+                        isinstance(timeout_active_name_specialist_followup_id, str)
+                        and timeout_active_name_specialist_followup_id.strip()
+                    ):
+                        specialist_meta_updates["specialist_id"] = (
+                            timeout_active_name_specialist_followup_id.strip()
+                        )
+                    _update_message_decision_metadata(
+                        saved_message,
+                        specialist_meta_updates,
+                    )
+                bot_response = _format_specialist_followup_prompt(
+                    specialist_name=timeout_active_name_specialist_followup_name,
+                    base_prompt=MSG_BOOKING_ASK_NAME,
+                    question_like=True,
+                )
+                bot_response, sent = _send_and_save(bot_response)
+                result_message = (
+                    "Policy core timeout active-name specialist-followup response sent"
+                    if sent
+                    else "Policy core timeout active-name specialist-followup response failed"
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+        timeout_pending_slot_question = timeout_resume_pending_slot_question
         if policy_core_timeout_degrade and timeout_booking_safe_fallback:
             timeout_context = _get_conversation_context(conversation)
             timeout_context_manager = _get_context_manager(timeout_context)
+            timeout_master_info_interrupt = bool(
+                collect_slot == "name"
+                and _is_timeout_master_info_interrupt_candidate(
+                    message_text=message_text,
+                    client_slug=payload.client_slug,
+                    expected_reply_type=expected_reply_type,
+                    expected_reply_matched=expected_reply_matched,
+                    expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+                    booking_service=(
+                        timeout_booking_service_query
+                        or (
+                            booking.get("service")
+                            if isinstance(booking, dict)
+                            and isinstance(booking.get("service"), str)
+                            and booking.get("service").strip()
+                            else None
+                        )
+                    ),
+                    intent_decomp_payload=intent_decomp_payload,
+                )
+            )
+            if timeout_master_info_interrupt:
+                timeout_booking_state = dict(booking) if isinstance(booking, dict) else {}
+                if timeout_booking_service_query and not timeout_booking_state.get("service"):
+                    timeout_booking_state["service"] = timeout_booking_service_query
+                if not timeout_booking_state.get("active"):
+                    timeout_booking_state["active"] = True
+                    timeout_booking_state["started_at"] = now.isoformat()
+                timeout_booking_state["last_question"] = collect_slot
+                _apply_policy_guard_override(
+                    final_action="fact",
+                    final_tool_action="info",
+                    reason_code=policy_guard_reason_code,
+                    reason="policy_core_timeout_master_info_interrupt",
+                )
+                _sync_policy_plan_audit(emit_trace=True)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "policy_core_guard",
+                        "decision": "timeout_master_info_interrupt",
+                        "state": conversation.state,
+                        "mode": policy_core_mode,
+                        "reason": policy_core_degrade_reason,
+                        "missing_slot": collect_slot,
+                        "pending_question_target": "specialist",
+                    },
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "policy_core_guard_recovery": "timeout_master_info_interrupt",
+                            "policy_core_timeout_retry_path": "booking_interrupt_master_info",
+                        },
+                    )
+                timeout_master_info_response = _handle_booking_interrupt(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message_text=message_text,
+                    saved_message=saved_message,
+                    client_slug=payload.client_slug,
+                    routing=routing,
+                    has_media=has_media,
+                    bypass_domain_flows=bypass_domain_flows,
+                    booking_wants_flow=booking_wants_flow,
+                    consult_intent=consult_intent,
+                    intent_decomp_used=intent_decomp_used,
+                    intent_decomp_set=intent_decomp_set,
+                    intent_decomp_payload=intent_decomp_payload,
+                    multi_intent_primary=multi_intent_primary,
+                    info_class_intents=info_class_intents,
+                    early_domain_intent=None,
+                    expected_reply_type=expected_reply_type,
+                    expected_reply_matched=expected_reply_matched,
+                    expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
+                    expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+                    pending_question_act=None,
+                    pending_question_target="specialist",
+                    batch_non_booking_message=batch_non_booking_message,
+                    booking_messages=booking_messages,
+                    booking_context=booking_context,
+                    booking=timeout_booking_state,
+                    current_goal=current_goal,
+                    basic_info_message=basic_info_message,
+                    session_memory_reset_reason=session_memory_reset_reason,
+                    memory_expected_reply_type=memory_expected_reply_type,
+                    policy_handler=policy_handler,
+                    policy_type=policy_type,
+                    now=now,
+                    message_count=message_count,
+                    consult_return_pending=consult_return_pending,
+                    consult_return_prompt=consult_return_prompt,
+                    consult_context=consult_context,
+                    consult_return_reason=consult_return_reason,
+                    maybe_apply_fact_guard=_maybe_apply_fact_guard,
+                    send_and_save=_send_and_save,
+                    send_response=_send_response,
+                    finalize_response=_finalize_bot_response,
+                )
+                if timeout_master_info_response:
+                    return timeout_master_info_response
+            timeout_retry_intent = (
+                POLICY_TIMEOUT_PENDING_SLOT_QUESTION_INTENT
+                if timeout_pending_slot_question
+                else POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT
+            )
+            timeout_retry_reason = (
+                "timeout_pending_slot_question"
+                if timeout_pending_slot_question
+                else "timeout_degrade_booking_collect"
+            )
+            timeout_retry_path = (
+                "booking_slot_guidance"
+                if timeout_pending_slot_question
+                else "booking_collect"
+            )
+            timeout_retry_limit_decision = (
+                "timeout_pending_slot_question_limit"
+                if timeout_pending_slot_question
+                else "timeout_booking_limit"
+            )
+            timeout_retry_limit_reason = (
+                "policy_core_timeout_pending_question_limit"
+                if timeout_pending_slot_question
+                else "policy_core_timeout_degrade_booking_limit"
+            )
             timeout_retry_count, timeout_retry_exhausted = _timeout_degrade_retry_status(
-                timeout_context_manager
+                timeout_context_manager,
+                intent=timeout_retry_intent,
             )
             if timeout_retry_exhausted:
                 _record_context_manager_decision(
@@ -12578,10 +16811,10 @@ async def _handle_webhook_payload(
                     decision="clarify_limit",
                     updates={
                         "clarify_attempt": {
-                            "intent": POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT,
+                            "intent": timeout_retry_intent,
                             "count": timeout_retry_count,
                         },
-                        "clarify_reason": "timeout_degrade_booking_collect",
+                        "clarify_reason": timeout_retry_reason,
                         "clarify_limit": True,
                     },
                 )
@@ -12589,20 +16822,28 @@ async def _handle_webhook_payload(
                     final_action="handoff",
                     final_tool_action="handoff",
                     reason_code="timeout_degrade",
-                    reason="policy_core_timeout_degrade_booking_limit",
+                    reason=timeout_retry_limit_reason,
                 )
                 _sync_policy_plan_audit(emit_trace=True)
                 _record_decision_trace(
                     conversation,
                     {
                         "stage": "policy_core_guard",
-                        "decision": "timeout_booking_limit",
+                        "decision": timeout_retry_limit_decision,
                         "state": conversation.state,
                         "mode": policy_core_mode,
                         "reason": policy_core_degrade_reason,
                         "retry_count": timeout_retry_count,
                         "retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
                         "missing_slot": collect_slot,
+                        "pending_question_act": (
+                            "ask_about_requested_slot"
+                            if timeout_pending_slot_question
+                            else None
+                        ),
+                        "pending_question_target": (
+                            "time" if timeout_pending_slot_question else None
+                        ),
                     },
                 )
                 if saved_message:
@@ -12612,7 +16853,7 @@ async def _handle_webhook_payload(
                             "policy_core_timeout_retry_count": timeout_retry_count,
                             "policy_core_timeout_retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
                             "policy_core_timeout_retry_exhausted": True,
-                            "policy_core_timeout_retry_path": "booking_collect",
+                            "policy_core_timeout_retry_path": timeout_retry_path,
                         },
                     )
                 return _handle_clarify_limit_escalation(
@@ -12630,22 +16871,9 @@ async def _handle_webhook_payload(
             timeout_retry_count = _register_clarify_attempt(
                 conversation=conversation,
                 saved_message=saved_message,
-                intent=POLICY_TIMEOUT_DEGRADE_CLARIFY_INTENT,
+                intent=timeout_retry_intent,
                 now=now,
-                reason="timeout_degrade_booking_collect",
-            )
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "policy_core_guard",
-                    "decision": "timeout_booking_collect",
-                    "state": conversation.state,
-                    "mode": policy_core_mode,
-                    "reason": policy_core_degrade_reason,
-                    "retry_count": timeout_retry_count,
-                    "retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
-                    "missing_slot": collect_slot,
-                },
+                reason=timeout_retry_reason,
             )
             if saved_message:
                 _update_message_decision_metadata(
@@ -12653,7 +16881,21 @@ async def _handle_webhook_payload(
                     {
                         "policy_core_timeout_retry_count": timeout_retry_count,
                         "policy_core_timeout_retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
-                        "policy_core_timeout_retry_path": "booking_collect",
+                        "policy_core_timeout_retry_path": timeout_retry_path,
+                    },
+                )
+            if not timeout_pending_slot_question:
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "policy_core_guard",
+                        "decision": "timeout_booking_collect",
+                        "state": conversation.state,
+                        "mode": policy_core_mode,
+                        "reason": policy_core_degrade_reason,
+                        "retry_count": timeout_retry_count,
+                        "retry_limit": POLICY_TIMEOUT_DEGRADE_MAX_RETRIES,
+                        "missing_slot": collect_slot,
                     },
                 )
         info_query_override = False
@@ -12741,6 +16983,232 @@ async def _handle_webhook_payload(
                     now=now,
                 )
             _set_conversation_context(conversation, context)
+        if timeout_pending_slot_question:
+            booking_expected = _expected_reply_for_booking_question(collect_slot)
+            if booking_expected == EXPECTED_REPLY_TIME:
+                context = _set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=context,
+                    expected_reply_type=booking_expected,
+                    reason="booking_slot_guidance",
+                    now=now,
+                )
+                _apply_policy_guard_override(
+                    final_action="collect",
+                    final_tool_action="collect",
+                    reason_code=policy_guard_reason_code,
+                    reason="policy_core_timeout_pending_question",
+                )
+                _sync_policy_plan_audit(emit_trace=True)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "policy_core_guard",
+                        "decision": "timeout_pending_slot_question",
+                        "state": conversation.state,
+                        "mode": policy_core_mode,
+                        "reason": policy_core_degrade_reason,
+                        "missing_slot": collect_slot,
+                    },
+                )
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "pending_question_interaction",
+                        "decision": "booking_slot_guidance",
+                        "state": conversation.state,
+                        "source": "policy_core_guard",
+                        "recovery": "timeout_pending_slot_question",
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "requested_slot": collect_slot,
+                        "expected_reply_type": booking_expected,
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="reply",
+                    intent="booking",
+                    source="booking_slot_guidance",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "pending_question_act": "ask_about_requested_slot",
+                            "pending_question_target": "time",
+                            "pending_question_interaction": "ask_about_requested_slot",
+                            "pending_question_owner": "booking_slot_guidance",
+                            "expected_reply_type": booking_expected,
+                            "expected_reply_reason": "booking_slot_guidance",
+                            "expected_reply_matched": False,
+                            "expected_reply_blocked_by_info": True,
+                            "policy_core_guard_recovery": "timeout_pending_slot_question",
+                            "policy_core_timeout_retry_path": "booking_slot_guidance",
+                        },
+                    )
+                bot_response, sent = _send_and_save(MSG_BOOKING_TIMEOUT_PENDING_QUESTION_TIME)
+                result_message = (
+                    "Policy core timeout pending-slot-question response sent"
+                    if sent
+                    else "Policy core timeout pending-slot-question response failed"
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+
+        timeout_active_name_time_availability_slots = (
+            _derive_timeout_active_name_time_availability_followup_slots(
+                message_text=message_text,
+                client_slug=payload.client_slug,
+                expected_reply_type=expected_reply_type,
+                expected_reply_reason=expected_reply_reason,
+                expected_reply_matched=expected_reply_matched,
+                expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+                booking_state=booking_state_for_collect,
+            )
+        )
+        if timeout_active_name_time_availability_slots:
+            current_booking_datetime, alternate_booking_datetime = (
+                timeout_active_name_time_availability_slots
+            )
+            context = _get_conversation_context(conversation)
+            context = _set_booking_context(context, booking_state_for_collect)
+            context = _set_expected_reply_context(
+                conversation=conversation,
+                saved_message=saved_message,
+                context=context,
+                expected_reply_type=EXPECTED_REPLY_NAME,
+                reason="booking_time_availability_followup",
+                now=now,
+            )
+            timeout_followup_manager = _sync_canonical_dialog_state(
+                _get_context_manager(context),
+                booking_state=_get_booking_context(context),
+                expected_reply_type=_get_expected_reply_type(context),
+                expected_reply_reason=_get_expected_reply_reason(context),
+                message_count=message_count,
+                branch_id=conversation.branch_id,
+                consult_context=consult_context if isinstance(consult_context, dict) else None,
+                interaction_target="time",
+                interaction_relation="ask_about_requested_slot",
+                interaction_owner="llm_policy_core:ask_about_requested_slot",
+            )
+            context = _set_context_manager(context, timeout_followup_manager)
+            interaction_state_payload = _get_canonical_dialog_state(timeout_followup_manager).get(
+                "interaction_state"
+            )
+            context, timeout_followup_memory = _sync_session_memory_interaction_state(
+                context,
+                interaction_state=(
+                    interaction_state_payload
+                    if isinstance(interaction_state_payload, dict)
+                    else None
+                ),
+                now=now,
+            )
+            _set_conversation_context(conversation, context)
+            _record_session_memory_update(
+                conversation,
+                saved_message,
+                memory=timeout_followup_memory,
+                reason="question_set",
+            )
+            _apply_policy_guard_override(
+                final_action="collect",
+                final_tool_action="collect",
+                reason_code=policy_guard_reason_code,
+                reason="policy_core_timeout_active_name_time_availability_followup",
+            )
+            _sync_policy_plan_audit(emit_trace=True)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "timeout_active_name_time_availability_followup",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                    "missing_slot": collect_slot,
+                    "current_datetime": current_booking_datetime,
+                    "alternate_datetime": alternate_booking_datetime,
+                },
+            )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "pending_question_interaction",
+                    "decision": "booking_time_availability_followup",
+                    "state": conversation.state,
+                    "source": "policy_core_guard",
+                    "pending_question_act": "ask_about_requested_slot",
+                    "pending_question_target": "time",
+                    "active_question_relation": "ask_about_requested_slot",
+                    "requested_slot": collect_slot,
+                    "expected_reply_type": EXPECTED_REPLY_NAME,
+                    "current_datetime": current_booking_datetime,
+                    "alternate_datetime": alternate_booking_datetime,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="booking_prompt",
+                intent="booking",
+                source="llm_policy_core",
+                fast_intent=False,
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "pending_question_interaction": "ask_about_requested_slot",
+                        "pending_question_owner": "booking_time_availability_followup",
+                        "active_question_relation": "ask_about_requested_slot",
+                        "current_datetime": current_booking_datetime,
+                        "alternate_datetime": alternate_booking_datetime,
+                        "expected_reply_type": EXPECTED_REPLY_NAME,
+                        "expected_reply_reason": "booking_time_availability_followup",
+                        "policy_core_guard_recovery": "timeout_active_name_time_availability_followup",
+                        "policy_core_timeout_retry_path": "booking_time_availability_followup",
+                    },
+                )
+            bot_response = _build_active_name_time_availability_followup_response(
+                current_slot=current_booking_datetime,
+                alternate_slot=alternate_booking_datetime,
+            )
+            if style_signal_for_collect and not has_media:
+                bot_response = _combine_sidecar(MSG_STYLE_REFERENCE_NEED_MEDIA, bot_response)
+            bot_response = _maybe_apply_consult_return(
+                conversation=conversation,
+                saved_message=saved_message,
+                bot_response=bot_response,
+                consult_return_pending=consult_return_pending,
+                consult_return_prompt=consult_return_prompt,
+                consult_context=consult_context,
+                reason=consult_return_reason or "booking_time_availability_followup",
+            )
+            _reset_low_confidence_retry(conversation)
+            bot_response, sent = _send_and_save(bot_response)
+            result_message = (
+                "Policy core timeout active-name time-availability follow-up response sent"
+                if sent
+                else "Policy core timeout active-name time-availability follow-up response failed"
+            )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
 
         collect_reschedule_signal = bool(
             collect_slot in {"service", "datetime", "name"}
@@ -13954,6 +18422,22 @@ async def _handle_webhook_payload(
             and policy_capability_resolution_mode == "clarify_missing_time"
             and policy_tool_action == "calendar.list_slots"
         ):
+            if (
+                _is_time_pending_question_guidance_act(
+                    policy_pending_question_act,
+                    policy_pending_question_target,
+                )
+                and expected_reply_type == EXPECTED_REPLY_TIME
+            ):
+                return _send_policy_validation_pending_question_guidance(
+                    validation_error="semantic_temporal_scope_missing",
+                    collect_slot="datetime",
+                    guard_reason="temporal scope missing for live availability question",
+                    trace_decision="semantic_temporal_scope_missing_slot_guidance",
+                    requested_slot="datetime",
+                    pending_question_act=policy_pending_question_act,
+                    pending_question_target=policy_pending_question_target,
+                )
             return _send_policy_validation_collect_prompt(
                 validation_error="semantic_temporal_scope_missing",
                 collect_slot="datetime",
@@ -13982,6 +18466,66 @@ async def _handle_webhook_payload(
                     from_tool_action=policy_tool_action,
                     to_action="collect",
                     to_tool_action="collect",
+                )
+        collect_service_info_interrupt_active = False
+        collect_service_info_interrupt_query = _resolve_active_time_collect_service_info_interrupt_query(
+            policy_tool_action=policy_tool_action,
+            policy_collect_slot=policy_collect_slot,
+            policy_intent=policy_intent,
+            policy_subject_kind=policy_subject_kind,
+            policy_resolution_mode=policy_resolution_mode,
+            message_text=message_text,
+            client_slug=payload.client_slug,
+            service_query=policy_service_query,
+            booking_state=booking if isinstance(booking, dict) else None,
+            booking_wants_flow=booking_wants_flow,
+            booking_active=booking_active,
+            policy_goal=policy_goal,
+            expected_reply_type=expected_reply_type,
+            expected_reply_matched=expected_reply_matched,
+        )
+        if collect_service_info_interrupt_query:
+            collect_service_info_interrupt_active = True
+            if not isinstance(policy_tool_args, dict):
+                policy_tool_args = {}
+            policy_tool_args["service_query"] = collect_service_info_interrupt_query
+            policy_service_query = collect_service_info_interrupt_query
+            _apply_policy_guard_override(
+                final_action="fact",
+                final_tool_action="catalog.service_query",
+                reason_code="contract_validation_failure",
+                reason=(
+                    "active-time services-overview side question should route through "
+                    "catalog.service_query instead of stale service collect"
+                ),
+            )
+            _record_semantic_override_block(
+                reason="policy_collect_service_info_interrupt_owner",
+                from_action="collect",
+                from_tool_action="collect",
+                to_action="fact",
+                to_tool_action="catalog.service_query",
+                from_intent=policy_intent,
+                to_intent="catalog.service_query",
+                source="booking_interrupt",
+            )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_interrupt_contract",
+                    "decision": "collect_service_info_interrupt",
+                    "state": conversation.state,
+                    "service_query": collect_service_info_interrupt_query,
+                    "expected_reply_type": expected_reply_type,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "policy_collect_guard_recovery": "active_time_service_info_interrupt",
+                        "service_query": collect_service_info_interrupt_query,
+                    },
                 )
 
         from app.services.tool_registry_service import (
@@ -14568,6 +19112,166 @@ async def _handle_webhook_payload(
                     )
                     if booking_reference:
                         policy_tool_args["appointment_id"] = booking_reference
+            specialist_name_for_active_name_followup = None
+            specialist_id_for_active_name_followup = None
+            if (
+                isinstance(policy_tool_args.get("specialist_name"), str)
+                and policy_tool_args.get("specialist_name").strip()
+            ):
+                specialist_name_for_active_name_followup = policy_tool_args.get(
+                    "specialist_name"
+                ).strip()
+            elif isinstance(specialist_name_hint, str) and specialist_name_hint.strip():
+                specialist_name_for_active_name_followup = specialist_name_hint.strip()
+            if (
+                isinstance(policy_tool_args.get("specialist_id"), str)
+                and policy_tool_args.get("specialist_id").strip()
+            ):
+                specialist_id_for_active_name_followup = policy_tool_args.get(
+                    "specialist_id"
+                ).strip()
+            customer_name_candidate = None
+            if (
+                isinstance(policy_tool_args.get("customer_name"), str)
+                and policy_tool_args.get("customer_name").strip()
+            ):
+                customer_name_candidate = policy_tool_args.get("customer_name").strip()
+            elif (
+                isinstance(policy_slot_state_validated.get("name"), str)
+                and policy_slot_state_validated.get("name").strip()
+            ):
+                customer_name_candidate = policy_slot_state_validated.get("name").strip()
+            if _should_recover_active_name_specialist_followup(
+                policy_goal=policy_goal,
+                policy_tool_action=policy_tool_action,
+                policy_collect_slot=policy_collect_slot,
+                policy_subject_kind=policy_subject_kind,
+                policy_capability=policy_capability,
+                expected_reply_type=expected_reply_type,
+                specialist_name=specialist_name_for_active_name_followup,
+                specialist_id=specialist_id_for_active_name_followup,
+                customer_name_candidate=customer_name_candidate,
+                explicit_customer_name_provided=_detect_explicit_name_provided(
+                    message_text,
+                    client_slug=payload.client_slug,
+                ),
+            ):
+                booking_state = dict(booking) if isinstance(booking, dict) else {}
+                if not booking_state.get("active"):
+                    booking_state["active"] = True
+                    booking_state["started_at"] = now.isoformat()
+                if (
+                    isinstance(policy_slot_state_validated.get("service"), str)
+                    and policy_slot_state_validated.get("service").strip()
+                    and not booking_state.get("service")
+                ):
+                    booking_state["service"] = policy_slot_state_validated.get("service").strip()
+                if (
+                    isinstance(policy_slot_state_validated.get("datetime"), str)
+                    and policy_slot_state_validated.get("datetime").strip()
+                ):
+                    booking_state["datetime"] = policy_slot_state_validated.get("datetime").strip()
+                if (
+                    isinstance(specialist_name_for_active_name_followup, str)
+                    and specialist_name_for_active_name_followup.strip()
+                ):
+                    booking_state["specialist_name"] = (
+                        specialist_name_for_active_name_followup.strip()
+                    )
+                if (
+                    isinstance(specialist_id_for_active_name_followup, str)
+                    and specialist_id_for_active_name_followup.strip()
+                ):
+                    booking_state["specialist_id"] = specialist_id_for_active_name_followup.strip()
+                booking_state["last_question"] = "name"
+                context = _get_conversation_context(conversation)
+                context = _set_booking_context(context, booking_state)
+                context = _set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=context,
+                    expected_reply_type=EXPECTED_REPLY_NAME,
+                    reason="booking_prompt",
+                    now=now,
+                )
+                _set_conversation_context(conversation, context)
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "policy_collect_guard_recovery": "active_name_specialist_followup",
+                        },
+                    )
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "policy_core_guard",
+                        "decision": "active_name_specialist_followup",
+                        "state": conversation.state,
+                        "reason": "contract_validation_failure",
+                        "pending_question_target": "specialist",
+                        "expected_reply_type": EXPECTED_REPLY_NAME,
+                    },
+                )
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "pending_question_interaction",
+                        "decision": "booking_specialist_followup",
+                        "state": conversation.state,
+                        "source": "llm_policy_core",
+                        "pending_question_target": "specialist",
+                        "active_question_relation": "referent_followup",
+                        "requested_slot": "name",
+                        "expected_reply_type": EXPECTED_REPLY_NAME,
+                        "specialist_name": specialist_name_for_active_name_followup,
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="booking_prompt",
+                    intent="booking",
+                    source="llm_policy_core",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    specialist_meta_updates = {
+                        "pending_question_target": "specialist",
+                        "pending_question_interaction": "specialist_followup",
+                        "pending_question_owner": "booking_specialist_followup",
+                        "active_question_relation": "referent_followup",
+                        "expected_reply_type": EXPECTED_REPLY_NAME,
+                        "expected_reply_reason": "booking_prompt",
+                    }
+                    if (
+                        isinstance(specialist_name_for_active_name_followup, str)
+                        and specialist_name_for_active_name_followup.strip()
+                    ):
+                        specialist_meta_updates["specialist_name"] = (
+                            specialist_name_for_active_name_followup.strip()
+                        )
+                    if (
+                        isinstance(specialist_id_for_active_name_followup, str)
+                        and specialist_id_for_active_name_followup.strip()
+                    ):
+                        specialist_meta_updates["specialist_id"] = (
+                            specialist_id_for_active_name_followup.strip()
+                        )
+                    _update_message_decision_metadata(saved_message, specialist_meta_updates)
+                bot_response = MSG_BOOKING_ASK_NAME
+                bot_response, sent = _send_and_save(bot_response)
+                result_message = (
+                    "Policy core active-name specialist-followup response sent"
+                    if sent
+                    else "Policy core active-name specialist-followup response failed"
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
             verifier_error, verifier_error_field = _verify_policy_tool_args_contract(
                 tool_action=policy_tool_action,
                 tool_args=policy_tool_args,
@@ -15090,6 +19794,8 @@ async def _handle_webhook_payload(
                         for section in decision_info_sections_raw
                         if isinstance(section, str) and section.strip()
                     ]
+                if collect_service_info_interrupt_active and not decision_info_sections:
+                    decision_info_sections = ["services_overview"]
                 decision_tool_decision = str(
                     (tool_result.decision_meta or {}).get("tool_decision") or ""
                 ).strip().casefold()
@@ -15145,6 +19851,86 @@ async def _handle_webhook_payload(
                     trace_payload["slots"] = merged_slots
                 trace_payload.setdefault("transition_owner", transition_owner_result.owner)
                 _record_decision_trace(conversation, trace_payload)
+                interaction_state_payload = _get_canonical_dialog_state(
+                    _get_context_manager(context)
+                ).get("interaction_state")
+                tool_owner_resolution = resolve_interaction_owner(
+                    build_owner_resolution_input(
+                        tool_action=policy_tool_action,
+                        info_refs=info_sections,
+                        expected_reply_type=expected_reply_type,
+                        expected_reply_reason=_get_expected_reply_reason(context),
+                        interaction_state=(
+                            interaction_state_payload
+                            if isinstance(interaction_state_payload, dict)
+                            else None
+                        ),
+                        booking_state=booking_state if isinstance(booking_state, dict) else None,
+                        service_query=policy_service_query,
+                    )
+                )
+                if tool_owner_resolution:
+                    if tool_owner_resolution.service_query:
+                        policy_service_query = tool_owner_resolution.service_query
+                        if (
+                            isinstance(policy_tool_args, dict)
+                            and not (
+                                isinstance(policy_tool_args.get("service_query"), str)
+                                and policy_tool_args.get("service_query").strip()
+                            )
+                        ):
+                            policy_tool_args["service_query"] = tool_owner_resolution.service_query
+                        if not (
+                            isinstance(booking_state, dict)
+                            and isinstance(booking_state.get("service"), str)
+                            and booking_state.get("service").strip()
+                        ):
+                            booking_state = dict(booking_state) if isinstance(booking_state, dict) else {}
+                            booking_state["service"] = tool_owner_resolution.service_query
+                            context = _set_booking_context(context, booking_state)
+                    context_manager = _sync_canonical_dialog_state(
+                        _get_context_manager(context),
+                        booking_state=_get_booking_context(context),
+                        expected_reply_type=expected_reply_type,
+                        expected_reply_reason=_get_expected_reply_reason(context),
+                        message_count=message_count,
+                        branch_id=conversation.branch_id,
+                        consult_context=consult_context if isinstance(consult_context, dict) else None,
+                        interaction_owner=tool_owner_resolution.execution_owner,
+                    )
+                    context = _set_context_manager(context, context_manager)
+                    interaction_state_payload = _get_canonical_dialog_state(context_manager).get(
+                        "interaction_state"
+                    )
+                    context, session_memory = _sync_session_memory_interaction_state(
+                        context,
+                        interaction_state=(
+                            interaction_state_payload
+                            if isinstance(interaction_state_payload, dict)
+                            else None
+                        ),
+                        now=now,
+                    )
+                    _set_conversation_context(conversation, context)
+                    owner_trace = {
+                        "stage": "owner_resolver",
+                        "decision": "match",
+                        "row_id": tool_owner_resolution.row_id,
+                        "execution_owner": tool_owner_resolution.execution_owner,
+                        "reason_code": tool_owner_resolution.reason_code,
+                    }
+                    if tool_owner_resolution.service_query:
+                        owner_trace["service_query"] = tool_owner_resolution.service_query
+                    _record_decision_trace(conversation, owner_trace)
+                    if saved_message:
+                        owner_meta = {
+                            "owner_resolution_row_id": tool_owner_resolution.row_id,
+                            "owner_resolution_reason_code": tool_owner_resolution.reason_code,
+                            "interaction_owner": tool_owner_resolution.execution_owner,
+                        }
+                        if tool_owner_resolution.service_query:
+                            owner_meta["service_query"] = tool_owner_resolution.service_query
+                        _update_message_decision_metadata(saved_message, owner_meta)
                 tool_expected_contract = resolve_tool_expected_reply_contract(
                     tool_action=policy_tool_action,
                     tool_decision=tool_decision,
@@ -15224,11 +20010,42 @@ async def _handle_webhook_payload(
                         saved_message=saved_message,
                         context=context,
                         expected_reply_type=tool_expected_reply_type,
-                        reason="llm_policy_core_tool",
+                        reason=contract_followup_reason or "llm_policy_core_tool",
                         now=now,
                     )
-                booking_followup_expected = contract_followup_expected
-                booking_followup_reason = contract_followup_reason
+                if (
+                    not terminal_clear_expected_reply
+                    and tool_owner_resolution
+                    and tool_owner_resolution.preserve_expected_reply_type
+                ):
+                    booking_followup_expected = tool_owner_resolution.preserve_expected_reply_type
+                    booking_followup_reason = (
+                        _get_expected_reply_reason(_get_conversation_context(conversation))
+                        or tool_owner_resolution.reason_code
+                    )
+                else:
+                    booking_followup_expected = contract_followup_expected
+                    booking_followup_reason = contract_followup_reason
+                tool_specialist_followup = bool(
+                    policy_tool_action == "calendar.book_slot"
+                    and tool_decision == "specialist_missing"
+                    and contract_followup_expected == EXPECTED_REPLY_NAME
+                )
+                specialist_followup_name = None
+                if tool_specialist_followup:
+                    raw_tool_specialist_name = (
+                        (tool_result.decision_meta or {}).get("specialist_name")
+                        if isinstance(tool_result.decision_meta, dict)
+                        else None
+                    )
+                    if isinstance(raw_tool_specialist_name, str) and raw_tool_specialist_name.strip():
+                        specialist_followup_name = raw_tool_specialist_name.strip()
+                    elif (
+                        isinstance(policy_tool_args, dict)
+                        and isinstance(policy_tool_args.get("specialist_name"), str)
+                        and policy_tool_args.get("specialist_name").strip()
+                    ):
+                        specialist_followup_name = policy_tool_args.get("specialist_name").strip()
                 services_overview_followup = False
                 tool_recovery = str(
                     (tool_result.decision_meta or {}).get("tool_recovery") or ""
@@ -15254,9 +20071,19 @@ async def _handle_webhook_payload(
                     booking_followup_expected = services_overview_contract.expected_reply_type
                     booking_followup_reason = services_overview_contract.reason
                     services_overview_followup = True
-                if not terminal_clear_expected_reply and (
-                    booking_wants_flow or policy_tool_action.startswith("calendar.")
-                ):
+                explicit_tool_followup = bool(contract_followup_expected)
+                should_derive_booking_followup = bool(
+                    booking_wants_flow
+                    or policy_tool_action.startswith("calendar.")
+                    or (
+                        explicit_tool_followup
+                        and not (
+                            tool_owner_resolution
+                            and tool_owner_resolution.preserve_expected_reply_type
+                        )
+                    )
+                )
+                if not terminal_clear_expected_reply and should_derive_booking_followup:
                     booking_for_followup = dict(booking_state) if isinstance(booking_state, dict) else {}
                     if booking_for_followup.get("active") is not True:
                         booking_for_followup["active"] = True
@@ -15372,6 +20199,8 @@ async def _handle_webhook_payload(
                             finalize_response=_finalize_bot_response,
                         )
                 booking_followup_allowed = bool(info_sections)
+                if not booking_followup_allowed and explicit_tool_followup:
+                    booking_followup_allowed = True
                 if not booking_followup_allowed and services_overview_followup:
                     # `services_overview` can come without explicit info_sections in tool meta;
                     # still preserve booking follow-up contract for canonical quality dialogs.
@@ -15381,6 +20210,8 @@ async def _handle_webhook_payload(
                     and policy_tool_action == "calendar.list_slots"
                     and tool_decision in {"ok", "specialist_missing"}
                 ):
+                    booking_followup_allowed = True
+                if not booking_followup_allowed and tool_specialist_followup:
                     booking_followup_allowed = True
                 if (
                     not booking_followup_allowed
@@ -15454,11 +20285,40 @@ async def _handle_webhook_payload(
                     and isinstance(tool_response_text, str)
                     and ("?" in tool_response_text or no_slots_outcome)
                 )
+                explicit_catalog_service_progress_followup_applied = False
+                if (
+                    explicit_tool_followup
+                    and contract_followup_reason == "catalog_service_booking_progress"
+                    and booking_followup_expected == EXPECTED_REPLY_TIME
+                    and booking_followup_allowed
+                    and not tool_expected_reply_type
+                    and not suppress_booking_lookup_followup
+                    and not conflict_reprompt_datetime
+                    and not (
+                        tool_owner_resolution
+                        and tool_owner_resolution.preserve_expected_reply_type
+                    )
+                ):
+                    context = _get_conversation_context(conversation)
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=booking_followup_expected,
+                        reason=booking_followup_reason or "catalog_service_booking_progress",
+                        now=now,
+                    )
+                    explicit_catalog_service_progress_followup_applied = True
                 if (
                     (
                         booking_wants_flow
                         or policy_tool_action.startswith("calendar.")
+                        or explicit_tool_followup
                         or services_overview_followup
+                        or (
+                            tool_owner_resolution
+                            and tool_owner_resolution.preserve_expected_reply_type
+                        )
                     )
                     and booking_followup_expected
                     in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
@@ -15466,12 +20326,24 @@ async def _handle_webhook_payload(
                     and not tool_expected_reply_type
                     and not suppress_booking_lookup_followup
                     and not conflict_reprompt_datetime
+                    and not explicit_catalog_service_progress_followup_applied
                 ):
                     if (
                         policy_tool_action == "calendar.list_slots"
                         and tool_decision == "specialist_missing"
                         and booking_followup_expected == EXPECTED_REPLY_NAME
                     ):
+                        booking_interrupt_prompt = None
+                    elif (
+                        tool_owner_resolution
+                        and tool_owner_resolution.preserve_expected_reply_type
+                        and booking_followup_expected
+                        == tool_owner_resolution.preserve_expected_reply_type
+                    ):
+                        # Matrix-owned side-question rows preserve the active resume contract
+                        # without re-deriving slot order from partially grounded booking state.
+                        booking_interrupt_prompt = None
+                    elif tool_specialist_followup and booking_followup_expected == EXPECTED_REPLY_NAME:
                         booking_interrupt_prompt = None
                     elif services_overview_followup and booking_followup_expected == EXPECTED_REPLY_SERVICE:
                         booking_interrupt_prompt = _booking_prompt_for_expected_reply_type(
@@ -15498,6 +20370,34 @@ async def _handle_webhook_payload(
                             reason=expected_reply_reason,
                             now=now,
                         )
+                        if tool_specialist_followup and booking_followup_expected == EXPECTED_REPLY_NAME:
+                            specialist_followup_trace = {
+                                "stage": "pending_question_interaction",
+                                "decision": "booking_specialist_followup",
+                                "state": conversation.state,
+                                "source": "tool_registry",
+                                "pending_question_target": "specialist",
+                                "expected_reply_type": EXPECTED_REPLY_NAME,
+                            }
+                            if specialist_followup_name:
+                                specialist_followup_trace["specialist_name"] = (
+                                    specialist_followup_name
+                                )
+                            _record_decision_trace(conversation, specialist_followup_trace)
+                            if saved_message:
+                                specialist_followup_meta = {
+                                    "pending_question_target": "specialist",
+                                    "pending_question_interaction": "specialist_followup",
+                                    "pending_question_owner": "booking_specialist_followup",
+                                }
+                                if specialist_followup_name:
+                                    specialist_followup_meta["specialist_name"] = (
+                                        specialist_followup_name
+                                    )
+                                _update_message_decision_metadata(
+                                    saved_message,
+                                    specialist_followup_meta,
+                                )
                     if suppress_redundant_followup_prompt:
                         booking_interrupt_prompt = None
                 if (
@@ -15977,6 +20877,15 @@ async def _handle_webhook_payload(
                     if isinstance(tool_decision, str) and tool_decision.strip()
                     else None
                 )
+                pending_question_tool_followup = bool(
+                    _is_time_pending_question_guidance_act(
+                        policy_pending_question_act,
+                        policy_pending_question_target,
+                    )
+                    and policy_tool_action == "calendar.list_slots"
+                    and tool_decision_token == "missing_slot"
+                    and turn_outcome_expected_reply == EXPECTED_REPLY_TIME
+                )
                 reply_intent = policy_tool_action
                 reply_source = "tool_registry"
                 turn_outcome_intent = policy_intent or policy_tool_action
@@ -16040,6 +20949,37 @@ async def _handle_webhook_payload(
                             "turn_outcome": turn_outcome.to_metadata(),
                         },
                     )
+                if pending_question_tool_followup:
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "pending_question_interaction",
+                            "decision": "booking_slot_guidance",
+                            "state": conversation.state,
+                            "source": "tool_registry",
+                            "tool_action": policy_tool_action,
+                            "tool_decision": tool_decision_token,
+                            "pending_question_act": policy_pending_question_act,
+                            "pending_question_target": policy_pending_question_target or "time",
+                            "expected_reply_type": turn_outcome_expected_reply,
+                        },
+                    )
+                if collect_service_info_interrupt_active:
+                    interrupt_sections = (
+                        list(info_sections)
+                        if isinstance(info_sections, list) and info_sections
+                        else ["services_overview"]
+                    )
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "booking_interrupt",
+                            "decision": "info_reply",
+                            "state": conversation.state,
+                            "booking_interrupt_info": True,
+                            "info_sections": interrupt_sections,
+                        },
+                    )
                 _record_message_decision_meta(
                     saved_message,
                     action="reply",
@@ -16047,6 +20987,30 @@ async def _handle_webhook_payload(
                     source=reply_source,
                     fast_intent=False,
                 )
+                if collect_service_info_interrupt_active and saved_message:
+                    interrupt_sections = (
+                        list(info_sections)
+                        if isinstance(info_sections, list) and info_sections
+                        else ["services_overview"]
+                    )
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "booking_info_interrupt": True,
+                            "booking_interrupt_info": True,
+                            "booking_info_intents": interrupt_sections,
+                        },
+                    )
+                if pending_question_tool_followup and saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "pending_question_act": policy_pending_question_act,
+                            "pending_question_target": policy_pending_question_target or "time",
+                            "pending_question_interaction": policy_pending_question_act,
+                            "pending_question_owner": "booking_slot_guidance",
+                        },
+                    )
                 if master_override_applied and isinstance(master_override_meta, dict):
                     _update_message_decision_metadata(saved_message, master_override_meta)
                 bot_response, sent = _send_and_save(bot_response)
@@ -16192,8 +21156,16 @@ async def _handle_webhook_payload(
         ) = _resolve_policy_collect_interrupt_arbitration(
             policy_tool_action=policy_tool_action,
             policy_intent=policy_intent,
+            policy_subject_kind=policy_subject_kind,
             policy_capability=policy_capability,
             policy_pack_refs=policy_pack_refs,
+            policy_tool_args=policy_tool_args,
+            policy_entity_refs=policy_entity_refs,
+            policy_pending_question_act=policy_pending_question_act,
+            policy_pending_question_target=policy_pending_question_target,
+            policy_temporal_scope=policy_temporal_scope,
+            policy_resolution_mode=policy_resolution_mode,
+            policy_active_question_relation=policy_active_question_relation,
             message_text=message_text,
             client_slug=payload.client_slug,
             service_query=policy_service_query,
@@ -16201,6 +21173,8 @@ async def _handle_webhook_payload(
             booking_wants_flow=booking_wants_flow,
             booking_active=booking_active,
             policy_goal=policy_goal,
+            expected_reply_type=expected_reply_type,
+            expected_reply_matched=expected_reply_matched,
         )
         if effective_policy_tool_action != policy_tool_action:
             _record_decision_trace(
@@ -16359,6 +21333,41 @@ async def _handle_webhook_payload(
                     ref for ref in policy_info_intents if ref in INFO_NON_SERVICE_INTENTS
                 ] or sorted(policy_info_set & INFO_NON_SERVICE_INTENTS)
                 policy_info_set = set(policy_info_intents)
+            if (
+                not policy_service_query
+                and policy_interrupt_reason == "policy_collect_info_interrupt_owner"
+                and _should_collect_service_for_info(policy_info_set)
+                and isinstance(booking, dict)
+            ):
+                booking_service_value = booking.get("service")
+                if isinstance(booking_service_value, str) and booking_service_value.strip():
+                    policy_service_query = booking_service_value.strip()
+                    if not isinstance(policy_tool_args, dict):
+                        policy_tool_args = {}
+                    if not (
+                        isinstance(policy_tool_args.get("service_query"), str)
+                        and policy_tool_args.get("service_query").strip()
+                    ):
+                        policy_tool_args["service_query"] = policy_service_query
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "policy_interrupt_contract",
+                            "decision": "service_query_carryover",
+                            "state": conversation.state,
+                            "source": "booking_state",
+                            "service_query": policy_service_query,
+                            "info_sections": list(policy_info_intents),
+                        },
+                    )
+                    if saved_message:
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "service_query": policy_service_query,
+                                "service_query_source": "booking_state",
+                            },
+                        )
             observed_interrupt_info_refs = sorted(
                 {
                     ref.strip()
@@ -16393,6 +21402,91 @@ async def _handle_webhook_payload(
                     trace_decision="booking_interrupt_plan_info_conflict_clarify",
                     trace_source="booking_interrupt",
                 )
+            context = _get_conversation_context(conversation)
+            context_manager = _get_context_manager(context)
+            interaction_state_payload = _get_canonical_dialog_state(context_manager).get(
+                "interaction_state"
+            )
+            owner_resolution = resolve_interaction_owner(
+                build_owner_resolution_input(
+                    tool_action=policy_tool_action,
+                    info_refs=policy_info_intents,
+                    expected_reply_type=expected_reply_type,
+                    expected_reply_reason=_get_expected_reply_reason(context),
+                    interaction_state=(
+                        interaction_state_payload
+                        if isinstance(interaction_state_payload, dict)
+                        else None
+                    ),
+                    booking_state=booking if isinstance(booking, dict) else None,
+                    service_query=policy_service_query,
+                )
+            )
+            if owner_resolution and owner_resolution.service_query:
+                policy_service_query = owner_resolution.service_query
+                if (
+                    isinstance(policy_tool_args, dict)
+                    and not (
+                        isinstance(policy_tool_args.get("service_query"), str)
+                        and policy_tool_args.get("service_query").strip()
+                    )
+                ):
+                    policy_tool_args["service_query"] = owner_resolution.service_query
+                if (
+                    isinstance(booking, dict)
+                    and not (
+                        isinstance(booking.get("service"), str) and booking.get("service").strip()
+                    )
+                ):
+                    booking = dict(booking)
+                    booking["service"] = owner_resolution.service_query
+                    context = _set_booking_context(context, booking)
+                context_manager = _sync_canonical_dialog_state(
+                    context_manager,
+                    booking_state=_get_booking_context(context),
+                    expected_reply_type=expected_reply_type,
+                    expected_reply_reason=_get_expected_reply_reason(context),
+                    message_count=message_count,
+                    branch_id=conversation.branch_id,
+                    consult_context=consult_context if isinstance(consult_context, dict) else None,
+                    interaction_owner=owner_resolution.execution_owner,
+                )
+                context = _set_context_manager(context, context_manager)
+                interaction_state_payload = _get_canonical_dialog_state(context_manager).get(
+                    "interaction_state"
+                )
+                context, session_memory = _sync_session_memory_interaction_state(
+                    context,
+                    interaction_state=(
+                        interaction_state_payload
+                        if isinstance(interaction_state_payload, dict)
+                        else None
+                    ),
+                    now=now,
+                )
+                booking_context = context
+                _set_conversation_context(conversation, context)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "owner_resolver",
+                        "decision": "match",
+                        "row_id": owner_resolution.row_id,
+                        "execution_owner": owner_resolution.execution_owner,
+                        "reason_code": owner_resolution.reason_code,
+                        "service_query": owner_resolution.service_query,
+                    },
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "owner_resolution_row_id": owner_resolution.row_id,
+                            "owner_resolution_reason_code": owner_resolution.reason_code,
+                            "interaction_owner": owner_resolution.execution_owner,
+                            "service_query": owner_resolution.service_query,
+                        },
+                    )
             requires_service = _should_collect_service_for_info(policy_info_set)
             if requires_service and not policy_service_query:
                 clarify_sections = _derive_service_clarify_info_sections(policy_info_intents)
@@ -16569,6 +21663,8 @@ async def _handle_webhook_payload(
                     expected_reply_matched=expected_reply_matched,
                     expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
                     expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+                    pending_question_act=policy_pending_question_act,
+                    pending_question_target=policy_pending_question_target,
                     batch_non_booking_message=batch_non_booking_message,
                     booking_messages=booking_messages,
                     booking_context=booking_context,
@@ -16897,6 +21993,197 @@ async def _handle_webhook_payload(
                 for slot_key, value in policy_slot_state_validated.items():
                     if not booking_state.get(slot_key):
                         booking_state[slot_key] = value
+                specialist_availability_followup = _should_preserve_specialist_availability_followup_owner(
+                    policy_goal=policy_goal,
+                    policy_collect_slot=policy_collect_slot,
+                    policy_pending_question_target=policy_pending_question_target,
+                    policy_subject_kind=policy_subject_kind,
+                    policy_capability=policy_capability,
+                    policy_temporal_scope=policy_temporal_scope,
+                    policy_active_question_relation=policy_active_question_relation,
+                )
+                service_choice_specialist_availability_followup = (
+                    _should_preserve_service_choice_specialist_availability_followup_owner(
+                        policy_goal=policy_goal,
+                        policy_collect_slot=policy_collect_slot,
+                        expected_reply_type=expected_reply_type,
+                        policy_resolution_mode=policy_resolution_mode,
+                        policy_pending_question_act=policy_pending_question_act,
+                        policy_pending_question_target=policy_pending_question_target,
+                        policy_subject_kind=policy_subject_kind,
+                        policy_capability=policy_capability,
+                        policy_temporal_scope=policy_temporal_scope,
+                        policy_active_question_relation=policy_active_question_relation,
+                    )
+                )
+                specialist_availability_followup = bool(
+                    specialist_availability_followup
+                    or service_choice_specialist_availability_followup
+                )
+                specialist_availability_relation = (
+                    "specialist_availability_followup"
+                    if service_choice_specialist_availability_followup
+                    else (policy_active_question_relation or "specialist_availability_followup")
+                )
+                active_name_time_availability_followup = (
+                    _should_preserve_active_name_time_availability_followup_owner(
+                        policy_goal=policy_goal,
+                        policy_collect_slot=policy_collect_slot,
+                        expected_reply_type=expected_reply_type,
+                        policy_resolution_mode=policy_resolution_mode,
+                        policy_pending_question_act=policy_pending_question_act,
+                        policy_pending_question_target=policy_pending_question_target,
+                        policy_subject_kind=policy_subject_kind,
+                        policy_capability=policy_capability,
+                        policy_temporal_scope=policy_temporal_scope,
+                        policy_active_question_relation=policy_active_question_relation,
+                    )
+                )
+                current_booking_datetime = (
+                    booking_state.get("datetime")
+                    if isinstance(booking_state.get("datetime"), str)
+                    and booking_state.get("datetime").strip()
+                    else None
+                )
+                probed_booking_datetime = (
+                    policy_slot_state_validated.get("datetime")
+                    if isinstance(policy_slot_state_validated.get("datetime"), str)
+                    and policy_slot_state_validated.get("datetime").strip()
+                    else None
+                )
+                specialist_name_preference, specialist_id_preference = (
+                    _extract_semantic_specialist_preference(
+                        tool_args=policy_tool_args,
+                        entity_refs=policy_entity_refs,
+                    )
+                )
+                if (
+                    policy_goal == "booking"
+                    and policy_pending_question_target == "specialist"
+                    and not policy_generic_specialist_choice_followup
+                    and not specialist_availability_followup
+                    and not (specialist_name_preference or specialist_id_preference)
+                ):
+                    specialist_name_hint = _resolve_specialist_name_hint_with_trace(
+                        db=db,
+                        message_text=message_text,
+                        client_slug=payload.client_slug,
+                        timing_context=timing_context,
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        tool_action=policy_tool_action,
+                    )
+                    if isinstance(specialist_name_hint, str) and specialist_name_hint.strip():
+                        specialist_name_preference = specialist_name_hint.strip()
+                        if not (
+                            isinstance(policy_tool_args.get("specialist_name"), str)
+                            and policy_tool_args.get("specialist_name").strip()
+                        ):
+                            policy_tool_args["specialist_name"] = specialist_name_preference
+                specialist_followup = _should_preserve_specialist_followup_owner(
+                    policy_goal=policy_goal,
+                    policy_collect_slot=policy_collect_slot,
+                    policy_pending_question_target=policy_pending_question_target,
+                    policy_subject_kind=policy_subject_kind,
+                    policy_capability=policy_capability,
+                    policy_resolution_mode=policy_resolution_mode,
+                    policy_active_question_relation=policy_active_question_relation,
+                    expected_reply_type=expected_reply_type,
+                    specialist_name=specialist_name_preference,
+                    specialist_id=specialist_id_preference,
+                )
+                specialist_followup_relation = (
+                    policy_active_question_relation or "referent_followup"
+                    if specialist_followup
+                    else None
+                )
+                if specialist_followup:
+                    if isinstance(specialist_name_preference, str) and specialist_name_preference.strip():
+                        booking_state["specialist_name"] = specialist_name_preference.strip()
+                    if isinstance(specialist_id_preference, str) and specialist_id_preference.strip():
+                        booking_state["specialist_id"] = specialist_id_preference.strip()
+                specialist_followup_master_info_interrupt = (
+                    _should_interrupt_generic_master_info_specialist_followup(
+                        policy_goal=policy_goal,
+                        policy_collect_slot=policy_collect_slot,
+                        policy_pending_question_target=policy_pending_question_target,
+                        policy_subject_kind=policy_subject_kind,
+                        policy_capability=policy_capability,
+                        policy_resolution_mode=policy_resolution_mode,
+                        policy_active_question_relation=policy_active_question_relation,
+                        expected_reply_type=expected_reply_type,
+                        specialist_name=specialist_name_preference,
+                        specialist_id=specialist_id_preference,
+                        message_text=message_text,
+                        client_slug=payload.client_slug,
+                        service_query=policy_service_query,
+                    )
+                )
+                generic_master_info_collect_interrupt = bool(
+                    (
+                        (
+                            policy_goal == "booking"
+                            and policy_pending_question_target == "specialist"
+                            and policy_collect_slot == "name"
+                            and not specialist_followup
+                        )
+                        or specialist_followup_master_info_interrupt
+                    )
+                    and not specialist_availability_followup
+                )
+                if generic_master_info_collect_interrupt:
+                    booking_interrupt_pending_question_target = (
+                        "time"
+                        if specialist_followup_master_info_interrupt
+                        else policy_pending_question_target
+                    )
+                    booking_interrupt_response = _handle_booking_interrupt(
+                        db=db,
+                        conversation=conversation,
+                        user=user,
+                        message_text=message_text,
+                        saved_message=saved_message,
+                        client_slug=payload.client_slug,
+                        routing=routing,
+                        has_media=has_media,
+                        bypass_domain_flows=bypass_domain_flows,
+                        booking_wants_flow=booking_wants_flow,
+                        consult_intent=consult_intent,
+                        intent_decomp_used=intent_decomp_used,
+                        intent_decomp_set=intent_decomp_set,
+                        intent_decomp_payload=intent_decomp_payload,
+                        multi_intent_primary=multi_intent_primary,
+                        info_class_intents=info_class_intents,
+                        early_domain_intent=early_domain_intent,
+                        expected_reply_type=expected_reply_type,
+                        expected_reply_matched=expected_reply_matched,
+                        expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
+                        expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+                        pending_question_act=policy_pending_question_act,
+                        pending_question_target=booking_interrupt_pending_question_target,
+                        batch_non_booking_message=batch_non_booking_message,
+                        booking_messages=booking_messages,
+                        booking_context=booking_context,
+                        booking=booking_state,
+                        current_goal=current_goal,
+                        basic_info_message=basic_info_message,
+                        session_memory_reset_reason=session_memory_reset_reason,
+                        memory_expected_reply_type=memory_expected_reply_type,
+                        policy_handler=policy_handler,
+                        policy_type=policy_type,
+                        now=now,
+                        message_count=message_count,
+                        consult_return_pending=consult_return_pending,
+                        consult_return_prompt=consult_return_prompt,
+                        consult_context=consult_context,
+                        consult_return_reason=consult_return_reason,
+                        maybe_apply_fact_guard=_maybe_apply_fact_guard,
+                        send_and_save=_send_and_save,
+                        send_response=_send_response,
+                        finalize_response=_finalize_bot_response,
+                    )
+                    if booking_interrupt_response:
+                        return booking_interrupt_response
                 collect_reschedule_signal = bool(
                     message_text
                     and _looks_like_booking_reschedule_request(
@@ -16997,14 +22284,144 @@ async def _handle_webhook_payload(
                 context = _set_booking_context(context, booking_state)
                 _set_conversation_context(conversation, context)
                 booking_expected = _expected_reply_for_booking_question(policy_collect_slot)
+                if (
+                    _is_time_pending_question_guidance_act(
+                        policy_pending_question_act,
+                        policy_pending_question_target,
+                    )
+                    and policy_collect_slot == "datetime"
+                    and expected_reply_type == EXPECTED_REPLY_TIME
+                    and expected_reply_matched is not True
+                    and booking_expected == EXPECTED_REPLY_TIME
+                    and not collect_verification_signal
+                ):
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=booking_expected,
+                        reason="booking_slot_guidance",
+                        now=now,
+                    )
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "pending_question_interaction",
+                            "decision": "booking_slot_guidance",
+                            "state": conversation.state,
+                            "source": "llm_policy_core",
+                            "pending_question_act": policy_pending_question_act,
+                            "pending_question_target": policy_pending_question_target or "time",
+                            "requested_slot": policy_collect_slot,
+                            "expected_reply_type": booking_expected,
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="reply",
+                        intent="booking",
+                        source="booking_slot_guidance",
+                        fast_intent=False,
+                    )
+                    if saved_message:
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "pending_question_act": policy_pending_question_act,
+                                "pending_question_target": policy_pending_question_target or "time",
+                                "pending_question_interaction": policy_pending_question_act,
+                                "pending_question_owner": "booking_slot_guidance",
+                            },
+                        )
+                    bot_response = MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE
+                    if style_reference_text_signal and not has_media:
+                        bot_response = _combine_sidecar(MSG_STYLE_REFERENCE_NEED_MEDIA, bot_response)
+                    bot_response = _maybe_apply_consult_return(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        bot_response=bot_response,
+                        consult_return_pending=consult_return_pending,
+                        consult_return_prompt=consult_return_prompt,
+                        consult_context=consult_context,
+                        reason=consult_return_reason or "booking_slot_guidance",
+                    )
+                    _reset_low_confidence_retry(conversation)
+                    bot_response, sent = _send_and_save(bot_response)
+                    result_message = (
+                        "LLM policy core booking slot guidance sent"
+                        if sent
+                        else "LLM policy core booking slot guidance failed"
+                    )
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
                 if prompt and booking_expected:
                     context = _set_expected_reply_context(
                         conversation=conversation,
                         saved_message=saved_message,
                         context=context,
                         expected_reply_type=booking_expected,
-                        reason="booking_prompt",
+                        reason=(
+                            "booking_time_availability_followup"
+                            if active_name_time_availability_followup
+                            else (
+                            "booking_specialist_availability_followup"
+                            if specialist_availability_followup
+                            else "booking_prompt"
+                            )
+                        ),
                         now=now,
+                    )
+                if specialist_followup:
+                    specialist_trace = {
+                        "stage": "pending_question_interaction",
+                        "decision": "booking_specialist_followup",
+                        "state": conversation.state,
+                        "source": "llm_policy_core",
+                        "pending_question_target": "specialist",
+                        "active_question_relation": specialist_followup_relation,
+                        "requested_slot": policy_collect_slot,
+                        "expected_reply_type": booking_expected,
+                    }
+                    if isinstance(specialist_name_preference, str) and specialist_name_preference.strip():
+                        specialist_trace["specialist_name"] = specialist_name_preference.strip()
+                    if isinstance(specialist_id_preference, str) and specialist_id_preference.strip():
+                        specialist_trace["specialist_id"] = specialist_id_preference.strip()
+                    _record_decision_trace(conversation, specialist_trace)
+                if specialist_availability_followup:
+                    specialist_availability_trace = {
+                        "stage": "pending_question_interaction",
+                        "decision": "booking_specialist_availability_followup",
+                        "state": conversation.state,
+                        "source": "llm_policy_core",
+                        "pending_question_act": policy_pending_question_act or "ask_about_requested_slot",
+                        "pending_question_target": "specialist",
+                        "active_question_relation": specialist_availability_relation,
+                        "requested_slot": policy_collect_slot,
+                        "expected_reply_type": booking_expected,
+                        "temporal_scope": policy_temporal_scope,
+                    }
+                    _record_decision_trace(conversation, specialist_availability_trace)
+                if active_name_time_availability_followup:
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "pending_question_interaction",
+                            "decision": "booking_time_availability_followup",
+                            "state": conversation.state,
+                            "source": "llm_policy_core",
+                            "pending_question_act": "ask_about_requested_slot",
+                            "pending_question_target": "time",
+                            "active_question_relation": "ask_about_requested_slot",
+                            "requested_slot": policy_collect_slot,
+                            "expected_reply_type": booking_expected,
+                            "current_datetime": current_booking_datetime,
+                            "alternate_datetime": probed_booking_datetime,
+                        },
                     )
                 _record_decision_trace(
                     conversation,
@@ -17023,7 +22440,81 @@ async def _handle_webhook_payload(
                     source="booking_verification" if collect_verification_signal else "llm_policy_core",
                     fast_intent=False,
                 )
+                if saved_message and specialist_followup:
+                    specialist_meta_updates = {
+                        "pending_question_target": "specialist",
+                        "pending_question_interaction": "specialist_followup",
+                        "pending_question_owner": "booking_specialist_followup",
+                        "active_question_relation": specialist_followup_relation,
+                    }
+                    if isinstance(specialist_name_preference, str) and specialist_name_preference.strip():
+                        specialist_meta_updates["specialist_name"] = specialist_name_preference.strip()
+                    if isinstance(specialist_id_preference, str) and specialist_id_preference.strip():
+                        specialist_meta_updates["specialist_id"] = specialist_id_preference.strip()
+                    _update_message_decision_metadata(saved_message, specialist_meta_updates)
+                if saved_message and specialist_availability_followup:
+                    _, specialist_availability_meta = _build_specialist_availability_followup_response(
+                        service_query=booking_state.get("service"),
+                        client_slug=payload.client_slug,
+                        message_text=message_text,
+                        requested_slot=policy_collect_slot,
+                    )
+                    specialist_availability_meta_updates = {
+                        "pending_question_act": policy_pending_question_act or "ask_about_requested_slot",
+                        "pending_question_target": "specialist",
+                        "pending_question_interaction": "specialist_availability_followup",
+                        "pending_question_owner": "booking_specialist_availability_followup",
+                        "active_question_relation": specialist_availability_relation,
+                    }
+                    if isinstance(specialist_availability_meta, dict):
+                        for key in (
+                            "info_sections",
+                            "fact_intents",
+                            "master_query_contract",
+                            "master_reply_mode",
+                            "master_profiles",
+                            "master_profiles_count",
+                            "service_query",
+                        ):
+                            value = specialist_availability_meta.get(key)
+                            if value not in (None, [], {}):
+                                specialist_availability_meta_updates[key] = value
+                    _update_message_decision_metadata(
+                        saved_message,
+                        specialist_availability_meta_updates,
+                    )
+                if saved_message and active_name_time_availability_followup:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "pending_question_act": "ask_about_requested_slot",
+                            "pending_question_target": "time",
+                            "pending_question_interaction": "ask_about_requested_slot",
+                            "pending_question_owner": "booking_time_availability_followup",
+                            "active_question_relation": "ask_about_requested_slot",
+                            "current_datetime": current_booking_datetime,
+                            "alternate_datetime": probed_booking_datetime,
+                        },
+                    )
                 bot_response = prompt or MSG_BOOKING_ASK_DATETIME
+                if specialist_followup:
+                    bot_response = _format_specialist_followup_prompt(
+                        specialist_name=specialist_name_preference,
+                        base_prompt=bot_response,
+                        question_like=_is_question_like_message(message_text),
+                    )
+                elif specialist_availability_followup:
+                    bot_response, _ = _build_specialist_availability_followup_response(
+                        service_query=booking_state.get("service"),
+                        client_slug=payload.client_slug,
+                        message_text=message_text,
+                        requested_slot=policy_collect_slot,
+                    )
+                elif active_name_time_availability_followup:
+                    bot_response = _build_active_name_time_availability_followup_response(
+                        current_slot=current_booking_datetime,
+                        alternate_slot=probed_booking_datetime,
+                    )
                 if style_reference_text_signal and not has_media:
                     bot_response = _combine_sidecar(MSG_STYLE_REFERENCE_NEED_MEDIA, bot_response)
                 bot_response = _maybe_apply_consult_return(
@@ -17700,6 +23191,8 @@ async def _handle_webhook_payload(
             expected_reply_matched=expected_reply_matched,
             expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
             expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+            pending_question_act=policy_pending_question_act,
+            pending_question_target=policy_pending_question_target,
             batch_non_booking_message=batch_non_booking_message,
             booking_messages=booking_messages,
             booking_context=booking_context,

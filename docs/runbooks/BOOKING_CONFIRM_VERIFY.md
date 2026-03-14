@@ -163,7 +163,7 @@ Scenario patterns included
 Notes
 - Generator outputs client turns only (consultant replies are produced by live system).
 - Each turn includes `expect` with required base keys `action/info_sections/reply_type/state/expected_reply`.
-- `expect.meta`, `expect.meta_any`, `expect.meta_contains`, and `expect.trace_contains` are the structured extension for capability-bearing turns when action/reply_type alone is still ambiguous.
+- `expect.meta`, `expect.meta_any`, `expect.meta_contains`, and `expect.trace_contains` are the structured extension for capability-bearing turns when action/reply_type alone is still ambiguous; prefer them for `expected_reply_type`, `pending_question_target`, `active_question_relation`, `interaction_owner`, and `reason_code`.
 - Use `--coverage booking,info,interrupt,handoff` to force escalation coverage.
 - `media-mode payload` uses placeholder URLs; update for real media tests.
 - For LLM mode, prefer passing `--client-slug` and `--scenario-context-file`; `ops/diagnose.py llm-quality` now writes `scenario_context.json` and passes it into the generator automatically.
@@ -660,14 +660,20 @@ Evaluation contract (state-aware)
   - `slot_constraint`
   - `slot_compare`
   - `mixed_fill_plus_question`
+- For those turns, `expected_reply_type` is the resume axis, `pending_question_target` is the interaction target, and `active_question_relation` plus `interaction_owner` should be asserted through structured meta/trace checks whenever the turn carries semantic ambiguity.
 - `booking_slot_stall` checks only slot-relevant turns (service/time/date/no-tag), not generic booking noise.
 - `booking_slot_stall` is valid only when there is neither real slot progress nor explicit `decision_meta` / `decision_trace` evidence that the turn was handled as one of the pending-question interaction acts while preserving the resume contract for the active slot.
+- Degraded handling counts as valid only when it preserves the same relation/resume contract or records an explicit post-grounding transition together with `reason_code`, `decision_meta`, and `decision_trace`.
+- Forbidden compression remains a canon failure even if surface text looks acceptable: generic `booking_prompt` without relation evidence, generic `master` truth counted as specialist live-availability success, or reopening `service_choice` after grounded service during pricing/info interrupt under active `time` resume.
 - If response text claims booking confirmation, evaluator requires appointment/calendar evidence; otherwise `false_booking_confirmation`.
 - If appointment/calendar path is active without successful calendar outcome, evaluator reports `calendar_tool_contract_miss`.
 - Booking `expected_reply_type` is limited to `service_choice`/`time`/`name` (phone/confirm are not expected_reply_type).
 - Capability-bearing turns should prefer structured oracle fields over phrase checks:
   - use `expect.meta.expected_reply_type=service_choice` when the canonical outcome is service clarify;
   - use `expect.meta.expected_reply_type=time` when the service is already grounded and the canonical outcome is datetime collect;
+  - use `expect.meta.pending_question_target` and `expect.meta.active_question_relation` when the turn operates over active pending-question state;
+  - use `expect.meta.interaction_owner` or `expect.trace_contains` for canonical owner evidence on side-question / follow-up rows;
+  - use `expect.meta.reason_code` when validity depends on degraded-but-observable handling rather than the happy path;
   - use `expect.trace_contains` for referent/canonical-state evidence (`question_contract`, `consult_return`, `referent_resolver`) instead of `must_include` wording.
 - Surface-mutation families (`paraphrase`, `translit`, `typo`, `format`) preserve the existing ontology; if a guarded run surfaces a new interaction-act class, docs/runbook/taxonomy must be updated before the next expensive closure attempt.
 

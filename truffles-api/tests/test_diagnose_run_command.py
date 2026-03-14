@@ -139,6 +139,57 @@ def test_llm_quality_generate_batch_uses_scenario_timeout(monkeypatch):
     assert "/tmp/scenario_context.json" in captured["command"]
 
 
+def test_llm_quality_generate_batch_enables_progress_stderr_for_generated_llm_by_default(
+    monkeypatch,
+):
+    captured: dict[str, object] = {}
+
+    def _fake_run_command(command, *, timeout=None, env=None):
+        captured["command"] = command
+        payload = {"dialogs": [{"dialog_id": "d1", "turns": []}], "warnings": {}}
+        return subprocess.CompletedProcess(command, 0, stdout=str(payload).replace("'", '"'), stderr="")
+
+    args = SimpleNamespace(
+        min_turns=10,
+        max_turns=15,
+        mode="llm",
+        media_mode="text",
+        media_kind="photo",
+        client_slug="demo_salon",
+        branch_slug=None,
+        scenarios_file=None,
+        scenario_coverage="booking,info,interrupt,handoff",
+        include_media=True,
+        llm_model="gpt-4o-mini",
+        llm_base_url="https://api.openai.com",
+        llm_api_key="test-key",
+        scenario_llm_batch_size=2,
+        scenario_llm_max_attempts=None,
+        scenario_llm_request_timeout=60.0,
+        scenario_llm_attempt_backoff=0.6,
+        scenario_progress_stderr=None,
+        scenario_gen_timeout=None,
+    )
+
+    monkeypatch.setenv("DIAGNOSE_SCENARIO_GEN_TIMEOUT_SEC", "10")
+    monkeypatch.setattr(_module, "_llm_quality_dialog_script", lambda: "/tmp/fake_script.py")
+    monkeypatch.setattr(_module, "run_command", _fake_run_command)
+
+    dialogs, warnings, error = _module._llm_quality_generate_batch(
+        args,
+        count=1,
+        seed=42,
+        scenario_context_path="/tmp/scenario_context.json",
+    )
+
+    assert error is None
+    assert len(dialogs) == 1
+    assert warnings == {}
+    assert "--llm-max-attempts" in captured["command"]
+    assert captured["command"][captured["command"].index("--llm-max-attempts") + 1] == "3"
+    assert "--progress-stderr" in captured["command"]
+
+
 def test_llm_quality_generate_batch_expands_timeout_budget_for_llm(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -186,6 +237,101 @@ def test_llm_quality_generate_batch_expands_timeout_budget_for_llm(monkeypatch):
     assert warnings == {}
     assert captured["timeout"] == pytest.approx(205.0)
     assert "--progress-stderr" in captured["command"]
+
+
+def test_llm_quality_generate_batch_uses_bounded_inner_retry_default(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_run_command(command, *, timeout=None, env=None):
+        captured["command"] = command
+        captured["timeout"] = timeout
+        payload = {"dialogs": [{"dialog_id": "d1", "turns": []}], "warnings": {}}
+        return subprocess.CompletedProcess(command, 0, stdout=str(payload).replace("'", '"'), stderr="")
+
+    args = SimpleNamespace(
+        min_turns=10,
+        max_turns=15,
+        mode="llm",
+        media_mode="text",
+        media_kind="photo",
+        client_slug="demo_salon",
+        branch_slug=None,
+        scenarios_file=None,
+        scenario_coverage="booking,info,interrupt,handoff",
+        include_media=True,
+        llm_model="gpt-4o-mini",
+        llm_base_url="https://api.openai.com",
+        llm_api_key="test-key",
+        scenario_llm_batch_size=2,
+        scenario_llm_max_attempts=None,
+        scenario_llm_request_timeout=60.0,
+        scenario_llm_attempt_backoff=0.6,
+        scenario_progress_stderr=None,
+        scenario_gen_timeout=None,
+    )
+
+    monkeypatch.setenv("DIAGNOSE_SCENARIO_GEN_TIMEOUT_SEC", "10")
+    monkeypatch.delenv("BOOKING_SCENARIO_LLM_MAX_ATTEMPTS", raising=False)
+    monkeypatch.setattr(_module, "_llm_quality_dialog_script", lambda: "/tmp/fake_script.py")
+    monkeypatch.setattr(_module, "run_command", _fake_run_command)
+
+    dialogs, warnings, error = _module._llm_quality_generate_batch(
+        args,
+        count=1,
+        seed=42,
+        scenario_context_path="/tmp/scenario_context.json",
+    )
+
+    assert error is None
+    assert len(dialogs) == 1
+    assert warnings == {}
+    assert captured["timeout"] == pytest.approx(205.0)
+    assert "--llm-max-attempts" in captured["command"]
+    assert captured["command"][captured["command"].index("--llm-max-attempts") + 1] == "3"
+
+
+def test_normalize_scenario_generation_error_includes_last_progress():
+    stderr = "\n".join(
+        [
+            json.dumps(
+                {
+                    "stage": "booking_scenario_llm_progress",
+                    "batch_index": 2,
+                    "attempt": 1,
+                    "event": "batch_attempt_error",
+                }
+            ),
+            "RuntimeError: timed out while waiting for llm batch",
+        ]
+    )
+
+    assert (
+        _module._normalize_scenario_generation_error(stderr)
+        == "timed out while waiting for llm batch"
+    )
+
+    timeout_only = "\n".join(
+        [
+            json.dumps(
+                {
+                    "stage": "booking_scenario_llm_progress",
+                    "batch_index": 3,
+                    "attempt": 1,
+                    "event": "batch_attempt_error",
+                    "error": "inner llm request timed out",
+                }
+            ),
+            "timed out while waiting for llm batch",
+        ]
+    )
+
+    assert (
+        _module._normalize_scenario_generation_error(timeout_only)
+        == (
+            "scenario_generation_timeout "
+            '(batch=3 attempt=1 event=batch_attempt_error error="inner llm request timed out")'
+        )
+    )
 
 
 def test_llm_quality_structured_meta_expectation_is_strong_oracle():

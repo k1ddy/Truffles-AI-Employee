@@ -51,6 +51,9 @@ from app.services.info_signal_service import (
 from app.services.info_signal_service import (
     tokens_have_prefixes as _tokens_have_prefixes,
 )
+from app.services.booking_signal_service import (
+    extract_daypart_token as _extract_daypart_token,
+)
 from app.services.pack_runtime_service import (
     _build_fact_meta,
     _has_contact_signal,
@@ -94,6 +97,26 @@ def _detect_info_anchor_hits(tokens: list[str]) -> dict[str, int]:
     return hits
 
 
+def _looks_like_daypart_preference_statement(
+    message_text: str | None,
+    *,
+    normalized: str,
+    question_like: bool,
+) -> bool:
+    if question_like or not normalized:
+        return False
+    if not _extract_daypart_token(message_text):
+        return False
+    if _system_any_match_multi(
+        normalized,
+        "hours_question_phrases",
+        "hours_question_work_verbs",
+        "hours_question_work_singular",
+    ):
+        return False
+    return _system_any_match_multi(normalized, "daypart_preference_markers")
+
+
 def _detect_info_class_intents(
     message_text: str | None,
     *,
@@ -116,6 +139,11 @@ def _detect_info_class_intents(
     if not question_like and tokens:
         question_like = _tokens_have_prefixes(tokens, QUESTION_WORD_PREFIXES)
     short_query = 0 < len(tokens) <= 4
+    daypart_preference_statement = _looks_like_daypart_preference_statement(
+        message_text,
+        normalized=normalized,
+        question_like=question_like,
+    )
 
     parking_signal = _has_parking_signal(normalized, client_slug=client_slug)
     guest_signal = _has_guest_waiting_signal(normalized, client_slug=client_slug)
@@ -209,6 +237,15 @@ def _detect_info_class_intents(
     if "duration" in anchor_intents and (question_like or short_query or intent_decomp_set):
         duration_signal = True
 
+    suppressed_info_intents: set[str] = set()
+    if daypart_preference_statement:
+        hours_signal = False
+        duration_signal = False
+        for intent_name in ("hours", "duration"):
+            anchor_intents.discard(intent_name)
+            anchor_hits.pop(intent_name, None)
+            suppressed_info_intents.add(intent_name)
+
     if parking_signal:
         intents.add("parking")
     if price_signal:
@@ -233,15 +270,20 @@ def _detect_info_class_intents(
     except Exception:
         question_type = None
     if question_type and question_type.kind in INFO_INTENTS:
-        intents.add(question_type.kind)
-        meta["question_type"] = question_type.kind
-        meta["question_type_score"] = question_type.score
+        if not (daypart_preference_statement and question_type.kind in {"hours", "duration"}):
+            intents.add(question_type.kind)
+            meta["question_type"] = question_type.kind
+            meta["question_type_score"] = question_type.score
     work_schedule_phrase = bool(hours_stem_signal and not service_duration_context)
     if work_schedule_phrase and "duration" in intents:
         intents.discard("duration")
         intents.add("hours")
         duration_signal = False
         hours_signal = True
+    if suppressed_info_intents:
+        intents.difference_update(suppressed_info_intents)
+        meta["suppressed_info_intents"] = sorted(suppressed_info_intents)
+        meta["daypart_preference_statement"] = True
     anchor_boost = question_like or short_query or bool(intent_decomp_set) or bool(question_type)
     if anchor_intents and anchor_boost:
         intents.update(anchor_intents)

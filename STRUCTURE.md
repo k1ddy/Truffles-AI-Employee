@@ -32,6 +32,7 @@
 | `contracts/packs/signal_graph.v1.jsonschema` | Канон сигнального графа (anchors/lexicons) | Архитектор/Backend |
 | `contracts/packs/signal_manifest.v1.jsonschema` | Канон signal manifest (regex/tokens/layout map) для signal-layer | Архитектор/Backend |
 | `contracts/policy/` | Policy DSL bundles | Архитектор/Backend |
+| `contracts/policy/interaction_owner_matrix.v1.jsonschema` | Канон machine-readable owner matrix для active pending-question rows (`M1..M41`) | Архитектор/Backend |
 | `contracts/policy/policy_bundle.v1.jsonschema` | Канон policy bundle (guards/sections) | Архитектор/Backend |
 | `contracts/integrations/provider_inbound.v1.jsonschema` | Provider inbound envelope (gateway) | Архитектор/Backend |
 | `contracts/integrations/provider_outbound.v1.jsonschema` | Provider outbound envelope (gateway) | Архитектор/Backend |
@@ -100,6 +101,8 @@
 | `truffles-api/app/services/booking_signal_service.py` | Booking/date/time signal helpers (manifest-backed regex/tokens + lexicon) | Backend |
 | `truffles-api/app/services/booking_transition_owner.py` | Single-writer booking/profile transition owner (`tool outcome -> state/profile`) | Backend |
 | `truffles-api/app/services/signal_manifest_service.py` | Signal manifest runtime compiler/loader (schema validation + signature cache + version meta) | Backend |
+| `truffles-api/app/services/interaction_owner_matrix_service.py` | Cached loader/validator for the machine-readable interaction owner matrix | Backend |
+| `truffles-api/app/services/owner_resolver.py` | Pure owner-row resolver that matches runtime turns against matrix rows and emits row/evidence decisions | Backend |
 | `truffles-api/app/services/appointment_reminder_service.py` | Appointment reminder/follow-up jobs + outbox enqueue | Backend |
 | `truffles-api/app/services/metrics_daily_service.py` | Daily metrics snapshot (metrics_daily) | Backend |
 | `truffles-api/app/services/marketing/service.py` | Marketing Pro lifecycle/audience/preflight/execute/retry logic | Backend |
@@ -331,6 +334,14 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60a-remaining-closure-architecture-verdict-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60b-remaining-closure-owner-matrix-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o62-timeout-ask-about-requested-slot-booking-limit-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o63-active-name-time-availability-followup-owner-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o64-timeout-mixed-date-availability-governance-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o65-invalid-schema-specialist-followup-truth-gate-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o66-policy-core-named-specialist-followup-owner-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o67-ambiguous-time-fill-scenario-governance-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-03-uvc-ux-program-closeout-steady-loop-a705.md`
 - `docs/TASK_PACKAGES/TP-2026-03-05-e2f-firebreak-semantic-contract-closure-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-05-e2e-firebreak-canonical-lock-replay-a1.md`
@@ -657,6 +668,7 @@
 | `truffles-api/app/knowledge/generic/*` | Generic pack scaffold (CI/tests) |
 | `truffles-api/app/knowledge/generic/SYSTEM_LEXICONS.yaml` | System language lexicons (shared) |
 | `truffles-api/app/knowledge/generic/SIGNAL_MANIFEST.yaml` | Declarative signal patterns/tokens/layout map for signal services |
+| `truffles-api/app/knowledge/generic/INTERACTION_OWNER_MATRIX.yaml` | Machine-readable owner matrix artifact for active pending-question rows |
 | `knowledge/generic/*` | Generic RAG docs (CI/tests) |
 
 ---
@@ -893,6 +905,8 @@ truffles-api/
 | `truffles-api/tests/test_admin_health.py` | Unit: Admin health minimum-data readiness |
 | `truffles-api/tests/test_pack_compiler.py` | Unit: pack compiler artifacts + checksum |
 | `truffles-api/tests/test_cross_domain_signal_contract_suite.py` | Unit: cross-domain info/booking/tool_registry contract on two non-salon runtime packs |
+| `truffles-api/tests/test_interaction_owner_matrix_contract.py` | Unit: schema/artifact contract for machine-readable interaction owner matrix |
+| `truffles-api/tests/test_owner_resolver.py` | Unit: resolver-driven row matching for the executable interaction owner slice |
 | `truffles-api/tests/test_policy_dsl.py` | Unit: policy DSL schema validation |
 | `truffles-api/tests/test_knowledge_registry_chunking.py` | Unit: Qdrant pack chunking by size |
 
@@ -981,3 +995,68 @@ ops/*.sh              # Кроме monitor.sh — одноразовое
 ---
 
 *Создано: 2025-12-10*
+
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o68-invalid-schema-service-grounded-booking-owner-a1.md` — bounded child TP for `r93/M17`, covering invalid-schema service-grounded degraded-booking recovery.
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o69-time-window-slot-constraint-collect-owner-a1.md` — bounded child TP for `r94/M18`, covering declarative time-window slot-constraint recovery under active `time` collect.
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o70-invalid-schema-booking-request-specialist-followup-a1.md` — bounded child TP for `r95/M19`, covering invalid-schema named-specialist booking-request follow-up recovery.
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o71-check-booking-stale-service-choice-governance-a1.md` — bounded child TP for `r96/M20`, covering stale `check_booking/service_choice` governance cleanup.
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o72-active-name-deictic-time-availability-owner-a1.md` — bounded child TP for `r101/M21`, covering active-name deictic requested-slot follow-up ownership after explicit time grounding.
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o73-question-like-daypart-exact-time-fill-owner-a1.md` — bounded child TP for `r102/M22`, covering question-like daypart phrasing that still carries an explicit exact-time fill under active `time` collect.
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o74-active-name-named-specialist-followup-owner-a1.md` — bounded child TP for `r103/M23`, covering declarative named-specialist follow-up under active `name` collect after grounded time.
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o75-active-time-consult-topic-shift-service-choice-owner-a1.md` — bounded child TP for `r104/M24`, covering standalone consult/service-topic shift that must clear stale booking `time` resume.
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o76-initial-timeout-requested-slot-owner-a1.md` — bounded child TP for `r105/M25`, covering first-time requested-slot timeout fallback under active `time` collect that must preserve `ask_about_requested_slot(time)` evidence.
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o77-active-time-daypart-preference-info-signal-false-positive-a1.md` — bounded child TP for `r106/M26`, covering matched active-time daypart-preference turns that must not leak `hours` / `duration` info-class signals.
+- `docs/TASK_PACKAGES/TP-2026-03-11-p1.6o78-booking-confirm-pricing-interrupt-service-choice-drift-a1.md` — bounded child TP for `r112/M27`, covering pricing interrupts under booking time confirmation that must preserve grounded service and `expected_reply_type=time` instead of reopening `service_choice`.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o79-executable-interaction-core-redesign-reset-a1.md` — doc-only forensic reset TP that freezes the reactive child chain as mined evidence corpus and makes executable interaction core the default next closure path.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o80-base-canon-interaction-model-sync-a1.md` — doc-only canon-sync TP that promotes interaction target / relation / owner / degrade / forbidden-compression semantics into the base requirements/spec/runbook canon before any runtime migration.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o81-machine-readable-owner-matrix-a1.md` — contract-artifact TP that publishes versioned schema + generic YAML artifact for the remaining interaction owner matrix before persisted-state/runtime migration.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o82-persisted-interaction-state-a1.md` — bounded runtime-state TP that makes `interaction_state` first-class in canonical dialog state + `session_memory` before resolver extraction.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o83-owner-resolver-m27-vertical-slice-a1.md` — bounded runtime TP that adds matrix runtime fields + cached loader + pure resolver and migrates `M27` through the first resolver-driven vertical slice before proof admission.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o84-m27-proof-lane-and-next-row-admission-a1.md` — proof-lane TP that revalidates the deterministic `M27` slice, runs one fresh guarded `dev L2`, records the invalid preflight attempt truthfully, and admits the next surfaced row after `M27` clears.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o85-slot-compare-explicit-time-fill-scenario-governance-a1.md` — bounded scenario-governance TP that normalizes explicit exact-time `slot_compare` turns to canonical `time -> name` expectations before the next proof lane.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o86-post-m28-proof-lane-a1.md` — proof-lane TP that verifies `M28` is gone on a fresh guarded `dev L2`, audits away the invalid first attempt, and admits the next surfaced row after `M28` clears.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o87-booking-tag-requested-slot-governance-a1.md` — bounded scenario-governance TP that targets booking-tag requested-slot questions which should canonicalize back to `ask_about_requested_slot(time)` under active `time` collect.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o88-post-m29-proof-lane-a1.md` — proof-lane TP that verifies `M29` is gone on one fresh guarded `dev L2` after deterministic closure and truthfully admits the next surfaced row, if any.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o89-slot-constraint-generic-free-slot-question-governance-a1.md` — bounded scenario-governance TP that retags generic free-slot questions out of `slot_constraint` and back to `ask_about_requested_slot(time)` under active `time` collect.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o90-post-m30-proof-lane-a1.md` — proof-lane TP that verifies `M30` is gone on one fresh guarded `dev L2` after deterministic closure and truthfully admits the next surfaced row, if any.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o91-invalid-schema-booking-request-specialist-catalog-match-a1.md` — bounded child TP that re-closes reopened `M19` by recovering named-specialist booking-request follow-up from branch catalog before secondary hint fallback.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o92-post-m19-reclosure-proof-lane-a1.md` — proof-lane TP that verifies reopened `M19` is gone on one fresh guarded `dev L2` after deterministic re-closure and truthfully admits the next surfaced row, if any.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o93-generic-specialist-choice-followup-owner-a1.md` — bounded child TP for `r117/M31`, covering generic specialist-choice success-path owner preservation under active `time` collect.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o94-post-m31-proof-lane-a1.md` — proof-lane TP that verifies `M31` is gone on one fresh guarded `dev L2` after deterministic closure and truthfully admits the next surfaced row, if any.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o95-active-name-deictic-day-availability-followup-owner-a1.md` — bounded child TP for `r118/M32`, covering active-name deictic day/date requested-slot follow-up owner preservation and scenario normalization.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o96-post-m32-proof-lane-a1.md` — proof-lane TP that verifies `M32` is gone on one fresh guarded `dev L2` after deterministic closure and truthfully admits the next surfaced row, if any.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o97-active-name-service-info-interrupt-owner-a1.md` — bounded child TP for `r119/M33`, extending the executable owner-matrix path so factual `catalog.service_query` side-questions under active `name` resume preserve the requested-slot owner contract.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o98-post-m33-proof-lane-a1.md` — proof-lane TP that verifies `M33` is gone on one fresh guarded `dev L2` after deterministic closure and truthfully admits the next surfaced row, if any.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o99-active-name-timeout-specialist-choice-followup-a1.md` — bounded child TP for `r120/M34`, covering question-like named-specialist choice under active `name` collect that still loses timeout specialist-followup ownership and stale `service_choice` expectations.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o100-post-m34-proof-lane-a1.md` — proof-lane TP that verifies `M34` is gone on one fresh guarded `dev L2` after deterministic closure and truthfully admits the next surfaced row, if any.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o101-slot-compare-generic-free-slot-question-governance-a1.md` — bounded scenario-governance TP for `r121/M35`, retagging generic free-slot `slot_compare` questions back to canonical `ask_about_requested_slot(time)` under active `time` collect.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o102-post-m35-proof-lane-a1.md` — proof-lane TP that verifies `M35` is gone on one fresh guarded `dev L2` after deterministic closure and truthfully admits the next surfaced row, if any.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o103-grounded-partial-date-daypart-fill-governance-a1.md` — bounded scenario-governance TP for `r122/M36`, normalizing grounded partial-date daypart availability follow-ups from stale `mixed_fill_plus_question/time` to canonical `time -> name`.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o104-post-m36-proof-lane-a1.md` — proof-lane TP that verifies `M36` is gone on one fresh guarded `dev L2` after deterministic closure and truthfully admits the next surfaced row, if any.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o105-timeout-active-booking-name-fill-followup-a1.md` — bounded runtime TP for `r123/M37`, keeping explicit booking slot fill inside timeout-degraded active-booking follow-up instead of `pack_fact_fallback`.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o106-post-m37-proof-lane-a1.md` — proof-lane TP that verifies `M37` is gone on one fresh guarded `dev L2` after deterministic closure and truthfully admits the next surfaced row, if any.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o107-active-time-timeout-generic-specialist-choice-followup-a1.md` — bounded runtime TP for `r124/M38`, routing timeout-degraded generic specialist-change turns under active `time` collect through the specialist-target interrupt while keeping the explicit `time` follow-up prompt.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o108-post-m38-proof-lane-a1.md` — proof-lane TP that verifies `M38` is gone on one fresh guarded `dev L2` after deterministic closure and truthfully admits the next surfaced row, if any.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o109-active-time-services-overview-interrupt-owner-a1.md` — bounded runtime TP for `r125/M39`, promoting grounded service-info side questions under active `time` collect into the existing `catalog.service_query` interrupt path before stale collect prompt emission.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o110-post-m39-proof-lane-a1.md` — fresh proof-lane TP after deterministic `M39` closure; requires one fingerprint-verified guarded `dev L2` and truthful admission of the next family.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o111-active-time-partial-date-fill-timeout-degraded-collect-governance-a1.md` — bounded scenario-governance TP for `r126/M40`, aligning pure partial-date fills under active `time` collect to canonical `time -> name` after grounded `datetime`.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o112-post-m40-proof-lane-a1.md` — fresh proof-lane TP after deterministic `M40` closure; requires one fingerprint-verified guarded `dev L2` and truthful admission of the next family.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o113-openai-preflight-transport-dedupe-timeout-alignment-a1.md` — bounded infra/tooling TP that removes repeated OpenAI preflight false-negatives by deduping identical `llm`/`judge` transport probes and respecting the configured timeout budget.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o114-active-time-time-preference-timeout-guidance-owner-a1.md` — bounded runtime TP for `r127/M41`, keeping generic time-preference statements under active `time` collect inside `booking_slot_guidance` instead of `truth_gate service_duration`.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o115-post-m41-proof-lane-a1.md` — fresh proof-lane TP after deterministic `M41` closure; requires one fingerprint-verified guarded `dev L2` and truthful admission of the next family.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o116-active-name-deictic-time-occupancy-followup-governance-a1.md` — bounded scenario-governance TP that re-closes reopened `M21` for deictic occupancy wording like `А если это время занято?` under active `name` resume.
+- `docs/TASK_PACKAGES/TP-2026-03-12-p1.6o117-post-m21-reclosure-proof-lane-a1.md` — fresh proof-lane TP after deterministic re-closure of reopened `M21`; requires one fingerprint-verified guarded `dev L2` and truthful admission of the next family.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o118-class-level-closure-process-reset-a1.md` — worktree-level process reset TP that keeps `P1.6o117` as the immediate proof gate but moves the remaining work onto class-level triage and structural follow-up tracks.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o119-timeout-degrade-owner-boundary-first-slice-a1.md` — first structural `Track C` TP that targets shared timeout/degrade owner-boundary precedence before degraded info/fact fallback on matched booking-collect turns.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o120-post-track-c-proof-lane-a1.md` — post-`Track C` proof-lane TP that refreshes a fingerprint-verified live runtime and truthfully checks whether timeout/degrade is still the first surfaced class.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o121-booking-slot-guidance-scenario-convergence-first-slice-a1.md` — first structural `Track A` TP that makes scenario/oracle derive active booking slot-guidance expectations from canonical runtime interaction semantics instead of stale `slot_compare` generator knowledge.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o122-post-track-a-proof-lane-a1.md` — post-`Track A` proof-lane TP that verifies the covered slot-guidance family is no longer first fail and truthfully surfaces the next remaining class on a fingerprint-verified live runtime.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o123-active-service-choice-service-info-progress-scenario-convergence-a1.md` — bounded runtime-first continuity TP that emits explicit `catalog_service_booking_progress` for service-grounded factual interrupts under active booking continuity and syncs oracle only on that same bounded contour.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o124-post-service-info-progress-proof-lane-a1.md` — post-`P1.6o123` proof-lane TP that verifies the covered service-info continuity family is no longer first fail on a fingerprint-verified live runtime and truthfully classifies the next remaining class.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o125-proof-lane-tool-evidence-fail-fast-validity-a1.md` — bounded proof-validity TP that makes strict `tool_evidence` bind to observed booking-tool opportunity/evidence in the executed prefix instead of unexecuted booking tails after fail-fast proof stops.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o126-post-tool-evidence-proof-lane-a1.md` — post-`P1.6o125` proof-lane TP that reruns one fresh fingerprint-verified guarded `dev L2` after the tool-evidence validity closure and truthfully classifies the next remaining class on admissible proof evidence.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o127-pending-handoff-resume-boundary-first-slice-a1.md` — bounded runtime-owner TP that preserves booking follow-up continuity across pending/handoff soft-pass and transport-degraded re-entry so factual booking-side interrupts do not erase the active booking question contract.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o128-post-pending-handoff-resume-proof-lane-a1.md` — post-`P1.6o127` proof-lane TP that truthfully proves the pending/handoff runtime-owner family is displaced and routes the next remaining class from fresh admissible evidence.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o129-active-time-named-specialist-followup-scenario-convergence-a1.md` — bounded `Track A` scenario-governance TP that converges active-time named specialist preference availability turns onto generalized specialist-followup expectations without path-specific owner duplication.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o130-post-active-time-named-specialist-followup-proof-lane-a1.md` — post-`P1.6o129` proof-lane TP that reruns one fresh fingerprint-verified guarded `dev L2` after the named specialist followup `Track A` closure and truthfully classifies the next remaining class on admissible proof evidence.
+- `docs/TASK_PACKAGES/TP-2026-03-13-p1.6o134-audited-infra-non-canonical-lock-retry-admission-a1.md` — bounded proof-process TP that restores admissible unchanged-fingerprint lock retry only for audited infra-invalid non-canonical locks with invalid run integrity after runtime recovery outside repo code.
