@@ -27,7 +27,7 @@ async function waitForConsoleApp(
     }
     await page.waitForURL(
         (url) => consoleHostPattern.test(url.toString()) && !url.toString().includes("/api/auth"),
-        { timeout: 30000 }
+        { timeout: 30000, waitUntil: "domcontentloaded" }
     );
 }
 

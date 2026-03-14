@@ -18,7 +18,7 @@ let resolvedBaseURL = baseURL;
 async function waitForConsoleApp(page: import('@playwright/test').Page) {
     await page.waitForURL(
         (url) => consoleHostPattern.test(url.toString()) && !url.toString().includes('/api/auth'),
-        { timeout: 30000 }
+        { timeout: 30000, waitUntil: 'domcontentloaded' }
     );
 }
 
@@ -203,7 +203,7 @@ test.describe('Smoke Test: Login Flow', () => {
             providerButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
             providerForm.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
             loginButton.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => null),
-            page.waitForURL(keycloakHostPattern, { timeout: 5000 }).catch(() => null),
+            page.waitForURL(keycloakHostPattern, { timeout: 5000, waitUntil: 'domcontentloaded' }).catch(() => null),
         ]);
         const hasLogout = await logoutButton.isVisible().catch(() => false);
         const hasSignIn = await signInHeading.isVisible().catch(() => false);
@@ -218,7 +218,7 @@ test.describe('Smoke Test: Login Flow', () => {
                 await Promise.race([
                     providerButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
                     providerForm.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
-                    page.waitForURL(keycloakHostPattern, { timeout: 5000 }).catch(() => null),
+                    page.waitForURL(keycloakHostPattern, { timeout: 5000, waitUntil: 'domcontentloaded' }).catch(() => null),
                 ]);
             }
         }

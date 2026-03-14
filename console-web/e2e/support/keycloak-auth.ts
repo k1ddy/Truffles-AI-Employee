@@ -122,10 +122,13 @@ async function waitForAuthTransition(page: Page, options: KeycloakAuthOptions) {
     const waitForConsoleApp = options.waitForConsoleApp;
 
     await Promise.race([
-        page.waitForURL(keycloakHostPattern, { timeout: authWaitTimeoutMs }),
+        page.waitForURL(keycloakHostPattern, { timeout: authWaitTimeoutMs, waitUntil: 'domcontentloaded' }),
         waitForConsoleApp
             ? waitForConsoleApp(page)
-            : page.waitForURL((url) => isConsoleAppUrl(url.toString(), consoleHostPattern), { timeout: authWaitTimeoutMs }),
+            : page.waitForURL((url) => isConsoleAppUrl(url.toString(), consoleHostPattern), {
+                timeout: authWaitTimeoutMs,
+                waitUntil: 'domcontentloaded',
+            }),
     ]);
 }
 
