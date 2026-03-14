@@ -147,6 +147,29 @@ SEMANTIC_RESOLUTION_MODE_VALUES = {
     "policy_fact",
     "live_calendar",
 }
+SEMANTIC_PENDING_QUESTION_ACT_VALUES = {
+    "fill_requested_slot",
+    "ask_about_requested_slot",
+    "slot_constraint",
+    "slot_compare",
+    "mixed_fill_plus_question",
+}
+SEMANTIC_PENDING_QUESTION_TARGET_VALUES = {
+    "time",
+    "specialist",
+}
+SEMANTIC_ACTIVE_QUESTION_RELATION_VALUES = {
+    "fill_requested_slot",
+    "ask_about_requested_slot",
+    "slot_constraint",
+    "slot_compare",
+    "mixed_fill_plus_question",
+    "referent_followup",
+    "generic_info_interrupt",
+    "specialist_availability_interrupt",
+    "specialist_availability_followup",
+    "tool_result_followup_specialist_missing",
+}
 
 
 def _is_supported_number_value(value: Any) -> bool:
@@ -477,6 +500,9 @@ class LlmPolicyCoreOutput(BaseModel):
     capability: str | None = None
     temporal_scope: str | None = None
     resolution_mode: str | None = None
+    pending_question_act: str | None = None
+    pending_question_target: str | None = None
+    active_question_relation: str | None = None
     resolver_id: str | None = None
     resolver_version: str | None = None
 
@@ -559,6 +585,33 @@ class LlmPolicyCoreOutput(BaseModel):
             value,
             field="resolution_mode",
             allowed=SEMANTIC_RESOLUTION_MODE_VALUES,
+        )
+
+    @field_validator("pending_question_act", mode="before")
+    @classmethod
+    def _validate_pending_question_act(cls, value: Any) -> str | None:
+        return _normalize_optional_semantic_token(
+            value,
+            field="pending_question_act",
+            allowed=SEMANTIC_PENDING_QUESTION_ACT_VALUES,
+        )
+
+    @field_validator("pending_question_target", mode="before")
+    @classmethod
+    def _validate_pending_question_target(cls, value: Any) -> str | None:
+        return _normalize_optional_semantic_token(
+            value,
+            field="pending_question_target",
+            allowed=SEMANTIC_PENDING_QUESTION_TARGET_VALUES,
+        )
+
+    @field_validator("active_question_relation", mode="before")
+    @classmethod
+    def _validate_active_question_relation(cls, value: Any) -> str | None:
+        return _normalize_optional_semantic_token(
+            value,
+            field="active_question_relation",
+            allowed=SEMANTIC_ACTIVE_QUESTION_RELATION_VALUES,
         )
 
     @field_validator("needs_manager", mode="before")

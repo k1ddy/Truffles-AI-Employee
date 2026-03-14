@@ -243,8 +243,9 @@ def apply_tool_transition_owner(
     )
     clear_datetime_after_negative_booking = bool(
         normalized_action == "calendar.book_slot"
-        and normalized_decision in {"conflict", "time_mismatch", "provider_unavailable"}
+        and normalized_decision in {"conflict", "time_mismatch"}
     )
+    # Transient provider outages do not invalidate the user-grounded requested time.
 
     merged_slots: dict[str, str] = {}
     for key in slot_order:

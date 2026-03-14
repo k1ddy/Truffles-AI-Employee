@@ -9,8 +9,24 @@ from pydantic import ValidationError
 
 from app.models import Conversation, Message
 from app.routers.webhook.trace import _record_decision_trace, _update_message_decision_metadata
-from app.schemas.webhook import MemoryContract
+from app.schemas.webhook import InteractionStateContract, MemoryContract
 from app.services.ai_service import normalize_for_matching
+
+_INTERACTION_RESUME_SLOTS = {"service", "datetime", "name", "phone"}
+_INTERACTION_TARGETS = {"time", "specialist"}
+_INTERACTION_RELATIONS = {
+    "fill_requested_slot",
+    "ask_about_requested_slot",
+    "slot_constraint",
+    "slot_compare",
+    "mixed_fill_plus_question",
+    "referent_followup",
+    "generic_info_interrupt",
+    "specialist_availability_interrupt",
+    "specialist_availability_followup",
+    "tool_result_followup_specialist_missing",
+}
+_INTERACTION_REFERENT_KEYS = {"service", "specialist", "branch", "booking_ref"}
 
 
 def _get_session_memory(context: dict) -> dict:
@@ -20,6 +36,80 @@ def _get_session_memory(context: dict) -> dict:
     if isinstance(payload, dict):
         return dict(payload)
     return {}
+
+
+def _normalize_interaction_state(memory: dict, *, mark_error) -> None:
+    interaction_state = memory.get("interaction_state")
+    if interaction_state is None:
+        return
+    if not isinstance(interaction_state, dict):
+        memory.pop("interaction_state", None)
+        mark_error("interaction_state_type")
+        return
+
+    cleaned: dict[str, object] = {}
+    resume_slot = interaction_state.get("resume_slot")
+    if isinstance(resume_slot, str) and resume_slot.strip():
+        resume_token = resume_slot.strip().casefold()
+        if resume_token in _INTERACTION_RESUME_SLOTS:
+            cleaned["resume_slot"] = resume_token
+    interaction_target = interaction_state.get("interaction_target")
+    if isinstance(interaction_target, str) and interaction_target.strip():
+        target_token = interaction_target.strip().casefold()
+        if target_token in _INTERACTION_TARGETS:
+            cleaned["interaction_target"] = target_token
+    interaction_relation = interaction_state.get("interaction_relation")
+    if isinstance(interaction_relation, str) and interaction_relation.strip():
+        relation_token = interaction_relation.strip().casefold()
+        if relation_token in _INTERACTION_RELATIONS:
+            cleaned["interaction_relation"] = relation_token
+    interaction_owner = interaction_state.get("interaction_owner")
+    if isinstance(interaction_owner, str) and interaction_owner.strip():
+        cleaned["interaction_owner"] = " ".join(interaction_owner.split())[:80]
+    grounded_referents = interaction_state.get("grounded_referents")
+    if isinstance(grounded_referents, dict):
+        cleaned_referents: dict[str, str] = {}
+        for referent_key in _INTERACTION_REFERENT_KEYS:
+            referent_value = grounded_referents.get(referent_key)
+            if isinstance(referent_value, str) and referent_value.strip():
+                cleaned_referents[referent_key] = " ".join(referent_value.split())[:120]
+        if cleaned_referents:
+            cleaned["grounded_referents"] = cleaned_referents
+    confirmation_state = interaction_state.get("confirmation_state")
+    if isinstance(confirmation_state, dict):
+        cleaned_confirmation: dict[str, object] = {}
+        required = confirmation_state.get("required")
+        if isinstance(required, bool):
+            cleaned_confirmation["required"] = required
+        slot = confirmation_state.get("slot")
+        if isinstance(slot, str) and slot.strip():
+            slot_token = slot.strip().casefold()
+            if slot_token in _INTERACTION_RESUME_SLOTS:
+                cleaned_confirmation["slot"] = slot_token
+        value = confirmation_state.get("value")
+        if isinstance(value, str) and value.strip():
+            cleaned_confirmation["value"] = " ".join(value.split())[:120]
+        source = confirmation_state.get("source")
+        if isinstance(source, str) and source.strip():
+            cleaned_confirmation["source"] = " ".join(source.split())[:80]
+        if cleaned_confirmation:
+            cleaned["confirmation_state"] = cleaned_confirmation
+    degrade_reason = interaction_state.get("degrade_reason")
+    if isinstance(degrade_reason, str) and degrade_reason.strip():
+        cleaned["degrade_reason"] = " ".join(degrade_reason.split())[:120]
+
+    if "resume_slot" not in cleaned:
+        memory.pop("interaction_state", None)
+        mark_error("interaction_state_resume_slot")
+        return
+
+    try:
+        memory["interaction_state"] = InteractionStateContract(**cleaned).model_dump(
+            exclude_none=True
+        )
+    except ValidationError:
+        memory.pop("interaction_state", None)
+        mark_error("interaction_state_contract")
 
 
 def _normalize_session_memory(memory: dict | None) -> tuple[dict, str | None]:
@@ -113,6 +203,7 @@ def _normalize_session_memory(memory: dict | None) -> tuple[dict, str | None]:
     normalize_list("unanswered_questions")
     normalize_dict("slots", values_as_str=False)
     normalize_dict("pending_slots", values_as_str=True)
+    _normalize_interaction_state(normalized, mark_error=mark_error)
 
     try:
         MemoryContract(**normalized)
@@ -132,6 +223,37 @@ def _set_session_memory(context: dict, memory: dict | None) -> dict:
     else:
         context.pop(legacy.SESSION_MEMORY_KEY, None)
     return context
+
+
+def _sync_session_memory_interaction_state(
+    context: dict,
+    *,
+    interaction_state: dict | None,
+    now: datetime,
+) -> tuple[dict, dict]:
+    from . import _legacy as legacy
+
+    memory = _get_session_memory(context)
+    cleaned_state = None
+    if isinstance(interaction_state, dict):
+        normalized_memory = {"interaction_state": interaction_state}
+        _normalize_interaction_state(normalized_memory, mark_error=lambda _reason: None)
+        cleaned_state = normalized_memory.get("interaction_state")
+
+    changed = False
+    if isinstance(cleaned_state, dict):
+        if memory.get("interaction_state") != cleaned_state:
+            memory["interaction_state"] = cleaned_state
+            changed = True
+    elif "interaction_state" in memory:
+        memory.pop("interaction_state", None)
+        changed = True
+
+    if changed:
+        memory["last_updated_at"] = now.isoformat()
+        memory["ttl_hours"] = legacy.SESSION_MEMORY_TTL_HOURS
+        context = _set_session_memory(context, memory)
+    return context, memory
 
 
 def _parse_session_memory_time(value: str | None) -> datetime | None:
@@ -201,6 +323,16 @@ def _session_memory_snapshot(memory: dict) -> dict:
         unanswered_count = len([item for item in unanswered if isinstance(item, str) and item.strip()])
     else:
         unanswered_count = 0
+    interaction_state = memory.get("interaction_state")
+    interaction_resume_slot = None
+    interaction_owner = None
+    if isinstance(interaction_state, dict):
+        raw_resume_slot = interaction_state.get("resume_slot")
+        if isinstance(raw_resume_slot, str) and raw_resume_slot.strip():
+            interaction_resume_slot = raw_resume_slot.strip()
+        raw_interaction_owner = interaction_state.get("interaction_owner")
+        if isinstance(raw_interaction_owner, str) and raw_interaction_owner.strip():
+            interaction_owner = raw_interaction_owner.strip()
     return {
         "last_question_type": memory.get("last_question_type"),
         "active_goal": memory.get("active_goal"),
@@ -208,6 +340,8 @@ def _session_memory_snapshot(memory: dict) -> dict:
         "goal_stack_top": cleaned_goals[-1] if cleaned_goals else None,
         "pending_slots": pending_keys,
         "unanswered_questions_count": unanswered_count,
+        "interaction_resume_slot": interaction_resume_slot,
+        "interaction_owner": interaction_owner,
     }
 
 

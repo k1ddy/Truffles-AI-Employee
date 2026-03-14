@@ -21,6 +21,16 @@ MSG_BOOKING_ASK_SERVICE = (
     "На какую услугу хотите записаться? После этого сразу проверю свободное время."
 )
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
+MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE = (
+    "Зависит от того, как вам удобнее: можно выбрать утро, день или вечер. "
+    "На какую дату и время вам удобно?"
+)
+MSG_BOOKING_SPECIALIST_AVAILABILITY_FOLLOWUP = (
+    "Чтобы понять, кто из мастеров свободен, подскажите день или более точное время."
+)
+MSG_BOOKING_TIMEOUT_PENDING_QUESTION_TIME = (
+    "Могу помочь подобрать свободное время. На какую дату и время вам удобно?"
+)
 MSG_BOOKING_ASK_NAME = "Отлично, время подходит. Как вас зовут?"
 MSG_BOOKING_CTA = "Хотите записаться?"
 
@@ -83,6 +93,9 @@ __all__ = [
     "MSG_AI_ERROR",
     "MSG_BOOKING_ASK_DATETIME",
     "MSG_BOOKING_ASK_NAME",
+    "MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE",
+    "MSG_BOOKING_SPECIALIST_AVAILABILITY_FOLLOWUP",
+    "MSG_BOOKING_TIMEOUT_PENDING_QUESTION_TIME",
     "MSG_BOOKING_ASK_SERVICE",
     "MSG_BOOKING_CTA",
     "MSG_DELIVERY_FAILED",

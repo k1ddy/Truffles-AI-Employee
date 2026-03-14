@@ -10,7 +10,7 @@ LLM принимает решение по действию (action), но не 
 
 Ответ (JSON):
 ```json
-{"intent":"booking|pricing|duration|location|hours|master_query|consult|greeting|out_of_domain|other","action":"fact|collect|handoff","tool_action":"info|consult|booking|handoff|collect|calendar.list_slots|calendar.book_slot|calendar.get_booking|calendar.reschedule|calendar.cancel|catalog.service_query|catalog.location|catalog.portfolio","tool_args":{"service_query":"","consult_question":""},"pack_refs":[],"slots":{"service":"","datetime":"","name":""},"next_question":"service|datetime|name|","open_questions":[],"needs_manager":false,"risk_signals":[],"language":"ru|kk|mix","confidence":0.0,"reason":"...","goal":"booking|info|consult|greeting|out_of_domain|other","entity_refs":[{"entity_id":"svc:manicure","entity_type":"service","source_ref":"carryover"}],"subject_kind":"service|specialist|branch|booking|general","capability":"pricing|duration|location|hours|promotions|bookability|live_availability|booking_manage|consultation|portfolio|other","temporal_scope":"none|specific_time|day|weekday|weekend|date_range","resolution_mode":"direct|referent_followup|clarify_missing_subject|clarify_missing_time|policy_fact|live_calendar","resolver_id":"llm_policy_core","resolver_version":"v1"}
+{"intent":"booking|pricing|duration|location|hours|master_query|consult|greeting|out_of_domain|other","action":"fact|collect|handoff","tool_action":"info|consult|booking|handoff|collect|calendar.list_slots|calendar.book_slot|calendar.get_booking|calendar.reschedule|calendar.cancel|catalog.service_query|catalog.location|catalog.portfolio","tool_args":{"service_query":"","consult_question":""},"pack_refs":[],"slots":{"service":"","datetime":"","name":""},"next_question":"service|datetime|name|","open_questions":[],"needs_manager":false,"risk_signals":[],"language":"ru|kk|mix","confidence":0.0,"reason":"...","goal":"booking|info|consult|greeting|out_of_domain|other","entity_refs":[{"entity_id":"svc:manicure","entity_type":"service","source_ref":"carryover"}],"subject_kind":"service|specialist|branch|booking|general","capability":"pricing|duration|location|hours|promotions|bookability|live_availability|booking_manage|consultation|portfolio|other","temporal_scope":"none|specific_time|day|weekday|weekend|date_range","resolution_mode":"direct|referent_followup|clarify_missing_subject|clarify_missing_time|policy_fact|live_calendar","pending_question_act":"fill_requested_slot|ask_about_requested_slot|slot_constraint|slot_compare|mixed_fill_plus_question|","pending_question_target":"time|specialist|","active_question_relation":"fill_requested_slot|ask_about_requested_slot|slot_constraint|slot_compare|mixed_fill_plus_question|referent_followup|generic_info_interrupt|specialist_availability_interrupt|specialist_availability_followup|tool_result_followup_specialist_missing|","resolver_id":"llm_policy_core","resolver_version":"v1"}
 ```
 
 Правила:
@@ -24,6 +24,9 @@ LLM принимает решение по действию (action), но не 
 - capability описывает тип вопроса: pricing, duration, location, hours, promotions, bookability, live_availability, booking_manage, consultation, portfolio, other.
 - temporal_scope: none, specific_time, day, weekday, weekend, date_range.
 - resolution_mode показывает как ты разрешил ход: direct, referent_followup, clarify_missing_subject, clarify_missing_time, policy_fact, live_calendar.
+- pending_question_act описывает, что пользователь делает относительно активного `pending_question_contract`: fill_requested_slot, ask_about_requested_slot, slot_constraint, slot_compare, mixed_fill_plus_question. Если такого активного контракта нет или ход не относится к нему — верни пустое значение.
+- pending_question_target описывает, над какой осью активного `pending_question_contract` работает ход: `time` для вопроса/сравнения/ограничения по времени, `specialist` для выбора/ограничения по мастеру во время активного booking collect. Если ход не относится к активному pending-question family — верни пустое значение.
+- active_question_relation описывает явную relation row над активным `pending_question_contract`. Используй: fill_requested_slot, ask_about_requested_slot, slot_constraint, slot_compare, mixed_fill_plus_question, referent_followup, generic_info_interrupt, specialist_availability_interrupt, specialist_availability_followup, tool_result_followup_specialist_missing. Если хода над активным pending-question family нет — верни пустое значение.
 - Если во входе есть memory.profile.current_referents или pending_question_contract, используй их как grounded dialog context, а не как необязательные подсказки.
 - info: pack_refs = info-интенты (pricing/duration/location/hours/promotions).
 - info: для pricing/duration укажи tool_args.service_query (или slots.service). Если нет услуги → action=collect и next_question/service.
@@ -53,5 +56,76 @@ LLM принимает решение по действию (action), но не 
 - catalog.location: без args, верни адрес/гео.
 - catalog.portfolio: без args, верни ссылку на работы.
 - collect: action=collect, next_question = недостающий слот.
+- Если есть активный `pending_question_contract` по `datetime` и пользователь спрашивает про удобное/лучшее время до заполнения слота
+  (например, "На какое время лучше записаться?"), это НЕ fill slot и НЕ generic info interrupt:
+  сохрани `action=collect`, `tool_action=collect`, `next_question="datetime"`, `open_questions=["datetime"]`,
+  и выставь `pending_question_act="ask_about_requested_slot"`, `pending_question_target="time"`,
+  `active_question_relation="ask_about_requested_slot"`.
+- Если есть активный `pending_question_contract` по `datetime` и пользователь спрашивает про свободные слоты/окна
+  без даты, дня или диапазона (например, "Когда у вас есть свободные слоты?"), это тоже `ask_about_requested_slot(time)`.
+  Не используй `calendar.list_slots` без `temporal_scope`: сохрани `action=collect`, `tool_action=collect`,
+  `next_question="datetime"`, `open_questions=["datetime"]`, `pending_question_act="ask_about_requested_slot"`,
+  `pending_question_target="time"`, `active_question_relation="ask_about_requested_slot"`.
+- Если есть активный `pending_question_contract` по `datetime` и пользователь просит сравнить/уточнить варианты времени
+  без заполнения точного слота (например, "А на какое время?", "Лучше утром или вечером?"),
+  сохрани `action=collect`, `tool_action=collect`, `next_question="datetime"`, `open_questions=["datetime"]`,
+  и выставь `pending_question_act="slot_compare"`, `pending_question_target="time"`,
+  `active_question_relation="slot_compare"`.
+- Если есть активный `pending_question_contract` по `datetime` и пользователь в вопросительной форме
+  одновременно предлагает явное точное время (например, "Может быть, на 14:00?", "А можно на утро, скажем, на 10 утра?"),
+  это уже fill missing slot, а не `ask_about_requested_slot` и не `slot_constraint`:
+  заполни `slots.datetime` конкретным значением времени, очисти `pending_question_act` / `pending_question_target` /
+  `active_question_relation`, и переведи `next_question` к следующему реально недостающему слоту
+  (`name`, если услуга уже известна и после времени остается только имя).
+- Если есть активный `pending_question_contract` по `datetime` и пользователь до заполнения времени спрашивает про конкретного мастера
+  или явно заявляет предпочтение конкретному мастеру
+  (например, "Могу ли я записаться к Айгерим?", "Я хочу записаться к Айгерим."),
+  сохрани booking collect context, не теряй active-time owner, выставь `pending_question_target="specialist"`
+  и `active_question_relation="referent_followup"`.
+- Если есть активный `pending_question_contract` по `datetime`, услуга уже известна и пользователь спрашивает,
+  какой мастер/специалист свободен в явном временном диапазоне или дне
+  (например, "Какой мастер свободен на этой неделе?", "Какой специалист свободен в пятницу?"),
+  это НЕ generic master info interrupt:
+  сохрани `action=collect`, `tool_action=collect`, `next_question="datetime"`, `open_questions=["datetime"]`,
+  выставь `subject_kind="specialist"`, `capability="live_availability"`,
+  `pending_question_act="ask_about_requested_slot"`, `pending_question_target="specialist"`,
+  `active_question_relation="specialist_availability_followup"`,
+  и не схлопывай ход в generic `master` truth reply.
+- Если есть активный `pending_question_contract` по `datetime`, день/время уже частично заземлены в carryover
+  (например, после "Есть ли свободные слоты на завтра?"), и пользователь затем спрашивает
+  "А какие мастера доступны?" без повторения даты,
+  не теряй relation из-за carryover: сохрани `action=collect`, `tool_action=collect`,
+  `subject_kind="specialist"`, `capability="live_availability"`,
+  `pending_question_act="ask_about_requested_slot"`, `pending_question_target="specialist"`,
+  `active_question_relation="specialist_availability_followup"`.
+  Если после такого ответа логично перейти к выбору мастера, выставь `next_question="name"` и `open_questions=["name"]`;
+  не оставляй `pending_question_target` / `active_question_relation` пустыми.
+- Если активный `pending_question_contract` по `datetime` уже довел booking до сбора имени
+  (`next_question="name"` / `open_questions=["name"]`), и пользователь спрашивает про другое конкретное время
+  (например, "А есть ли свободные слоты на 15:00?"),
+  не схлопывай ход в generic `booking_prompt` и не перетирай автоматически текущий booking-time контекст:
+  сохрани `action=collect`, `tool_action=collect`, `next_question="name"`, `open_questions=["name"]`,
+  сохрани booking follow-up context (`subject_kind="booking"`, `capability="live_availability"`, `temporal_scope="specific_time"`),
+  `pending_question_act="ask_about_requested_slot"`, `pending_question_target="time"`,
+  `active_question_relation="ask_about_requested_slot"`.
+  Такой ход — это alternate-time availability follow-up над уже заполненной datetime-axis, а не подтверждение смены времени.
+- Если активный `pending_question_contract` по `datetime` уже довел booking до сбора имени
+  (`next_question="name"` / `open_questions=["name"]`), и пользователь деиктически спрашивает про уже заземленное время
+  (например, "А есть ли у вас места в это время?"),
+  не оставляй `pending_question_target` / `active_question_relation` пустыми:
+  сохрани `action=collect`, `tool_action=collect`, `next_question="name"`, `open_questions=["name"]`,
+  `subject_kind="booking"`, `capability="live_availability"`, `temporal_scope="specific_time"`,
+  `resolution_mode="referent_followup"`, `pending_question_act="ask_about_requested_slot"`,
+  `pending_question_target="time"`, `active_question_relation="ask_about_requested_slot"`.
+  Это requested-slot follow-up над уже выбранным временем, а не generic продолжение name collect.
+- Если активный `pending_question_contract` уже довел booking до сбора имени
+  (`next_question="name"` / `open_questions=["name"]`), и пользователь выбирает конкретного мастера
+  или явно заявляет предпочтение по мастеру
+  (например, "Я хотел бы записаться к Айгерим.", "Можно к Айгерим?"),
+  не трактуй это как заполнение customer-name и не коммить `calendar.book_slot`:
+  сохрани `action=collect`, `tool_action=collect`, `next_question="name"`, `open_questions=["name"]`,
+  `subject_kind="specialist"`, `capability="bookability"`, `resolution_mode="referent_followup"`,
+  `pending_question_target="specialist"`, `active_question_relation="referent_followup"`.
+  Это specialist follow-up над активным `name` collect; имя клиента все еще не заполнено.
 - handoff: action=handoff, tool_action=handoff, pack_refs пустой, needs_manager=true.
 - confidence 0.0–1.0; если сомневаешься, ставь низкую.

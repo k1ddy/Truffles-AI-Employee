@@ -1,0 +1,1225 @@
+schema_version: interaction_owner_matrix.v1
+matrix_id: remaining_closure_owner_matrix
+source:
+  parent_verdict_tp: docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60a-remaining-closure-architecture-verdict-a1.md
+  owner_matrix_tp: docs/TASK_PACKAGES/TP-2026-03-09-p1.6o60b-remaining-closure-owner-matrix-a1.md
+  redesign_reset_tp: docs/TASK_PACKAGES/TP-2026-03-12-p1.6o79-executable-interaction-core-redesign-reset-a1.md
+  canon_sync_tp: docs/TASK_PACKAGES/TP-2026-03-12-p1.6o80-base-canon-interaction-model-sync-a1.md
+global_invariants:
+  resume_axis_field: expected_reply_type
+  interaction_target_field: pending_question_target
+  interaction_relation_field: active_question_relation
+  owner_field: interaction_owner
+  one_interaction_owner_per_inbound: true
+  relation_source: semantic_owner_or_boundary_validation_only
+  allowed_degrade_requirements:
+  - preserve_relation
+  - preserve_resume_after_grounding_boundary
+  - emit_reason_code
+  - emit_decision_meta
+  - emit_decision_trace
+  forbidden_global_compressions:
+  - generic_booking_prompt_without_relation_evidence
+  - generic_master_truth_as_live_availability_success
+  - reopen_service_choice_after_grounded_service_on_pricing_interrupt
+  - silent_loss_of_active_pending_question_contract
+row_status_legend:
+  closed: row closed by canonical contract or higher-level mechanism
+  closed_bounded: row closed locally with bounded closure; fresh guarded rerun moved
+    to a different family
+  open: row remains unresolved and requires a follow-up implementation block
+admission_rules:
+  one_child_tp_per_row: true
+  child_tp_must_name_matrix_row: true
+  guarded_rerun_requires:
+  - semantic_contract_output
+  - owner_arbitration_boundary
+  - degrade_path
+  - adjacent_negative_row
+rows:
+- row_id: M1
+  active_slot: time
+  surface_family: ask best/convenient time
+  semantic_contract_raw: '`pending_question_target=time`, `active_question_relation=ask_about_requested_slot`,
+    `subject_kind=service`, `capability=bookability`'
+  semantic_axes:
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    subject_kind: service
+    capability: bookability
+  execution_owner: '`ask_about_requested_slot(time)` owner'
+  resume_owner: '`time`'
+  allowed_degrade_raw: clarify missing time only
+  forbidden_compression_raw: generic `booking_prompt` without relation trace
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o16`'
+    child_tp_refs:
+    - P1.6o16
+    surfaced_by_runs: []
+- row_id: M2
+  active_slot: time
+  surface_family: free slots without date/day/range
+  semantic_contract_raw: '`pending_question_target=time`, `active_question_relation=ask_about_requested_slot`,
+    `subject_kind=time`, `capability=live_availability`'
+  semantic_axes:
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    subject_kind: time
+    capability: live_availability
+  execution_owner: '`ask_about_requested_slot(time)` owner'
+  resume_owner: '`time`'
+  allowed_degrade_raw: clarify temporal scope; no blind `calendar.list_slots`
+  forbidden_compression_raw: generic info interrupt; tool call without temporal scope
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o59`'
+    child_tp_refs:
+    - P1.6o59
+    surfaced_by_runs: []
+- row_id: M3
+  active_slot: time
+  surface_family: compare time options (`утром или вечером`)
+  semantic_contract_raw: '`pending_question_target=time`, `active_question_relation=slot_compare`,
+    `subject_kind=time`, `capability=live_availability`'
+  semantic_axes:
+    pending_question_target: time
+    active_question_relation: slot_compare
+    subject_kind: time
+    capability: live_availability
+  execution_owner: '`slot_compare/time-guidance` owner'
+  resume_owner: '`time`'
+  allowed_degrade_raw: clarify compare axis while preserving resume
+  forbidden_compression_raw: collapse into ordinary `booking_prompt`
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o48`'
+    child_tp_refs:
+    - P1.6o48
+    surfaced_by_runs: []
+- row_id: M4
+  active_slot: time
+  surface_family: named specialist follow-up (`к Айгерим?`)
+  semantic_contract_raw: '`pending_question_target=specialist`, `active_question_relation=referent_followup`,
+    `subject_kind=specialist`, `capability=bookability`'
+  semantic_axes:
+    pending_question_target: specialist
+    active_question_relation: referent_followup
+    subject_kind: specialist
+    capability: bookability
+  execution_owner: '`booking_specialist_followup` owner'
+  resume_owner: '`time`'
+  allowed_degrade_raw: clarify service/time while preserving specialist follow-up
+  forbidden_compression_raw: generic `master` info
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o51`'
+    child_tp_refs:
+    - P1.6o51
+    surfaced_by_runs: []
+- row_id: M5
+  active_slot: time
+  surface_family: generic master truth question (`кто делает маникюр?`)
+  semantic_contract_raw: '`active_question_relation=generic_info_interrupt`, `subject_kind=service`,
+    `capability=bookability`'
+  semantic_axes:
+    active_question_relation: generic_info_interrupt
+    subject_kind: service
+    capability: bookability
+  execution_owner: '`booking_info_contract/master`'
+  resume_owner: '`time`'
+  allowed_degrade_raw: truthful abstain with explicit resume
+  forbidden_compression_raw: claim live availability
+  status:
+    state: closed
+    raw: '`closed` via `P1.6o24`'
+    child_tp_refs:
+    - P1.6o24
+    surfaced_by_runs: []
+- row_id: M6
+  active_slot: name
+  surface_family: generic specialist availability under `name` collect
+  semantic_contract_raw: '`pending_question_target=specialist`, `active_question_relation=specialist_availability_interrupt`,
+    `subject_kind=specialist`, `capability=live_availability`'
+  semantic_axes:
+    pending_question_target: specialist
+    active_question_relation: specialist_availability_interrupt
+    subject_kind: specialist
+    capability: live_availability
+  execution_owner: bounded `master/specialist` interrupt owner for `name` collect
+  resume_owner: '`name`'
+  allowed_degrade_raw: truthful interrupt + resume `name`
+  forbidden_compression_raw: generic `booking_prompt`
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o43`'
+    child_tp_refs:
+    - P1.6o43
+    surfaced_by_runs: []
+- row_id: M7
+  active_slot: time
+  surface_family: generic specialist availability with temporal scope (`Какой мастер
+    свободен на этой неделе?`)
+  semantic_contract_raw: '`pending_question_target=specialist`, `active_question_relation=specialist_availability_followup`,
+    `subject_kind=specialist`, `capability=live_availability`, `temporal_scope=date_range`'
+  semantic_axes:
+    pending_question_target: specialist
+    active_question_relation: specialist_availability_followup
+    subject_kind: specialist
+    capability: live_availability
+    temporal_scope: date_range
+  execution_owner: explicit specialist live-availability follow-up owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: clarify date-range/service while preserving specialist availability
+    relation
+  forbidden_compression_raw: generic `booking_info_contract/master`; `master_service_not_found`
+    as success
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o60`; fresh guarded `dev L2` rolled to a different
+      family'
+    child_tp_refs:
+    - P1.6o60
+    surfaced_by_runs: []
+- row_id: M8
+  active_slot: time
+  surface_family: question-like date/day constraint (`А есть ли время в пятницу?`)
+  semantic_contract_raw: '`pending_question_target=time`, `active_question_relation=slot_constraint`,
+    `subject_kind=time`, `capability=live_availability`, `temporal_scope=specific_day`'
+  semantic_axes:
+    pending_question_target: time
+    active_question_relation: slot_constraint
+    subject_kind: time
+    capability: live_availability
+    temporal_scope: specific_day
+  execution_owner: slot-constraint/live-availability owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: clarify exact time while preserving date constraint
+  forbidden_compression_raw: generic `booking_prompt`
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o28` + `P1.6o36`'
+    child_tp_refs:
+    - P1.6o28
+    - P1.6o36
+    surfaced_by_runs: []
+- row_id: M9
+  active_slot: time/name
+  surface_family: tool outcome `calendar.book_slot -> specialist_missing`
+  semantic_contract_raw: '`pending_question_target=specialist`, `active_question_relation=tool_result_followup_specialist_missing`,
+    `subject_kind=specialist`, `capability=bookability`'
+  semantic_axes:
+    pending_question_target: specialist
+    active_question_relation: tool_result_followup_specialist_missing
+    subject_kind: specialist
+    capability: bookability
+  execution_owner: specialist-missing follow-up owner
+  resume_owner: '`specialist/name`'
+  allowed_degrade_raw: explicit specialist follow-up prompt with preserved trace/meta
+  forbidden_compression_raw: stale `time` resume only
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o58`'
+    child_tp_refs:
+    - P1.6o58
+    surfaced_by_runs: []
+- row_id: M10
+  active_slot: time
+  surface_family: generic specialist availability after grounded day/time (`А какие
+    мастера доступны?`)
+  semantic_contract_raw: '`pending_question_target=specialist`, `active_question_relation=specialist_availability_followup`,
+    `subject_kind=specialist`, `capability=live_availability`, `temporal_scope=specific_time|day`,
+    and explicit transition `next_question=name`, `open_questions=["name"]` when the
+    answer moves to specialist choice'
+  semantic_axes:
+    pending_question_target: specialist
+    active_question_relation: specialist_availability_followup
+    subject_kind: specialist
+    capability: live_availability
+    temporal_scope: specific_time|day
+    next_question: name
+    open_questions:
+    - name
+  execution_owner: grounded-time specialist-availability owner
+  resume_owner: explicit `name` transition after truthful grounded-time availability
+    answer
+  allowed_degrade_raw: truthful specialist availability answer + explicit `name` follow-up
+  forbidden_compression_raw: generic `booking_info_contract/master`; `master_service_not_found`;
+    admin-check fallback as semantic success
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o61`; fresh guarded `dev L2` `r81` rolled to a
+      different family'
+    child_tp_refs:
+    - P1.6o61
+    surfaced_by_runs:
+    - r81
+- row_id: M11
+  active_slot: time
+  surface_family: active requested-slot question under repeated timeout clarify-limit
+    (`Какой ближайший слот доступен?`)
+  semantic_contract_raw: '`expected_reply_type=time`, `pending_question_target=time`,
+    `active_question_relation=ask_about_requested_slot`, `subject_kind=time`, `capability=live_availability`;
+    degrade path must preserve the same row even when a previous degraded collect
+    already consumed timeout budget'
+  semantic_axes:
+    expected_reply_type: time
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    subject_kind: time
+    capability: live_availability
+  execution_owner: timeout-degraded requested-slot owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded timeout-degraded collect/guidance with explicit timeout
+    provenance and preserved `question_contract`; escalation only after a row-scoped
+    retry limit, not inherited generic booking-collect count
+  forbidden_compression_raw: '`policy_timeout_degrade` handoff without `pending_question_interaction`;
+    dropping `question_contract`; generic pending escalation as semantic success'
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o62`; fresh guarded `dev L2` `r82` rolled to a
+      different family'
+    child_tp_refs:
+    - P1.6o62
+    surfaced_by_runs:
+    - r82
+- row_id: M12
+  active_slot: name
+  surface_family: alternate specific-time availability probe after grounded time (`А
+    есть ли свободные слоты на 15:00?`)
+  semantic_contract_raw: '`expected_reply_type=name`, `pending_question_target=time`,
+    `active_question_relation=ask_about_requested_slot`, `subject_kind=booking`, `capability=live_availability`,
+    `temporal_scope=specific_time`; do not overwrite committed `booking.datetime`
+    until the alternate slot is explicitly accepted'
+  semantic_axes:
+    expected_reply_type: name
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    subject_kind: booking
+    capability: live_availability
+    temporal_scope: specific_time
+  execution_owner: active-name time-availability follow-up owner
+  resume_owner: '`name`'
+  allowed_degrade_raw: truthful alternate-slot availability answer or bounded clarify
+    while preserving resume `name` and explicit pending-question trace
+  forbidden_compression_raw: generic `booking_prompt`; stale `service_choice`; dropping
+    `pending_question_interaction`; silent overwrite of `booking.datetime` to the
+    alternate time
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o63`; fresh guarded `dev L2` `r83` rolled to a
+      different family'
+    child_tp_refs:
+    - P1.6o63
+    surfaced_by_runs:
+    - r83
+- row_id: M13
+  active_slot: time
+  surface_family: grounded partial-date availability question under timeout-degraded
+    collect (`Есть ли свободные слоты на завтра?`)
+  semantic_contract_raw: '`expected_reply_type=time` at turn start, `pending_question_target=time`,
+    `active_question_relation=slot_constraint`, `subject_kind=booking`, `capability=live_availability`,
+    `temporal_scope=specific_day`; once `question_contract` grounds `datetime` and
+    timeout-degraded collect resumes the next missing slot, canonical post-grounding
+    contract becomes `expected_reply_type=name` while preserving `slot_constraint`
+    trace/meta and timeout provenance'
+  semantic_axes:
+    expected_reply_type: time
+    pending_question_target: time
+    active_question_relation: slot_constraint
+    subject_kind: booking
+    capability: live_availability
+    temporal_scope: specific_day
+  execution_owner: grounded partial-date slot-constraint -> degraded-collect transition
+    owner
+  resume_owner: explicit `name` transition after grounded date fill
+  allowed_degrade_raw: preserved `slot_constraint` trace/meta plus observable `policy_core_degraded_collect`
+    fallback
+  forbidden_compression_raw: stale scenario expectation that keeps `reply_type=time`
+    after `datetime` grounding; dropping `slot_constraint` trace/meta; generic `booking_prompt`
+    counted as success without grounded-date evidence
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o64`; fresh guarded `dev L2` `r90` rolled to a
+      different family'
+    child_tp_refs:
+    - P1.6o64
+    surfaced_by_runs:
+    - r90
+- row_id: M14
+  active_slot: time
+  surface_family: named specialist follow-up under `invalid_schema` degraded fallback
+    (`Можно к мастеру Асем?`)
+  semantic_contract_raw: '`expected_reply_type=time`, `pending_question_target=specialist`,
+    `active_question_relation=referent_followup`, `subject_kind=specialist`, `capability=bookability`;
+    when `llm_policy_core` fails with non-retryable `invalid_schema`, degrade must
+    preserve the specialist-followup row and explicit policy-failure provenance'
+  semantic_axes:
+    expected_reply_type: time
+    pending_question_target: specialist
+    active_question_relation: referent_followup
+    subject_kind: specialist
+    capability: bookability
+  execution_owner: invalid-schema specialist-followup recovery owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded specialist follow-up clarify/recovery with preserved
+    `time` resume and explicit `policy_error:invalid_schema` evidence
+  forbidden_compression_raw: '`booking_interrupt info_reply`; `truth_gate master`;
+    dropping `pending_question_target` / `active_question_relation`; generic `master`
+    FACT counted as graceful degrade'
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o65`; fresh guarded `dev L2` `r91` rolled to a
+      different family'
+    child_tp_refs:
+    - P1.6o65
+    surfaced_by_runs:
+    - r91
+- row_id: M15
+  active_slot: time
+  surface_family: declarative named specialist booking follow-up on policy-core success
+    path (`Я хочу записаться к Айгерим.`)
+  semantic_contract_raw: '`expected_reply_type=time`, `pending_question_target=specialist`,
+    `active_question_relation=referent_followup`, `subject_kind=specialist`, `capability=bookability`;
+    successful `llm_policy_core collect` must preserve referent-followup ownership
+    instead of emitting blank relation axes'
+  semantic_axes:
+    expected_reply_type: time
+    pending_question_target: specialist
+    active_question_relation: referent_followup
+    subject_kind: specialist
+    capability: bookability
+  execution_owner: policy-core named specialist follow-up owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded specialist-followup booking prompt with preserved `time`
+    resume and explicit `llm_policy_core` success provenance
+  forbidden_compression_raw: generic `booking_prompt` with blank `pending_question_target`;
+    blank `active_question_relation`; missing `pending_question_interaction=booking_specialist_followup`
+    despite explicit named specialist selection
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o66`; fresh guarded `dev L2` `r92` rolled to a
+      different family'
+    child_tp_refs:
+    - P1.6o66
+    surfaced_by_runs:
+    - r92
+- row_id: M16
+  active_slot: time
+  surface_family: ambiguous lower-bound time preference under active time collect
+    (`Мне нужно в 14:00 или позже.`)
+  semantic_contract_raw: generated scenario governance must keep `reply_type=time`
+    when the utterance contains an explicit clock token plus comparative constraint
+    and runtime keeps `slot_confirmation_required=true`; downstream info interrupts
+    must inherit the still-open `time` resume contract
+  semantic_axes: {}
+  execution_owner: ambiguous-time-fill scenario-governance owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded scenario normalization/expectation override that preserves
+    `time` until confirmation/clarification completes
+  forbidden_compression_raw: overclaim canonical exact-time fill to `name`; stale
+    downstream `name` expectation on info interrupts such as pricing/promo
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o67`; fresh guarded `dev L2` `r93` rolled to a
+      different family'
+    child_tp_refs:
+    - P1.6o67
+    surfaced_by_runs:
+    - r93
+- row_id: M17
+  active_slot: time
+  surface_family: service-grounded booking intake under `invalid_schema` degraded
+    fallback (`Я хочу записаться на маникюр.` -> `А есть ли свободные слоты на субботу?`)
+  semantic_contract_raw: explicit service grounding under booking request must survive
+    non-retryable `policy_error:invalid_schema`; degraded collect must persist `booking.service`,
+    resume `expected_reply_type=time`, and keep later slot/availability follow-ups
+    on the active `time` row instead of reopening `service_choice`
+  semantic_axes:
+    expected_reply_type: time
+  execution_owner: invalid-schema service-grounded booking recovery owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded service-hint-safe degraded collect with explicit invalid-schema
+    provenance
+  forbidden_compression_raw: generic `booking_prompt` asking service; stale `service_choice`;
+    dropping grounded service and accepting judge-pass visible reply as closure
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o68`; fresh guarded `dev L2` `r94` rolled to a
+      different family'
+    child_tp_refs:
+    - P1.6o68
+    surfaced_by_runs:
+    - r94
+- row_id: M18
+  active_slot: time
+  surface_family: declarative time-window constraint under active `time` collect (`Мне
+    нужно с 10 до 12.`)
+  semantic_contract_raw: active `datetime` question remains open; declarative clock-time
+    window is a `slot_constraint(time)` and must preserve pending-question evidence
+    plus `expected_reply_type=time` instead of silently degrading to a generic collect
+    prompt
+  semantic_axes:
+    expected_reply_type: time
+  execution_owner: collect-slot-order slot-constraint guidance owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded pending-question guidance with preserved `slot_constraint(time)`
+    meta/trace
+  forbidden_compression_raw: generic `booking_prompt` without `pending_question_interaction`;
+    missing `pending_question_target=time`; treating unresolved window as plain collect
+    prompt
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o69`; fresh guarded `dev L2` `r95` rolled to a
+      different family'
+    child_tp_refs:
+    - P1.6o69
+    surfaced_by_runs:
+    - r95
+- row_id: M19
+  active_slot: time
+  surface_family: invalid-schema named-specialist booking request under active `time`
+    collect (`Можно ли записаться к Айгерим?`)
+  semantic_contract_raw: named-specialist booking request without literal `master`
+    wording must still recover to `booking_specialist_followup` when `llm_policy_core`
+    fails with `invalid_schema`; recovery may use bounded specialist-hint extraction
+    or a deterministic branch-catalog specialist match while preserving resume `time`
+  semantic_axes:
+    pending_question_target: specialist
+    active_question_relation: referent_followup
+    expected_reply_type: time
+  execution_owner: invalid-schema booking-request specialist-followup recovery owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded `invalid_schema` specialist-followup recovery with
+    explicit hint or branch-catalog provenance
+  forbidden_compression_raw: generic `degraded_collect` / `booking_prompt`; missing
+    `pending_question_target=specialist`; missing `active_question_relation=referent_followup`
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o70` + `P1.6o91`; fresh guarded `dev L2` `r116`
+      reopened the same invalid-schema booking-request specialist-followup family
+      on `Можно записаться к Айгерим?`, `P1.6o91` re-closed it with deterministic
+      branch-catalog specialist recovery, and fresh guarded `dev L2` `r117` rolled
+      past reopened `M19` to a different family'
+    child_tp_refs:
+    - P1.6o70
+    - P1.6o91
+    surfaced_by_runs:
+    - r96
+    - r116
+- row_id: M20
+  active_slot: service_choice|null
+  surface_family: stale service-choice expectation after `check_booking` / media interruption
+    (`Когда у меня назначена встреча?`)
+  semantic_contract_raw: generated scenario governance must not carry a stale service-choice
+    pending-question contract into a booking-management follow-up when runtime validly
+    starts `booking_manage/calendar.get_booking` with no active service-choice owner
+  semantic_axes: {}
+  execution_owner: scenario-governance booking-management state owner
+  resume_owner: '`null`'
+  allowed_degrade_raw: normalize post-interrupt scenario state so booking-management
+    turns do not inherit stale service-choice expectations
+  forbidden_compression_raw: forcing runtime to reopen `service_choice`; accepting
+    stale `question_contract service_choice` as closure
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o71`; fresh guarded `dev L2` `r101` rolled to
+      a different family'
+    child_tp_refs:
+    - P1.6o71
+    surfaced_by_runs:
+    - r101
+- row_id: M21
+  active_slot: name
+  surface_family: deictic requested-slot availability follow-up after grounded specific
+    time (`А есть ли у вас места в это время?`)
+  semantic_contract_raw: '`expected_reply_type=name`, `pending_question_target=time`,
+    `active_question_relation=ask_about_requested_slot`, `subject_kind=booking`, `capability=live_availability`,
+    `temporal_scope=specific_time`, `resolution_mode=referent_followup`; grounded
+    `datetime` must remain the referent of `в это время`'
+  semantic_axes:
+    expected_reply_type: name
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    subject_kind: booking
+    capability: live_availability
+    temporal_scope: specific_time
+    resolution_mode: referent_followup
+  execution_owner: active-name deictic time-availability follow-up owner
+  resume_owner: '`name`'
+  allowed_degrade_raw: truthful availability answer or bounded clarify while preserving
+    grounded time referent and resume `name`
+  forbidden_compression_raw: generic `name` collect; stale `service_choice`; blank
+    `pending_question_target` / `active_question_relation`; treating deictic slot
+    question as ordinary collect continuation
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o72` + `P1.6o116`; fresh guarded `dev L2` `r128`
+      reopened the same active-name deictic specific-time requested-slot follow-up
+      family on `А если это время занято?`, `P1.6o116` re-closed it with bounded
+      scenario-governance normalization for deictic occupancy wording, and the
+      next admissible proof lane is `P1.6o117`'
+    child_tp_refs:
+    - P1.6o72
+    - P1.6o116
+    surfaced_by_runs:
+    - r102
+    - r128
+- row_id: M22
+  active_slot: time
+  surface_family: question-like daypart phrasing with explicit exact time fill under
+    active `time` collect (`А можно на утро, скажем, на 10 утра?`)
+  semantic_contract_raw: explicit exact clock token must ground `datetime`; canonical
+    resume advances to `name`; downstream info/price interrupts must inherit `expected_reply_type=name`
+    and the turn may not remain on `ask_about_requested_slot(time)` once the exact
+    time is sufficient to consume the slot
+  semantic_axes:
+    expected_reply_type: name
+  execution_owner: question-like daypart exact-time fill owner
+  resume_owner: '`name`'
+  allowed_degrade_raw: bounded grounded-time booking progress with preserved explicit
+    `datetime` evidence and `name` resume, or explicit clarify if normalization cannot
+    safely ground the exact time
+  forbidden_compression_raw: generic time guidance; leaving `pending_question_target=time`
+    / `active_question_relation=ask_about_requested_slot` as the final contract despite
+    explicit `10 утра`; blank `slots.datetime`; downstream stale `expected_reply_type=time`
+    on pricing/info turns
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o73`; fresh guarded `dev L2` `r103` rolled to
+      a different family'
+    child_tp_refs:
+    - P1.6o73
+    surfaced_by_runs:
+    - r103
+- row_id: M23
+  active_slot: name
+  surface_family: declarative named-specialist follow-up after grounded time (`Я хотел
+    бы записаться к Айгерим.`)
+  semantic_contract_raw: '`expected_reply_type=name`, `pending_question_target=specialist`,
+    `active_question_relation=referent_followup`, `subject_kind=specialist`, `capability=bookability`;
+    selecting a specialist while customer-name slot is still open must preserve specialist-followup
+    ownership and may not commit booking yet'
+  semantic_axes:
+    expected_reply_type: name
+    pending_question_target: specialist
+    active_question_relation: referent_followup
+    subject_kind: specialist
+    capability: bookability
+  execution_owner: active-name named-specialist follow-up owner
+  resume_owner: '`name`'
+  allowed_degrade_raw: bounded specialist-followup prompt that preserves specialist
+    preference and resumes customer-name collect
+  forbidden_compression_raw: stale `service_choice`; blank `pending_question_target`
+    / `active_question_relation`; direct `calendar.book_slot` that treats specialist
+    token as both `specialist_name` and `customer_name`
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o74`; fresh guarded `dev L2` `r104` rolled to
+      a different family'
+    child_tp_refs:
+    - P1.6o74
+    surfaced_by_runs:
+    - r104
+- row_id: M24
+  active_slot: time
+  surface_family: standalone consult/service-topic shift after active booking time
+    collect (`Я интересуюсь дизайном ногтей.` -> `Какие у вас есть варианты?`)
+  semantic_contract_raw: once consult/service-topic shift becomes the semantic owner,
+    stale booking `expected_reply_type=time` must clear or be replaced by consult/service-choice
+    ownership before the next follow-up turn; generic `варианты` follow-up may not
+    inherit booking slot semantics
+  semantic_axes:
+    expected_reply_type: time
+  execution_owner: active-time consult topic-shift service-choice owner
+  resume_owner: '`service_choice`'
+  allowed_degrade_raw: bounded consult/service-choice reply or clarify that preserves
+    the new consult lane and does not silently reuse booking slot state
+  forbidden_compression_raw: stale `expected_reply_type=time`; `question_contract
+    expected_reply_type=time` after standalone consult shift; `calendar.list_slots`
+    answer to consult/service-options follow-up
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o75`; fresh guarded `dev L2` `r105` rolled to
+      a different family'
+    child_tp_refs:
+    - P1.6o75
+    surfaced_by_runs:
+    - r105
+- row_id: M25
+  active_slot: time
+  surface_family: first-time requested-slot question under active time collect with
+    timeout degrade (`В какое время у вас есть слоты?`)
+  semantic_contract_raw: when the user first asks about the missing time slot under
+    active `time` collect, timeout fallback must still preserve `pending_question_act=ask_about_requested_slot`,
+    `pending_question_target=time`, `pending_question_interaction=ask_about_requested_slot`,
+    and `expected_reply_type=time` instead of collapsing into generic collect
+  semantic_axes:
+    expected_reply_type: time
+    pending_question_target: time
+  execution_owner: initial-timeout requested-slot owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded timeout-degraded requested-slot reply/clarify with
+    preserved requested-slot interaction evidence
+  forbidden_compression_raw: generic `booking_prompt`; `policy_core_degraded_collect`
+    without `pending_question_interaction`; dropping `ask_about_requested_slot(time)`
+    into plain `question_contract time`
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o76`; fresh guarded `dev L2` `r106` rolled to
+      a different family'
+    child_tp_refs:
+    - P1.6o76
+    surfaced_by_runs:
+    - r106
+- row_id: M26
+  active_slot: time
+  surface_family: matched daypart-preference answer after booking + pricing interrupt
+    (`Я предпочитаю утренние часы.`)
+  semantic_contract_raw: once active `time` collect consumes a daypart preference
+    as booking slot input, runtime may preserve booking collect / `slot_constraint(time)`
+    evidence but may not emit `hours` / `duration` info-class signals or `basic_info_message=true`
+    for the same turn
+  semantic_axes: {}
+  execution_owner: active-time daypart-preference info-signal false-positive
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded booking collect / clarify without phantom info-section
+    expectations
+  forbidden_compression_raw: '`info_tags=hours`; `signal_snapshot.info_class.intents=[''duration'',''hours'']`;
+    `basic_info_message=true`; `info_section_miss` on a booking collect turn'
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o77`; fresh guarded `dev L2` `r112` rolled to
+      a different family'
+    child_tp_refs:
+    - P1.6o77
+    surfaced_by_runs:
+    - r112
+- row_id: M27
+  active_slot: time
+  surface_family: pricing interrupt while booking time confirmation is still open
+    (`Мне нужно что-то после 15:00.` -> `А сколько это будет стоить?`)
+  semantic_contract_raw: when active `time` collect remains open under `slot_confirmation_required=true`
+    / `booking_confirm_reject`, pricing interrupt must preserve grounded booking service
+    and resume `expected_reply_type=time` instead of reopening `service_choice`
+  semantic_axes:
+    expected_reply_type: time
+  execution_owner: booking-confirm pricing-interrupt service-carryover owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: truthful pricing answer or bounded pricing clarify while preserving
+    grounded service and `time` resume
+  forbidden_compression_raw: '`service_clarify`; `expected_reply_type=service_choice`;
+    blank `booking_slots`; dropped `question_contract expected_reply_type=time` after
+    pricing interrupt'
+  runtime_match:
+    tool_action: info
+    info_refs:
+    - pricing
+    expected_reply_reason: booking_confirm_reject
+    interaction_target: time
+    interaction_relation: ask_about_requested_slot
+    require_booking_active: true
+    require_missing_service_query: true
+    require_grounded_referents:
+    - service
+  runtime_effects:
+    bypass_service_clarify: true
+    carryover_grounded_referents:
+    - service
+    preserve_expected_reply_type: time
+    reason_code: owner_matrix_m27
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o78` + `P1.6o83` + `P1.6o84`; fresh guarded `dev
+      L2` `r113` rolled to a different family'
+    child_tp_refs:
+    - P1.6o78
+    - P1.6o83
+    - P1.6o84
+    surfaced_by_runs:
+    - r112
+- row_id: M28
+  active_slot: time
+  surface_family: question-like explicit exact-time candidate still tagged as slot_compare
+    after booking-side info interrupts (`Можно записаться на 15:00?`)
+  semantic_contract_raw: under active `time` collect with prior grounded date/time
+    context, an explicit exact clock candidate inside question-like `slot_compare`
+    phrasing must canonicalize to bounded `datetime` fill and advance resume to `name`;
+    generated scenario/oracle may not keep stale `slot_compare/time` pending-question
+    expectations once the exact time is sufficient to consume the slot
+  semantic_axes:
+    expected_reply_type: name
+  execution_owner: slot-compare explicit-time fill scenario-governance owner
+  resume_owner: '`name`'
+  allowed_degrade_raw: normalize generated expectations to canonical `time` -> `name`
+    slot fill while preserving explicit `datetime` evidence; if the utterance is not
+    a grounded exact-time fill, keep the active `time` resume truthfully
+  forbidden_compression_raw: stale `pending_question_act=slot_compare`; `pending_question_target=time`;
+    `expected_reply_type=time`; required `pending_question_interaction slot_compare/time`
+    trace after runtime already grounded explicit exact time and advanced to `name`
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o85`; deterministic scenario-governance normalization
+      now canonically rewrites explicit exact-time `slot_compare` turns to `time ->
+      name`; next proof admission is `P1.6o86`'
+    child_tp_refs:
+    - P1.6o85
+    surfaced_by_runs:
+    - r113
+- row_id: M29
+  active_slot: time
+  surface_family: booking-tag free-slot question still inherits stale service_choice
+    after booking-management contamination (`На какое время у вас есть свободные слоты?`)
+  semantic_contract_raw: under active `time` collect, a requested-slot question about
+    available times without a grounded date/day/range must preserve the canonical
+    `ask_about_requested_slot(time)` contract; generated scenario/oracle may not leave
+    the turn on generic `booking/service_choice` just because an earlier turn carried
+    a booking-management tag or stale service-choice expectation
+  semantic_axes:
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    expected_reply_type: time
+  execution_owner: booking-tag requested-slot scenario-governance owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: normalize booking-tag free-slot questions to canonical `ask_about_requested_slot(time)`
+    expectations while keeping genuine `check_booking` turns inside booking-management
+    ownership
+  forbidden_compression_raw: generic `booking/service_choice`; stale `question_contract
+    expected_reply_type=service_choice`; accepting booking-management coverage contamination
+    as valid requested-slot governance
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o87`; deterministic scenario-governance normalization
+      now retags malformed booking-management contamination and restores canonical
+      `ask_about_requested_slot(time)` expectations; next proof admission is `P1.6o88`'
+    child_tp_refs:
+    - P1.6o87
+    surfaced_by_runs:
+    - r114
+- row_id: M30
+  active_slot: time
+  surface_family: generic free-slot question still overclaims slot_constraint under
+    active time collect (`Какое время доступно?`)
+  semantic_contract_raw: under active `time` collect, a generic requested-slot question
+    about available times without a new temporal constraint must preserve the canonical
+    `ask_about_requested_slot(time)` contract; generated scenario/oracle may not overclaim
+    `slot_constraint(time)` just because the dialog is already collecting time
+  semantic_axes:
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    expected_reply_type: time
+  execution_owner: slot-constraint generic-slot-question scenario-governance owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: normalize generic free-slot questions back to canonical `ask_about_requested_slot(time)`
+    expectations while keeping genuine constraint turns such as `после обеда` / `до
+    шести` inside `slot_constraint`
+  forbidden_compression_raw: stale `slot_constraint(time)` meta/trace on a generic
+    free-slot question; `pending_question_act=slot_constraint`; `pending_question_interaction
+    slot_constraint/time` when runtime canonically uses `ask_about_requested_slot(time)`
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o89`; fresh guarded `dev L2` `r116` rolled past
+      the generic free-slot `slot_constraint` overclaim and instead reopened existing
+      invalid-schema specialist-followup row `M19`'
+    child_tp_refs:
+    - P1.6o89
+    surfaced_by_runs:
+    - r115
+- row_id: M31
+  active_slot: time
+  surface_family: generic specialist-choice question under active `time` collect on
+    policy-core success path (`Можно выбрать мастера?`)
+  semantic_contract_raw: successful `llm_policy_core collect` for a generic specialist-choice
+    question under active `time` collect must preserve `pending_question_target=specialist`,
+    `active_question_relation=referent_followup`, `subject_kind=specialist`, `capability=bookability`,
+    `resolution_mode=referent_followup`, and explicit `next_question=name`; runtime
+    may not compress that row into generic `booking_info_contract/master`
+  semantic_axes:
+    expected_reply_type: time
+    pending_question_target: specialist
+    active_question_relation: referent_followup
+    subject_kind: specialist
+    capability: bookability
+    resolution_mode: referent_followup
+    next_question: name
+    open_questions:
+    - name
+  execution_owner: policy-core generic specialist-choice follow-up owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded specialist-choice reply that explicitly confirms specialist
+    choice is possible or asks for the preferred master while preserving `time` resume
+    and explicit `llm_policy_core` success provenance
+  forbidden_compression_raw: generic `booking_info_contract/master`; `master_service_not_found`
+    admin-check fallback; blank `pending_question_owner=booking_specialist_followup`;
+    dropping `pending_question_target` / `active_question_relation` when successful
+    `llm_policy_core` already emitted specialist-choice collect semantics
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o93`; fresh guarded `dev L2` `r118` rolled past
+      the generic specialist-choice question `Можно выбрать мастера?` and surfaced
+      adjacent active-name requested-slot follow-up row `M32`'
+    child_tp_refs:
+    - P1.6o93
+    surfaced_by_runs:
+    - r117
+- row_id: M32
+  active_slot: name
+  surface_family: active-name deictic day requested-slot follow-up loses `booking_time_availability_followup`
+    owner evidence (`У вас есть свободные слоты на этот день?`)
+  semantic_contract_raw: under active `name` resume with already grounded specific
+    date/time booking context, a deictic day/date requested-slot follow-up such as
+    `на этот день` must preserve `pending_question_act=ask_about_requested_slot`,
+    `pending_question_target=time`, `active_question_relation=ask_about_requested_slot`,
+    `expected_reply_type=name`, and `booking_time_availability_followup` ownership;
+    runtime and scenario-governance may not collapse the row into generic `booking_prompt`
+    / stale `service_choice`
+  semantic_axes:
+    expected_reply_type: name
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    temporal_scope: specific_time
+    capability: bookability
+    resolution_mode: referent_followup
+    next_question: name
+  execution_owner: active-name deictic-day requested-slot follow-up owner
+  resume_owner: '`name`'
+  allowed_degrade_raw: bounded requested-slot clarification that keeps the active
+    `name` resume and explicit follow-up owner evidence while telling the user the
+    current grounded time will not be changed automatically
+  forbidden_compression_raw: generic `booking_prompt` with `expected_reply_reason=booking_prompt`;
+    `interaction_owner=question_contract:policy_core_degraded_collect`; stale `booking/service_choice`
+    scenario expectations; dropping `pending_question_act` / `pending_question_owner`
+    after policy-core already emitted grounded `ask_about_requested_slot(time)` semantics
+  status:
+    state: closed_bounded
+    raw: '`closed_bounded` via `P1.6o95`; bounded runtime owner preservation now
+      admits the `bookability + specific_time` variant and scenario-governance normalizes
+      deictic day/date phrasing such as `на этот день`; fresh guarded `dev L2`
+      `r119` rolled past this row and surfaced `M33`'
+    child_tp_refs:
+    - P1.6o95
+    surfaced_by_runs:
+    - r118
+- row_id: M33
+  active_slot: name
+  surface_family: active-name service-info interrupt drops back to generic `booking_interrupt`
+    `time` resume after requested-slot follow-up (`Какова цена на маникюр?`)
+  semantic_contract_raw: under active `name` resume with persisted requested-slot
+    follow-up ownership (`interaction_target=time`, `interaction_relation=ask_about_requested_slot`),
+    a factual `catalog.service_query` side-question must preserve the active `name`
+    resume and interaction owner instead of reopening generic `time` collect just
+    because slot-order completeness still looks partial; runtime may answer the service
+    fact but must not compress the row back to `booking_interrupt/time`
+  semantic_axes:
+    expected_reply_type: name
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    subject_kind: service
+    capability: pricing
+    resolution_mode: direct
+    next_question: name
+    open_questions:
+    - name
+  execution_owner: active-name service-info interrupt owner
+  resume_owner: '`name`'
+  allowed_degrade_raw: truthful service-info reply without follow-up prompt leakage
+    while preserving active `name` resume, persisted requested-slot interaction owner,
+    and explicit owner-resolution evidence
+  forbidden_compression_raw: generic `booking_interrupt`; `expected_reply_type=time`;
+    `expected_reply_reason=booking_interrupt`; resetting `interaction_owner` to
+    `question_contract:policy_core_degraded_collect` after a factual `catalog.service_query`
+    side-question under active-name requested-slot follow-up
+  runtime_match:
+    tool_action: catalog.service_query
+    expected_reply_reason: booking_time_availability_followup
+    interaction_target: time
+    interaction_relation: ask_about_requested_slot
+    require_booking_active: true
+    require_grounded_referents:
+    - service
+  runtime_effects:
+    preserve_expected_reply_type: name
+    reason_code: owner_matrix_m33
+  status:
+    state: closed_bounded
+    raw: '`surfaced` by `P1.6o96` / `r119` on `Какова цена на маникюр?`; `closed_bounded`
+      via `P1.6o97` by reusing the executable owner-matrix path so factual `catalog.service_query`
+      interrupts preserve the active `name` resume; next proof admission is `P1.6o98`'
+    child_tp_refs:
+    - P1.6o97
+    surfaced_by_runs:
+    - r119
+- row_id: M34
+  active_slot: name
+  surface_family: active-name named-specialist choice follow-up under timeout degrade
+    loses specialist-followup ownership (`Могу выбрать Айгерим?`) after consult side-question
+  semantic_contract_raw: under active `name` collect with already grounded booking
+    time, a question-like named specialist choice such as `выбрать Айгерим` belongs
+    to the same `pending_question_target=specialist` / `active_question_relation=referent_followup`
+    family as active-name named-specialist follow-up; even when `llm_policy_core`
+    times out, degrade must preserve specialist-followup ownership, acknowledge the
+    chosen specialist, and resume `name` collect rather than collapsing into generic
+    `policy_core_degraded_collect` or stale `service_choice`
+  semantic_axes:
+    expected_reply_type: name
+    pending_question_target: specialist
+    active_question_relation: referent_followup
+    subject_kind: specialist
+    capability: bookability
+    resolution_mode: referent_followup
+    next_question: name
+  execution_owner: active-name timeout specialist-choice follow-up owner
+  resume_owner: '`name`'
+  allowed_degrade_raw: bounded specialist-followup prompt that explicitly carries
+    the chosen specialist into `policy_core_timeout_specialist_followup` and resumes
+    customer-name collect with observable trace/meta evidence
+  forbidden_compression_raw: generic `booking_prompt` with `expected_reply_reason=policy_core_degraded_collect`;
+    blank `pending_question_interaction=specialist_followup`; stale `booking/service_choice`
+    expectations; dropping `active_question_relation=referent_followup` for question-like
+    named specialist choice under active `name` collect
+  status:
+    state: closed_bounded
+    raw: '`surfaced` by `P1.6o98` / `r120` on `Могу выбрать Айгерим?`; `closed_bounded`
+      via `P1.6o99` by extending the timeout specialist-followup recovery to active
+      `name` collect and normalizing `выбрать <name>` in scenario-governance; next
+      proof admission is `P1.6o100`'
+    child_tp_refs:
+    - P1.6o99
+    surfaced_by_runs:
+    - r120
+- row_id: M35
+  active_slot: time
+  surface_family: generic free-slot question still overclaims `slot_compare` under
+    active time collect (`Какое время доступно?`)
+  semantic_contract_raw: under active `time` collect, a generic free-slot question
+    such as `Какое время доступно?` belongs to the canonical `ask_about_requested_slot(time)`
+    follow-up family; generated scenario/oracle may not preserve stale `slot_compare(time)`
+    pending-question evidence when runtime canonically keeps requested-slot guidance
+  semantic_axes:
+    expected_reply_type: time
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    subject_kind: booking
+    capability: live_availability
+    resolution_mode: referent_followup
+    next_question: datetime
+  execution_owner: slot-compare generic-slot-question scenario-governance owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: normalize generic free-slot questions back to canonical `ask_about_requested_slot(time)`
+    expectations and trace/meta evidence
+  forbidden_compression_raw: stale `slot_compare(time)` meta/trace on a generic
+    free-slot question; `pending_question_act=slot_compare`; `pending_question_interaction
+    slot_compare/time` when runtime canonically uses `ask_about_requested_slot(time)`
+    / `booking_slot_guidance`
+  status:
+    state: closed_bounded
+    raw: '`surfaced` by `P1.6o100` / `r121` on `Какое время доступно?`; `closed_bounded`
+      via `P1.6o101` by adding the bounded `slot_compare -> ask_about_requested_slot`
+      normalization for generic free-slot questions under active `time` collect;
+      `P1.6o102` proved `M35` is no longer first fail and admitted `M36`'
+    child_tp_refs:
+    - P1.6o101
+    surfaced_by_runs:
+    - r121
+- row_id: M36
+  active_slot: time
+  surface_family: grounded partial-date daypart availability mixed question still
+    overclaims `time` under active time collect (`Мне нужна информация о свободных
+    слотах на утро.` after `завтра`)
+  semantic_contract_raw: once a partial date is already grounded under active
+    `time` collect, a follow-up such as `Мне нужна информация о свободных слотах
+    на утро.` becomes a bounded daypart fill that completes `datetime=завтра утром`
+    and advances canonical resume to `name`; generated scenario/oracle may not
+    keep stale `mixed_fill_plus_question` / `expected_reply_type=time` expectations
+    on this family
+  semantic_axes:
+    expected_reply_type: name
+  execution_owner: grounded partial-date daypart fill scenario-governance owner
+  resume_owner: '`name`'
+  allowed_degrade_raw: normalize grounded partial-date daypart availability follow-ups
+    to canonical `time -> name` collect while preserving bounded daypart-fill evidence;
+    if no partial-date anchor is active, keep `mixed_fill_plus_question` truthfully
+  forbidden_compression_raw: stale `mixed_fill_plus_question`; `expected_reply_type=time`;
+    required pending-question follow-up after runtime already grounds `datetime=завтра утром`
+    and advances to `name`
+  status:
+    state: closed_bounded
+    raw: '`surfaced` by `P1.6o102` / `r122` on `Мне нужна информация о свободных
+      слотах на утро.` after `Я хочу записаться на завтра.`; `closed_bounded`
+      via `P1.6o103` by adding bounded grounded-partial-date daypart-fill normalization
+      in scenario-governance; next proof admission is `P1.6o104`'
+    child_tp_refs:
+    - P1.6o103
+    surfaced_by_runs:
+    - r122
+- row_id: M37
+  active_slot: time
+  surface_family: timeout-degraded active booking drops explicit name fill and
+    collapses to pack fact fallback (`Меня зовут Динара.` under active `service`
+    + partial `datetime`)
+  semantic_contract_raw: when timeout degrade hits an active incomplete booking
+    and the current turn explicitly fills a booking slot, runtime must merge that
+    fill into booking state and resume the next missing-slot prompt; it may not
+    compress the turn into generic `off_topic` / `pack_fact_fallback`
+  semantic_axes:
+    expected_reply_type: time
+    subject_kind: booking
+  execution_owner: timeout active-booking slot-fill follow-up owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: reuse bounded booking slot-fill helpers to merge the
+    current-turn name fill into booking state and resume canonical booking follow-up
+    with explicit timeout provenance in trace/meta
+  forbidden_compression_raw: >-
+    `policy_core_timeout_fact_fallback`; `pack_fact_fallback`; `intent=off_topic`;
+    FACT-like reply without evidence after explicit booking slot fill while booking
+    state remains active
+  status:
+    state: closed_bounded
+    raw: '`surfaced` by `P1.6o104` / `r123` on `Меня зовут Динара.` under active
+      booking timeout degrade; `closed_bounded` via `P1.6o105` by merging current-turn
+      slot fill into booking follow-up before pack fact fallback; fresh guarded `dev L2`
+      `p1.6o106-l2-dev-20260312-a1-r1` rolled past this row and surfaced `M38`'
+    child_tp_refs:
+    - P1.6o105
+    surfaced_by_runs:
+    - r123
+- row_id: M38
+  active_slot: time
+  surface_family: generic specialist-change question under active `time` collect
+    hits timeout clarify-limit escalation (`Могу я поменять специалиста?`)
+  semantic_contract_raw: under active `time` collect, a generic specialist-change
+    side question belongs to the specialist-target interrupt family; even when
+    `llm_policy_core` times out, degrade must preserve `pending_question_target=specialist`
+    and resume `time` collect instead of escalating to `pending` / handoff
+  semantic_axes:
+    expected_reply_type: time
+    pending_question_target: specialist
+    active_question_relation: specialist_availability_interrupt
+    subject_kind: specialist
+    capability: bookability
+  execution_owner: active-time timeout generic specialist-choice follow-up owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded timeout specialist-target interrupt reply that acknowledges
+    specialist changes are allowed, preserves `booking_interrupt_info` / specialist-target
+    evidence, and resumes `time` collect with explicit timeout provenance
+  forbidden_compression_raw: '`policy_core_timeout_degrade_booking_limit`; handoff / `pending`;
+    blank `pending_question_target=specialist`; dropping specialist-target interrupt
+    trace/meta for generic specialist-change side questions under active `time` collect'
+  status:
+    state: closed_bounded
+    raw: '`surfaced` by `P1.6o106` / `r124` on `Могу я поменять специалиста?`; `closed_bounded`
+      via `P1.6o107` by routing timeout-degraded generic specialist-change turns through
+      the specialist-target master-info interrupt and keeping the explicit `time` follow-up
+      prompt; fresh guarded `dev L2` `p1.6o108-l2-dev-20260312-a1-r1` rolled past this
+      row and surfaced `M39`'
+    child_tp_refs:
+    - P1.6o107
+    surfaced_by_runs:
+    - r124
+- row_id: M39
+  active_slot: time
+  surface_family: active-time services-overview side question reopens stale `service_choice`
+    instead of answering factual service info (`Какие услуги по стрижке волос вы предлагаете?`)
+  semantic_contract_raw: under active `time` collect, an explicit service-info / services-overview
+    side question with a grounded service referent belongs to the factual `catalog.service_query`
+    interrupt family; runtime must answer the side question and preserve `expected_reply_type=time`
+    instead of reopening `service_choice`
+  semantic_axes:
+    expected_reply_type: time
+    subject_kind: service
+    capability: other
+    resolution_mode: clarify_missing_subject
+  execution_owner: active-time services-overview interrupt owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded collect-to-`catalog.service_query` recovery that preserves
+    booking-interrupt evidence, keeps `expected_reply_type=time`, and answers the grounded
+    services-overview question before resuming booking
+  forbidden_compression_raw: stale `booking_prompt` / `service_choice`; `tool_action=collect`
+    without service-info reply; dropping `booking_interrupt_info`; overwriting the active
+    `time` resume contract for grounded service-info side questions under booking
+  status:
+    state: closed_bounded
+    raw: '`surfaced` by `P1.6o108` / `r125` on `Какие услуги по стрижке волос вы предлагаете?`;
+      `closed_bounded` via `P1.6o109` by promoting active-time services-overview side questions
+      into the existing `catalog.service_query` interrupt path before stale collect prompt emission;
+      fresh guarded `dev L2` `p1.6o110-l2-dev-20260312-a1-r1` rolled past this row
+      and surfaced `M40`'
+    child_tp_refs:
+    - P1.6o109
+    surfaced_by_runs:
+    - r125
+- row_id: M40
+  active_slot: time
+  surface_family: active-time partial-date fill keeps stale `time` expectation after
+    timeout-degraded collect (`Могу прийти в пятницу.`)
+  semantic_contract_raw: under active `time` collect, a pure partial-date answer
+    fills `datetime`; if runtime resumes the next missing slot after timeout-degraded
+    collect, canonical post-grounding contract becomes `expected_reply_type=name`
+    and scenario-governance may not preserve stale `time` expectations or pending-question
+    traces
+  semantic_axes:
+    expected_reply_type: name
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    subject_kind: booking
+    temporal_scope: specific_day
+  execution_owner: active-time partial-date fill degraded-collect scenario-governance
+    owner
+  resume_owner: '`name`'
+  allowed_degrade_raw: normalize pure partial-date fills such as `Могу прийти в пятницу.`
+    to canonical `time -> name` collect under active `time` resume, clearing stale
+    pending-question meta after grounded fill; if no active `time` collect exists,
+    keep the turn truthfully as-is
+  forbidden_compression_raw: stale `reply_type=time` / `expected_reply_type=time`
+    after grounded partial-date fill; lingering `pending_question_act=ask_about_requested_slot`;
+    accepting stale time-collect scenario as closure despite runtime `policy_core_degraded_collect`
+    moving to `name`
+  status:
+    state: closed_bounded
+    raw: '`surfaced` by `P1.6o110` / `r126` on `Могу прийти в пятницу.` under active
+      `time` collect after `Когда у вас есть свободные слоты?`; `closed_bounded`
+      via `P1.6o111` by normalizing active-time partial-date fills to canonical `name`
+      collect in sanitize/post-coverage repair; next admissible proof lane is `P1.6o112`'
+    child_tp_refs:
+    - P1.6o111
+    surfaced_by_runs:
+    - r126
+- row_id: M41
+  active_slot: time
+  surface_family: generic time-preference statement under active `time` collect and
+    `policy_core timeout` collapses into `truth_gate service_duration` (`У меня есть
+    предпочтения по времени.`)
+  semantic_contract_raw: under active `time` collect, a generic time-preference
+    statement such as `У меня есть предпочтения по времени.` remains inside the
+    bounded `ask_about_requested_slot(time)` family; even when `llm_policy_core`
+    times out, degrade must preserve requested-slot guidance ownership instead of
+    letting false-positive `duration` info signaling trigger `booking_interrupt info_reply`
+    + `truth_gate service_duration`
+  semantic_axes:
+    expected_reply_type: time
+    pending_question_target: time
+    active_question_relation: ask_about_requested_slot
+    subject_kind: booking
+    resolution_mode: clarify_missing_time
+    next_question: datetime
+  execution_owner: active-time time-preference timeout guidance owner
+  resume_owner: '`time`'
+  allowed_degrade_raw: bounded timeout requested-slot guidance that admits generic
+    time-preference statements into `booking_slot_guidance`, suppresses the false-positive
+    `duration` info signal for this family before `pending_info_signal` short-circuits
+    the booking owner, and emits explicit `policy_core_guard` trace/meta evidence
+  forbidden_compression_raw: '`booking_interrupt info_reply`; `truth_gate service_duration`;
+    `expected_reply_blocked_by_info=true`; false-positive `duration` info carryover;
+    dropping `ask_about_requested_slot(time)` ownership on generic time-preference
+    statements under active `time` collect after `policy_core timeout`'
+  status:
+    state: closed_bounded
+    raw: '`surfaced` by `P1.6o112` / `r127` on `У меня есть предпочтения по времени.`;
+      `closed_bounded` via `P1.6o114` by reusing the bounded timeout requested-slot
+      guidance owner and suppressing the family-specific false-positive `duration`
+      info signal before degraded fallback short-circuits to `truth_gate`; next
+      admissible proof lane is `P1.6o115`'
+    child_tp_refs:
+    - P1.6o114
+    surfaced_by_runs:
+    - r127

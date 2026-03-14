@@ -283,6 +283,30 @@ def test_resolve_master_intent_choose_specialist_with_service_query_is_explicit(
     assert resolution.service_query == "маникюр"
 
 
+def test_resolve_master_intent_generic_specialist_question_with_service_query_is_explicit() -> None:
+    resolution = runtime.resolve_master_intent(
+        message_text="Есть ли доступные специалисты?",
+        client_slug="demo_salon",
+        service_query="маникюр",
+    )
+
+    assert resolution.explicit is True
+    assert resolution.reason == "person_question_signal"
+    assert resolution.service_query == "маникюр"
+
+
+def test_resolve_master_intent_question_with_filler_before_master_is_explicit() -> None:
+    resolution = runtime.resolve_master_intent(
+        message_text="Какой у вас мастер?",
+        client_slug="demo_salon",
+        service_query="маникюр",
+    )
+
+    assert resolution.explicit is True
+    assert resolution.reason == "question_person_signal"
+    assert resolution.service_query == "маникюр"
+
+
 def test_resolve_master_intent_choose_specialist_without_service_query_is_explicit() -> None:
     resolution = runtime.resolve_master_intent(
         message_text="Могу ли я выбрать специалиста?",
@@ -304,6 +328,19 @@ def test_resolve_master_intent_named_master_question_with_service_query_is_expli
 
     assert resolution.explicit is True
     assert resolution.reason == "person_named_question_signal"
+    assert resolution.service_query == "маникюр"
+    assert "Айгерим" in resolution.matched_signals
+
+
+def test_resolve_master_intent_bare_named_specialist_question_with_service_query_is_explicit() -> None:
+    resolution = runtime.resolve_master_intent(
+        message_text="Могу ли я записаться к Айгерим?",
+        client_slug="demo_salon",
+        service_query="маникюр",
+    )
+
+    assert resolution.explicit is True
+    assert resolution.reason == "named_question_signal"
     assert resolution.service_query == "маникюр"
     assert "Айгерим" in resolution.matched_signals
 

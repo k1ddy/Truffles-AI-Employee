@@ -1637,6 +1637,8 @@ def _handle_booking_interrupt(
     expected_reply_matched: bool | None,
     expected_reply_shortcircuit: bool,
     expected_reply_blocked_by_info: bool,
+    pending_question_act: str | None,
+    pending_question_target: str | None,
     batch_non_booking_message: str | None,
     booking_messages: list[str],
     booking_context: dict | None,
@@ -1762,6 +1764,11 @@ def _handle_booking_interrupt(
         expected_reply_matched=expected_reply_matched,
         message_text=message_text,
     )
+    pending_question_target_value = (
+        pending_question_target.strip().casefold()
+        if isinstance(pending_question_target, str) and pending_question_target.strip()
+        else None
+    )
 
     def _merge_info_sections(info_meta: dict[str, Any], intents: list[str]) -> list[str]:
         sections: list[str] = []
@@ -1839,6 +1846,15 @@ def _handle_booking_interrupt(
             intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
             force_master_intent=False,
         )
+        if (
+            pending_question_target_value is None
+            and master_resolution.explicit
+            and expected_reply_type == legacy.EXPECTED_REPLY_TIME
+            and booking_state.get("active")
+        ):
+            # For active-time info interrupts the pending target must stay aligned
+            # with the blocked resume slot, not with the transient info subject.
+            pending_question_target_value = "time"
         if master_resolution.explicit and "master" not in booking_info_intents:
             booking_info_intents = [*booking_info_intents, "master"]
         if not master_resolution.explicit and "master" in booking_info_intents:
@@ -1941,6 +1957,17 @@ def _handle_booking_interrupt(
                         meta=guest_meta if isinstance(guest_meta, dict) else None,
                     )
                     info_source = "guest_policy"
+            if info_decision and pending_question_target_value:
+                info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
+                info_decision = PackDecision(
+                    action=info_decision.action,
+                    response=info_decision.response,
+                    intent=info_decision.intent,
+                    meta={
+                        **info_meta,
+                        "pending_question_target": pending_question_target_value,
+                    },
+                )
             if booking_info_intents:
                 if "hours" in booking_info_intents and {"pricing", "duration"} & set(booking_info_intents):
                     multi_result = compose_multi_truth_reply(
@@ -2127,6 +2154,126 @@ def _handle_booking_interrupt(
                     )
                     info_source = "truth_fallback"
                     break
+            if (
+                not info_decision
+                and pending_question_act == "ask_about_requested_slot"
+                and pending_question_target_value in {None, "time"}
+                and expected_reply_type == legacy.EXPECTED_REPLY_TIME
+                and expected_reply_matched is not True
+                and expected_reply_blocked_by_info
+                and booking_time_service_candidate
+            ):
+                context = (
+                    booking_context
+                    if isinstance(booking_context, dict)
+                    else legacy._get_conversation_context(conversation)
+                )
+                booking_state = (
+                    booking if isinstance(booking, dict) else legacy._get_booking_context(context)
+                )
+                booking_active = bool(booking_state.get("active"))
+                if not booking_active:
+                    booking_state = dict(booking_state)
+                    booking_state["active"] = True
+                    booking_state["started_at"] = now.isoformat()
+                booking_state = legacy._update_booking_from_messages(
+                    booking_state,
+                    booking_messages,
+                    client_slug=client_slug,
+                )
+                if booking_active and not booking_state.get("service"):
+                    service_hint = legacy._get_recent_service_hint(context, now)
+                    if service_hint:
+                        booking_state["service"] = service_hint
+                        context = legacy._clear_service_hint(context)
+                context_manager = legacy._get_context_manager(context)
+                refusal_flags = context_manager.get("refusal_flags")
+                booking_state, prompt = legacy._next_booking_prompt(
+                    booking_state, refusal_flags=refusal_flags
+                )
+                booking_state, prompt = _apply_collect_all_prompt(
+                    booking_state,
+                    prompt,
+                    message_text,
+                )
+                context = legacy._set_booking_context(context, booking_state)
+                legacy._set_conversation_context(conversation, context)
+                booking_expected = legacy._expected_reply_for_booking_question(
+                    booking_state.get("last_question")
+                )
+                if booking_expected == legacy.EXPECTED_REPLY_TIME:
+                    context = legacy._set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=booking_expected,
+                        reason="booking_slot_guidance",
+                        now=now,
+                    )
+                    legacy._record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "pending_question_interaction",
+                            "decision": "booking_slot_guidance",
+                            "state": conversation.state,
+                            "source": "booking_interrupt",
+                            "pending_question_act": pending_question_act,
+                            "pending_question_target": pending_question_target_value or "time",
+                            "requested_slot": "datetime",
+                            "expected_reply_type": booking_expected,
+                        },
+                    )
+                    legacy._record_message_decision_meta(
+                        saved_message,
+                        action="reply",
+                        intent="booking",
+                        source="booking_slot_guidance",
+                        fast_intent=False,
+                    )
+                    if saved_message:
+                        legacy._update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "pending_question_act": pending_question_act,
+                                "pending_question_target": pending_question_target_value or "time",
+                                "pending_question_interaction": pending_question_act,
+                                "pending_question_owner": "booking_slot_guidance",
+                            },
+                        )
+                    bot_response = legacy.MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE
+                    style_reference_signal = bool(
+                        message_text
+                        and legacy._is_style_reference_request(message_text, has_media=has_media)
+                    )
+                    if style_reference_signal and not has_media:
+                        bot_response = legacy._combine_sidecar(
+                            legacy.MSG_STYLE_REFERENCE_NEED_MEDIA,
+                            bot_response,
+                        )
+                    bot_response = bot_response.strip()
+                    if consult_return_pending:
+                        bot_response = legacy._apply_consult_return(
+                            conversation=conversation,
+                            saved_message=saved_message,
+                            bot_response=bot_response,
+                            consult_return_prompt=consult_return_prompt,
+                            consult_context=consult_context,
+                            reason=consult_return_reason or "booking_slot_guidance",
+                        )
+                    legacy._reset_low_confidence_retry(conversation)
+                    bot_response, sent = send_and_save(bot_response)
+                    result_message = (
+                        "Booking slot guidance sent"
+                        if sent
+                        else "Booking slot guidance failed"
+                    )
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
             if not info_decision and expected_reply_blocked_by_info:
                 info_decision = PackDecision(
                     action="reply",
@@ -2523,6 +2670,18 @@ def _handle_booking_interrupt(
                     and "pricing" in set(trace_info_intents or [])
                     and booking_expected == legacy.EXPECTED_REPLY_NAME
                 )
+                specialist_name_followup_signal = bool(
+                    booking_interrupt_info
+                    and info_decision.intent == "master"
+                    and pending_question_target_value == "specialist"
+                    and booking_expected == legacy.EXPECTED_REPLY_NAME
+                )
+                specialist_time_followup_signal = bool(
+                    booking_interrupt_info
+                    and info_decision.intent == "master"
+                    and pending_question_target_value in {"specialist", "time"}
+                    and booking_expected == legacy.EXPECTED_REPLY_TIME
+                )
                 booking_prompt_kept = bool(
                     prompt_text
                     and (
@@ -2544,6 +2703,8 @@ def _handle_booking_interrupt(
                             and walkin_without_booking_signal
                         )
                         or pricing_name_followup_signal
+                        or specialist_name_followup_signal
+                        or specialist_time_followup_signal
                     )
                 )
                 booking_prompt_suppressed = bool(
@@ -2555,6 +2716,8 @@ def _handle_booking_interrupt(
                     trace_payload["booking_interrupt_info"] = True
                 if info_sections:
                     trace_payload["info_sections"] = info_sections
+                if pending_question_target_value:
+                    trace_payload["pending_question_target"] = pending_question_target_value
                 legacy._record_decision_trace(conversation, trace_payload)
 
                 if info_source == "service_matcher":
@@ -2601,6 +2764,8 @@ def _handle_booking_interrupt(
                         "booking_info_intents": booking_info_intents,
                         "booking_interrupt_info": bool(booking_interrupt_info),
                     }
+                    if pending_question_target_value:
+                        message_meta_updates["pending_question_target"] = pending_question_target_value
                     if booking_prompt_suppressed:
                         message_meta_updates["carryover_ignored"] = True
                         message_meta_updates[

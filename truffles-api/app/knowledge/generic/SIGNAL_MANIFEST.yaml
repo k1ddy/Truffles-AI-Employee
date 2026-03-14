@@ -64,15 +64,15 @@ booking:
         flags:
           - IGNORECASE
     daypart_token_patterns:
-      - pattern: '\b(вечер\w*|вечером|к вечеру|на вечер|после работы|ближе к вечеру)\b'
+      - pattern: '\b(вечер\w*|вечерн\w*|вечером|к вечеру|на вечер|после работы|ближе к вечеру)\b'
         replacement: 'вечером'
         flags:
           - IGNORECASE
-      - pattern: '\b(утро\w*|утром|с утра|на утро)\b'
+      - pattern: '\b(утро\w*|утрен\w*|утром|с утра|на утро)\b'
         replacement: 'утром'
         flags:
           - IGNORECASE
-      - pattern: '\b(днем|днём|день|дневное|дневной|после обеда|ближе к обеду)\b'
+      - pattern: '\b(днем|днём|день|дневн\w*|после обеда|ближе к обеду)\b'
         replacement: 'днем'
         flags:
           - IGNORECASE
@@ -91,6 +91,18 @@ booking:
       - веч
       - ноч
       - обед
+    pending_time_question_markers:
+      - когда
+      - врем
+      - свобод
+      - слот
+      - окн
+      - удоб
+      - лучш
+      - посовет
+      - қай
+      - уақыт
+      - ыңғай
   layout_swap_map:
     q: й
     w: ц

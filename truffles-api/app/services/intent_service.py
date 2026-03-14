@@ -410,6 +410,9 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             "capability": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "temporal_scope": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "resolution_mode": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "pending_question_act": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "pending_question_target": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "active_question_relation": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "resolver_id": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "resolver_version": {"anyOf": [{"type": "string"}, {"type": "null"}]},
         },
@@ -1356,7 +1359,8 @@ POLICY_CORE_PROMPT_FALLBACK = """# LLM Policy Core Prompt
 Return JSON only (no markdown). Required fields: intent, action, tool_action, slots, confidence.
 Optional fields: tool_args, pack_refs, slots, next_question, open_questions, needs_manager,
 risk_signals, language, reason, goal, entity_refs, subject_kind, capability, temporal_scope,
-resolution_mode, resolver_id, resolver_version.
+resolution_mode, pending_question_act, pending_question_target, active_question_relation,
+resolver_id, resolver_version.
 Use tool_action and pack_refs only from the allowed lists provided in the input.
 slots/open_questions/next_question may only use: service, datetime, name.
 If memory.profile.current_referents or memory.profile.pending_question_contract is present,
@@ -1381,6 +1385,11 @@ live_availability, booking_manage, consultation, portfolio, other.
 temporal_scope values: none, specific_time, day, weekday, weekend, date_range.
 resolution_mode values: direct, referent_followup, clarify_missing_subject,
 clarify_missing_time, policy_fact, live_calendar.
+pending_question_target values: time, specialist.
+active_question_relation values: fill_requested_slot, ask_about_requested_slot,
+slot_constraint, slot_compare, mixed_fill_plus_question, referent_followup,
+generic_info_interrupt, specialist_availability_interrupt,
+specialist_availability_followup, tool_result_followup_specialist_missing.
 """
 
 _CONTROLLER_PROMPT_CACHE: str | None = None
