@@ -49,6 +49,10 @@ export function shouldAllowLocalSessionBridge(baseURL: string) {
     }
 }
 
+function escapeRegex(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function resolveLocalSessionBridgeBaseURL(options: KeycloakAuthOptions) {
     if (options.localSessionBridgeBaseURL) {
         return options.localSessionBridgeBaseURL;
@@ -210,6 +214,9 @@ export async function startKeycloakLogin(page: Page, options: KeycloakAuthOption
     const action = await providerForm.getAttribute('action');
     const actionOrigin = action ? new URL(action).origin : baseURL;
     const preferredOrigin = resolvePreferredOrigin(baseURL, actionOrigin, stayOnBaseOrigin);
+    const resolvedKeycloakPattern = action
+        ? new RegExp(escapeRegex(new URL(actionOrigin).host))
+        : options.keycloakHostPattern;
     options.onResolvedOrigin?.(preferredOrigin);
 
     if (stayOnBaseOrigin && action) {
@@ -227,7 +234,10 @@ export async function startKeycloakLogin(page: Page, options: KeycloakAuthOption
         providerButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
         providerForm.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
     ]);
-    const transitionPromise = waitForAuthTransition(page, options);
+    const transitionPromise = waitForAuthTransition(page, {
+        ...options,
+        keycloakHostPattern: resolvedKeycloakPattern,
+    });
     if (await providerButton.isVisible().catch(() => false)) {
         await providerButton.click();
     } else if (await providerForm.isVisible().catch(() => false)) {
