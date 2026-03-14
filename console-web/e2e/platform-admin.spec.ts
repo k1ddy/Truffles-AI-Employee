@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
     buildSignInUrl,
     loginThroughKeycloak,
+    shouldAllowLocalSessionBridge,
     shouldStayOnBaseOrigin,
 } from './support/keycloak-auth';
 
@@ -745,6 +746,7 @@ function keycloakAuthOptions() {
         consoleHostPattern,
         keycloakHostPattern,
         stayOnBaseOrigin,
+        allowLocalSessionBridge: shouldAllowLocalSessionBridge(baseURL),
         authWaitTimeoutMs: 15000,
         onResolvedOrigin: (origin: string) => {
             resolvedBaseURL = origin;

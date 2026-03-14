@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
 import {
     loginThroughKeycloak,
+    shouldAllowLocalSessionBridge,
     shouldStayOnBaseOrigin,
     startKeycloakLogin,
+    waitForAuthenticatedConsole,
 } from './support/keycloak-auth';
 
 const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
@@ -30,6 +32,7 @@ function keycloakAuthOptions() {
         consoleHostPattern,
         keycloakHostPattern,
         stayOnBaseOrigin,
+        allowLocalSessionBridge: shouldAllowLocalSessionBridge(baseURL),
         waitForConsoleApp,
         onResolvedOrigin: (origin: string) => {
             resolvedBaseURL = origin;
@@ -50,6 +53,7 @@ async function loginWithSharedHelper(page: import('@playwright/test').Page) {
             await gotoConsoleRoot(page);
         },
     });
+    await waitForAuthenticatedConsole(page, 30000);
 }
 
 async function selectOptionIfNeeded(
@@ -238,11 +242,23 @@ test.describe('Smoke Test: Login Flow', () => {
 
     test('should logout successfully @smoke', async ({ page }) => {
         await loginWithSharedHelper(page);
-        await expect(page.getByTestId('logout-button')).toBeVisible({ timeout: 20000 });
+        await gotoConsoleRoot(page);
+        await waitForAuthenticatedConsole(page, 30000);
+        await retryProfileLoad(page);
+        const logoutButton = page.getByTestId('logout-button');
+        const loginButton = page.getByTestId('login-button');
+        if (!(await logoutButton.isVisible().catch(() => false)) && (await loginButton.isVisible().catch(() => false))) {
+            await loginWithSharedHelper(page);
+            await gotoConsoleRoot(page);
+            await waitForAuthenticatedConsole(page, 30000);
+            await retryProfileLoad(page);
+        }
+        await waitForConsoleReady(page);
+        await expect(logoutButton).toBeVisible({ timeout: 20000 });
         await selectCompanyIfNeeded(page);
         await selectClientIfNeeded(page);
         await selectBranchIfNeeded(page);
-        await page.getByTestId('logout-button').click();
-        await expect(page.getByTestId('login-button')).toBeVisible({ timeout: 10000 });
+        await logoutButton.click();
+        await expect(loginButton).toBeVisible({ timeout: 10000 });
     });
 });

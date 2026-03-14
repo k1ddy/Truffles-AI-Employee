@@ -39,6 +39,16 @@ export function shouldStayOnBaseOrigin(baseURL: string) {
     return /localhost|127\.0\.0\.1/.test(baseURL);
 }
 
+export function shouldAllowLocalSessionBridge(baseURL: string) {
+    try {
+        const url = new URL(baseURL);
+        const isLocalHost = /^(localhost|127\.0\.0\.1)$/.test(url.hostname);
+        return !(isLocalHost && (url.port === '3000' || (!url.port && url.protocol === 'http:')));
+    } catch {
+        return true;
+    }
+}
+
 function resolveLocalSessionBridgeBaseURL(options: KeycloakAuthOptions) {
     if (options.localSessionBridgeBaseURL) {
         return options.localSessionBridgeBaseURL;
@@ -52,6 +62,57 @@ function resolvePreferredOrigin(baseURL: string, actionOrigin: string, stayOnBas
 
 function isConsoleAppUrl(urlString: string, consoleHostPattern: RegExp) {
     return consoleHostPattern.test(urlString) && !urlString.includes('/api/auth');
+}
+
+type ConsoleAuthState = {
+    ok: boolean;
+    sessionStatus: number | null;
+    meStatus: number | null;
+    sessionError?: string | null;
+    hasAccessToken?: boolean;
+};
+
+async function readAuthenticatedConsoleState(page: Page): Promise<ConsoleAuthState> {
+    return page.evaluate(async () => {
+        try {
+            const sessionResponse = await fetch("/api/auth/session", {
+                credentials: "include",
+                cache: "no-store",
+            });
+            if (!sessionResponse.ok) {
+                return { ok: false, sessionStatus: sessionResponse.status, meStatus: null };
+            }
+            const session = await sessionResponse.json().catch(() => null) as
+                | { accessToken?: string; error?: string }
+                | null;
+            if (!session?.accessToken || session.error) {
+                return {
+                    ok: false,
+                    sessionStatus: sessionResponse.status,
+                    meStatus: null,
+                    sessionError: session?.error ?? null,
+                    hasAccessToken: Boolean(session?.accessToken),
+                };
+            }
+
+            const meResponse = await fetch("/api/proxy/me", {
+                credentials: "include",
+                cache: "no-store",
+            }).catch(() => null);
+            return {
+                ok: Boolean(meResponse?.ok),
+                sessionStatus: sessionResponse.status,
+                meStatus: meResponse?.status ?? null,
+            };
+        } catch {
+            return { ok: false, sessionStatus: null, meStatus: null };
+        }
+    });
+}
+
+async function resolveNoCredentialsState(page: Page, options: KeycloakLoginOptions) {
+    await options.onNoCredentialsVisible?.(page);
+    return readAuthenticatedConsoleState(page);
 }
 
 async function waitForAuthTransition(page: Page, options: KeycloakAuthOptions) {
@@ -192,9 +253,27 @@ export async function loginThroughKeycloak(page: Page, options: KeycloakLoginOpt
     }
 
     const usernameInput = page.locator('#username');
+    await usernameInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null);
     if (!(await usernameInput.isVisible().catch(() => false))) {
-        await options.onNoCredentialsVisible?.(page);
-        return true;
+        const initialState = await resolveNoCredentialsState(page, options);
+        if (initialState.ok) {
+            await options.onPostLogin?.(page);
+            return true;
+        }
+
+        const retried = await startKeycloakLogin(page, options);
+        if (!retried) {
+            return false;
+        }
+        await usernameInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null);
+        if (!(await usernameInput.isVisible().catch(() => false))) {
+            const retryState = await resolveNoCredentialsState(page, options);
+            if (retryState.ok) {
+                await options.onPostLogin?.(page);
+                return true;
+            }
+            return false;
+        }
     }
 
     await expect(usernameInput).toBeVisible();
@@ -215,6 +294,17 @@ export async function loginThroughKeycloak(page: Page, options: KeycloakLoginOpt
 
     await options.onPostLogin?.(page);
     return true;
+}
+
+export async function waitForAuthenticatedConsole(page: Page, timeoutMs = 20000) {
+    await expect
+        .poll(
+            async () => readAuthenticatedConsoleState(page),
+            { timeout: timeoutMs }
+        )
+        .toEqual(
+            expect.objectContaining({ ok: true }),
+        );
 }
 
 export async function isAuthGateVisible(page: Page, options: AuthGateOptions = {}) {

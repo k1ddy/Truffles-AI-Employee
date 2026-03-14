@@ -4,7 +4,9 @@ import { expect, test } from '@playwright/test';
 import {
     buildSignInUrl,
     loginThroughKeycloak,
+    shouldAllowLocalSessionBridge,
     shouldStayOnBaseOrigin,
+    waitForAuthenticatedConsole,
 } from './support/keycloak-auth';
 
 const consoleHostPattern = /localhost(?::\d+)?|127\.0\.0\.1(?::\d+)?|192\.168\.5\.27:3000|console\.truffles\.kz/;
@@ -43,6 +45,7 @@ function keycloakAuthOptions() {
         consoleHostPattern,
         keycloakHostPattern,
         stayOnBaseOrigin,
+        allowLocalSessionBridge: shouldAllowLocalSessionBridge(baseURL),
         authWaitTimeoutMs: 15000,
         onResolvedOrigin: (origin: string) => {
             resolvedBaseURL = origin;
@@ -56,6 +59,7 @@ async function loginWithSharedHelper(page: import('@playwright/test').Page) {
         loginUser,
         loginPassword,
     });
+    await waitForAuthenticatedConsole(page, 30000);
 }
 
 async function selectOptionIfNeeded(selector: import('@playwright/test').Locator) {
@@ -178,7 +182,7 @@ test.describe('Owner/Admin Business Control', () => {
         await gotoConsoleRoot(page);
     });
 
-    test('should expose owner/admin control navigation and business summary @smoke', async ({ page }) => {
+    test('should expose owner/admin control navigation and business summary', async ({ page }) => {
         await requireOwnerAdminRoleOrSkip(page);
         const navModeToggle = page.getByTestId('nav-owner-admin-toggle');
         if (!(await navModeToggle.isVisible().catch(() => false))) {
@@ -210,7 +214,7 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('data-trust-title')).toBeVisible();
     });
 
-    test('should render data-trust and team-performance operational surfaces @smoke', async ({ page }) => {
+    test('should render data-trust and team-performance operational surfaces', async ({ page }) => {
         await requireOwnerAdminRoleOrSkip(page);
         await page.getByTestId('nav-data-trust').click();
         await expect(page).toHaveURL(urlPathPattern('/business/data-trust'));
@@ -251,7 +255,7 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('subscription-actions')).toBeVisible();
     });
 
-    test('should render consultant verification overview foundation @smoke consultant verification', async ({ page }) => {
+    test('should render consultant verification overview foundation consultant verification', async ({ page }) => {
         await requireOwnerAdminRoleOrSkip(page);
         await expect(page.getByTestId('nav-consultant-verification')).toBeVisible();
 
@@ -265,7 +269,7 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('consultant-verification-actions')).toBeVisible();
     });
 
-    test('should render consultant verification chat workspace, scenario tools, compare, and findings when rollout is enabled @smoke consultant verification chat consultant verification scenarios consultant verification findings consultant verification compare', async ({ page }) => {
+    test('should render consultant verification chat workspace, scenario tools, compare, and findings when rollout is enabled consultant verification chat consultant verification scenarios consultant verification findings consultant verification compare', async ({ page }) => {
         test.slow();
         await requireOwnerAdminRoleOrSkip(page);
         await page.getByTestId('nav-consultant-verification').click();
@@ -303,7 +307,7 @@ test.describe('Owner/Admin Business Control', () => {
         await captureConsultantVerificationScreenshots(page);
     });
 
-    test('should render simple owner settings and explainability surface @smoke', async ({ page }) => {
+    test('should render simple owner settings and explainability surface', async ({ page }) => {
         await requireOwnerAdminRoleOrSkip(page);
         await page.getByTestId('nav-settings').click();
         await expect(page).toHaveURL(urlPathPattern('/settings'));
