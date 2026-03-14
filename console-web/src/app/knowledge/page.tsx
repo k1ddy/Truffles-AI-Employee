@@ -20,6 +20,7 @@ import {
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import AccessDenied from "@/components/AccessDenied";
+import { MISSING_LABELS } from "@/components/provisioning-wizard-domain";
 import api from "@/lib/api";
 import { writeConsoleContextScopeToStorage } from "@/lib/console-context-storage";
 import type { components } from "@/types/api.generated";
@@ -64,6 +65,15 @@ type SpecialistSummary = {
     is_active?: boolean;
 };
 
+const OWNER_REMEDIATION_HINTS: Record<string, string> = {
+    "client_pack.guest_policy": "Опишите правила для новых или гостевых клиентов: кого принимаете, нужны ли ограничения или депозит.",
+    "client_pack.policy.payment_info": "Добавьте понятное объяснение оплаты: наличные, карта, предоплата, когда именно клиент платит.",
+    "client_pack.policy.reschedule": "Опишите, как клиент может перенести запись и за сколько времени это допустимо.",
+    "client_pack.policy.cancel": "Опишите правила отмены: есть ли штраф, сколько времени на бесплатную отмену и кто подтверждает отмену.",
+    "client_pack.policy.discounts": "Опишите действующие скидки, акции и ограничения: кому доступны, как считаются, можно ли суммировать.",
+};
+const LOSSY_STRUCTURED_REWRITE_ERROR_PREFIX = "Lossy structured field rewrite blocked: ";
+
 const KNOWLEDGE_STEPS = [
     { id: "draft", label: "Draft", hint: "редактирование" },
     { id: "validate", label: "Validate", hint: "валидация" },
@@ -80,6 +90,7 @@ type ValidationState = {
     errors: string[];
     warnings: string[];
     diff: string;
+    draftSaved: boolean;
 };
 
 function isApiUnavailable(error: unknown) {
@@ -119,6 +130,27 @@ function normalizeStringList(value: unknown): string[] {
         return [];
     }
     return value.filter((item): item is string => typeof item === "string");
+}
+
+function formatKnowledgeValidationIssue(message: string): { title: string; detail?: string } {
+    if (message.startsWith(LOSSY_STRUCTURED_REWRITE_ERROR_PREFIX)) {
+        const path = message.slice(LOSSY_STRUCTURED_REWRITE_ERROR_PREFIX.length).trim();
+        const label = MISSING_LABELS[path] ?? path;
+        return {
+            title: `Нельзя упростить structured поле: ${label}`,
+            detail: "В этом филиале поле хранится как объект. Оставьте guided-поле пустым, чтобы сохранить серверное значение, или редактируйте JSON без смены типа поля.",
+        };
+    }
+    const prefix = "Missing required field:";
+    if (!message.startsWith(prefix)) {
+        return { title: message };
+    }
+    const path = message.slice(prefix.length).trim();
+    const label = MISSING_LABELS[path] ?? path;
+    return {
+        title: `Не заполнено: ${label}`,
+        detail: OWNER_REMEDIATION_HINTS[path] ?? `Проверьте и заполните поле «${label}» в knowledge pack этого филиала.`,
+    };
 }
 
 function formatPayload(value: unknown): string {
@@ -171,6 +203,15 @@ function extractApiErrorMessage(error: unknown): string | null {
     return trimmed || null;
 }
 
+function extractApiErrorValidationIssues(error: unknown): string[] {
+    if (!axios.isAxiosError(error)) {
+        return [];
+    }
+    const payload = error.response?.data as { error?: { details?: { errors?: unknown } } } | undefined;
+    const issues = payload?.error?.details?.errors;
+    return normalizeStringList(issues);
+}
+
 function resolveKnowledgeActionErrorMessage(error: unknown): string {
     if (isGatewayLikeError(error)) {
         return "Сервис знаний временно недоступен (gateway). Повторите позже или проверьте OPS.";
@@ -181,6 +222,12 @@ function resolveKnowledgeActionErrorMessage(error: unknown): string {
     }
     if (code === "BRANCH_SELECTION_REQUIRED") {
         return "Выберите филиал в контексте Console и повторите.";
+    }
+    if (code === "KNOWLEDGE_INVALID") {
+        const issues = extractApiErrorValidationIssues(error);
+        if (issues.length > 0) {
+            return formatKnowledgeValidationIssue(issues[0]).title;
+        }
     }
     const apiMessage = extractApiErrorMessage(error);
     if (apiMessage) {
@@ -318,6 +365,24 @@ function extractGuidedServices(payload: Record<string, unknown> | null): GuidedS
 
 function normalizeString(value: unknown): string {
     return typeof value === "string" ? value : "";
+}
+
+function isStructuredKnowledgeValue(value: unknown): boolean {
+    return Boolean(value) && typeof value === "object";
+}
+
+function applyGuidedTextField(baseValue: unknown, nextValue: string): unknown {
+    const trimmed = nextValue.trim();
+    if (typeof baseValue === "string") {
+        return trimmed;
+    }
+    if (trimmed.length > 0) {
+        return trimmed;
+    }
+    if (baseValue !== null && baseValue !== undefined) {
+        return baseValue;
+    }
+    return "";
 }
 
 function parseCsvLikeList(value: string): string[] {
@@ -487,16 +552,16 @@ function buildStructuredDraftPayload(
     };
     const nextPolicy: Record<string, unknown> = {
         ...policy,
-        payment_info: policyProfile.paymentInfo.trim(),
-        reschedule: policyProfile.reschedule.trim(),
-        cancel: policyProfile.cancel.trim(),
-        discounts: policyProfile.discounts.trim(),
+        payment_info: applyGuidedTextField(policy.payment_info, policyProfile.paymentInfo),
+        reschedule: applyGuidedTextField(policy.reschedule, policyProfile.reschedule),
+        cancel: applyGuidedTextField(policy.cancel, policyProfile.cancel),
+        discounts: applyGuidedTextField(policy.discounts, policyProfile.discounts),
     };
 
     root.client_pack = {
         ...clientPack,
         salon: nextSalon,
-        guest_policy: salonProfile.guestPolicy.trim(),
+        guest_policy: applyGuidedTextField(clientPack.guest_policy, salonProfile.guestPolicy),
         booking: nextBooking,
         policy: nextPolicy,
         services_catalog: {
@@ -566,6 +631,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         errors: [],
         warnings: [],
         diff: "",
+        draftSaved: true,
     });
 
     const { data: meData } = useQuery({
@@ -598,8 +664,22 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         setBranchId(selectedBranchId ?? "");
     }, [selectedBranchId]);
 
+    useEffect(() => {
+        setDraftText("");
+        setValidation({
+            ran: false,
+            errors: [],
+            warnings: [],
+            diff: "",
+            draftSaved: true,
+        });
+        setLastValidatedDraft(null);
+        setLastValidatedDraftHash(null);
+        setAckWarnings(false);
+    }, [selectedClientId, selectedBranchId]);
+
     const currentQuery = useQuery({
-        queryKey: ["knowledge-current"],
+        queryKey: ["knowledge-current", selectedClientId, selectedBranchId],
         queryFn: async () => {
             const response = await knowledgeApi.getCurrent();
             return response.data;
@@ -609,7 +689,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     });
 
     const historyQuery = useQuery({
-        queryKey: ["knowledge-history"],
+        queryKey: ["knowledge-history", selectedClientId, selectedBranchId],
         queryFn: async () => {
             const response = await knowledgeApi.history();
             return response.data;
@@ -880,19 +960,19 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         allSpecialistsQuery.isSuccess,
     ]);
 
-    const currentPayloadObject = useMemo(() => {
-        const payload = currentQuery.data?.payload;
+    const workspacePayloadObject = useMemo(() => {
+        const payload = currentQuery.data?.edit_base_payload ?? currentQuery.data?.payload;
         if (payload && typeof payload === "object" && !Array.isArray(payload)) {
             return payload as Record<string, unknown>;
         }
         return null;
     }, [currentQuery.data]);
     const clientPackObject = useMemo(() => {
-        if (!currentPayloadObject) {
+        if (!workspacePayloadObject) {
             return {} as Record<string, unknown>;
         }
-        return ensureObject(currentPayloadObject.client_pack);
-    }, [currentPayloadObject]);
+        return ensureObject(workspacePayloadObject.client_pack);
+    }, [workspacePayloadObject]);
     const flatClientPackPaths = useMemo(
         () => flattenClientPackPaths(clientPackObject),
         [clientPackObject]
@@ -915,7 +995,12 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         const collectFields = Array.isArray(booking.collect_fields) ? booking.collect_fields : [];
         const policyFilledCount = ["payment_info", "reschedule", "cancel", "discounts"]
             .map((key) => policy[key])
-            .filter((value) => typeof value === "string" && value.trim().length > 0).length;
+            .filter((value) => {
+                if (typeof value === "string") {
+                    return value.trim().length > 0;
+                }
+                return isStructuredKnowledgeValue(value);
+            }).length;
         return {
             servicesCount: services.length,
             priceRowsCount: priceList.length,
@@ -924,6 +1009,26 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             flattenedFieldsCount: flatClientPackPaths.length,
         };
     }, [clientPackObject, flatClientPackPaths.length]);
+    const structuredGuidedFields = useMemo(() => {
+        const policy = ensureObject(clientPackObject.policy);
+        const items: string[] = [];
+        if (isStructuredKnowledgeValue(clientPackObject.guest_policy)) {
+            items.push("guest_policy");
+        }
+        if (isStructuredKnowledgeValue(policy.payment_info)) {
+            items.push("policy.payment_info");
+        }
+        if (isStructuredKnowledgeValue(policy.reschedule)) {
+            items.push("policy.reschedule");
+        }
+        if (isStructuredKnowledgeValue(policy.cancel)) {
+            items.push("policy.cancel");
+        }
+        if (isStructuredKnowledgeValue(policy.discounts)) {
+            items.push("policy.discounts");
+        }
+        return items;
+    }, [clientPackObject]);
 
     const currentText = useMemo(() => {
         if (!currentQuery.data) {
@@ -932,6 +1037,24 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         const payload = currentQuery.data.content ?? currentQuery.data.payload ?? currentQuery.data;
         return formatPayload(payload);
     }, [currentQuery.data]);
+    const draftServerText = useMemo(() => {
+        if (!currentQuery.data) {
+            return "";
+        }
+        const payload = currentQuery.data.draft_content ?? currentQuery.data.draft_payload;
+        return formatPayload(payload);
+    }, [currentQuery.data]);
+    const editBaseText = useMemo(() => {
+        if (!currentQuery.data) {
+            return "";
+        }
+        const payload = currentQuery.data.edit_base_content ?? currentQuery.data.edit_base_payload;
+        return formatPayload(payload);
+    }, [currentQuery.data]);
+    const editBaseSource = currentQuery.data?.edit_base_source ?? "none";
+    const editBaseUpdatedAt = currentQuery.data?.edit_base_updated_at ?? null;
+    const draftUpdatedAt = currentQuery.data?.draft_updated_at ?? null;
+    const hasSavedDraft = Boolean(currentQuery.data?.draft_version_id && draftServerText.trim().length > 0);
 
     const historyItems = useMemo(
         () => extractHistoryItems(historyQuery.data),
@@ -1005,8 +1128,8 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         if (Object.keys(selectedBranchWorkingHours).length > 0) {
             return selectedBranchWorkingHours;
         }
-        return extractPayloadWorkingHours(currentPayloadObject);
-    }, [selectedBranchWorkingHours, currentPayloadObject]);
+        return extractPayloadWorkingHours(workspacePayloadObject);
+    }, [selectedBranchWorkingHours, workspacePayloadObject]);
     const hasBranchChangeReason = branchChangeReason.trim().length > 0;
     const isBranchPatchDirty = useMemo(() => {
         if (!selectedBranchContext || parsedBranchWorkingHours.error) {
@@ -1044,17 +1167,27 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     }, [selectedBranchContext]);
 
     useEffect(() => {
-        setGuidedHours(extractGuidedHours(currentPayloadObject));
-        const extractedServices = extractGuidedServices(currentPayloadObject);
+        if (draftText.trim().length > 0) {
+            return;
+        }
+        if (!editBaseText.trim()) {
+            return;
+        }
+        setDraftText(editBaseText);
+    }, [draftText, editBaseText]);
+
+    useEffect(() => {
+        setGuidedHours(extractGuidedHours(workspacePayloadObject));
+        const extractedServices = extractGuidedServices(workspacePayloadObject);
         if (extractedServices.length > 0) {
             setGuidedServices(extractedServices);
         } else {
             setGuidedServices([{ id: `svc-${Date.now()}`, name: "" }]);
         }
-        setGuidedSalonProfile(extractGuidedSalonProfile(currentPayloadObject));
-        setGuidedBooking(extractGuidedBooking(currentPayloadObject));
-        setGuidedPolicy(extractGuidedPolicy(currentPayloadObject));
-    }, [currentPayloadObject, selectedBranchId]);
+        setGuidedSalonProfile(extractGuidedSalonProfile(workspacePayloadObject));
+        setGuidedBooking(extractGuidedBooking(workspacePayloadObject));
+        setGuidedPolicy(extractGuidedPolicy(workspacePayloadObject));
+    }, [workspacePayloadObject, selectedBranchId]);
 
     useEffect(() => {
         if (!isPlatformAdmin || fleetClients.length === 0) {
@@ -1096,7 +1229,21 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const hasWarnings = validation.warnings.length > 0;
     const isDraftDirty = lastValidatedDraft !== null && lastValidatedDraft !== draftText;
     const consultantVerificationReadiness = consultantVerificationReadinessQuery.data?.readiness;
-    const compareReady = consultantVerificationReadiness?.status === "ready";
+    const consultantVerificationReadinessErrorMessage = consultantVerificationReadinessQuery.error
+        ? resolveKnowledgeActionErrorMessage(consultantVerificationReadinessQuery.error)
+        : null;
+    const compareRequired = consultantVerificationReadiness?.compare_required ?? false;
+    const compareReady = !consultantVerificationReadinessQuery.isError
+        && (!compareRequired || consultantVerificationReadiness?.status === "ready");
+    const compareStatusLabel = consultantVerificationReadinessQuery.isError
+        ? "Не удалось проверить"
+        : consultantVerificationReadiness?.status_label
+            ?? (compareRequired ? "Еще не запускали" : "Сравнение не требуется");
+    const editBaseSourceLabel = editBaseSource === "draft"
+        ? "сохраненный draft"
+        : editBaseSource === "published"
+            ? "опубликованная версия"
+            : "пустой workspace";
     const canPublish = canEdit
         && !apiUnavailable
         && validation.ran
@@ -1117,14 +1264,17 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             const diff = typeof data?.diff === "string" ? data.diff : "";
             const valid = data?.valid ?? errors.length === 0;
             const draftHash = typeof data?.draft_hash === "string" ? data.draft_hash : null;
-            setValidation({ ran: true, errors, warnings, diff });
+            const draftSaved = data?.draft_saved !== false;
+            setValidation({ ran: true, errors, warnings, diff, draftSaved });
             setLastValidatedDraft(draftText);
             setLastValidatedDraftHash(draftHash);
             setAckWarnings(false);
             void queryClient.invalidateQueries({
                 queryKey: ["knowledge-consultant-verification-readiness", selectedClientId, selectedBranchId],
             });
-            if (valid) {
+            if (!draftSaved) {
+                toast.error("Черновик не сохранён: обнаружена потеря structured данных.");
+            } else if (valid) {
                 toast.success("Валидация пройдена");
             } else {
                 toast.error("Валидация не пройдена");
@@ -1180,6 +1330,11 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             if (extractApiErrorCode(error) === "KNOWLEDGE_COMPARE_REQUIRED") {
                 toast.error("Сначала выполните live vs draft compare для текущего draft.");
                 setStepIndex(3);
+                return;
+            }
+            if (extractApiErrorCode(error) === "KNOWLEDGE_INVALID") {
+                toast.error(resolveKnowledgeActionErrorMessage(error));
+                setStepIndex(1);
                 return;
             }
             const code = extractApiErrorCode(error);
@@ -1471,7 +1626,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             return;
         }
         const payload = buildStructuredDraftPayload(
-            currentPayloadObject,
+            workspacePayloadObject,
             guidedHours,
             normalizedServices,
             guidedSalonProfile,
@@ -2077,6 +2232,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                     className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition ${
                                         active ? "border-primary bg-primary/10" : "border-border/60 hover:bg-muted"
                                     }`}
+                                    data-testid={`knowledge-step-${step.id}`}
                                 >
                                     <div>
                                         <div className="font-medium">{step.label}</div>
@@ -2103,15 +2259,68 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 <button
                                     type="button"
                                     className="btn-ghost"
+                                    onClick={() => setDraftText(editBaseText || currentText)}
+                                    disabled={!(editBaseText || currentText) || !canEdit}
+                                    data-testid="knowledge-load-edit-base"
+                                >
+                                    Загрузить базу редактирования
+                                </button>
+                                <button
+                                    type="button"
+                                    className="btn-ghost"
                                     onClick={() => setDraftText(currentText)}
                                     disabled={!currentText || !canEdit}
+                                    data-testid="knowledge-load-published"
                                 >
-                                    Загрузить current в draft
+                                    Загрузить опубликованную версию
+                                </button>
+                                <button
+                                    type="button"
+                                    className="btn-ghost"
+                                    onClick={() => setDraftText(draftServerText)}
+                                    disabled={!hasSavedDraft || !canEdit}
+                                    data-testid="knowledge-load-saved-draft"
+                                >
+                                    Загрузить сохраненный draft
                                 </button>
                                 <span className="text-xs text-muted-foreground">
-                                    Draft хранится локально до публикации.
+                                    Draft сохраняется на сервере после Validate и автоматически восстанавливается для текущего филиала.
                                 </span>
                             </div>
+                            <div
+                                className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm"
+                                data-testid="knowledge-edit-base-card"
+                            >
+                                <p className="font-medium text-foreground">
+                                    Сейчас редактируете на базе: {editBaseSourceLabel}
+                                </p>
+                                <p className="mt-1 text-muted-foreground">
+                                    {editBaseSource === "draft"
+                                        ? "Console поднимает последний сохраненный draft этого филиала. Это безопаснее, чем собирать черновик с нуля."
+                                        : editBaseSource === "published"
+                                            ? "Сохраненного draft пока нет, поэтому редактор стартует от опубликованной версии."
+                                            : "Для этого филиала еще нет опубликованной версии и сохраненного draft. Начните с минимального черновика и Validate."}
+                                </p>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                    База обновлена: {formatTimestamp(editBaseUpdatedAt)}
+                                    {hasSavedDraft ? ` · saved draft: ${formatTimestamp(draftUpdatedAt)}` : ""}
+                                </p>
+                            </div>
+                            {structuredGuidedFields.length > 0 && (
+                                <div
+                                    className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900"
+                                    data-testid="knowledge-structured-warning"
+                                >
+                                    <p className="font-medium">Важное ограничение structured builder</p>
+                                    <p className="mt-1">
+                                        В этом филиале часть policy-полей хранится как структурные объекты:
+                                        {" "}
+                                        {structuredGuidedFields.join(", ")}.
+                                        {" "}
+                                        Если оставить эти поля пустыми, builder сохранит серверные значения как есть и не сотрет их.
+                                    </p>
+                                </div>
+                            )}
                             <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
                                 <div className="flex flex-wrap items-start justify-between gap-2">
                                     <div>
@@ -2125,6 +2334,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                         className="btn-primary"
                                         onClick={applyStructuredDraft}
                                         disabled={!canEdit}
+                                        data-testid="knowledge-build-structured-draft"
                                     >
                                         Собрать structured draft
                                     </button>
@@ -2453,6 +2663,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                     setValidation((prev) => prev.ran ? { ...prev, ran: false } : prev);
                                 }}
                                 disabled={!canEdit}
+                                data-testid="knowledge-draft-textarea"
                             />
                             <div className="text-xs text-muted-foreground">
                                 {draftText.trim().length} символов
@@ -2467,18 +2678,29 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 className="btn-primary"
                                 onClick={() => validateMutation.mutate()}
                                 disabled={!canEdit || apiUnavailable || !draftText.trim() || validateMutation.isPending}
+                                data-testid="knowledge-validate-button"
                             >
                                 {validateMutation.isPending ? "Проверка..." : "Запустить валидацию"}
                             </button>
                             {validation.ran && (
-                                <div className="space-y-3">
+                                <div className="space-y-3" data-testid="knowledge-validation-results">
                                     <div className={`rounded-lg border p-3 text-sm ${hasErrors ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border/60 bg-muted/30"}`}>
                                         {hasErrors ? "Ошибки найдены" : "Ошибок нет"}
                                     </div>
                                     {validation.errors.length > 0 && (
-                                        <ul className="list-disc space-y-1 pl-5 text-sm text-destructive">
+                                        <ul
+                                            className="list-disc space-y-1 pl-5 text-sm text-destructive"
+                                            data-testid="knowledge-validation-errors"
+                                        >
                                             {validation.errors.map((error, idx) => (
-                                                <li key={`${error}-${idx}`}>{error}</li>
+                                                <li key={`${error}-${idx}`}>
+                                                    <div>{formatKnowledgeValidationIssue(error).title}</div>
+                                                    {formatKnowledgeValidationIssue(error).detail ? (
+                                                        <div className="text-xs text-destructive/80">
+                                                            {formatKnowledgeValidationIssue(error).detail}
+                                                        </div>
+                                                    ) : null}
+                                                </li>
                                             ))}
                                         </ul>
                                     )}
@@ -2490,6 +2712,14 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                                     <li key={`${warning}-${idx}`}>{warning}</li>
                                                 ))}
                                             </ul>
+                                        </div>
+                                    )}
+                                    {!validation.draftSaved && (
+                                        <div
+                                            className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900"
+                                            data-testid="knowledge-validation-draft-save-blocked"
+                                        >
+                                            Черновик не сохранён на сервере: обнаружена потеря structured данных. Исправьте типы полей и повторите Validate.
                                         </div>
                                     )}
                                     {isDraftDirty && (
@@ -2555,8 +2785,16 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 </div>
                                 <div className="flex items-center justify-between mt-2">
                                     <span>Consultant compare</span>
-                                    <span className={compareReady ? "text-green-600" : "text-amber-600"}>
-                                        {consultantVerificationReadiness?.status_label ?? "not run"}
+                                    <span
+                                        className={
+                                            consultantVerificationReadinessQuery.isError
+                                                ? "text-destructive"
+                                                : compareReady
+                                                    ? "text-green-600"
+                                                    : "text-amber-600"
+                                        }
+                                    >
+                                        {compareStatusLabel}
                                     </span>
                                 </div>
                             </div>
@@ -2566,7 +2804,8 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                     <div>
                                         <p className="font-medium text-foreground">Проверка live vs draft</p>
                                         <p className="mt-1 text-muted-foreground">
-                                            {consultantVerificationReadiness?.summary
+                                            {consultantVerificationReadinessErrorMessage
+                                                ?? consultantVerificationReadiness?.summary
                                                 ?? "После Validate откройте проверку консультанта и прогоните хотя бы один compare-кейс."}
                                         </p>
                                     </div>
@@ -2607,7 +2846,9 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             </button>
                             {!canPublish && (
                                 <p className="text-xs text-muted-foreground">
-                                    Publish доступен только после Validate без ошибок, подтверждения warnings и green compare для текущего draft.
+                                    {compareRequired
+                                        ? "Publish доступен только после Validate без ошибок, подтверждения warnings и green compare для текущего draft."
+                                        : "Publish доступен после Validate без ошибок и подтверждения warnings. Для первого publish или branch без rollout compare сейчас не требуется."}
                                 </p>
                             )}
                         </div>
@@ -2695,6 +2936,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             className="btn-ghost"
                             onClick={() => setStepIndex((prev) => Math.max(prev - 1, 0))}
                             disabled={stepIndex === 0}
+                            data-testid="knowledge-step-prev"
                         >
                             Назад
                         </button>
@@ -2703,6 +2945,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             className="btn-primary"
                             onClick={() => setStepIndex((prev) => Math.min(prev + 1, KNOWLEDGE_STEPS.length - 1))}
                             disabled={stepIndex === KNOWLEDGE_STEPS.length - 1}
+                            data-testid="knowledge-step-next"
                         >
                             Далее
                         </button>

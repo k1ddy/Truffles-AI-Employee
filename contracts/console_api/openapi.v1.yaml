@@ -14550,6 +14550,61 @@ components:
           - type: string
           - type: 'null'
           title: Content
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+        draft_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Draft Version Id
+        draft_payload:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Draft Payload
+        draft_content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Draft Content
+        draft_updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Draft Updated At
+        edit_base_source:
+          type: string
+          enum:
+          - draft
+          - published
+          - none
+          title: Edit Base Source
+          default: none
+        edit_base_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Edit Base Version Id
+        edit_base_payload:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Edit Base Payload
+        edit_base_content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Edit Base Content
+        edit_base_updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Edit Base Updated At
       type: object
       title: ConsoleKnowledgeCurrentResponse
     ConsoleKnowledgeHistoryItem:

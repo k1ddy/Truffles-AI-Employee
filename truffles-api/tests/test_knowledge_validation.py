@@ -3,8 +3,10 @@ import copy
 from app.services.knowledge_validation import (
     build_diff,
     dump_pack_yaml,
+    get_lossy_structured_rewrite_paths,
     get_missing_required_fields,
     parse_draft_text,
+    should_block_draft_persist,
     validate_payload,
 )
 
@@ -84,6 +86,39 @@ def test_validate_payload_warns_on_reduced_services():
     errors, warnings = validate_payload(payload, previous_payload=previous)
     assert errors == []
     assert any("services_catalog.services reduced" in warning for warning in warnings)
+
+
+def test_validate_payload_blocks_lossy_structured_policy_rewrite():
+    previous = _base_payload()
+    payload = copy.deepcopy(previous)
+    payload["client_pack"]["policy"]["payment_info"] = "Оплата наличными"
+
+    errors, warnings = validate_payload(payload, previous_payload=previous)
+
+    assert any(
+        error == "Lossy structured field rewrite blocked: client_pack.policy.payment_info"
+        for error in errors
+    )
+    assert warnings == []
+
+
+def test_get_lossy_structured_rewrite_paths_detects_guest_policy_erasure():
+    previous = _base_payload()
+    payload = copy.deepcopy(previous)
+    payload["client_pack"]["guest_policy"] = ""
+
+    blocked = get_lossy_structured_rewrite_paths(payload, previous_payload=previous)
+
+    assert blocked == ["client_pack.guest_policy"]
+
+
+def test_should_block_draft_persist_only_for_lossy_rewrite_errors():
+    assert should_block_draft_persist(
+        ["Lossy structured field rewrite blocked: client_pack.policy.cancel"]
+    ) is True
+    assert should_block_draft_persist(
+        ["Missing required field: client_pack.policy.cancel"]
+    ) is False
 
 
 def test_build_diff_returns_text():

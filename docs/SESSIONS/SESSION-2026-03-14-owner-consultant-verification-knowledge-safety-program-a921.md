@@ -1,0 +1,73 @@
+# SESSION 2026-03-14-owner-consultant-verification-knowledge-safety-program-a921 — Session 2026-03-14-owner-consultant-verification-knowledge-safety-program-a921
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-14-owner-consultant-verification-knowledge-safety-program-a921.md
+- block_id: CONSOLE-OWNER-CONSULTANT-VERIFICATION-KNOWLEDGE-SAFETY-PROGRAM-A921
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-13-owner-consultant-verification-program-a920
+- worktree: /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920
+- base_ref: origin/main
+- scope: Full RCA and remediation program for the Knowledge -> Consultant Verification owner flow: lossless draft editing, truthful draft/live verification, first-publish gate repair, branch-accurate readiness, and owner-safe remediation messaging.
+- done:
+  - Reproduced and documented the lossy `Structured Draft Builder` contract: `guest_policy` and `policy.*` are read and rewritten as strings in `console-web/src/app/knowledge/page.tsx`, while validation/runtime expect structured objects.
+  - Confirmed that consultant verification message sessions ignore `source_mode=draft` during runtime execution because `append_consultant_verification_message()` never resolves or injects draft truth override.
+  - Confirmed a first-publish deadlock: `Publish` requires compare, while compare itself requires an existing live published version.
+  - Confirmed that `Validate` persists a server draft via `upsert_draft()`, but the Knowledge UI reload path still exposes only `GET /knowledge/current`; owner cannot safely resume the saved draft after refresh.
+  - Confirmed additional UX/product gaps: consultant verification overview is not always selected-branch-accurate for owner/admin client scope, readiness-query errors on the Knowledge page are silent, and owner-facing remediation still leaks raw schema paths instead of business labels already present in the codebase.
+  - Wrote the canonical remediation program TP `TP-2026-03-14-owner-consultant-verification-knowledge-safety-program-a921.md` with RCA, one mandatory web search, bounded waves, DoD, checks, rollout, and residual debt.
+  - Implemented `Wave1`: consultant verification sessions now bind to real `live`/`draft` runtime truth, readiness/overview are selected-branch-aware, and publish compare is required only when live baseline exists and the compare rollout is enabled.
+  - Implemented `Wave2`: `/knowledge/current` now returns published + saved draft + effective edit-base provenance; Knowledge UI reloads the saved draft for the selected branch and no longer claims draft is local-only.
+  - Implemented `Wave3`: `Structured Draft Builder` now preserves structured `guest_policy` and `policy.*` values when the owner leaves those guided fields blank, and the UI warns when these sections are stored as structured objects.
+  - Implemented `Wave4`: validation errors are mapped to owner-readable labels and concrete remediation prompts instead of raw `client_pack.*` schema paths.
+  - Fixed a latent branch-switch integrity gap on the Knowledge page by scoping `knowledge-current/history` queries to the selected client + branch.
+  - Added deterministic `owner-admin-business` Playwright proof for the Knowledge owner flow without depending on live auth: saved draft auto-recovery, edit-base provenance switching, structured policy preservation during `Structured Draft Builder`, and owner-readable remediation text after Validate.
+  - Added explicit Knowledge step/test hooks (`knowledge-step-*`, `knowledge-load-*`, `knowledge-structured-warning`, `knowledge-validation-*`) so the owner flow is covered by stable UI contracts instead of brittle text-only selectors.
+  - Added a backend save-block guard for lossy structured rewrites: if a branch already stores `guest_policy` or guarded `policy.*` sections as structured objects, `Validate` now rejects scalar/empty rewrites with deterministic errors and does not persist that draft.
+  - Extended owner UX so the Validation step explicitly says when the draft was not saved because of structured-data loss, instead of silently implying that every Validate persists a safe server draft.
+  - Added deterministic backend tests and mocked owner/admin Playwright proof for the new loss-prevention path.
+  - Added a publish-time compiler assertion in `publish_version()`: even if a malformed payload reaches publish/auto-publish, the compiler now blocks structured->scalar rewrites against the current published branch and returns the same deterministic loss-prevention errors.
+  - Improved owner-facing publish errors so `KNOWLEDGE_INVALID` now surfaces the first mapped remediation issue instead of a generic compiler failure message.
+- evidence:
+  - `console-web/src/app/knowledge/page.tsx`
+  - `console-web/e2e/owner-admin-business.spec.ts`
+  - `console-web/src/app/business/consultant-verification/page.tsx`
+  - `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx`
+  - `console-web/src/components/provisioning-wizard-domain.ts`
+  - `console-web/src/lib/api-client.ts`
+  - `console-web/src/types/api.generated.ts`
+  - `contracts/console_api/openapi.v1.yaml`
+  - `truffles-api/app/routers/console.py`
+  - `truffles-api/app/services/console_consultant_verification.py`
+  - `truffles-api/app/services/knowledge_registry_service.py`
+  - `truffles-api/app/services/knowledge_validation.py`
+  - `truffles-api/app/services/knowledge_registry_service.py`
+  - `truffles-api/app/services/knowledge_runtime.py`
+  - `truffles-api/app/schemas/console.py`
+  - `truffles-api/tests/test_console_consultant_verification_api.py`
+  - `truffles-api/tests/test_console_owner_business.py`
+  - `docs/TASK_PACKAGES/TP-2026-03-14-owner-consultant-verification-knowledge-safety-program-a921.md`
+  - Web search: `RFC 7386 JSON Merge Patch preserve unspecified fields` -> `https://datatracker.ietf.org/doc/html/rfc7386`
+  - Checks:
+    - `pytest -q tests/test_console_consultant_verification_api.py tests/test_console_owner_business.py tests/test_console_knowledge_preflight.py -k 'consultant_verification or knowledge'`
+    - `pytest -q tests/test_console_owner_business.py -k 'get_knowledge_current or publish_knowledge'`
+    - `ruff check app/services/console_consultant_verification.py app/services/knowledge_registry_service.py app/routers/console.py app/schemas/console.py tests/test_console_consultant_verification_api.py tests/test_console_owner_business.py`
+    - `python3 scripts/generate_openapi.py --check`
+    - `npm run generate:api`
+    - `npm run lint -- --file src/app/knowledge/page.tsx --file src/lib/api-client.ts`
+    - `npm run build`
+    - `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --workers 1 --grep "knowledge saved draft provenance|knowledge structured draft preservation|knowledge remediation"`
+    - `pytest -q tests/test_knowledge_validation.py tests/test_console_owner_business.py -k 'lossy or validate_knowledge or knowledge'`
+    - `pytest -q tests/test_knowledge_registry_sync_backfill.py tests/test_console_owner_business.py tests/test_knowledge_validation.py -k 'publish_version or lossy or validate_knowledge or publish_knowledge or knowledge'`
+    - `ruff check app/services/knowledge_validation.py app/routers/console.py tests/test_knowledge_validation.py tests/test_console_owner_business.py`
+    - `pytest -q tests/test_console_consultant_verification_api.py tests/test_console_owner_business.py tests/test_console_knowledge_preflight.py tests/test_knowledge_validation.py tests/test_knowledge_registry_sync_backfill.py -k 'consultant_verification or knowledge'`
+    - `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --workers 1 --grep "knowledge saved draft provenance|knowledge structured draft preservation|knowledge remediation|knowledge lossy rewrite"`
+    - `SESSION_AGENT=a921 ./scripts/session_check.sh`
+- next:
+  - Decide whether the remaining deferred debt on `UX-44` needs a dedicated follow-up for true merge-patch authoring beyond the current preservation guard.
+  - If product wants even stricter closure, widen the guarded-path envelope beyond current `guest_policy` + `policy.*` objects only after domain review confirms those migrations are always invalid.
+- last_updated: 2026-03-14T20:32:00+05:00
