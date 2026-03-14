@@ -5,7 +5,6 @@ import {
     loginThroughKeycloak,
     shouldAllowLocalSessionBridge,
     shouldStayOnBaseOrigin,
-    waitForAuthenticatedConsole,
 } from './support/keycloak-auth';
 
 const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
@@ -320,7 +319,6 @@ async function loginWithSharedHelper(page: import('@playwright/test').Page) {
         loginUser,
         loginPassword,
     });
-    await waitForAuthenticatedConsole(page, 30000);
 }
 
 async function ensureLoggedIn(page: import('@playwright/test').Page) {

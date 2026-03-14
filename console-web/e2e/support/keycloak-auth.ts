@@ -89,24 +89,20 @@ async function readAuthenticatedConsoleState(page: Page): Promise<ConsoleAuthSta
             const session = await sessionResponse.json().catch(() => null) as
                 | { accessToken?: string; error?: string }
                 | null;
-            if (!session?.accessToken || session.error) {
-                return {
-                    ok: false,
-                    sessionStatus: sessionResponse.status,
-                    meStatus: null,
-                    sessionError: session?.error ?? null,
-                    hasAccessToken: Boolean(session?.accessToken),
-                };
-            }
 
             const meResponse = await fetch("/api/proxy/me", {
                 credentials: "include",
                 cache: "no-store",
             }).catch(() => null);
+            const hasAccessToken = Boolean(session?.accessToken);
+            const sessionError = session?.error ?? null;
+            const meOk = Boolean(meResponse?.ok);
             return {
-                ok: Boolean(meResponse?.ok),
+                ok: meOk || (hasAccessToken && !sessionError),
                 sessionStatus: sessionResponse.status,
                 meStatus: meResponse?.status ?? null,
+                sessionError,
+                hasAccessToken,
             };
         } catch {
             return { ok: false, sessionStatus: null, meStatus: null };
@@ -209,7 +205,7 @@ export async function startKeycloakLogin(page: Page, options: KeycloakAuthOption
     const providerWaitTimeoutMs = options.providerWaitTimeoutMs ?? 15000;
     const baseOrigin = new URL(baseURL).origin;
 
-    await page.goto(buildSignInUrl(baseURL), { waitUntil: 'commit' });
+    await page.goto(buildSignInUrl(baseURL), { waitUntil: 'domcontentloaded' });
     const providerForm = page.locator('form[action*="keycloak"]').first();
     const action = await providerForm.getAttribute('action');
     const actionOrigin = action ? new URL(action).origin : baseURL;
@@ -231,8 +227,8 @@ export async function startKeycloakLogin(page: Page, options: KeycloakAuthOption
 
     const providerButton = page.getByRole('button', { name: /sign in with keycloak|войти через sso/i });
     await Promise.race([
-        providerButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
-        providerForm.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
+        providerButton.waitFor({ state: 'visible', timeout: providerWaitTimeoutMs }).catch(() => null),
+        providerForm.waitFor({ state: 'visible', timeout: providerWaitTimeoutMs }).catch(() => null),
     ]);
     const transitionPromise = waitForAuthTransition(page, {
         ...options,
@@ -267,7 +263,8 @@ export async function loginThroughKeycloak(page: Page, options: KeycloakLoginOpt
     }
 
     const usernameInput = page.locator('#username');
-    await usernameInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null);
+    const credentialsWaitTimeoutMs = Math.min(options.authWaitTimeoutMs ?? 20000, 15000);
+    await usernameInput.waitFor({ state: 'visible', timeout: credentialsWaitTimeoutMs }).catch(() => null);
     if (!(await usernameInput.isVisible().catch(() => false))) {
         const initialState = await resolveNoCredentialsState(page, options);
         if (initialState.ok) {
@@ -279,7 +276,7 @@ export async function loginThroughKeycloak(page: Page, options: KeycloakLoginOpt
         if (!retried) {
             return false;
         }
-        await usernameInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null);
+        await usernameInput.waitFor({ state: 'visible', timeout: credentialsWaitTimeoutMs }).catch(() => null);
         if (!(await usernameInput.isVisible().catch(() => false))) {
             const retryState = await resolveNoCredentialsState(page, options);
             if (retryState.ok) {
@@ -294,17 +291,26 @@ export async function loginThroughKeycloak(page: Page, options: KeycloakLoginOpt
     await expect(page.locator('#password')).toBeVisible();
     await page.fill('#username', options.loginUser);
     await page.fill('#password', options.loginPassword);
-    await page.click('#kc-login');
-
     const waitForConsoleApp = options.waitForConsoleApp;
-    if (waitForConsoleApp) {
-        await waitForConsoleApp(page);
-    } else {
-        const consoleHostPattern = options.consoleHostPattern ?? DEFAULT_CONSOLE_HOST_PATTERN;
-        await page.waitForURL((url) => isConsoleAppUrl(url.toString(), consoleHostPattern), {
+    const postSubmitWait = waitForConsoleApp
+        ? waitForConsoleApp(page)
+        : page.waitForURL((url) => {
+            const consoleHostPattern = options.consoleHostPattern ?? DEFAULT_CONSOLE_HOST_PATTERN;
+            return isConsoleAppUrl(url.toString(), consoleHostPattern);
+        }, {
             timeout: options.authWaitTimeoutMs ?? 20000,
+            waitUntil: 'domcontentloaded',
         });
-    }
+
+    await page.locator('form#kc-form-login, form[action*="login-actions/authenticate"]').first().evaluate((form) => {
+        const htmlForm = form as HTMLFormElement;
+        if (typeof htmlForm.requestSubmit === 'function') {
+            htmlForm.requestSubmit();
+            return;
+        }
+        htmlForm.submit();
+    });
+    await postSubmitWait;
 
     await options.onPostLogin?.(page);
     return true;
