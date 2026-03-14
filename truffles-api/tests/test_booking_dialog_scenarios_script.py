@@ -3191,7 +3191,16 @@ def test_sanitize_llm_turns_normalizes_slot_compare_days_availability_to_request
     )
 
 
-def test_sanitize_llm_turns_normalizes_slot_compare_partial_date_availability_to_slot_constraint():
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Есть ли у вас время на завтра?",
+        "У вас есть время на завтра?",
+    ],
+)
+def test_sanitize_llm_turns_normalizes_slot_compare_partial_date_availability_to_slot_constraint(
+    text,
+):
     ctx = _module._build_context(random.Random(168))
     turns = [
         {
@@ -3202,7 +3211,7 @@ def test_sanitize_llm_turns_normalizes_slot_compare_partial_date_availability_to
         },
         {
             "kind": "text",
-            "text": "Есть ли у вас время на завтра?",
+            "text": text,
             "tags": ["slot_compare"],
             "expect": {
                 "reply_type": "time",
@@ -3249,7 +3258,16 @@ def test_sanitize_llm_turns_normalizes_slot_compare_partial_date_availability_to
     )
 
 
-def test_sanitize_llm_turns_keeps_slot_compare_partial_date_with_explicit_alternatives():
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Есть ли у вас время на завтра утром или вечером?",
+        "У вас есть время на завтра утром или вечером?",
+    ],
+)
+def test_sanitize_llm_turns_keeps_slot_compare_partial_date_with_explicit_alternatives(
+    text,
+):
     ctx = _module._build_context(random.Random(169))
     turns = [
         {
@@ -3260,7 +3278,7 @@ def test_sanitize_llm_turns_keeps_slot_compare_partial_date_with_explicit_altern
         },
         {
             "kind": "text",
-            "text": "Есть ли у вас время на завтра утром или вечером?",
+            "text": text,
             "tags": ["slot_compare"],
             "expect": {
                 "reply_type": "time",
@@ -3930,7 +3948,16 @@ def test_repair_post_coverage_orphan_pending_question_turns_normalizes_slot_comp
     )
 
 
-def test_repair_post_coverage_orphan_pending_question_turns_normalizes_slot_compare_partial_date_availability():
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Есть ли у вас время на завтра?",
+        "У вас есть время на завтра?",
+    ],
+)
+def test_repair_post_coverage_orphan_pending_question_turns_normalizes_slot_compare_partial_date_availability(
+    text,
+):
     dialogs = [
         {
             "dialog_id": 1,
@@ -3943,7 +3970,7 @@ def test_repair_post_coverage_orphan_pending_question_turns_normalizes_slot_comp
                 },
                 {
                     "kind": "text",
-                    "text": "Есть ли у вас время на завтра?",
+                    "text": text,
                     "tags": ["slot_compare"],
                     "expect": {
                         "reply_type": "time",
@@ -3992,7 +4019,16 @@ def test_repair_post_coverage_orphan_pending_question_turns_normalizes_slot_comp
     )
 
 
-def test_repair_post_coverage_orphan_pending_question_turns_keeps_slot_compare_partial_date_with_explicit_alternatives():
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Есть ли у вас время на завтра утром или вечером?",
+        "У вас есть время на завтра утром или вечером?",
+    ],
+)
+def test_repair_post_coverage_orphan_pending_question_turns_keeps_slot_compare_partial_date_with_explicit_alternatives(
+    text,
+):
     dialogs = [
         {
             "dialog_id": 1,
@@ -4005,7 +4041,7 @@ def test_repair_post_coverage_orphan_pending_question_turns_keeps_slot_compare_p
                 },
                 {
                     "kind": "text",
-                    "text": "Есть ли у вас время на завтра утром или вечером?",
+                    "text": text,
                     "tags": ["slot_compare"],
                     "expect": {
                         "reply_type": "time",

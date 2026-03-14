@@ -335,6 +335,9 @@ from app.services.ai_service import (
     transcribe_audio_with_fallback,
 )
 from app.services.booking_signal_service import (
+    extract_relative_date_token as _extract_relative_date_token,
+)
+from app.services.booking_signal_service import (
     has_daypart_stem as _has_daypart_stem,
 )
 from app.services.booking_signal_service import (
@@ -959,7 +962,7 @@ def _is_declarative_partial_date_slot_constraint_candidate(
     if _is_datetime_grounded_for_prompt(candidate_value, client_slug=client_slug):
         return False
     normalized_message = normalize_for_matching(message_text)
-    if not normalized_message or "выходн" not in normalized_message:
+    if not normalized_message or _extract_relative_date_token(message_text) != WEEKEND_RELATIVE_DAY_TOKEN:
         return False
     extracted_value = _extract_datetime(message_text, client_slug=client_slug)
     if not isinstance(extracted_value, str) or not extracted_value.strip():
@@ -3207,6 +3210,15 @@ def _run_class_router_stage(
 # Legacy webhook orchestrator + helpers moved from _legacy.py.
 
 logger = get_logger("webhook")
+BOOK_SLOT_TOOL_ACTION = "calendar.book_slot"
+DEFAULT_MANAGER_REQUEST_MESSAGE = "Клиент запросил менеджера."
+DEFAULT_BOOKING_CLARIFY_MESSAGE = "Клиент ожидает уточнение по записи."
+WEEKEND_RELATIVE_DAY_TOKEN = "в субботу"
+_CARRYOVER_CAPACITY_LEAD_PREFIX = "скольк"
+_CARRYOVER_CAPACITY_TOKENS = ("мест",)
+_KAZAKH_LANGUAGE_HINT_TOKENS = ("қазақша", "казах", "қазақ", "қазак")
+_RUSSIAN_LANGUAGE_HINT_TOKENS = ("по-русски", "русск")
+_MEMORY_CONSENT_REPLY_TOKENS = ("ответьте", "да", "нет")
 _BRANCH_EXPORTS = (
     BRANCH_CONTEXT_KEY,
     BRANCH_SELECTION_KEY,
@@ -3454,6 +3466,24 @@ _OBSERVABILITY_REASONS_PROTECTED = {
     "expected_reply_deferred",
     "none",
 }
+
+
+def _contains_any_text_token(text: str | None, tokens: tuple[str, ...]) -> bool:
+    if not isinstance(text, str) or not text:
+        return False
+    return any(token in text for token in tokens)
+
+
+def _contains_all_text_tokens(text: str | None, tokens: tuple[str, ...]) -> bool:
+    if not isinstance(text, str) or not text:
+        return False
+    return all(token in text for token in tokens)
+
+
+def _pad_surface_token(value: str | None) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    return " ".join(("", value, ""))
 
 
 def _set_policy_core_tool_observability(message: Message | None) -> None:
@@ -6663,7 +6693,7 @@ def _should_recover_active_name_specialist_followup(
         return False
     if expected_reply_type != EXPECTED_REPLY_NAME:
         return False
-    if normalized_tool_action != "calendar.book_slot":
+    if normalized_tool_action != BOOK_SLOT_TOOL_ACTION:
         return False
     if normalized_collect_slot not in {None, "name"}:
         return False
@@ -7058,7 +7088,7 @@ def _resolve_specialist_name_hint_with_trace(
                 )
                 .all()
             )
-            padded_message = f" {normalized_message} "
+            padded_message = _pad_surface_token(normalized_message)
             for specialist in specialists:
                 specialist_name = getattr(specialist, "name", None)
                 if not isinstance(specialist_name, str) or not specialist_name.strip():
@@ -7066,7 +7096,7 @@ def _resolve_specialist_name_hint_with_trace(
                 normalized_specialist_name = normalize_for_matching(specialist_name)
                 if not normalized_specialist_name:
                     continue
-                if f" {normalized_specialist_name} " not in padded_message:
+                if _pad_surface_token(normalized_specialist_name) not in padded_message:
                     specialist_name_tokens = [
                         token
                         for token in normalized_specialist_name.split()
@@ -7419,7 +7449,10 @@ def _looks_like_carryover_followup(message_text: str | None) -> bool:
     followup_phrases = get_system_lexicon_list("carryover_followup_phrases")
     if followup_phrases and _contains_any(normalized, followup_phrases):
         return True
-    if tokens[0].startswith("скольк") and "мест" in normalized:
+    if (
+        tokens[0].startswith(_CARRYOVER_CAPACITY_LEAD_PREFIX)
+        and _contains_any_text_token(normalized, _CARRYOVER_CAPACITY_TOKENS)
+    ):
         return True
     if len(tokens) <= SESSION_MEMORY_SHORT_TOKENS:
         pricing_groups = INFO_ANCHOR_GROUPS.get("pricing", [])
@@ -10198,9 +10231,9 @@ async def _handle_webhook_payload(
         normalized = _normalize_text(text)
         if not normalized:
             return None
-        if any(token in normalized for token in ("қазақша", "казах", "қазақ", "қазак")):
+        if _contains_any_text_token(normalized, _KAZAKH_LANGUAGE_HINT_TOKENS):
             return "kz"
-        if any(token in normalized for token in ("по-русски", "русск")):
+        if _contains_any_text_token(normalized, _RUSSIAN_LANGUAGE_HINT_TOKENS):
             return "ru"
         for char in ("ә", "ғ", "қ", "ң", "ө", "ұ", "ү", "һ", "і"):
             if char in normalized:
@@ -10611,7 +10644,7 @@ async def _handle_webhook_payload(
         if isinstance(booking_state, dict) and booking_state.get("active"):
             return False
         normalized = _normalize_text(response_text)
-        if "ответьте" in normalized and "да" in normalized and "нет" in normalized:
+        if _contains_all_text_tokens(normalized, _MEMORY_CONSENT_REPLY_TOKENS):
             return False
         return True
 
@@ -15039,7 +15072,7 @@ async def _handle_webhook_payload(
             "timeout_degrade" if policy_core_timeout_degrade else "contract_validation_failure"
         )
         if explicit_manager_request_signal:
-            handover_message = message_text or "Клиент запросил менеджера."
+            handover_message = message_text or DEFAULT_MANAGER_REQUEST_MESSAGE
             _, reused, telegram_sent = _reuse_active_handover(
                 db=db,
                 conversation=conversation,
@@ -16212,7 +16245,7 @@ async def _handle_webhook_payload(
                     db=db,
                     conversation=conversation,
                     user=user,
-                    message_text=message_text or "Клиент ожидает уточнение по записи.",
+                    message_text=message_text or DEFAULT_BOOKING_CLARIFY_MESSAGE,
                     saved_message=saved_message,
                     source="policy_core_guard",
                     allow_handover=routing.get("allow_handover_create", False),
@@ -21928,7 +21961,7 @@ async def _handle_webhook_payload(
                     conversation_id=conversation.id,
                     bot_response=bot_response,
                 )
-            handover_message = message_text or "Клиент запросил менеджера."
+            handover_message = message_text or DEFAULT_MANAGER_REQUEST_MESSAGE
             _, reused, telegram_sent = _reuse_active_handover(
                 db=db,
                 conversation=conversation,

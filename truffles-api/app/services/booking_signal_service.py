@@ -207,7 +207,8 @@ def looks_like_time_preference_statement(
     preference_markers = get_system_lexicon_list("daypart_preference_markers")
     if not preference_markers or not any(marker in normalized for marker in preference_markers):
         return False
-    return "по времени" in normalized
+    context_tokens = get_system_lexicon_list("hours_followup_phrases")
+    return bool(context_tokens and any(token in normalized for token in context_tokens))
 
 
 def extract_time_token(text: str | None) -> str | None:

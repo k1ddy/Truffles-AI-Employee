@@ -8131,3 +8131,48 @@ Evidence:
 - `truffles-api/tests/test_message_endpoint.py`
 - `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o197-invalid-schema-booking-request-unique-first-name-catalog-match-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o198-post-p1.6o197-proof-lane-a1.md`
+
+### 2026-03-14 — `P1.6o198` moves reopened `M19` off first fail and surfaces a Track A lexical-variant generator drift; `P1.6o199` is the next admissible deterministic block
+
+- Completed `P1.6o198` proof lane:
+  - fresh guarded `dev L2` rerun `p1.6o198-l2-dev-20260314-a1-r1` strict-audited with `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, `oracle_arbitration.winner=contract`, and `judge_alignment=conflicted`;
+  - reopened `M19` moved off first fail: the run no longer stops on `А можно записаться к Айгерим?` after the unique first-name branch-catalog recovery closure.
+- Surfaced first fail for `P1.6o198`:
+  - `dialog 1 / turn 3 / "У вас есть время на завтра?"`;
+  - runtime canonically emits `action=booking_prompt`, `source=policy_core_guard`, `expected_reply_reason=policy_core_timeout_owner_boundary`, `policy_core_guard_recovery=timeout_owner_boundary_collect`, `pending_question_act=slot_constraint`, `pending_question_target=time`, `pending_question_interaction=slot_constraint`, and grounded `answer_slot=datetime`, `answer_value=завтра`;
+  - generated `scenarios.json` still tags the turn as `slot_compare` and requires stale `pending_question_act=slot_compare` plus matching `pending_question_interaction slot_compare/time` trace evidence;
+  - strict audit keeps runtime evidence authoritative, so this is a Track A generator/oracle lexical-variant drift, not another runtime family.
+- Published `P1.6o199` as the next admissible continuation:
+  - bounded scenario-governance closure for the surfaced `у вас есть время ...` partial-date availability variant;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o199`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o198-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o198-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o198-l2-dev-20260314-a1-r1/scenarios.json`
+- `/tmp/booking_quality/p1.6o198-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o198-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o198-l2-dev-20260314-a1-r1/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o198-post-p1.6o197-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o199-partial-date-availability-slot-constraint-lexical-variant-a1.md`
+
+### 2026-03-14 — `P1.6o199` broadens partial-date availability normalization to `есть время` lexical variants; `P1.6o200` is the next admissible proof lane
+
+- Completed `P1.6o199` on deterministic contour:
+  - `scripts/booking_dialog_scenarios.py` now recognizes bounded `есть время` occupancy phrasing in the existing partial-date availability normalization path and no longer treats that surfaced wording as a pure fill without availability query;
+  - both sanitize and post-coverage repair now canonicalize surfaced variants like `У вас есть время на завтра?` to `slot_constraint(time)` under active `time` collect while preserving explicit-alternative compare turns like `У вас есть время на завтра утром или вечером?` as `slot_compare`.
+- Deterministic validation for `P1.6o199`:
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "slot_compare_partial_date_availability"` -> `4 passed, 124 deselected`
+  - `python3 -m py_compile scripts/booking_dialog_scenarios.py truffles-api/tests/test_booking_dialog_scenarios_script.py`
+  - `pytest -q truffles-api/tests/test_booking_dialog_scenarios_script.py -k "partial_date and slot_compare or slot_constraint"` -> `16 passed, 112 deselected`
+  - `git diff --check`
+  - `SESSION_AGENT=a1 scripts/session_check.sh`
+- Published `P1.6o200` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o199`;
+  - no new generator/runtime patch is admissible before that rerun is strict-audited and classified.
+
+Evidence:
+- `scripts/booking_dialog_scenarios.py`
+- `truffles-api/tests/test_booking_dialog_scenarios_script.py`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o199-partial-date-availability-slot-constraint-lexical-variant-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o200-post-p1.6o199-proof-lane-a1.md`

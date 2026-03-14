@@ -726,6 +726,7 @@ AVAILABILITY_QUERY_PATTERNS = [
 ]
 TIME_OCCUPANCY_QUERY_PATTERNS = [
     re.compile(r"\bзанят\w*\b", re.IGNORECASE),
+    re.compile(r"\b(?:у\s+вас\s+)?есть\s+врем\w*\b", re.IGNORECASE),
 ]
 DEICTIC_TIME_REFERENCE_PATTERNS = [
     re.compile(r"\b(?:в|на)\s+это\s+время\b", re.IGNORECASE),
@@ -2421,7 +2422,10 @@ def _looks_like_partial_date_fill_without_availability_query(text: str | None) -
     has_partial_date = any(pattern.search(text) for pattern in PARTIAL_DATE_FILL_PATTERNS)
     if not has_partial_date:
         return False
-    return not any(pattern.search(text) for pattern in AVAILABILITY_QUERY_PATTERNS)
+    return not any(
+        pattern.search(text)
+        for pattern in (AVAILABILITY_QUERY_PATTERNS + TIME_OCCUPANCY_QUERY_PATTERNS)
+    )
 
 
 def _looks_like_grounded_time_availability_probe(text: str | None) -> bool:
