@@ -220,8 +220,10 @@ def _simulation_allowlist() -> set[str]:
     return {item.strip() for item in raw.split(",") if item.strip()}
 
 
-def _is_simulation_allowed(metadata) -> bool:
+def _is_simulation_allowed(metadata, *, allow_internal_source: bool = False) -> bool:
     if _is_env_enabled(os.environ.get("TEST_MODE"), default=False):
+        return True
+    if allow_internal_source:
         return True
     if metadata is None:
         return False
@@ -485,14 +487,22 @@ def _get_simulation_context(value) -> dict | None:
     return payload
 
 
-def apply_simulation_context(conversation: Conversation, metadata) -> dict | None:
+def apply_simulation_context(
+    conversation: Conversation,
+    metadata,
+    *,
+    allow_internal_source: bool = False,
+) -> dict | None:
     context = conversation.context if isinstance(conversation.context, dict) else {}
     sim_meta = _extract_simulation_meta(metadata)
     if not sim_meta:
-        if context.get(SIMULATION_CONTEXT_KEY) and not _is_simulation_allowed(metadata):
+        if context.get(SIMULATION_CONTEXT_KEY) and not _is_simulation_allowed(
+            metadata,
+            allow_internal_source=allow_internal_source,
+        ):
             conversation.context = _clear_simulation_context(context)
         return None
-    if not _is_simulation_allowed(metadata):
+    if not _is_simulation_allowed(metadata, allow_internal_source=allow_internal_source):
         if context.get(SIMULATION_CONTEXT_KEY):
             conversation.context = _clear_simulation_context(context)
         logger.warning(

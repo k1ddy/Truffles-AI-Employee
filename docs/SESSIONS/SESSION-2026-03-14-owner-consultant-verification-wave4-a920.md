@@ -1,0 +1,30 @@
+# SESSION 2026-03-14-owner-consultant-verification-wave4-a920 — Session 2026-03-14-owner-consultant-verification-wave4-a920
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave4-a920.md
+- block_id: CONSOLE-OWNER-CONSULTANT-VERIFICATION-WAVE4-A920
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-13-owner-consultant-verification-program-a920@wave4
+- worktree: /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920
+- base_ref: origin/main
+- scope: Wave4 structured owner verification layer: scenario library, replay helpers, and session summary over the existing safe simulation workspace.
+- done:
+  - Added data-driven scenario catalog to consultant verification overview from onboarding blueprints, capabilities, and reference pack context.
+  - Added owner/admin replay helpers that always start a fresh simulation session and keep prior captured sessions immutable.
+  - Added owner-facing session summary with category counts and weak-turn replay controls.
+- next:
+  - Start Wave5 weak-spot capture and remediation loop on top of saved weak turns.
+- evidence:
+  - `cd truffles-api && pytest -q tests/test_console_consultant_verification_api.py -k 'scenario or replay or summary'` (`2 passed, 5 deselected`)
+  - `cd truffles-api && ruff check app/schemas/console.py app/services/console_consultant_verification.py tests/test_console_consultant_verification_api.py` (`pass`)
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd console-web && npm run generate:api` (`pass`)
+  - `cd console-web && npm run lint -- --file src/app/business/consultant-verification/page.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationScenarioLibrary.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationSessionSummaryPanel.tsx --file src/app/business/consultant-verification/_lib/presentation.ts --file src/lib/api-client.ts --file e2e/owner-admin-business.spec.ts` (`pass`)
+  - `cd console-web && npm run build` (`pass`)
+  - `cd console-web && npm run start -- --hostname 127.0.0.1 --port 3102` + `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --grep "consultant verification scenarios"` (`failed: Keycloak auth transition timeout in e2e/support/keycloak-auth.ts:55`)
+- last_updated: 2026-03-14T10:44:53+05:00

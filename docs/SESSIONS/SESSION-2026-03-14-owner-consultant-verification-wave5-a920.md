@@ -1,0 +1,27 @@
+# SESSION 2026-03-14-owner-consultant-verification-wave5-a920 — Session 2026-03-14-owner-consultant-verification-wave5-a920
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave5-a920.md
+- block_id: CONSOLE-OWNER-CONSULTANT-VERIFICATION-WAVE5-A920
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-13-owner-consultant-verification-program-a920@wave5
+- worktree: /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920
+- base_ref: origin/main
+- scope: Wave5 owner-detected weak spots: finding capture, failure-family clustering, remediation status loop, and linkage into knowledge/learning moderation surfaces.
+- done:
+  - Added persistent findings model, migration, schemas, and Console API for owner/admin consultant verification remediation state.
+  - Added owner-facing findings panel with status updates, repeat counts, and backlog/learning linkage.
+  - Clustered repeat weak answers into failure families and reopened fixed findings when the same family reappeared.
+- next:
+  - Start Wave6 live-vs-draft compare and make compare readiness part of publish safety.
+- evidence:
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/truffles-api && pytest -q tests/test_console_consultant_verification_api.py -k 'finding or scenario or summary'` (`7 passed, 5 deselected`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/truffles-api && ruff check app/models/__init__.py app/models/console_consultant_verification_finding.py app/schemas/console.py app/services/console_consultant_verification.py app/routers/console.py tests/test_console_consultant_verification_api.py` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/console-web && npm run lint -- --file src/app/business/consultant-verification/_components/ConsultantVerificationFindingsPanel.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx --file src/lib/api-client.ts` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/console-web && npm run build` (`pass`)
+- last_updated: 2026-03-14T11:37:50+05:00

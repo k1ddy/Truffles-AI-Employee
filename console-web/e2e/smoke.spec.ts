@@ -3,6 +3,7 @@ import {
     buildSignInUrl,
     isAuthGateVisible,
     loginThroughKeycloak,
+    shouldAllowLocalSessionBridge,
     shouldStayOnBaseOrigin,
 } from './support/keycloak-auth';
 
@@ -119,22 +120,6 @@ async function waitForApiOk(page: import('@playwright/test').Page, path: string,
     );
 }
 
-async function waitForCasesWithStatus(page: import('@playwright/test').Page, status: string, timeout = 10000) {
-    return page.waitForResponse(
-        (response) => {
-            if (!matchesPath(response.url(), ['/console/v1/cases', '/api/proxy/cases'])) return false;
-            if (response.status() !== 200) return false;
-            try {
-                const { searchParams } = new URL(response.url());
-                return searchParams.get('status') === status;
-            } catch {
-                return false;
-            }
-        },
-        { timeout },
-    );
-}
-
 async function expectRowsOrEmpty(
     page: import('@playwright/test').Page,
     rowTestId: string,
@@ -171,6 +156,33 @@ async function waitForCasesState(
         return 'empty';
     }
     return 'error';
+}
+
+async function waitForInboxSurfaceReady(
+    page: import('@playwright/test').Page,
+    timeout = 15000,
+) {
+    const filters = page.getByTestId('cases-filters');
+    const secondaryPanelToggle = page.getByTestId('cases-secondary-panel-toggle');
+    const refresh = page.getByTestId('cases-refresh');
+    const error = page.getByTestId('cases-error');
+    await expect
+        .poll(
+            async () => {
+                if (await filters.isVisible().catch(() => false)) return 'filters';
+                if (await secondaryPanelToggle.isVisible().catch(() => false)) return 'panels';
+                if (await refresh.isVisible().catch(() => false)) return 'refresh';
+                if (await error.isVisible().catch(() => false)) return 'error';
+                return 'pending';
+            },
+            { timeout }
+        )
+        .not.toBe('pending');
+
+    if (await error.isVisible().catch(() => false)) {
+        return 'error';
+    }
+    return 'ready';
 }
 
 async function selectOptionIfNeeded(
@@ -293,6 +305,7 @@ function keycloakAuthOptions() {
         consoleHostPattern,
         keycloakHostPattern,
         stayOnBaseOrigin,
+        allowLocalSessionBridge: shouldAllowLocalSessionBridge(baseURL),
         authWaitTimeoutMs: 15000,
         onResolvedOrigin: (origin: string) => {
             resolvedBaseURL = origin;
@@ -529,7 +542,7 @@ async function openInbox(page: import('@playwright/test').Page) {
     }
     await expect(page.getByTestId('cases-title')).toBeVisible({ timeout: 20000 });
     for (let attempt = 0; attempt < 3; attempt += 1) {
-        const state = await waitForCasesState(page);
+        const state = await waitForInboxSurfaceReady(page);
         if (state !== 'error') {
             return;
         }
@@ -805,24 +818,34 @@ test.describe('Inbox Features', () => {
 
     test('should display filter controls @smoke', async ({ page }) => {
         await expect(page.getByTestId('cases-filters')).toBeVisible();
-        await expect(page.getByTestId('cases-filter-status')).toBeVisible();
-        await expect(page.getByTestId('cases-filter-sort')).toBeVisible();
-        await expect(page.getByTestId('cases-filter-assigned')).toBeVisible();
+        await expect(page.getByTestId('cases-mode-scopes')).toBeVisible();
+        await expect(page.getByTestId('cases-mode-scope-open')).toBeVisible();
+        await expect(page.getByTestId('cases-mode-scope-resolved')).toBeVisible();
+        await expect(page.getByTestId('cases-mode-scope-all')).toBeVisible();
+        await expect(page.getByTestId('cases-filter-owner-scope')).toBeVisible();
         await expect(page.getByTestId('cases-refresh')).toBeVisible();
+        await expect(page.getByTestId('cases-secondary-panel-toggle')).toBeVisible();
+        await page.getByTestId('cases-secondary-panel-toggle').click();
+        await expect(page.getByTestId('cases-secondary-panel')).toBeVisible();
+        await page.getByTestId('cases-secondary-tab-filters').click();
+        const advancedFilters = page.getByTestId('cases-filters-advanced');
+        if (!(await advancedFilters.isVisible().catch(() => false))) {
+            await page.getByTestId('cases-filter-advanced-toggle').click();
+        }
+        await expect(advancedFilters).toBeVisible();
+        await expect(page.getByTestId('cases-filter-sort-select')).toBeVisible();
     });
 
     test('should filter by status @smoke', async ({ page }) => {
-        const waitForPending = waitForCasesWithStatus(page, 'pending');
-        await page.getByTestId('cases-filter-status').selectOption('pending');
-        await waitForPending;
+        await page.getByTestId('cases-mode-scope-resolved').click();
+        await expect(page.getByTestId('cases-history-hint')).toBeVisible();
         await expect(page.getByTestId('cases-table')).toBeVisible();
         await expectRowsOrEmpty(page, 'cases-row', 'cases-empty');
     });
 
     test('should keep filters after opening case @smoke', async ({ page }) => {
-        const waitForPending = waitForCasesWithStatus(page, 'pending');
-        await page.getByTestId('cases-filter-status').selectOption('pending');
-        await waitForPending;
+        await page.getByTestId('cases-mode-scope-resolved').click();
+        await expect(page.getByTestId('cases-history-hint')).toBeVisible();
         await expectRowsOrEmpty(page, 'cases-row', 'cases-empty');
 
         const emptyState = page.getByTestId('cases-empty');
@@ -833,7 +856,7 @@ test.describe('Inbox Features', () => {
 
         await page.getByTestId('cases-row').first().click();
         await expect(page).toHaveURL(/\/cases\/[a-f0-9-]+/);
-        await expect(page.getByTestId('cases-filter-status')).toHaveValue('pending');
+        await expect(page.getByTestId('cases-history-hint')).toBeVisible();
         await expect(page.getByTestId('cases-workspace-persistence')).toBeVisible();
     });
 

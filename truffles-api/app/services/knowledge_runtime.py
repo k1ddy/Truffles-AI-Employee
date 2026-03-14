@@ -22,6 +22,7 @@ class RuntimeTruth:
 
 
 _RUNTIME_TRUTH: ContextVar[RuntimeTruth | None] = ContextVar("runtime_truth", default=None)
+_RUNTIME_TRUTH_OVERRIDE: ContextVar[RuntimeTruth | None] = ContextVar("runtime_truth_override", default=None)
 
 
 def _normalize_client_slug(client_slug: str | None) -> str | None:
@@ -65,6 +66,14 @@ def get_runtime_truth() -> RuntimeTruth | None:
     return _RUNTIME_TRUTH.get()
 
 
+def set_runtime_truth_override(runtime_truth: RuntimeTruth | None) -> None:
+    _RUNTIME_TRUTH_OVERRIDE.set(runtime_truth)
+
+
+def get_runtime_truth_override() -> RuntimeTruth | None:
+    return _RUNTIME_TRUTH_OVERRIDE.get()
+
+
 def build_runtime_truth(
     db,
     *,
@@ -73,6 +82,11 @@ def build_runtime_truth(
     branch_id: UUID | None,
     allow_fallback: bool = False,
 ) -> RuntimeTruth:
+    override_truth = get_runtime_truth_override()
+    if override_truth is not None:
+        if branch_id is None or override_truth.branch_id is None or override_truth.branch_id == branch_id:
+            return override_truth
+
     normalized_slug = _normalize_client_slug(client_slug)
     if not branch_id:
         return RuntimeTruth(
@@ -134,10 +148,56 @@ def build_runtime_truth(
     )
 
 
+def build_runtime_truth_from_payload(
+    *,
+    payload_json: dict[str, Any] | None,
+    client_slug: str | None,
+    branch_id: UUID | None,
+    source: str,
+    version_id: str | None = None,
+    allow_fallback: bool = False,
+) -> RuntimeTruth:
+    normalized_slug = _normalize_client_slug(client_slug)
+    if not isinstance(payload_json, dict):
+        return RuntimeTruth(
+            truth={},
+            client_slug=normalized_slug,
+            branch_id=branch_id,
+            source="payload_missing",
+            version_id=version_id,
+            allow_fallback=allow_fallback,
+        )
+
+    compiled = extract_compiled_artifacts(payload_json, compile_if_missing=True)
+    effective_pack = compiled.get("effective_pack") if isinstance(compiled, dict) else None
+    if not isinstance(effective_pack, dict):
+        return RuntimeTruth(
+            truth={},
+            client_slug=normalized_slug,
+            branch_id=branch_id,
+            source="effective_pack_missing",
+            version_id=version_id,
+            allow_fallback=allow_fallback,
+        )
+
+    return RuntimeTruth(
+        truth=effective_pack,
+        client_slug=normalized_slug,
+        branch_id=branch_id,
+        source=source,
+        version_id=version_id,
+        compiled_hash=compiled.get("hash") if isinstance(compiled, dict) else None,
+        allow_fallback=allow_fallback,
+    )
+
+
 __all__ = [
     "RuntimeTruth",
     "build_runtime_truth",
+    "build_runtime_truth_from_payload",
     "get_runtime_truth",
+    "get_runtime_truth_override",
     "set_runtime_truth",
+    "set_runtime_truth_override",
     "should_allow_truth_fallback",
 ]

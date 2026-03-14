@@ -579,6 +579,73 @@ export type BusinessSummaryAction = {
     href: string;
     severity: "critical" | "warn" | "info";
 };
+export type ConsultantVerificationReadinessCard = {
+    id: string;
+    title: string;
+    summary: string;
+    state: "ready" | "needs_attention" | "planned";
+    state_label: string;
+    evidence_label?: string | null;
+    href?: string | null;
+};
+export type ConsultantVerificationOverviewResponse = {
+    generated_at: string;
+    feature_enabled: boolean;
+    status: "ready" | "needs_attention" | "not_enabled";
+    status_label: string;
+    summary: string;
+    next_wave_summary: string;
+    knowledge_last_published_at?: string | null;
+    knowledge_stale_hours?: number | null;
+    readiness_cards: ConsultantVerificationReadinessCard[];
+    stress_test_examples: string[];
+    scenario_catalog: ConsultantVerificationScenarioItem[];
+    actions: BusinessSummaryAction[];
+};
+export type ConsultantVerificationSourceMode = "live" | "draft";
+export type ConsultantVerificationChallengeMode = "as_client" | "stress";
+export type ConsultantVerificationOutcome = "fact" | "collect" | "handoff";
+export type ConsultantVerificationBusinessVerdict =
+    | "answered"
+    | "needs_clarification"
+    | "handoff"
+    | "gap_detected";
+export type ConsultantVerificationScenarioItem =
+    components["schemas"]["ConsoleConsultantVerificationScenarioItem"];
+export type ConsultantVerificationSessionSummary =
+    components["schemas"]["ConsoleConsultantVerificationSessionSummary"];
+export type ConsultantVerificationSessionWeakTurn =
+    components["schemas"]["ConsoleConsultantVerificationSessionWeakTurn"];
+export type ConsultantVerificationFindingRecord =
+    components["schemas"]["ConsoleConsultantVerificationFindingRecord"];
+export type ConsultantVerificationFindingListResponse =
+    components["schemas"]["ConsoleConsultantVerificationFindingListResponse"];
+export type ConsultantVerificationCompareCaseRecord =
+    components["schemas"]["ConsoleConsultantVerificationCompareCaseRecord"];
+export type ConsultantVerificationCompareReadiness =
+    components["schemas"]["ConsoleConsultantVerificationCompareReadiness"];
+export type ConsultantVerificationCompareResponse =
+    components["schemas"]["ConsoleConsultantVerificationCompareResponse"];
+export type ConsultantVerificationReadinessResponse =
+    components["schemas"]["ConsoleConsultantVerificationReadinessResponse"];
+export type ConsultantVerificationSessionRecord =
+    components["schemas"]["ConsoleConsultantVerificationSessionRecord"];
+export type ConsultantVerificationTurnRecord =
+    components["schemas"]["ConsoleConsultantVerificationTurnRecord"];
+export type ConsultantVerificationSessionResponse =
+    components["schemas"]["ConsoleConsultantVerificationSessionResponse"];
+export type ConsultantVerificationSessionListResponse =
+    components["schemas"]["ConsoleConsultantVerificationSessionListResponse"];
+export type ConsultantVerificationSessionCreateRequest =
+    components["schemas"]["ConsoleConsultantVerificationSessionCreateRequest"];
+export type ConsultantVerificationMessageCreateRequest =
+    components["schemas"]["ConsoleConsultantVerificationMessageCreateRequest"];
+export type ConsultantVerificationFindingCreateRequest =
+    components["schemas"]["ConsoleConsultantVerificationFindingCreateRequest"];
+export type ConsultantVerificationFindingUpdateRequest =
+    components["schemas"]["ConsoleConsultantVerificationFindingUpdateRequest"];
+export type ConsultantVerificationCompareRequest =
+    components["schemas"]["ConsoleConsultantVerificationCompareRequest"];
 export type IncidentAction = {
     id: string;
     title: string;
@@ -860,6 +927,7 @@ export type KnowledgeValidationResponse = {
     errors?: string[];
     warnings?: string[];
     diff?: string | null;
+    draft_hash?: string | null;
 };
 export type KnowledgePublishResponse = {
     success?: boolean;
@@ -1374,6 +1442,49 @@ export const opsApi = {
 export const businessApi = {
     getSummary: () => apiClient.get<BusinessSummaryResponse>("/business/summary"),
     getIncidents: () => apiClient.get<IncidentListResponse>("/business/incidents"),
+    getConsultantVerificationOverview: () =>
+        apiClient.get<ConsultantVerificationOverviewResponse>("/business/consultant-verification/overview"),
+    listConsultantVerificationSessions: () =>
+        apiClient.get<ConsultantVerificationSessionListResponse>("/business/consultant-verification/sessions"),
+    createConsultantVerificationSession: (data: ConsultantVerificationSessionCreateRequest) =>
+        apiClient.post<ConsultantVerificationSessionResponse>("/business/consultant-verification/sessions", data),
+    getConsultantVerificationSession: (sessionId: string) =>
+        apiClient.get<ConsultantVerificationSessionResponse>(
+            `/business/consultant-verification/sessions/${sessionId}`,
+        ),
+    sendConsultantVerificationMessage: (
+        sessionId: string,
+        data: ConsultantVerificationMessageCreateRequest,
+    ) =>
+        apiClient.post<ConsultantVerificationSessionResponse>(
+            `/business/consultant-verification/sessions/${sessionId}/messages`,
+            data,
+        ),
+    listConsultantVerificationFindings: (params?: { status?: string; limit?: number }) =>
+        apiClient.get<ConsultantVerificationFindingListResponse>(
+            "/business/consultant-verification/findings",
+            { params },
+        ),
+    getConsultantVerificationReadiness: () =>
+        apiClient.get<ConsultantVerificationReadinessResponse>("/business/consultant-verification/readiness"),
+    runConsultantVerificationCompare: (data: ConsultantVerificationCompareRequest) =>
+        apiClient.post<ConsultantVerificationCompareResponse>(
+            "/business/consultant-verification/compare",
+            data,
+        ),
+    createConsultantVerificationFinding: (data: ConsultantVerificationFindingCreateRequest) =>
+        apiClient.post<ConsultantVerificationFindingRecord>(
+            "/business/consultant-verification/findings",
+            data,
+        ),
+    updateConsultantVerificationFinding: (
+        findingId: string,
+        data: ConsultantVerificationFindingUpdateRequest,
+    ) =>
+        apiClient.patch<ConsultantVerificationFindingRecord>(
+            `/business/consultant-verification/findings/${findingId}`,
+            data,
+        ),
     getSubscriptionSummary: () => apiClient.get<SubscriptionSummaryResponse>("/subscription/summary"),
     getDataTrustSummary: () => apiClient.get<DataTrustSummaryResponse>("/business/data-trust"),
     getTeamPerformanceSummary: () => apiClient.get<TeamPerformanceSummaryResponse>("/business/team-performance"),

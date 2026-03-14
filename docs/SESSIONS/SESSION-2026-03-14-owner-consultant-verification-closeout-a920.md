@@ -1,0 +1,51 @@
+# SESSION 2026-03-14-owner-consultant-verification-closeout-a920 — Session 2026-03-14-owner-consultant-verification-closeout-a920
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-closeout-a920.md
+- block_id: CONSOLE-OWNER-CONSULTANT-VERIFICATION-CLOSEOUT-A920
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-13-owner-consultant-verification-program-a920
+- worktree: /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920
+- base_ref: origin/main
+- scope: Closeout proof for owner/admin consultant verification: deterministic checks, UI proof, auth/e2e blocker triage, and explicit go/no-go status.
+- done:
+  - Reduced the local Playwright blocker from Keycloak transition failure to a real env mismatch by adding remote-session bridging for local origins in `console-web/e2e/support/keycloak-auth.ts` and allowing `platform_admin` in the owner consultant-verification lane.
+  - Brought up a local closeout stack instead of touching the canonical DB: cloned `chatbot` into `truffles-local-postgres-a920`, applied branch migrations `057/058`, enabled the rollout flag only in the clone, and ran `truffles-api-local-a920` against that clone so local `console-web` could hit the branch-only consultant-verification endpoints.
+  - Fixed the real runtime blockers in the simulation path: consultant-verification webhook payloads now keep tenancy-contract semantics (`source="system"` + `origin_source="console_consultant_verification"`), resolve `instanceId`, and preserve `origin_source` through webhook preflight so simulation mode stays enabled without real outbound side effects.
+  - Fixed the closeout Playwright lane itself by marking the expensive real-runtime consultant-verification test as slow and by replacing the invalid strict locator union in the summary assertion.
+  - Re-ran the full local proof bundle: `npm run generate:api`, frontend build, and the targeted owner/admin compare lane are green against the local branch API.
+  - Added an optional screenshot capture hook to `console-web/e2e/owner-admin-business.spec.ts`, then captured closeout screenshots from the real owner/admin compare flow at `390/1024/1280/1440` widths under `/tmp/consultant_verification_closeout_a920/`.
+  - Verified the remaining gap is release-only: one-client canary and post-merge monitoring cannot be truthfully completed until this branch is merged/deployed because the rollout flag and the new endpoints are currently proven only on the local clone DB + local branch API.
+- evidence:
+  - `console-web/e2e/support/keycloak-auth.ts`
+  - `console-web/e2e/owner-admin-business.spec.ts`
+  - `truffles-api/app/services/console_consultant_verification.py`
+  - `truffles-api/app/routers/webhook/http.py`
+  - `truffles-api/app/routers/webhook/decision.py`
+  - `truffles-api/app/schemas/webhook.py`
+  - `contracts/tenancy/tenant_context.v1.jsonschema`
+  - `truffles-api/tests/test_console_consultant_verification_api.py`
+  - `truffles-api/tests/test_branch_routing_instance.py`
+  - `truffles-api/tests/test_console_owner_business.py`
+  - `docs/CONSOLE_GUIDE.md`
+  - `docs/CONSOLE_AUDIT/UX_BACKLOG.md`
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/truffles-api && pytest -q tests/test_console_consultant_verification_api.py tests/test_console_owner_business.py tests/test_console_knowledge_preflight.py tests/test_state_service_simulation.py tests/test_branch_routing_instance.py` (`111 passed`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/console-web && npm run generate:api` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/console-web && npm run lint -- --file e2e/owner-admin-business.spec.ts` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/console-web && npm run build` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && NEXTAUTH_URL=http://127.0.0.1:3102 NEXT_PUBLIC_E2E_BYPASS_AUTH=1 NEXT_PUBLIC_API_URL=http://127.0.0.1:8001/console/v1 npm run dev -- --hostname 127.0.0.1 --port 3102` (`manual closeout server for screenshot lane`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/console-web && set -a && source /home/zhan/secrets/console-e2e.env && set +a && NEXT_PUBLIC_API_URL=http://127.0.0.1:8001/console/v1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 E2E_CONSULTANT_VERIFICATION_SCREENSHOT_DIR=/tmp/consultant_verification_closeout_a920 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --workers 1 --grep "consultant verification compare"` (`1 passed (56.2s)`)
+  - `/tmp/consultant_verification_closeout_a920/consultant-verification-390.png`
+  - `/tmp/consultant_verification_closeout_a920/consultant-verification-1024.png`
+  - `/tmp/consultant_verification_closeout_a920/consultant-verification-1280.png`
+  - `/tmp/consultant_verification_closeout_a920/consultant-verification-1440.png`
+  - `SESSION_AGENT=a920 scripts/session_check.sh` (`Session OK`)
+- next:
+  - Prepare PR handoff with the local proof bundle and an explicit release-only checklist: one-client canary, go/no-go decision, and 72h post-merge monitoring.
+- last_updated: 2026-03-14T13:18:50+05:00

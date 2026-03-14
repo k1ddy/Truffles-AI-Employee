@@ -87,6 +87,7 @@
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
 | `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
 | `truffles-api/app/services/console_owner_admin.py` | Owner/Admin business helpers extracted from `console.py` | Backend |
+| `truffles-api/app/services/console_consultant_verification.py` | Owner/Admin consultant verification overview + safe simulation session service | Backend |
 | `truffles-api/app/services/console_knowledge_preflight.py` | Knowledge publish preflight helpers (`draft_hash`, recent validate gate) | Backend |
 | `truffles-api/app/services/capabilities_runtime.py` | Runtime capabilities context (client_capabilities → decision/booking) | Backend |
 | `truffles-api/app/services/knowledge_runtime.py` | Runtime published pack truth (knowledge_versions → demo_salon resolver) | Backend |
@@ -105,6 +106,9 @@
 | `truffles-api/app/services/marketing/service.py` | Marketing Pro lifecycle/audience/preflight/execute/retry logic | Backend |
 | `truffles-api/app/models/alert_event.py` | DB model for alert events (analytics) | Backend |
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
+| `truffles-api/app/models/console_consultant_verification_finding.py` | DB model for owner/admin consultant verification findings and remediation state | Backend |
+| `truffles-api/app/models/console_consultant_verification_session.py` | DB model for owner/admin consultant verification sessions | Backend |
+| `truffles-api/app/models/console_consultant_verification_turn.py` | DB model for persisted owner/admin consultant verification transcript turns | Backend |
 | `truffles-api/app/models/console_macro.py` | DB model for Inbox macros (Console) | Backend |
 | `truffles-api/app/models/marketing_campaign.py` | Marketing campaign model (status/approval/preflight fields) | Backend |
 | `truffles-api/app/models/marketing_campaign_recipient.py` | Materialized audience snapshot per campaign | Backend |
@@ -135,6 +139,12 @@
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/src/app/insights/page.tsx` | Insights/Analytics page (read-only daily metrics) | Frontend |
 | `console-web/src/app/marketing/page.tsx` | Marketing Pro lifecycle UI (preview/approval/preflight/execute) | Frontend |
+| `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx` | Owner/Admin consultant verification interactive workspace (sessions, transcript, explainer) | Frontend |
+| `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationComparePanel.tsx` | Owner/Admin consultant verification live-vs-draft compare panel and readiness scorecard | Frontend |
+| `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationFindingsPanel.tsx` | Owner/Admin consultant verification findings list, status updates, and draft retest actions | Frontend |
+| `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationScenarioLibrary.tsx` | Owner/Admin consultant verification scenario catalog cards and quick-run actions | Frontend |
+| `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationSessionSummaryPanel.tsx` | Owner/Admin consultant verification session summary and replay controls | Frontend |
+| `console-web/src/app/business/consultant-verification/_lib/presentation.ts` | Owner-facing verdict/explanation presentation helpers for consultant verification | Frontend |
 | `console-web/src/components/TenantsScopedErrorSummary.tsx` | Scoped error summary для Tenants workspace зон | Frontend |
 | `console-web/src/components/TenantsSensitiveIdCell.tsx` | Mask/reveal/copy ячейка чувствительного `instance_id` с audit hook | Frontend |
 | `console-web/src/components/TenantsQuickCreatePanel.tsx` | Вынесенный quick-create блок Tenants (компания/клиент/филиал) с явными label-id для a11y | Frontend |
@@ -210,6 +220,20 @@
 | `docs/TASK_PACKAGES/TP-2026-03-08-inbox-calendar-ux-reconstruction-wave37-a1.md` | Wave37 Task Package for Calendar acceptance recovery after merged Wave36: focused booking entry, service-first time discovery, intuitive language, hard guardrails, and full operator proof | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave38-a1.md` | Wave38 Task Package for post-merge Calendar hardening: deterministic filters, natural phone input, booking edit/reschedule/cancel lifecycle, and full operator proof | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-09-inbox-calendar-ux-reconstruction-wave39-a1.md` | Wave39 Task Package for Calendar action-safety envelope: server-owned action contract, fail-closed lifecycle, explicit state machines, exhaustive proof, and post-merge replay | Brain/Architect |
+
+| `docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-program-a920.md` | Program Task Package for owner-facing consultant verification and trust-under-pressure surface in `Business` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave1-a920.md` | Wave1 Task Package for owner consultant verification entrypoint, IA foundation, and service-boundary contract | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave2-a920.md` | Wave2 Task Package for safe simulation session kernel and no-side-effect consultant verification API | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave3-a920.md` | Wave3 Task Package for owner-readable chat workspace, verdicts, and explanation panels | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave4-a920.md` | Wave4 Task Package for scenario library, stress presets, replay, and session summary | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave5-a920.md` | Wave5 Task Package for weak-spot capture, failure-family grouping, and remediation status loop | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave6-a920.md` | Wave6 Task Package for `live vs draft` compare, finding retest, and readiness gate | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-closeout-a920.md` | Closeout Task Package for deterministic proof, canary rollout, and post-merge monitoring of consultant verification | Brain/Architect |
+| `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave2-a920.md` | Session log for Wave2 safe simulation kernel implementation | Brain/Architect |
+| `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave3-a920.md` | Session log for Wave3 owner-readable chat workspace implementation | Brain/Architect |
+| `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave4-a920.md` | Session log for Wave4 scenario library, replay, and session summary implementation | Brain/Architect |
+| `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave5-a920.md` | Session log for Wave5 findings/remediation loop implementation | Brain/Architect |
+| `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave6-a920.md` | Session log for Wave6 live-vs-draft compare and publish readiness implementation | Brain/Architect |
 | `console-web/src/lib/calendar-action-registry.ts` | Canonical Calendar action registry and role/status/action scenario matrix used by booking cards, action panel, and deterministic operator proof | Frontend |
 | `truffles-api/app/services/calendar_action_contract.py` | Server-owned Calendar booking action contract builder for `allowed_actions` / `blocked_actions` and machine-readable blocked reasons | Backend |
 | `truffles-api/app/logging_config.py` | Shared Prometheus counters/helpers, now including Calendar action-family observability for denied/version-conflict/double-submit/filter/follow-up events | Backend |

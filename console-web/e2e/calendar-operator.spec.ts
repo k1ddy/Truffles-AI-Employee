@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test, expect, type Page, type Route } from '@playwright/test';
-import { isAuthGateVisible, loginThroughKeycloak } from './support/keycloak-auth';
+import { isAuthGateVisible, loginThroughKeycloak, shouldAllowLocalSessionBridge } from './support/keycloak-auth';
 import {
     CALENDAR_BOOKING_ACTION_SCENARIO_MATRIX,
     buildCalendarBookingActionAvailabilityMap,
@@ -1036,6 +1036,7 @@ async function ensureCalendarReady(page: Page, url: string) {
         await loginThroughKeycloak(page, {
             baseURL,
             consoleHostPattern,
+            allowLocalSessionBridge: shouldAllowLocalSessionBridge(baseURL),
             loginUser,
             loginPassword,
             authWaitTimeoutMs: 20000,

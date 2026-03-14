@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
-import { isAuthGateVisible, loginThroughKeycloak } from './support/keycloak-auth';
+import { isAuthGateVisible, loginThroughKeycloak, shouldAllowLocalSessionBridge } from './support/keycloak-auth';
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
 const consoleHostPattern = /localhost:3000|localhost:3100|192\.168\.5\.27:3000|console\.truffles\.kz/;
@@ -2019,6 +2019,7 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
         await loginThroughKeycloak(page, {
             baseURL,
             consoleHostPattern,
+            allowLocalSessionBridge: shouldAllowLocalSessionBridge(baseURL),
             loginUser,
             loginPassword,
             authWaitTimeoutMs: 20000,

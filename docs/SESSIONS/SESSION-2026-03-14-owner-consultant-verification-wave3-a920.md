@@ -1,0 +1,38 @@
+# SESSION 2026-03-14-owner-consultant-verification-wave3-a920 — Session 2026-03-14-owner-consultant-verification-wave3-a920
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave3-a920.md
+- block_id: CONSOLE-OWNER-CONSULTANT-VERIFICATION-WAVE3-A920
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-13-owner-consultant-verification-program-a920@wave3
+- worktree: /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920
+- base_ref: origin/main
+- scope: Wave3 owner-readable chat workspace for consultant verification: session UX, verdict translation, explanation panels, and targeted owner/admin UI proof.
+- done:
+  - Added a dedicated frontend workspace component for owner/admin consultant verification with explicit source-mode and challenge-mode controls.
+  - Connected the page to Wave2 session APIs for recent-session listing, session creation, session selection, and message sending.
+  - Implemented transcript bubbles with plain-language verdict chips and click-to-inspect assistant turns.
+  - Added owner-readable explanation cards, source-ref display, preview-only side-effect badges, and a bounded advanced-details disclosure.
+  - Extended owner/admin Playwright coverage with a dedicated consultant-verification chat lane that exercises the new workspace when rollout is enabled.
+  - Synced Console docs/backlog/state/structure to reflect the shipped Wave3 surface and remaining infra gap for local Playwright proof.
+- next:
+  - Start Wave4 on top of the shipped workspace: scenario presets/library, replay helpers, and session summary.
+  - Keep local Playwright proof as infra-bound until a console server is actually listening for the live lane.
+- evidence:
+  - console-web/src/app/business/consultant-verification/page.tsx
+  - console-web/src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx
+  - console-web/src/app/business/consultant-verification/_lib/presentation.ts
+  - console-web/e2e/owner-admin-business.spec.ts
+  - docs/CONSOLE_GUIDE.md
+  - docs/CONSOLE_AUDIT/UX_BACKLOG.md
+  - STRUCTURE.md
+  - STATE.md
+  - `cd console-web && npm run lint -- --file src/app/business/consultant-verification/page.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx --file src/app/business/consultant-verification/_lib/presentation.ts --file e2e/owner-admin-business.spec.ts`
+  - `cd console-web && npm run build`
+  - `cd console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --grep "consultant verification chat"`
+- last_updated: 2026-03-14T10:14:31+05:00

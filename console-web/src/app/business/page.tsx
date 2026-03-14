@@ -552,7 +552,7 @@ export default function BusinessPage() {
                 </div>
             </section>
 
-            <section className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2" data-testid="business-wave2-shortcuts">
+            <section className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="business-wave2-shortcuts">
                 <article className="rounded-xl border border-border/60 bg-card p-4">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Контроль качества</p>
                     <h2 className="mt-1 text-lg font-semibold">Надежность данных и рисков</h2>
@@ -561,6 +561,16 @@ export default function BusinessPage() {
                     </p>
                     <div className="mt-3">
                         <Link href="/business/data-trust" className="btn-ghost">Проверить качество данных</Link>
+                    </div>
+                </article>
+                <article className="rounded-xl border border-border/60 bg-card p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Доверие к консультанту</p>
+                    <h2 className="mt-1 text-lg font-semibold">Проверка консультанта под давлением</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        Подготовьте owner-facing проверку, где можно писать как клиент и искать реальные слабые места.
+                    </p>
+                    <div className="mt-3">
+                        <Link href="/business/consultant-verification" className="btn-ghost">Открыть проверку консультанта</Link>
                     </div>
                 </article>
                 <article className="rounded-xl border border-border/60 bg-card p-4">

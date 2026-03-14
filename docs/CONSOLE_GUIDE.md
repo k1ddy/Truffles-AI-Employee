@@ -226,6 +226,35 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - Data: `specialists`, `bookings`
 - RBAC: owner/admin/manager read/write.
 
+**Business (Owner/Admin control)**
+- UI: `console-web/src/app/business/page.tsx`, `console-web/src/app/business/data-trust/page.tsx`,
+  `console-web/src/app/business/team-performance/page.tsx`,
+  `console-web/src/app/business/consultant-verification/page.tsx`
+- API: `GET /console/v1/business/summary`, `GET /console/v1/business/incidents`,
+  `GET /console/v1/business/data-trust`, `GET /console/v1/business/team-performance`,
+  `GET /console/v1/business/consultant-verification/overview`,
+  `GET /console/v1/business/consultant-verification/sessions`,
+  `POST /console/v1/business/consultant-verification/sessions`,
+  `GET /console/v1/business/consultant-verification/sessions/{session_id}`,
+  `POST /console/v1/business/consultant-verification/sessions/{session_id}/messages`,
+  `GET /console/v1/business/consultant-verification/findings`,
+  `POST /console/v1/business/consultant-verification/findings`,
+  `PATCH /console/v1/business/consultant-verification/findings/{finding_id}`,
+  `GET /console/v1/business/consultant-verification/readiness`,
+  `POST /console/v1/business/consultant-verification/compare`
+- RBAC: `platform_admin`, `owner`, `admin`; the same roles can create sessions and send simulation messages inside the selected tenant scope.
+- Consultant verification Wave1/Wave2/Wave3 contract:
+  - Route is business-facing, not a dev playground.
+  - First screen still shows readiness/gaps/next-wave promise as the default owner entrypoint.
+  - Interactive session/findings/compare endpoints fail closed behind the per-client rollout flag; when rollout is disabled the page remains on the overview/readiness surface.
+  - Wave2 adds safe simulation sessions on the real consultant runtime with rollback-only execution, persisted owner/admin transcripts, and explicit preview flags (`would_handoff`, `would_book`, `gap_detected`).
+  - Wave3 adds the owner-readable workspace: `как клиент` / `найти слабые места` mode selection, recent sessions, transcript bubbles, verdict chips, source refs, preview-only impact badges, and an optional advanced-details disclosure.
+  - Wave4 adds a data-driven scenario catalog sourced from onboarding blueprints, capabilities, and reference packs; session summaries with honest category counts (`answered / clarification / handoff / gap`); and replay actions that always start a fresh simulation session instead of mutating prior evidence.
+  - Wave5 adds owner-detected findings: weak answers can be flagged from the explainer panel, clustered into failure families, linked to `knowledge_backlog` / `learning_candidates`, and tracked via statuses (`new / in_review / needs_data / fixed / retested`).
+  - Wave6 adds `live vs draft` compare and publish readiness: the same prompt or finding can be rerun against published knowledge and the latest saved draft; the result records a compare audit event, surfaces regressions in owner language, supports finding retest, and becomes a required gate before `Knowledge -> Publish`.
+  - Closeout status on this branch: local deterministic proof, owner/admin compare lane, and screenshot audit are green; one-client canary and post-merge monitoring remain release-only steps after merge/deploy.
+  - Simulation turns must never leak real outbound, booking, or handoff side effects into production flows.
+
 **Knowledge (Знания)**
 - UI: `console-web/src/app/knowledge/page.tsx`
 - API: `GET /console/v1/knowledge/current`, `POST /console/v1/knowledge/validate`,
