@@ -321,24 +321,35 @@ def test_derive_consultant_verification_status_thresholds() -> None:
         branch_selected=True,
         has_published_knowledge=True,
         knowledge_stale_hours=4,
+        knowledge_sync_failed=False,
     )
     missing_status, missing_label, missing_summary = console_router._derive_consultant_verification_status(
         feature_enabled=True,
         branch_selected=True,
         has_published_knowledge=False,
         knowledge_stale_hours=None,
+        knowledge_sync_failed=False,
     )
     branch_status, branch_label, branch_summary = console_router._derive_consultant_verification_status(
         feature_enabled=True,
         branch_selected=False,
         has_published_knowledge=True,
         knowledge_stale_hours=None,
+        knowledge_sync_failed=False,
+    )
+    sync_status, sync_label, sync_summary = console_router._derive_consultant_verification_status(
+        feature_enabled=True,
+        branch_selected=True,
+        has_published_knowledge=True,
+        knowledge_stale_hours=None,
+        knowledge_sync_failed=True,
     )
     ready_status, ready_label, ready_summary = console_router._derive_consultant_verification_status(
         feature_enabled=True,
         branch_selected=True,
         has_published_knowledge=True,
         knowledge_stale_hours=12,
+        knowledge_sync_failed=False,
     )
 
     assert disabled_status == "not_enabled"
@@ -350,6 +361,9 @@ def test_derive_consultant_verification_status_thresholds() -> None:
     assert branch_status == "needs_attention"
     assert "филиал" in branch_label.lower()
     assert "branch" in branch_summary.lower()
+    assert sync_status == "needs_attention"
+    assert "синхронизац" in sync_label.lower()
+    assert "опубликована" in sync_summary.lower()
     assert ready_status == "ready"
     assert "основа" in ready_label.lower()
     assert "без реальных действий" in ready_summary.lower()
@@ -1024,6 +1038,9 @@ async def test_publish_knowledge_allows_first_publish_without_compare(monkeypatc
 
     assert response.success is True
     assert response.version_id == version_id
+    assert response.sync_status == "ready"
+    assert response.partial_success is False
+    assert "синхрониз" in (response.message or "").lower()
 
 
 @pytest.mark.asyncio
@@ -1090,6 +1107,8 @@ async def test_publish_knowledge_allows_live_update_without_compare_when_rollout
 
     assert response.success is True
     assert response.version_id == version_id
+    assert response.sync_status == "ready"
+    assert response.partial_success is False
 
 
 @pytest.mark.asyncio
@@ -1152,9 +1171,128 @@ async def test_publish_knowledge_allows_skip_preflight_override(monkeypatch):
 
     assert response.success is True
     assert response.version_id == version_id
+    assert response.sync_status == "ready"
+    assert response.partial_success is False
     assert branch.knowledge_safe_mode is False
     assert branch.knowledge_safe_mode_reason is None
     assert db.commit.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_publish_knowledge_reports_partial_success_when_sync_fails(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        knowledge_safe_mode=False,
+        knowledge_safe_mode_reason=None,
+        knowledge_safe_mode_at=None,
+    )
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+    db = Mock()
+    version_id = uuid4()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
+    monkeypatch.setattr(console_router, "ensure_onboarding_step", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_inputs",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            has_capabilities=False,
+            reference_pack_domain_slug=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "get_current_published", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "has_recent_knowledge_preflight", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(console_router, "validate_draft", lambda *_args, **_kwargs: ({"sections": []}, [], [], None))
+    monkeypatch.setattr(
+        console_router,
+        "publish_version",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            id=version_id,
+            payload_json={"sections": []},
+            published_at=datetime.now(timezone.utc),
+            sync_status="pending",
+            sync_error=None,
+            sync_completed_at=None,
+        ),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "sync_published_branch_docs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("timed out")),
+    )
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
+
+    response = await console_router.publish_knowledge(
+        body=ConsoleKnowledgePublishRequest(draft_text="knowledge draft"),
+        request=SimpleNamespace(),
+        db=db,
+    )
+
+    assert response.success is True
+    assert response.version_id == version_id
+    assert response.sync_status == "failed"
+    assert response.partial_success is True
+    assert response.sync_error == "timed out"
+    assert branch.knowledge_safe_mode is True
+    assert branch.knowledge_safe_mode_reason == "timed out"
+
+
+@pytest.mark.asyncio
+async def test_retry_knowledge_sync_recovers_failed_published_version(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        knowledge_safe_mode=True,
+        knowledge_safe_mode_reason="timed out",
+        knowledge_safe_mode_at=None,
+    )
+    version_id = uuid4()
+    version = SimpleNamespace(
+        id=version_id,
+        branch_id=branch.id,
+        status="published",
+        payload_json={"sections": []},
+        sync_status="failed",
+        sync_error="timed out",
+        sync_completed_at=None,
+    )
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+    db = Mock()
+
+    query = Mock()
+    query.filter.return_value = query
+    query.first.return_value = version
+    db.query.return_value = query
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
+    monkeypatch.setattr(console_router, "sync_published_branch_docs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "extract_compiled_artifacts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
+
+    response = await console_router.retry_knowledge_version_sync(
+        version_id=version_id,
+        request=SimpleNamespace(),
+        db=db,
+    )
+
+    assert response.success is True
+    assert response.version_id == version_id
+    assert response.sync_status == "ready"
+    assert response.sync_error is None
+    assert branch.knowledge_safe_mode is False
 
 
 @pytest.mark.asyncio

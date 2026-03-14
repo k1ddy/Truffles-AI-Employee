@@ -2897,6 +2897,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
+  /console/v1/knowledge/versions/{version_id}/retry-sync:
+    post:
+      tags:
+      - console
+      summary: Retry Knowledge Version Sync
+      operationId: retry_knowledge_version_sync_console_v1_knowledge_versions__version_id__retry_sync_post
+      parameters:
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Version Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleKnowledgeSyncRetryResponse'
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Bad Request
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/knowledge/rollback:
     post:
       tags:
@@ -10158,6 +10203,20 @@ components:
           - type: string
           - type: 'null'
           title: Onboarding Updated At
+        knowledge_safe_mode:
+          type: boolean
+          title: Knowledge Safe Mode
+          default: false
+        knowledge_safe_mode_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Safe Mode Reason
+        knowledge_safe_mode_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Safe Mode At
         go_live_state:
           type: string
           enum:
@@ -13129,6 +13188,21 @@ components:
         next_wave_summary:
           type: string
           title: Next Wave Summary
+        branch_selection_required:
+          type: boolean
+          title: Branch Selection Required
+          default: false
+        selected_branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Selected Branch Id
+        selected_branch_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Selected Branch Name
         knowledge_last_published_at:
           anyOf:
           - type: string
@@ -13139,6 +13213,30 @@ components:
           - type: integer
           - type: 'null'
           title: Knowledge Stale Hours
+        knowledge_sync_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Sync Status
+        knowledge_sync_status_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Sync Status Label
+        knowledge_sync_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Sync Error
+        knowledge_safe_mode:
+          type: boolean
+          title: Knowledge Safe Mode
+          default: false
+        knowledge_safe_mode_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Safe Mode Reason
         readiness_cards:
           items:
             $ref: '#/components/schemas/ConsoleConsultantVerificationReadinessCard'
@@ -14555,6 +14653,40 @@ components:
           - type: string
           - type: 'null'
           title: Updated At
+        sync_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Status
+        sync_status_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Status Label
+        sync_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Error
+        sync_completed_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Completed At
+        knowledge_safe_mode:
+          type: boolean
+          title: Knowledge Safe Mode
+          default: false
+        knowledge_safe_mode_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Safe Mode Reason
+        knowledge_safe_mode_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Safe Mode At
         draft_version_id:
           anyOf:
           - type: string
@@ -14631,6 +14763,26 @@ components:
           - type: string
           - type: 'null'
           title: Summary
+        sync_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Status
+        sync_status_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Status Label
+        sync_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Error
+        sync_completed_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Completed At
       type: object
       required:
       - id
@@ -14681,6 +14833,38 @@ components:
           - type: string
           - type: 'null'
           title: Message
+        sync_status:
+          type: string
+          title: Sync Status
+          default: pending
+        sync_status_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Status Label
+        sync_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Error
+        sync_completed_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Completed At
+        knowledge_safe_mode:
+          type: boolean
+          title: Knowledge Safe Mode
+          default: false
+        knowledge_safe_mode_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Safe Mode Reason
+        partial_success:
+          type: boolean
+          title: Partial Success
+          default: false
       type: object
       required:
       - success
@@ -14712,10 +14896,94 @@ components:
             format: uuid
           - type: 'null'
           title: Version Id
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+        sync_status:
+          type: string
+          title: Sync Status
+          default: pending
+        sync_status_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Status Label
+        sync_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Error
+        sync_completed_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Completed At
+        knowledge_safe_mode:
+          type: boolean
+          title: Knowledge Safe Mode
+          default: false
+        knowledge_safe_mode_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Safe Mode Reason
+        partial_success:
+          type: boolean
+          title: Partial Success
+          default: false
       type: object
       required:
       - success
       title: ConsoleKnowledgeRollbackResponse
+    ConsoleKnowledgeSyncRetryResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        version_id:
+          type: string
+          format: uuid
+          title: Version Id
+        sync_status:
+          type: string
+          title: Sync Status
+        sync_status_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Status Label
+        sync_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Error
+        sync_completed_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sync Completed At
+        knowledge_safe_mode:
+          type: boolean
+          title: Knowledge Safe Mode
+          default: false
+        knowledge_safe_mode_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Safe Mode Reason
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+      type: object
+      required:
+      - success
+      - version_id
+      - sync_status
+      title: ConsoleKnowledgeSyncRetryResponse
     ConsoleKnowledgeValidateRequest:
       properties:
         draft_text:
@@ -14750,6 +15018,10 @@ components:
           - type: string
           - type: 'null'
           title: Draft Hash
+        draft_saved:
+          type: boolean
+          title: Draft Saved
+          default: false
       type: object
       required:
       - valid

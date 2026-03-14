@@ -33,6 +33,9 @@ logger = get_logger("knowledge_registry")
 
 SERVICES_COLLECTION = "services_index"
 PACK_INDEX_SCHEMA_VERSION = "pack_index.v1"
+KNOWLEDGE_SYNC_STATUS_PENDING = "pending"
+KNOWLEDGE_SYNC_STATUS_READY = "ready"
+KNOWLEDGE_SYNC_STATUS_FAILED = "failed"
 
 
 def _coerce_string_list(value: Any) -> list[str]:
@@ -348,9 +351,57 @@ def publish_version(
         created_at=now,
         published_by=actor_id,
         published_at=now,
+        sync_status=KNOWLEDGE_SYNC_STATUS_PENDING,
+        sync_error=None,
+        sync_completed_at=None,
     )
     db.add(version)
     return version
+
+
+def mark_knowledge_version_sync_pending(version: KnowledgeVersion) -> None:
+    version.sync_status = KNOWLEDGE_SYNC_STATUS_PENDING
+    version.sync_error = None
+    version.sync_completed_at = None
+
+
+def mark_knowledge_version_sync_ready(
+    version: KnowledgeVersion,
+    *,
+    completed_at: datetime,
+) -> None:
+    version.sync_status = KNOWLEDGE_SYNC_STATUS_READY
+    version.sync_error = None
+    version.sync_completed_at = completed_at
+
+
+def mark_knowledge_version_sync_failed(
+    version: KnowledgeVersion,
+    *,
+    error_message: str,
+    completed_at: datetime,
+) -> None:
+    version.sync_status = KNOWLEDGE_SYNC_STATUS_FAILED
+    version.sync_error = error_message
+    version.sync_completed_at = completed_at
+
+
+def normalize_knowledge_sync_status(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == KNOWLEDGE_SYNC_STATUS_READY:
+        return KNOWLEDGE_SYNC_STATUS_READY
+    if normalized == KNOWLEDGE_SYNC_STATUS_FAILED:
+        return KNOWLEDGE_SYNC_STATUS_FAILED
+    return KNOWLEDGE_SYNC_STATUS_PENDING
+
+
+def knowledge_sync_status_label(value: Any) -> str:
+    normalized = normalize_knowledge_sync_status(value)
+    if normalized == KNOWLEDGE_SYNC_STATUS_READY:
+        return "Синхронизировано"
+    if normalized == KNOWLEDGE_SYNC_STATUS_FAILED:
+        return "Нужна синхронизация"
+    return "Синхронизация в очереди"
 
 
 def restore_version(

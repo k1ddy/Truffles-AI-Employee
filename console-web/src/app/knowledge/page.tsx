@@ -239,6 +239,31 @@ function resolveKnowledgeActionErrorMessage(error: unknown): string {
     return "Не удалось выполнить действие. Проверьте контекст и попробуйте снова.";
 }
 
+function knowledgeSyncStatusClass(status?: string | null): string {
+    if (status === "ready") {
+        return "bg-emerald-100 text-emerald-800";
+    }
+    if (status === "failed") {
+        return "bg-red-100 text-red-800";
+    }
+    return "bg-slate-100 text-slate-700";
+}
+
+function resolveKnowledgeSyncMessage(
+    status?: string | null,
+    error?: string | null,
+): string {
+    if (status === "failed") {
+        return error
+            ? `Версия опубликована, но синхронизация завершилась с ошибкой: ${error}`
+            : "Версия опубликована, но синхронизация завершилась с ошибкой.";
+    }
+    if (status === "ready") {
+        return "Последняя версия опубликована и синхронизирована.";
+    }
+    return "Синхронизация еще не подтверждена.";
+}
+
 function parseOptionalJson(value: string, label: string): { value?: Record<string, unknown>; error?: string } {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -1055,6 +1080,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const editBaseUpdatedAt = currentQuery.data?.edit_base_updated_at ?? null;
     const draftUpdatedAt = currentQuery.data?.draft_updated_at ?? null;
     const hasSavedDraft = Boolean(currentQuery.data?.draft_version_id && draftServerText.trim().length > 0);
+    const currentSyncStatus = currentQuery.data?.sync_status ?? null;
+    const currentSyncStatusLabel = currentQuery.data?.sync_status_label ?? "Синхронизация не подтверждена";
+    const currentSyncError = currentQuery.data?.sync_error ?? null;
+    const currentSyncFailed = currentSyncStatus === "failed" || Boolean(currentQuery.data?.knowledge_safe_mode);
 
     const historyItems = useMemo(
         () => extractHistoryItems(historyQuery.data),
@@ -1307,9 +1336,14 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         },
         onSuccess: (data) => {
             setLastPublishAt(data?.published_at ?? new Date().toISOString());
-            toast.success(data?.message || "Знания опубликованы");
+            if (data?.sync_status === "failed") {
+                toast.error(data?.message || resolveKnowledgeSyncMessage(data?.sync_status, data?.sync_error));
+            } else {
+                toast.success(data?.message || "Знания опубликованы");
+            }
             currentQuery.refetch();
             historyQuery.refetch();
+            consultantVerificationReadinessQuery.refetch();
         },
         onError: (error) => {
             if (isApiUnavailable(error)) {
@@ -1346,6 +1380,36 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         },
     });
 
+    const retrySyncMutation = useMutation({
+        mutationFn: async (versionId: string) => {
+            const response = await knowledgeApi.retrySync(versionId);
+            return response.data;
+        },
+        onSuccess: (data) => {
+            if (data?.sync_status === "ready") {
+                toast.success(data?.message || "Синхронизация успешно завершена");
+            } else {
+                toast.error(data?.message || resolveKnowledgeSyncMessage(data?.sync_status, data?.sync_error));
+            }
+            currentQuery.refetch();
+            historyQuery.refetch();
+            consultantVerificationReadinessQuery.refetch();
+        },
+        onError: (error) => {
+            if (isApiUnavailable(error)) {
+                setApiUnavailable(true);
+                return;
+            }
+            if (isGatewayLikeError(error)) {
+                const message = resolveKnowledgeActionErrorMessage(error);
+                setGatewayError(message);
+                toast.error(message);
+                return;
+            }
+            handleError(error);
+        },
+    });
+
     const rollbackMutation = useMutation({
         mutationFn: async (reason: string) => {
             const confirmation = await confirmationsApi.create({
@@ -1358,11 +1422,16 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             const response = await knowledgeApi.rollback(selectedVersionId, confirmationId);
             return response.data;
         },
-        onSuccess: () => {
+        onSuccess: (data) => {
             setLastRollbackAt(new Date().toISOString());
-            toast.success("Версия восстановлена");
+            if (data?.sync_status === "failed") {
+                toast.error(data?.message || resolveKnowledgeSyncMessage(data?.sync_status, data?.sync_error));
+            } else {
+                toast.success(data?.message || "Версия восстановлена");
+            }
             currentQuery.refetch();
             historyQuery.refetch();
+            consultantVerificationReadinessQuery.refetch();
             setShowRollbackConfirm(false);
             setRollbackReason("");
         },
@@ -1919,10 +1988,37 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                     <div className="rounded-lg border border-border/60 px-3 py-2">
                         Источник часов: {effectiveHoursSource} · версия публикации: {currentQuery.data?.version_id ?? "не опубликована"}
                     </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        Синхронизация знаний: <span className={`rounded-full px-2 py-0.5 ${knowledgeSyncStatusClass(currentSyncStatus)}`}>{currentSyncStatusLabel}</span>
+                    </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        Safe mode: {selectedBranchContext.knowledge_safe_mode ? `включен${selectedBranchContext.knowledge_safe_mode_reason ? ` (${selectedBranchContext.knowledge_safe_mode_reason})` : ""}` : "выключен"}
+                    </div>
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
                     Поля ниже применятся только после кнопки `Сохранить изменение филиала`.
                 </div>
+                {currentSyncFailed ? (
+                    <div
+                        className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-800"
+                        data-testid="knowledge-sync-warning"
+                    >
+                        <p className="font-medium">{resolveKnowledgeSyncMessage(currentSyncStatus, currentSyncError ?? selectedBranchContext.knowledge_safe_mode_reason)}</p>
+                        {currentQuery.data?.version_id ? (
+                            <div className="mt-3">
+                                <button
+                                    type="button"
+                                    className="btn-primary"
+                                    onClick={() => retrySyncMutation.mutate(currentQuery.data?.version_id ?? "")}
+                                    disabled={retrySyncMutation.isPending || !currentQuery.data?.version_id}
+                                    data-testid="knowledge-sync-retry"
+                                >
+                                    {retrySyncMutation.isPending ? "Повторяем..." : "Повторить синхронизацию"}
+                                </button>
+                            </div>
+                        ) : null}
+                    </div>
+                ) : null}
 
                 {canEdit && (
                     <div className="mt-4 grid gap-3">
@@ -2836,6 +2932,23 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 </label>
                             )}
 
+                            {currentQuery.data?.version_id ? (
+                                <div
+                                    className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm"
+                                    data-testid="knowledge-publish-sync-status"
+                                >
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="font-medium text-foreground">Статус текущей публикации</p>
+                                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${knowledgeSyncStatusClass(currentSyncStatus)}`}>
+                                            {currentSyncStatusLabel}
+                                        </span>
+                                    </div>
+                                    <p className="mt-2 text-muted-foreground">
+                                        {resolveKnowledgeSyncMessage(currentSyncStatus, currentSyncError)}
+                                    </p>
+                                </div>
+                            ) : null}
+
                             <button
                                 type="button"
                                 className="btn-primary"
@@ -2872,12 +2985,22 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                                 <div className="font-medium">
                                                     {item.summary || item.id || "unknown-version"}
                                                 </div>
-                                                <div className="text-xs text-muted-foreground">
-                                                    {item.status ?? "status неизвестен"}
+                                                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                                    <span>{item.status ?? "status неизвестен"}</span>
+                                                    {item.sync_status_label ? (
+                                                        <span className={`rounded-full px-2 py-0.5 ${knowledgeSyncStatusClass(item.sync_status)}`}>
+                                                            {item.sync_status_label}
+                                                        </span>
+                                                    ) : null}
                                                 </div>
                                                 {item.published_at && (
                                                     <div className="text-xs text-muted-foreground">
                                                         Published: {new Date(item.published_at).toLocaleString("ru-RU")}
+                                                    </div>
+                                                )}
+                                                {item.sync_error && (
+                                                    <div className="text-xs text-red-700">
+                                                        Sync error: {item.sync_error}
                                                     </div>
                                                 )}
                                             </div>

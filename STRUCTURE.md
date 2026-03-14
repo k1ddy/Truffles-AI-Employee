@@ -112,6 +112,7 @@
 | `truffles-api/app/models/console_consultant_verification_finding.py` | DB model for owner/admin consultant verification findings and remediation state | Backend |
 | `truffles-api/app/models/console_consultant_verification_session.py` | DB model for owner/admin consultant verification sessions | Backend |
 | `truffles-api/app/models/console_consultant_verification_turn.py` | DB model for persisted owner/admin consultant verification transcript turns | Backend |
+| `truffles-api/app/models/knowledge_version.py` | DB model for draft/published knowledge versions plus sync-status metadata and safe publish recovery state | Backend |
 | `truffles-api/app/models/console_macro.py` | DB model for Inbox macros (Console) | Backend |
 | `truffles-api/app/models/marketing_campaign.py` | Marketing campaign model (status/approval/preflight fields) | Backend |
 | `truffles-api/app/models/marketing_campaign_recipient.py` | Materialized audience snapshot per campaign | Backend |
@@ -138,6 +139,7 @@
 | `truffles-api/migrations/022_add_alert_events.sql` | Migration: alert_events (no_response, etc.) | Backend/OPS |
 | `truffles-api/migrations/034_marketing_pro_v1.sql` | Migration: Marketing Pro v1 schema (campaign state + audience/suppression/delivery events) | Backend/OPS |
 | `truffles-api/migrations/041_add_tenants_fleet_prewarm_jobs.sql` | Migration: durable tenants fleet prewarm dispatch queue | Backend/OPS |
+| `truffles-api/migrations/059_add_knowledge_version_sync_status.sql` | Migration: knowledge version sync-status fields (`pending/ready/failed`) plus safe-mode backfill for truthful publish/sync UX | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/src/app/insights/page.tsx` | Insights/Analytics page (read-only daily metrics) | Frontend |
@@ -232,11 +234,15 @@
 | `docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave5-a920.md` | Wave5 Task Package for weak-spot capture, failure-family grouping, and remediation status loop | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave6-a920.md` | Wave6 Task Package for `live vs draft` compare, finding retest, and readiness gate | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-closeout-a920.md` | Closeout Task Package for deterministic proof, canary rollout, and post-merge monitoring of consultant verification | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-14-owner-consultant-verification-knowledge-safety-program-a921.md` | Remediation program Task Package for safe Knowledge authoring, truthful draft/live verification, and owner-safe validation/publish messaging | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-15-consultant-verification-branch-publish-flow-a3.md` | Task Package for inline branch repair on consultant verification and truthful publish/sync semantics with retry-sync | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave2-a920.md` | Session log for Wave2 safe simulation kernel implementation | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave3-a920.md` | Session log for Wave3 owner-readable chat workspace implementation | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave4-a920.md` | Session log for Wave4 scenario library, replay, and session summary implementation | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave5-a920.md` | Session log for Wave5 findings/remediation loop implementation | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave6-a920.md` | Session log for Wave6 live-vs-draft compare and publish readiness implementation | Brain/Architect |
+| `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-knowledge-safety-program-a921.md` | Session log for the Knowledge safety remediation program behind owner consultant verification | Brain/Architect |
+| `docs/SESSIONS/SESSION-2026-03-15-consultant-verification-branch-publish-flow-a3.md` | Session log for inline branch repair and truthful publish/sync semantics on owner surfaces | Brain/Architect |
 | `console-web/src/lib/calendar-action-registry.ts` | Canonical Calendar action registry and role/status/action scenario matrix used by booking cards, action panel, and deterministic operator proof | Frontend |
 | `truffles-api/app/services/calendar_action_contract.py` | Server-owned Calendar booking action contract builder for `allowed_actions` / `blocked_actions` and machine-readable blocked reasons | Backend |
 | `truffles-api/app/logging_config.py` | Shared Prometheus counters/helpers, now including Calendar action-family observability for denied/version-conflict/double-submit/filter/follow-up events | Backend |

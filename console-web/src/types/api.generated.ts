@@ -1194,6 +1194,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/knowledge/versions/{version_id}/retry-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Knowledge Version Sync */
+        post: operations["retry_knowledge_version_sync_console_v1_knowledge_versions__version_id__retry_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/knowledge/rollback": {
         parameters: {
             query?: never;
@@ -4055,6 +4072,15 @@ export interface components {
             /** Onboarding Updated At */
             onboarding_updated_at?: string | null;
             /**
+             * Knowledge Safe Mode
+             * @default false
+             */
+            knowledge_safe_mode: boolean;
+            /** Knowledge Safe Mode Reason */
+            knowledge_safe_mode_reason?: string | null;
+            /** Knowledge Safe Mode At */
+            knowledge_safe_mode_at?: string | null;
+            /**
              * Go Live State
              * @default pending
              * @enum {string}
@@ -5650,10 +5676,32 @@ export interface components {
             summary: string;
             /** Next Wave Summary */
             next_wave_summary: string;
+            /**
+             * Branch Selection Required
+             * @default false
+             */
+            branch_selection_required: boolean;
+            /** Selected Branch Id */
+            selected_branch_id?: string | null;
+            /** Selected Branch Name */
+            selected_branch_name?: string | null;
             /** Knowledge Last Published At */
             knowledge_last_published_at?: string | null;
             /** Knowledge Stale Hours */
             knowledge_stale_hours?: number | null;
+            /** Knowledge Sync Status */
+            knowledge_sync_status?: string | null;
+            /** Knowledge Sync Status Label */
+            knowledge_sync_status_label?: string | null;
+            /** Knowledge Sync Error */
+            knowledge_sync_error?: string | null;
+            /**
+             * Knowledge Safe Mode
+             * @default false
+             */
+            knowledge_safe_mode: boolean;
+            /** Knowledge Safe Mode Reason */
+            knowledge_safe_mode_reason?: string | null;
             /**
              * Readiness Cards
              * @default []
@@ -6490,6 +6538,23 @@ export interface components {
             content?: string | null;
             /** Updated At */
             updated_at?: string | null;
+            /** Sync Status */
+            sync_status?: string | null;
+            /** Sync Status Label */
+            sync_status_label?: string | null;
+            /** Sync Error */
+            sync_error?: string | null;
+            /** Sync Completed At */
+            sync_completed_at?: string | null;
+            /**
+             * Knowledge Safe Mode
+             * @default false
+             */
+            knowledge_safe_mode: boolean;
+            /** Knowledge Safe Mode Reason */
+            knowledge_safe_mode_reason?: string | null;
+            /** Knowledge Safe Mode At */
+            knowledge_safe_mode_at?: string | null;
             /** Draft Version Id */
             draft_version_id?: string | null;
             /** Draft Payload */
@@ -6528,6 +6593,14 @@ export interface components {
             published_at?: string | null;
             /** Summary */
             summary?: string | null;
+            /** Sync Status */
+            sync_status?: string | null;
+            /** Sync Status Label */
+            sync_status_label?: string | null;
+            /** Sync Error */
+            sync_error?: string | null;
+            /** Sync Completed At */
+            sync_completed_at?: string | null;
         };
         /** ConsoleKnowledgeHistoryResponse */
         ConsoleKnowledgeHistoryResponse: {
@@ -6554,6 +6627,29 @@ export interface components {
             published_at?: string | null;
             /** Message */
             message?: string | null;
+            /**
+             * Sync Status
+             * @default pending
+             */
+            sync_status: string;
+            /** Sync Status Label */
+            sync_status_label?: string | null;
+            /** Sync Error */
+            sync_error?: string | null;
+            /** Sync Completed At */
+            sync_completed_at?: string | null;
+            /**
+             * Knowledge Safe Mode
+             * @default false
+             */
+            knowledge_safe_mode: boolean;
+            /** Knowledge Safe Mode Reason */
+            knowledge_safe_mode_reason?: string | null;
+            /**
+             * Partial Success
+             * @default false
+             */
+            partial_success: boolean;
         };
         /** ConsoleKnowledgeRollbackRequest */
         ConsoleKnowledgeRollbackRequest: {
@@ -6571,6 +6667,58 @@ export interface components {
             success: boolean;
             /** Version Id */
             version_id?: string | null;
+            /** Message */
+            message?: string | null;
+            /**
+             * Sync Status
+             * @default pending
+             */
+            sync_status: string;
+            /** Sync Status Label */
+            sync_status_label?: string | null;
+            /** Sync Error */
+            sync_error?: string | null;
+            /** Sync Completed At */
+            sync_completed_at?: string | null;
+            /**
+             * Knowledge Safe Mode
+             * @default false
+             */
+            knowledge_safe_mode: boolean;
+            /** Knowledge Safe Mode Reason */
+            knowledge_safe_mode_reason?: string | null;
+            /**
+             * Partial Success
+             * @default false
+             */
+            partial_success: boolean;
+        };
+        /** ConsoleKnowledgeSyncRetryResponse */
+        ConsoleKnowledgeSyncRetryResponse: {
+            /** Success */
+            success: boolean;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Sync Status */
+            sync_status: string;
+            /** Sync Status Label */
+            sync_status_label?: string | null;
+            /** Sync Error */
+            sync_error?: string | null;
+            /** Sync Completed At */
+            sync_completed_at?: string | null;
+            /**
+             * Knowledge Safe Mode
+             * @default false
+             */
+            knowledge_safe_mode: boolean;
+            /** Knowledge Safe Mode Reason */
+            knowledge_safe_mode_reason?: string | null;
+            /** Message */
+            message?: string | null;
         };
         /** ConsoleKnowledgeValidateRequest */
         ConsoleKnowledgeValidateRequest: {
@@ -6589,6 +6737,11 @@ export interface components {
             diff?: string | null;
             /** Draft Hash */
             draft_hash?: string | null;
+            /**
+             * Draft Saved
+             * @default false
+             */
+            draft_saved: boolean;
         };
         /** ConsoleLearningCandidate */
         ConsoleLearningCandidate: {
@@ -13713,6 +13866,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    retry_knowledge_version_sync_console_v1_knowledge_versions__version_id__retry_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleKnowledgeSyncRetryResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

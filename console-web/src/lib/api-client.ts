@@ -595,8 +595,16 @@ export type ConsultantVerificationOverviewResponse = {
     status_label: string;
     summary: string;
     next_wave_summary: string;
+    branch_selection_required?: boolean;
+    selected_branch_id?: string | null;
+    selected_branch_name?: string | null;
     knowledge_last_published_at?: string | null;
     knowledge_stale_hours?: number | null;
+    knowledge_sync_status?: string | null;
+    knowledge_sync_status_label?: string | null;
+    knowledge_sync_error?: string | null;
+    knowledge_safe_mode?: boolean;
+    knowledge_safe_mode_reason?: string | null;
     readiness_cards: ConsultantVerificationReadinessCard[];
     stress_test_examples: string[];
     scenario_catalog: ConsultantVerificationScenarioItem[];
@@ -922,6 +930,13 @@ export type KnowledgeCurrentResponse = {
     payload?: unknown;
     content?: string | null;
     updated_at?: string | null;
+    sync_status?: string | null;
+    sync_status_label?: string | null;
+    sync_error?: string | null;
+    sync_completed_at?: string | null;
+    knowledge_safe_mode?: boolean;
+    knowledge_safe_mode_reason?: string | null;
+    knowledge_safe_mode_at?: string | null;
     draft_version_id?: string | null;
     draft_payload?: unknown;
     draft_content?: string | null;
@@ -945,6 +960,13 @@ export type KnowledgePublishResponse = {
     version_id?: string | null;
     published_at?: string | null;
     message?: string | null;
+    sync_status?: string | null;
+    sync_status_label?: string | null;
+    sync_error?: string | null;
+    sync_completed_at?: string | null;
+    knowledge_safe_mode?: boolean;
+    knowledge_safe_mode_reason?: string | null;
+    partial_success?: boolean;
 };
 export type KnowledgeHistoryItem = {
     id?: string | null;
@@ -952,6 +974,10 @@ export type KnowledgeHistoryItem = {
     created_at?: string | null;
     published_at?: string | null;
     summary?: string | null;
+    sync_status?: string | null;
+    sync_status_label?: string | null;
+    sync_error?: string | null;
+    sync_completed_at?: string | null;
 };
 export type KnowledgeHistoryResponse = {
     items?: KnowledgeHistoryItem[];
@@ -959,7 +985,16 @@ export type KnowledgeHistoryResponse = {
 export type KnowledgeRollbackResponse = {
     success?: boolean;
     version_id?: string | null;
+    message?: string | null;
+    sync_status?: string | null;
+    sync_status_label?: string | null;
+    sync_error?: string | null;
+    sync_completed_at?: string | null;
+    knowledge_safe_mode?: boolean;
+    knowledge_safe_mode_reason?: string | null;
+    partial_success?: boolean;
 };
+export type KnowledgeSyncRetryResponse = components["schemas"]["ConsoleKnowledgeSyncRetryResponse"];
 export type LearningCandidate = components["schemas"]["ConsoleLearningCandidate"];
 export type LearningCandidateListResponse = components["schemas"]["ConsoleLearningCandidateListResponse"];
 export type LearningCandidateActionResponse = components["schemas"]["ConsoleLearningCandidateActionResponse"];
@@ -1753,6 +1788,8 @@ export const knowledgeApi = {
             draft_text: draftText,
             skip_preflight_check: options?.skipPreflightCheck ?? false,
         }),
+    retrySync: (versionId: string) =>
+        apiClient.post<KnowledgeSyncRetryResponse>(`/knowledge/versions/${versionId}/retry-sync`),
     history: () =>
         apiClient.get<KnowledgeHistoryResponse>("/knowledge/history"),
     rollback: (versionId: string, confirmationId?: string) =>

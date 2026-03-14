@@ -1,0 +1,54 @@
+# SESSION 2026-03-15-consultant-verification-branch-publish-flow-a3 — Session 2026-03-15-consultant-verification-branch-publish-flow-a3
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-15-consultant-verification-branch-publish-flow-a3.md
+- block_id: CONSOLE-CONSULTANT-VERIFICATION-BRANCH-PUBLISH-FLOW-A3
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-15-consultant-verification-branch-publish-flow-a3
+- worktree: /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3
+- base_ref: origin/main
+- scope: Fix the owner-facing dead-end around missing branch context on `Business -> Проверка консультанта`, split Knowledge publish semantics into truthful `publish + sync` states, expose retry-sync/safe-mode state, and synchronize canon docs/state with the repaired contract.
+- done:
+  - Confirmed the root cause with code and runtime evidence: consultant verification blocked on missing Console branch context without an inline repair path, while Knowledge publish returned `Knowledge publish failed` even after the version row was already committed and only downstream sync timed out.
+  - Added durable knowledge sync-state storage via `knowledge_versions.sync_status/sync_error/sync_completed_at` and backfilled safe-mode branches in migration `truffles-api/migrations/059_add_knowledge_version_sync_status.sql`.
+  - Extended `knowledge_registry_service` with sync-status helpers so publish/rollback/retry flows can truthfully mark `pending`, `ready`, or `failed` without faking a total publish failure.
+  - Updated Console schemas/OpenAPI/types so `consultant-verification` overview, `knowledge/current`, publish, rollback, and history all carry sync/safe-mode metadata.
+  - Reworked `publish_knowledge()` and `rollback_knowledge()` to commit the published version first, then run sync, and return `partial_success=true` plus `sync_status=failed` when only the sync phase fails.
+  - Added `POST /console/v1/knowledge/versions/{version_id}/retry-sync` so owner/admin can recover a timed-out sync without creating a duplicate knowledge version.
+  - Made consultant verification readiness sync-aware: if the latest published branch knowledge is only `published + sync_failed` or the branch is in `knowledge_safe_mode`, overview/readiness now shows that state explicitly instead of pretending knowledge is merely missing or stale.
+  - Added an inline branch gate to `console-web/src/app/business/consultant-verification/page.tsx`, including scope card, branch selector, apply action, and cache invalidation so owner/admin can repair branch context directly on the verification page.
+  - Updated `Knowledge` page UX to show current sync status, safe-mode warning, truthful partial-success toasts, and a retry-sync action instead of encouraging republish.
+  - Added deterministic backend tests for partial-success publish and retry-sync recovery, plus mocked Playwright proof for the new branch gate and `published + sync_failed -> retry-sync -> ready` owner flow.
+  - Synced canon docs (`docs/CONSOLE_GUIDE.md`, `docs/CONSOLE_AUDIT/UX_BACKLOG.md`, `STRUCTURE.md`, `STATE.md`) with the repaired contract and explicit residual roadmap (`UX-50`, `UX-51`).
+- evidence:
+  - Runtime DB note: `knowledge_publish_failed` for `version_id=033ba3b8-a19a-4887-8587-aa761243f29c` at `2026-03-14 19:01:21+00` while the same version is already `published` at `2026-03-14 19:01:15+00`; branch `b7f75692-951e-421a-aae6-f5db97394799` entered `knowledge_safe_mode=true` with reason `timed out`.
+  - Files:
+    - `truffles-api/app/models/knowledge_version.py`
+    - `truffles-api/migrations/059_add_knowledge_version_sync_status.sql`
+    - `truffles-api/app/services/knowledge_registry_service.py`
+    - `truffles-api/app/services/console_consultant_verification.py`
+    - `truffles-api/app/routers/console.py`
+    - `truffles-api/app/schemas/console.py`
+    - `console-web/src/app/business/consultant-verification/page.tsx`
+    - `console-web/src/app/knowledge/page.tsx`
+    - `console-web/src/lib/api-client.ts`
+    - `console-web/e2e/owner-admin-business.spec.ts`
+    - `contracts/console_api/openapi.v1.yaml`
+  - Checks:
+    - `cd /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3/truffles-api && pytest -q tests/test_console_owner_business.py tests/test_console_consultant_verification_api.py -k 'consultant_verification or knowledge_publish or knowledge or retry_knowledge_sync'` (`37 passed, 56 deselected`)
+    - `cd /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3/truffles-api && ruff check app/routers/console.py app/schemas/console.py app/services/console_consultant_verification.py app/services/knowledge_registry_service.py tests/test_console_consultant_verification_api.py tests/test_console_owner_business.py` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3/truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3/console-web && npm ci` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3/console-web && npm run generate:api` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3/console-web && npm run lint -- --file src/app/business/consultant-verification/page.tsx --file src/app/knowledge/page.tsx --file e2e/owner-admin-business.spec.ts --file src/lib/api-client.ts` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3/console-web && npm run build` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3/console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --workers 1 --grep 'consultant verification branch gate|knowledge publish sync failure'` (`2 passed`)
+- next:
+  - If timeout family repeats after these truthful semantics land, publish `TP-2026-03-15-knowledge-sync-jobs-and-retry-observability-a3` and move sync execution to an explicit async job contract.
+  - If another owner surface duplicates branch/client repair logic, publish `TP-2026-03-15-console-scope-gate-unification-a3` and extract one shared owner scope gate.
+- last_updated: 2026-03-15T01:04:06+05:00

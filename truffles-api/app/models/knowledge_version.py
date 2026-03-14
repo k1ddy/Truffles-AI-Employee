@@ -22,3 +22,6 @@ class KnowledgeVersion(Base):
     created_at = Column(TIMESTAMP(timezone=True))
     published_by = Column(UUID(as_uuid=True), ForeignKey("agents.id"))
     published_at = Column(TIMESTAMP(timezone=True))
+    sync_status = Column(Text, nullable=False, default="pending")
+    sync_error = Column(Text)
+    sync_completed_at = Column(TIMESTAMP(timezone=True))
