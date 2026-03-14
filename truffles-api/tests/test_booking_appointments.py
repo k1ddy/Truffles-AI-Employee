@@ -1404,6 +1404,34 @@ def test_booking_transition_owner_clears_datetime_on_book_slot_conflict():
     assert result.booking_has_datetime is False
 
 
+def test_booking_transition_owner_preserves_datetime_on_book_slot_provider_unavailable():
+    now = datetime(2026, 2, 12, 8, 0, tzinfo=timezone.utc)
+    result = booking_transition_owner.apply_tool_transition_owner(
+        existing_booking_state={
+            "active": True,
+            "service": "Стрижка",
+            "datetime": "2026-02-12T18:30:00",
+            "name": "Айгуль",
+        },
+        policy_slot_state={"service": "Стрижка"},
+        tool_args={"start_at": "2026-02-12T18:30:00"},
+        tool_action="calendar.book_slot",
+        tool_decision="provider_unavailable",
+        policy_intent="booking",
+        policy_goal="booking",
+        booking_wants_flow=True,
+        appointment_id=None,
+        now=now,
+        slot_order=booking_router.BOOKING_SLOT_ORDER,
+    )
+
+    assert result.booking_state.get("service") == "Стрижка"
+    assert result.booking_state.get("name") == "Айгуль"
+    assert result.booking_state.get("datetime") == "2026-02-12T18:30:00"
+    assert result.merged_slots.get("datetime") == "2026-02-12T18:30:00"
+    assert result.booking_has_datetime is True
+
+
 def test_booking_transition_owner_syncs_profile_from_remote_jid():
     user = SimpleNamespace(name=None, phone=None)
 

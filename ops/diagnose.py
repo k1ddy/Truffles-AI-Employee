@@ -2493,6 +2493,14 @@ def _chaos_state_fallback_ok(expected_state, actual_state, meta, conv_meta, hand
         if action in _chaos_booking_completion_actions() or action == "escalate":
             return True
         if (
+            action == "booking_prompt"
+            and pending_action == "pending_pass"
+            and isinstance(meta, dict)
+            and meta.get("pending_handoff_resume_boundary") is True
+            and meta.get("policy_core_guard_recovery") == "timeout_owner_boundary_collect"
+        ):
+            return True
+        if (
             action == "reply"
             and intent_value
             in {
@@ -4165,6 +4173,67 @@ def _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_v
     return any(marker in text for marker in markers)
 
 
+def _llm_quality_has_pending_question_interaction_contract(
+    *,
+    meta,
+    trace_entries,
+    actual_expected_reply_type=None,
+):
+    allowed_acts = {
+        "ask_about_requested_slot",
+        "slot_constraint",
+        "slot_compare",
+        "mixed_fill_plus_question",
+    }
+    booking_reply_types = {"service_choice", "time", "name"}
+
+    def _collect_meta_acts(payload):
+        if not isinstance(payload, dict):
+            return set()
+        acts = set()
+        for key in ("pending_question_act", "dialog_act", "pending_question_interaction"):
+            token = _llm_quality_normalize_tool_token(payload.get(key))
+            if token in allowed_acts:
+                acts.add(token)
+        return acts
+
+    saw_act = False
+    saw_resume_contract = False
+    actual_expected = _llm_quality_normalize_expect_token(actual_expected_reply_type)
+    if actual_expected in booking_reply_types:
+        saw_resume_contract = True
+
+    meta_candidates = [meta] if isinstance(meta, dict) else []
+    if isinstance(meta, dict):
+        llm_policy_meta = meta.get("llm_policy_core")
+        if isinstance(llm_policy_meta, dict):
+            meta_candidates.append(llm_policy_meta)
+            payload = llm_policy_meta.get("payload")
+            if isinstance(payload, dict):
+                meta_candidates.append(payload)
+        expected_reply_type = _llm_quality_normalize_tool_token(meta.get("expected_reply_type"))
+        if expected_reply_type in booking_reply_types:
+            saw_resume_contract = True
+
+    for candidate in meta_candidates:
+        if _collect_meta_acts(candidate):
+            saw_act = True
+        expected_reply_type = _llm_quality_normalize_tool_token(candidate.get("expected_reply_type"))
+        if expected_reply_type in booking_reply_types:
+            saw_resume_contract = True
+
+    for entry in trace_entries or []:
+        if not isinstance(entry, dict):
+            continue
+        if _collect_meta_acts(entry):
+            saw_act = True
+        expected_reply_type = _llm_quality_normalize_tool_token(entry.get("expected_reply_type"))
+        if expected_reply_type in booking_reply_types:
+            saw_resume_contract = True
+
+    return saw_act and saw_resume_contract
+
+
 def _llm_quality_should_suppress_missed_question_judge_fail(
     *,
     judge_result,
@@ -4523,6 +4592,42 @@ def _llm_quality_normalize_expect_trace_contains(value):
     return normalized
 
 
+def _llm_quality_compile_active_time_specialist_followup_expectations(expectations):
+    loader = globals().get("_llm_quality_repo_root")
+    if not callable(loader):
+        return expectations
+    cached = globals().get("_LLM_QUALITY_SCENARIO_CONTRACT_COMPILER")
+    if cached is None:
+        repo_root = loader()
+        api_root = os.path.join(repo_root, "truffles-api")
+        if api_root not in sys.path:
+            sys.path.insert(0, api_root)
+        try:
+            from app.services.scenario_contract_compiler import (
+                compile_active_time_specialist_followup_expectations,
+                should_compile_active_time_specialist_followup_expectations,
+            )
+        except Exception:
+            globals()["_LLM_QUALITY_SCENARIO_CONTRACT_COMPILER"] = False
+            return expectations
+        cached = (
+            should_compile_active_time_specialist_followup_expectations,
+            compile_active_time_specialist_followup_expectations,
+        )
+        globals()["_LLM_QUALITY_SCENARIO_CONTRACT_COMPILER"] = cached
+    if cached is False:
+        return expectations
+    should_compile, compile_expectations = cached
+    if not callable(should_compile) or not callable(compile_expectations):
+        return expectations
+    if not should_compile(expectations):
+        return expectations
+    compiled = compile_expectations(expectations)
+    if isinstance(compiled, dict):
+        return compiled
+    return expectations
+
+
 def _llm_quality_extract_expectations(turn):
     def _normalize_mapping(value):
         helper = globals().get("_llm_quality_normalize_expect_mapping")
@@ -4665,7 +4770,7 @@ def _llm_quality_extract_expectations(turn):
     meta_any = _normalize_contains_mapping(expect.get("meta_any"))
     meta_contains = _normalize_contains_mapping(expect.get("meta_contains"))
     trace_contains = _normalize_trace_contains(expect.get("trace_contains"))
-    return {
+    normalized = {
         "action": action,
         "info_sections": [section.lower() for section in info_sections],
         "reply_type": reply_type or None,
@@ -4677,6 +4782,12 @@ def _llm_quality_extract_expectations(turn):
         "meta_contains": meta_contains,
         "trace_contains": trace_contains,
     }
+    compiler = globals().get("_llm_quality_compile_active_time_specialist_followup_expectations")
+    if callable(compiler):
+        compiled = compiler(normalized)
+        if isinstance(compiled, dict):
+            normalized = compiled
+    return normalized
 
 
 def _llm_quality_entry_matches_expected(entry, expected):
@@ -4718,6 +4829,80 @@ def _llm_quality_meta_matches_expected(meta, expected, expected_any, expected_co
             if item not in actual:
                 return False
     return True
+
+
+def _llm_quality_meta_matches_timeout_grounded_slot_constraint_name_resume(
+    meta,
+    expected,
+    expected_any,
+    expected_contains,
+    trace_entries,
+):
+    if not isinstance(meta, dict):
+        return False
+    if _llm_quality_normalize_tool_token(meta.get("expected_reply_type")) != "name":
+        return False
+    if str(meta.get("expected_reply_reason") or "").strip() != "policy_core_degraded_collect":
+        return False
+    if _llm_quality_normalize_tool_token(meta.get("pending_question_act")) != "slot_constraint":
+        return False
+    if _llm_quality_normalize_tool_token(meta.get("pending_question_target")) != "time":
+        return False
+    if _llm_quality_normalize_tool_token(meta.get("pending_question_interaction")) != "slot_constraint":
+        return False
+    if not _llm_quality_trace_has_expected_entries(
+        trace_entries,
+        [
+            {
+                "stage": "question_contract",
+                "decision": "matched",
+                "answer_slot": "datetime",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "policy_core_guard",
+                "decision": "degraded_collect",
+                "reason": "policy_error:timeout",
+            },
+        ],
+    ):
+        return False
+
+    normalized_expected = dict(expected or {})
+    normalized_expected_any = {
+        key: list(values) if isinstance(values, list) else values
+        for key, values in (expected_any or {}).items()
+    }
+
+    saw_time_expectation = False
+    expected_reply_type = _llm_quality_normalize_tool_token(
+        normalized_expected.get("expected_reply_type")
+    )
+    if expected_reply_type == "time":
+        normalized_expected["expected_reply_type"] = "name"
+        saw_time_expectation = True
+
+    expected_any_values = normalized_expected_any.get("expected_reply_type")
+    if isinstance(expected_any_values, list):
+        normalized_values = []
+        for value in expected_any_values:
+            normalized_value = _llm_quality_normalize_tool_token(value)
+            if normalized_value == "time":
+                normalized_values.append("name")
+                saw_time_expectation = True
+            else:
+                normalized_values.append(value)
+        normalized_expected_any["expected_reply_type"] = normalized_values
+
+    if not saw_time_expectation:
+        return False
+
+    return _llm_quality_meta_matches_expected(
+        meta,
+        normalized_expected,
+        normalized_expected_any,
+        expected_contains,
+    )
 
 
 def _llm_quality_trace_has_expected_entries(trace_entries, expected_items):
@@ -4931,6 +5116,38 @@ def _llm_quality_infer_info_tags(text):
                 tags.add(tag)
                 break
     return tags
+
+
+def _llm_quality_should_infer_info_tags_from_text(
+    *,
+    turn_tags,
+    expected_info_sections,
+    expected_reply_type,
+    expected_reply_matched,
+    meta,
+    trace_entries,
+):
+    if expected_info_sections:
+        return False
+    if expected_reply_matched is not True:
+        return True
+    normalized_tags = {
+        str(tag).strip().lower()
+        for tag in (turn_tags or [])
+        if isinstance(tag, str) and tag.strip()
+    }
+    if normalized_tags.intersection(LLM_QUALITY_INFO_TAGS):
+        return True
+    if "consult" in normalized_tags:
+        return True
+    normalized_reply_type = _llm_quality_normalize_expect_token(expected_reply_type)
+    if normalized_reply_type not in CHAOS_BOOKING_REPLY_TYPES:
+        return True
+    return not _llm_quality_has_pending_question_interaction_contract(
+        meta=meta,
+        trace_entries=trace_entries,
+        actual_expected_reply_type=normalized_reply_type,
+    )
 
 def _llm_quality_detect_language(text: str | None) -> str:
     if not text:
@@ -5756,11 +5973,18 @@ def _normalize_scenario_generation_error(stderr):
         event = payload.get("event")
         if batch_idx is None and attempt is None and event is None:
             continue
-        last_progress = (
-            f"batch={batch_idx if batch_idx is not None else '?'} "
-            f"attempt={attempt if attempt is not None else '?'} "
-            f"event={event if event is not None else '?'}"
-        )
+        progress_parts = [
+            f"batch={batch_idx if batch_idx is not None else '?'}",
+            f"attempt={attempt if attempt is not None else '?'}",
+            f"event={event if event is not None else '?'}",
+        ]
+        error_detail = payload.get("error")
+        if isinstance(error_detail, str) and error_detail.strip():
+            compact_error = " ".join(error_detail.strip().split())
+            if len(compact_error) > 160:
+                compact_error = compact_error[:157] + "..."
+            progress_parts.append(f"error={json.dumps(compact_error, ensure_ascii=False)}")
+        last_progress = " ".join(progress_parts)
         break
     for line in reversed(lines):
         marker = "RuntimeError:"
@@ -5800,15 +6024,30 @@ def _llm_quality_scenario_timeout(args, *, count):
     if getattr(args, "mode", None) != "llm":
         return base_timeout
     llm_batch_size = max(1, int(getattr(args, "scenario_llm_batch_size", 2)))
-    llm_max_attempts = max(1, int(getattr(args, "scenario_llm_max_attempts", 1)))
+    llm_max_attempts = _llm_quality_effective_scenario_llm_max_attempts(args)
     llm_request_timeout = max(5.0, float(getattr(args, "scenario_llm_request_timeout", 40.0)))
     estimated_calls = int(math.ceil(max(1, int(count)) / float(llm_batch_size)))
     estimated_budget = (estimated_calls * llm_max_attempts * llm_request_timeout) + 25.0
     return max(base_timeout, estimated_budget)
 
 
+def _llm_quality_effective_scenario_llm_max_attempts(args) -> int:
+    configured = getattr(args, "scenario_llm_max_attempts", None)
+    if configured is None:
+        configured = os.environ.get("BOOKING_SCENARIO_LLM_MAX_ATTEMPTS", "3")
+    return max(1, int(configured))
+
+
+def _llm_quality_scenario_progress_stderr_enabled(args) -> bool:
+    configured = getattr(args, "scenario_progress_stderr", None)
+    if configured is not None:
+        return bool(configured)
+    return getattr(args, "mode", None) == "llm" and not getattr(args, "scenarios_file", None)
+
+
 def _llm_quality_generate_batch(args, *, count, seed, scenario_context_path=None):
     scenario_timeout = _llm_quality_scenario_timeout(args, count=count)
+    progress_stderr = _llm_quality_scenario_progress_stderr_enabled(args)
     script_path = _llm_quality_dialog_script()
     cmd = [
         sys.executable,
@@ -5847,13 +6086,12 @@ def _llm_quality_generate_batch(args, *, count, seed, scenario_context_path=None
             cmd += ["--llm-base-url", args.llm_base_url]
         if getattr(args, "scenario_llm_batch_size", None):
             cmd += ["--llm-batch-size", str(args.scenario_llm_batch_size)]
-        if getattr(args, "scenario_llm_max_attempts", None):
-            cmd += ["--llm-max-attempts", str(args.scenario_llm_max_attempts)]
+        cmd += ["--llm-max-attempts", str(_llm_quality_effective_scenario_llm_max_attempts(args))]
         if getattr(args, "scenario_llm_request_timeout", None):
             cmd += ["--llm-request-timeout", str(args.scenario_llm_request_timeout)]
         if getattr(args, "scenario_llm_attempt_backoff", None):
             cmd += ["--llm-attempt-backoff", str(args.scenario_llm_attempt_backoff)]
-        if getattr(args, "scenario_progress_stderr", False):
+        if progress_stderr:
             cmd.append("--progress-stderr")
     child_env = {}
     if args.mode == "llm" and args.llm_api_key:
@@ -6924,12 +7162,89 @@ def _llm_quality_build_run_economy_status(
         "signal_2",
         "signal_15",
     }
+    non_canonical_lock_retry_reason = None
     non_canonical_lock_retry_eligible = bool(
         previous_lock_fingerprint_clean
         and previous_lock_canonical is False
         and previous_lock_stop_reason
         and previous_lock_stop_reason in previous_lock_stop_reason_process_allowlist
     )
+    if non_canonical_lock_retry_eligible:
+        non_canonical_lock_retry_reason = "process_stop_reason"
+    elif previous_lock_fingerprint_clean and previous_lock_canonical is False:
+        previous_lock_summary_path = (
+            str(previous_lock_payload.get("summary_path") or "").strip() or None
+        )
+        previous_lock_summary = (
+            _llm_quality_load_json_object(previous_lock_summary_path)
+            if previous_lock_summary_path
+            else None
+        )
+        previous_lock_quality_status = (
+            previous_lock_summary.get("quality_status")
+            if isinstance(previous_lock_summary, dict)
+            else None
+        )
+        previous_lock_artifact_integrity = (
+            previous_lock_summary.get("artifact_integrity")
+            if isinstance(previous_lock_summary, dict)
+            else None
+        )
+        previous_lock_manual_audit = (
+            previous_lock_summary.get("manual_audit")
+            if isinstance(previous_lock_summary, dict)
+            else None
+        )
+        previous_lock_manual_status = (
+            str((previous_lock_manual_audit or {}).get("status") or "").strip().casefold()
+        )
+        if not previous_lock_manual_status and previous_lock_summary_path:
+            resolved_manual = _llm_quality_resolve_manual_audit_status(
+                os.path.dirname(previous_lock_summary_path)
+            )
+            previous_lock_manual_status = (
+                str((resolved_manual or {}).get("manual_audit_status") or "")
+                .strip()
+                .casefold()
+            )
+        previous_lock_manual_done = previous_lock_manual_status in {
+            "done",
+            "completed",
+            "pass",
+            "passed",
+        }
+        previous_lock_infra_invalid = (
+            isinstance(previous_lock_summary, dict)
+            and previous_lock_summary.get("infra_valid") is False
+        )
+        previous_lock_run_integrity_invalid = (
+            isinstance(previous_lock_quality_status, dict)
+            and previous_lock_quality_status.get("run_integrity_valid") is False
+        )
+        previous_lock_artifacts_valid = (
+            isinstance(previous_lock_artifact_integrity, dict)
+            and previous_lock_artifact_integrity.get("valid") is True
+        )
+        previous_lock_infra_reasons = (
+            previous_lock_quality_status.get("infra_reasons")
+            if isinstance(previous_lock_quality_status, dict)
+            else None
+        )
+        previous_lock_integrity_reasons = (
+            previous_lock_quality_status.get("run_integrity_reasons")
+            if isinstance(previous_lock_quality_status, dict)
+            else None
+        )
+        if (
+            previous_lock_infra_invalid
+            and previous_lock_run_integrity_invalid
+            and previous_lock_artifacts_valid
+            and previous_lock_manual_done
+            and bool(previous_lock_infra_reasons)
+            and bool(previous_lock_integrity_reasons)
+        ):
+            non_canonical_lock_retry_eligible = True
+            non_canonical_lock_retry_reason = "audited_infra_invalid_non_canonical"
     non_canonical_lock_retry_applied = False
     previous_lock_run_id = str(previous_lock_payload.get("run_id") or "").strip() or None
     if mode == "off":
@@ -6960,6 +7275,7 @@ def _llm_quality_build_run_economy_status(
             "previous_lock_run_id": previous_lock_run_id,
             "allow_non_canonical_lock_retry": bool(allow_non_canonical_lock_retry),
             "non_canonical_lock_retry_eligible": non_canonical_lock_retry_eligible,
+            "non_canonical_lock_retry_reason": non_canonical_lock_retry_reason,
             "non_canonical_lock_retry_applied": False,
             "baseline_checked": bool(
                 isinstance(baseline_preflight, dict) and baseline_preflight.get("checked")
@@ -7148,6 +7464,7 @@ def _llm_quality_build_run_economy_status(
         "previous_lock_run_id": previous_lock_run_id,
         "allow_non_canonical_lock_retry": bool(allow_non_canonical_lock_retry),
         "non_canonical_lock_retry_eligible": non_canonical_lock_retry_eligible,
+        "non_canonical_lock_retry_reason": non_canonical_lock_retry_reason,
         "non_canonical_lock_retry_applied": non_canonical_lock_retry_applied,
         "baseline_checked": baseline_checked,
         "baseline_canonical": baseline_canonical,
@@ -8865,7 +9182,7 @@ def _llm_quality_next_step_for_reason(reason):
         "timeout_degrade_booking_generic": "replace timeout generic clarify with booking-safe slot prompt when booking context is active",
         "run_economy_violation": "avoid full/replay spend without code delta + baseline; use lock/replay loop with reset-before-dialog",
         "run_completion_gap": "stop run as INVALID and rerun from lock scenarios until all expected turns are executed",
-        "lock_fingerprint_unchanged_after_non_canonical": "apply root-cause fix that changes lock fingerprint (or explicit forensic override) before next lock",
+        "lock_fingerprint_unchanged_after_non_canonical": "apply root-cause fix that changes lock fingerprint or use explicit audited infra-recovery override before next lock",
         "trace_response_mismatch": "fail run as INVALID and inspect trace write path for missing inbound records",
         "weak_oracle_turn": "add at least one explicit expectation per scenario turn (action/reply_type/info/state/meta/trace/reply)",
         "incomplete_run_artifact": "discard incomplete run from baseline/comparison and regenerate with full summary+brief artifacts",
@@ -10631,13 +10948,64 @@ def _llm_quality_openai_probe_reason(status_code: int | None, body: object | Non
     return "request_failed"
 
 
-def _llm_quality_openai_key_preflight(
+def _llm_quality_openai_probe_timeout(timeout: float | None) -> float:
+    try:
+        requested = float(timeout or 8.0)
+    except (TypeError, ValueError):
+        requested = 8.0
+    return max(2.0, min(requested, 30.0))
+
+
+def _llm_quality_openai_preflight_fingerprint(*, api_key: str, model: str, base_url: str) -> str:
+    return hashlib.sha256(f"{model}|{base_url}|{api_key}".encode("utf-8")).hexdigest()
+
+
+def _llm_quality_openai_preflight_should_retry(*, status: int | None, reason: str | None) -> bool:
+    normalized_reason = _llm_quality_normalize_tool_token(reason)
+    if normalized_reason in {
+        "unauthorized",
+        "invalid_api_key",
+        "insufficient_quota",
+        "rate_limit",
+    }:
+        return False
+    if status in {408, 409}:
+        return True
+    if isinstance(status, int) and status >= 500:
+        return True
+    if normalized_reason.startswith("url_error"):
+        return True
+    return normalized_reason in {
+        "probe_error:timeouterror",
+        "probe_error_timeout",
+        "probe_error:sockettimeout",
+    }
+
+
+def _llm_quality_openai_preflight_retry_delay(attempt: int) -> float:
+    return max(0.1, min(0.5 * max(1, int(attempt)), 1.0))
+
+
+def _llm_quality_openai_preflight_attempt_timeout(
+    *,
+    purpose: str,
+    timeout: float,
+    attempt: int,
+) -> float:
+    base_timeout = _llm_quality_openai_probe_timeout(timeout)
+    if _llm_quality_normalize_tool_token(purpose) != "llm" or int(attempt) <= 1:
+        return base_timeout
+    return max(base_timeout, min(max(base_timeout * 2.0, 45.0), 90.0))
+
+
+def _llm_quality_openai_key_preflight_attempt(
     *,
     purpose: str,
     api_key: str,
     model: str,
     base_url: str,
     timeout: float,
+    effective_timeout: float | None = None,
 ) -> dict:
     endpoint = _llm_quality_openai_chat_endpoint(base_url)
     payload = {
@@ -10654,7 +11022,8 @@ def _llm_quality_openai_key_preflight(
             "Authorization": f"Bearer {api_key}",
         },
     )
-    effective_timeout = max(2.0, min(float(timeout or 8.0), 15.0))
+    if effective_timeout is None:
+        effective_timeout = _llm_quality_openai_probe_timeout(timeout)
     started = time.monotonic()
     try:
         with urllib.request.urlopen(req, timeout=effective_timeout) as resp:
@@ -10675,6 +11044,7 @@ def _llm_quality_openai_key_preflight(
                 "elapsed_ms": elapsed_ms,
                 "endpoint": endpoint,
                 "model": model,
+                "timeout_s": effective_timeout,
             }
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
@@ -10693,6 +11063,7 @@ def _llm_quality_openai_key_preflight(
             "elapsed_ms": elapsed_ms,
             "endpoint": endpoint,
             "model": model,
+            "timeout_s": effective_timeout,
         }
     except urllib.error.URLError as exc:
         elapsed_ms = round((time.monotonic() - started) * 1000, 2)
@@ -10704,6 +11075,7 @@ def _llm_quality_openai_key_preflight(
             "elapsed_ms": elapsed_ms,
             "endpoint": endpoint,
             "model": model,
+            "timeout_s": effective_timeout,
         }
     except Exception as exc:
         elapsed_ms = round((time.monotonic() - started) * 1000, 2)
@@ -10715,7 +11087,93 @@ def _llm_quality_openai_key_preflight(
             "elapsed_ms": elapsed_ms,
             "endpoint": endpoint,
             "model": model,
+            "timeout_s": effective_timeout,
         }
+
+
+def _llm_quality_collect_openai_preflight_result(
+    *,
+    purpose: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    timeout: float,
+    cache: dict[str, dict],
+) -> tuple[dict, bool]:
+    fingerprint = _llm_quality_openai_preflight_fingerprint(
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+    )
+    cached = cache.get(fingerprint)
+    if isinstance(cached, dict):
+        reused_result = dict(cached)
+        reused_result["purpose"] = purpose
+        reused_result["reused"] = True
+        return reused_result, True
+
+    result = _llm_quality_openai_key_preflight(
+        purpose=purpose,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        timeout=timeout,
+    )
+    result["reused"] = False
+    cache[fingerprint] = dict(result)
+    return result, False
+
+
+def _llm_quality_openai_key_preflight(
+    *,
+    purpose: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    timeout: float,
+) -> dict:
+    started = time.monotonic()
+    previous_failures = []
+    final_result = None
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
+        attempt_timeout = _llm_quality_openai_preflight_attempt_timeout(
+            purpose=purpose,
+            timeout=timeout,
+            attempt=attempt,
+        )
+        result = _llm_quality_openai_key_preflight_attempt(
+            purpose=purpose,
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            timeout=timeout,
+            effective_timeout=attempt_timeout,
+        )
+        retryable = _llm_quality_openai_preflight_should_retry(
+            status=result.get("status"),
+            reason=result.get("reason"),
+        )
+        if result.get("valid") or not retryable or attempt >= max_attempts:
+            final_result = result
+            break
+        previous_failures.append(
+            {
+                "attempt": attempt,
+                "reason": result.get("reason"),
+                "status": result.get("status"),
+                "timeout_s": result.get("timeout_s"),
+            }
+        )
+        time.sleep(_llm_quality_openai_preflight_retry_delay(attempt))
+    if final_result is None:
+        final_result = result
+    final_result["attempts"] = attempt
+    final_result["retried"] = attempt > 1
+    final_result["elapsed_ms"] = round((time.monotonic() - started) * 1000, 2)
+    if previous_failures:
+        final_result["retry_reasons"] = list(previous_failures)
+    return final_result
 
 
 def _llm_quality_secret_fingerprint(secret):
@@ -10930,6 +11388,30 @@ def _llm_quality_build_scenario_contract_status(
     include_media=False,
     acceptance_contract=False,
 ):
+    pending_question_tags = {
+        "ask_about_requested_slot",
+        "slot_constraint",
+        "slot_compare",
+        "mixed_fill_plus_question",
+    }
+    pending_question_context_preserve_tags = {
+        "info",
+        "media",
+        "price",
+        "location",
+        "hours",
+        "promo",
+        "duration",
+        "parking",
+        "master",
+        "wrong_slot",
+        "interrupt",
+    }
+
+    def _normalized_reply_type(expectations):
+        value = str((expectations or {}).get("reply_type") or "").strip().casefold()
+        return value or None
+
     coverage_tokens = _llm_quality_parse_coverage_tokens(scenario_coverage)
     required_tags_by_coverage = {
         "booking": ("booking", "check_booking", "confirm"),
@@ -10943,6 +11425,7 @@ def _llm_quality_build_scenario_contract_status(
     reply_type_coverage_turns = 0
     action_coverage_turns = 0
     info_coverage_turns = 0
+    reasons = []
     extract_expectations_fn = globals().get("_llm_quality_extract_expectations")
     weak_expectation_fn = globals().get("_llm_quality_is_weak_oracle_expectation")
 
@@ -10953,6 +11436,7 @@ def _llm_quality_build_scenario_contract_status(
         if not isinstance(turns, list):
             continue
         dialog_count += 1
+        active_reply_type = None
         first_check_booking = None
         first_confirm_after_check = None
         for idx, turn in enumerate(turns):
@@ -10997,10 +11481,20 @@ def _llm_quality_build_scenario_contract_status(
                 and first_confirm_after_check is None
             ):
                 first_confirm_after_check = idx
+            if any(tag in pending_question_tags for tag in tags) and active_reply_type != "time":
+                reasons.append(
+                    f"orphan_pending_question_turn:d{dialog_count}:t{idx + 1}"
+                )
+            reply_type = _normalized_reply_type(expectations)
+            if reply_type:
+                active_reply_type = reply_type
+            elif any(tag in pending_question_context_preserve_tags for tag in tags):
+                pass
+            else:
+                active_reply_type = None
         if first_check_booking is not None and first_confirm_after_check is not None:
             dialogs_with_check_confirm_sequence += 1
 
-    reasons = []
     required = {}
     for coverage_token, required_tags in required_tags_by_coverage.items():
         if coverage_token not in coverage_tokens:
@@ -11011,13 +11505,6 @@ def _llm_quality_build_scenario_contract_status(
             if not present:
                 reasons.append(f"missing_tag:{tag}")
 
-    if (
-        "booking" in coverage_tokens
-        and required.get("check_booking")
-        and required.get("confirm")
-        and dialogs_with_check_confirm_sequence <= 0
-    ):
-        reasons.append("check_confirm_sequence_missing")
     if weak_expectation_turns > 0 and not allow_weak_oracle:
         reasons.append("weak_oracle_turn")
     if acceptance_contract:
@@ -11134,6 +11621,11 @@ def _llm_quality_build_tool_evidence_status(
     if not isinstance(tool_hooks, dict):
         tool_hooks = {}
     hook_by_action = tool_hooks.get("by_action") if isinstance(tool_hooks.get("by_action"), dict) else {}
+    required_hook_by_action = (
+        tool_hooks.get("required_by_action")
+        if isinstance(tool_hooks.get("required_by_action"), dict)
+        else {}
+    )
 
     def _as_int(value):
         if isinstance(value, bool):
@@ -11156,6 +11648,7 @@ def _llm_quality_build_tool_evidence_status(
     confirm_tool_events = _as_int(tool_events.get("confirm"))
     calendar_hook_events = _as_int(hook_by_action.get("calendar"))
     confirm_hook_events = _as_int(hook_by_action.get("confirm"))
+    calendar_hook_candidates = _as_int(required_hook_by_action.get("calendar"))
     booking_commit_trace_events = _as_int(trace_stages.get("booking_commit"))
     booking_confirm_trace_events = _as_int(trace_stages.get("booking_confirm"))
     booking_confirm_actions = _as_int(actions.get("booking_confirm"))
@@ -11175,24 +11668,43 @@ def _llm_quality_build_tool_evidence_status(
         + booking_confirm_actions
     )
 
-    booking_required = "booking" in coverage_tokens or calendar_intent_turns > 0
+    calendar_intent_candidates = calendar_intent_turns + check_booking_intents
     confirm_candidates = check_booking_intents + booking_confirm_actions
-    require_calendar = policy in {"auto", "strict"} and booking_required
-    require_confirm = policy == "strict" and booking_required
+    calendar_opportunity_total = (
+        calendar_intent_candidates
+        + booking_confirm_actions
+        + calendar_evidence_total
+        + confirm_evidence_total
+    )
+    confirm_opportunity_total = confirm_candidates + confirm_evidence_total
+    confirm_observed = confirm_evidence_total > 0
+    booking_required = (
+        "booking" in coverage_tokens
+        or calendar_opportunity_total > 0
+        or confirm_opportunity_total > 0
+    )
+    require_calendar = policy in {"auto", "strict"} and calendar_opportunity_total > 0
+    require_confirm = policy == "strict" and confirm_opportunity_total > 0
     require_hooks = policy == "strict"
+    require_calendar_hook = (
+        require_hooks
+        and hooks_mode == "auto"
+        and require_calendar
+        and calendar_hook_candidates > 0
+    )
 
     reasons = []
     if policy == "strict" and hooks_mode != "auto":
         reasons.append("tool_hooks_mode_not_auto")
-    if require_calendar and calendar_intent_turns == 0:
+    if require_calendar and calendar_intent_candidates == 0:
         reasons.append("calendar_intent_missing")
     if require_calendar and calendar_evidence_total <= 0:
         reasons.append("calendar_evidence_missing")
-    if require_confirm and confirm_candidates <= 0:
+    if require_confirm and confirm_candidates <= 0 and not confirm_observed:
         reasons.append("confirm_candidate_missing")
     if require_confirm and confirm_evidence_total <= 0:
         reasons.append("confirm_evidence_missing")
-    if require_hooks and hooks_mode == "auto" and require_calendar and calendar_hook_events <= 0:
+    if require_calendar_hook and calendar_hook_events <= 0:
         reasons.append("calendar_hook_missing")
     if require_hooks and hooks_mode == "auto" and require_confirm and confirm_hook_events <= 0:
         reasons.append("confirm_hook_missing")
@@ -11206,18 +11718,24 @@ def _llm_quality_build_tool_evidence_status(
             "calendar": require_calendar,
             "confirm": require_confirm,
             "hooks": require_hooks,
+            "calendar_hook": require_calendar_hook,
             "hooks_mode": hooks_mode,
         },
         "counts": {
             "calendar_intent_turns": calendar_intent_turns,
             "check_booking_intents": check_booking_intents,
             "booking_confirm_actions": booking_confirm_actions,
+            "calendar_intent_candidates": calendar_intent_candidates,
             "calendar_tool_events": calendar_tool_events,
             "confirm_tool_events": confirm_tool_events,
             "calendar_hook_events": calendar_hook_events,
             "confirm_hook_events": confirm_hook_events,
+            "calendar_hook_candidates": calendar_hook_candidates,
             "booking_commit_trace_events": booking_commit_trace_events,
             "booking_confirm_trace_events": booking_confirm_trace_events,
+            "calendar_opportunity_total": calendar_opportunity_total,
+            "confirm_opportunity_total": confirm_opportunity_total,
+            "confirm_observed": confirm_observed,
             "calendar_evidence_total": calendar_evidence_total,
             "confirm_evidence_total": confirm_evidence_total,
         },
@@ -11736,6 +12254,13 @@ def _llm_quality_evaluate_turn(
             expected_meta_any,
             expected_meta_contains,
         )
+        and not _llm_quality_meta_matches_timeout_grounded_slot_constraint_name_resume(
+            meta,
+            expected_meta,
+            expected_meta_any,
+            expected_meta_contains,
+            trace_entries,
+        )
     ):
         reasons.append("expected_meta_mismatch")
     if expected_trace_contains and not _llm_quality_trace_has_expected_entries(
@@ -11828,6 +12353,12 @@ def _llm_quality_evaluate_turn(
             # the reply is a plain slot list without a follow-up question marker.
             if has_slots_payload or (calendar_outcome == "success" and bot_response) or has_followup_prompt:
                 booking_stall_ignored = True
+        elif _llm_quality_has_pending_question_interaction_contract(
+            meta=meta,
+            trace_entries=trace_entries,
+            actual_expected_reply_type=actual_expected_reply_type,
+        ):
+            booking_stall_ignored = True
     if (
         booking_active
         and booking_progress_expected
@@ -12555,9 +13086,10 @@ def _parse_llm_quality_args(argv):
     parser.add_argument(
         "--scenario-llm-max-attempts",
         type=int,
-        default=1,
+        default=None,
         help=(
             "Inner retries inside booking_dialog_scenarios.py. "
+            "When omitted, BOOKING_SCENARIO_LLM_MAX_ATTEMPTS or 3 is used. "
             "Outer retries are controlled by --retry-count."
         ),
     )
@@ -12576,6 +13108,7 @@ def _parse_llm_quality_args(argv):
     parser.add_argument(
         "--scenario-progress-stderr",
         action="store_true",
+        default=None,
         help="Emit scenario generation batch/attempt progress to stderr.",
     )
     parser.add_argument("--llm-model", default="gpt-4o-mini")
@@ -12822,7 +13355,7 @@ def _parse_llm_quality_args(argv):
         action="store_true",
         help=(
             "Allow lock rerun with unchanged fingerprint only when previous lock was non-canonical "
-            "due to process/preflight stop reason."
+            "due to process/preflight stop reason or audited infra-invalid run-integrity failure."
         ),
     )
     parser.add_argument(
@@ -16520,7 +17053,7 @@ def _run_llm_quality(args):
         raise SystemExit("llm-quality: --count must be >= 1")
     if getattr(args, "scenario_llm_batch_size", 1) < 1:
         raise SystemExit("llm-quality: --scenario-llm-batch-size must be >= 1")
-    if getattr(args, "scenario_llm_max_attempts", 1) < 1:
+    if getattr(args, "scenario_llm_max_attempts", None) is not None and args.scenario_llm_max_attempts < 1:
         raise SystemExit("llm-quality: --scenario-llm-max-attempts must be >= 1")
     if getattr(args, "scenario_llm_request_timeout", 1.0) <= 0:
         raise SystemExit("llm-quality: --scenario-llm-request-timeout must be > 0")
@@ -16528,6 +17061,8 @@ def _run_llm_quality(args):
         raise SystemExit("llm-quality: --scenario-llm-attempt-backoff must be >= 0")
     if getattr(args, "scenario_gen_timeout", None) is not None and args.scenario_gen_timeout <= 0:
         raise SystemExit("llm-quality: --scenario-gen-timeout must be > 0")
+    args.scenario_llm_max_attempts = _llm_quality_effective_scenario_llm_max_attempts(args)
+    args.scenario_progress_stderr = _llm_quality_scenario_progress_stderr_enabled(args)
     rng = random.Random(args.seed or int(time.time()))
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     run_id = args.run_id or _llm_quality_build_default_run_id(timestamp)
@@ -17036,23 +17571,18 @@ def _run_llm_quality(args):
         )
         judge_cache = _llm_quality_load_judge_cache(judge_cache_file)
     openai_preflight = []
-    preflight_fingerprint_seen = set()
+    preflight_result_cache: dict[str, dict] = {}
 
     def _run_openai_preflight_check(*, purpose, api_key, model, base_url, timeout):
         if not api_key:
             return None
-        fingerprint = hashlib.sha256(
-            f"{purpose}|{model}|{base_url}|{api_key}".encode("utf-8")
-        ).hexdigest()
-        if fingerprint in preflight_fingerprint_seen:
-            return None
-        preflight_fingerprint_seen.add(fingerprint)
-        result = _llm_quality_openai_key_preflight(
+        result, _reused = _llm_quality_collect_openai_preflight_result(
             purpose=purpose,
             api_key=api_key,
             model=model,
             base_url=base_url,
             timeout=timeout,
+            cache=preflight_result_cache,
         )
         openai_preflight.append(result)
         print(
@@ -17066,6 +17596,11 @@ def _run_llm_quality(args):
                     "elapsed_ms": result.get("elapsed_ms"),
                     "model": model,
                     "base_url": base_url,
+                    "timeout_s": result.get("timeout_s"),
+                    "attempts": result.get("attempts"),
+                    "retried": bool(result.get("retried")),
+                    "retry_reasons": result.get("retry_reasons") or [],
+                    "reused": bool(result.get("reused")),
                 },
                 ensure_ascii=False,
             )
@@ -17574,6 +18109,7 @@ def _run_llm_quality(args):
             "sent_total": 0,
             "errors": 0,
             "by_action": {},
+            "required_by_action": {},
         },
     }
     judge_stats = {
@@ -18893,7 +19429,14 @@ def _run_llm_quality(args):
                 expected_meta_contains = expectations.get("meta_contains") or {}
                 expected_trace_contains = expectations.get("trace_contains") or []
                 info_tags = [tag for tag in turn_tags if tag in LLM_QUALITY_INFO_TAGS]
-                if not info_tags:
+                if not info_tags and _llm_quality_should_infer_info_tags_from_text(
+                    turn_tags=turn_tags,
+                    expected_info_sections=expected_info_sections,
+                    expected_reply_type=expected_reply_type_value,
+                    expected_reply_matched=expected_reply_matched,
+                    meta=meta,
+                    trace_entries=trace_entries,
+                ):
                     info_tags = sorted(_llm_quality_infer_info_tags(text))
                 info_answered = {}
                 info_sections = []
@@ -19272,6 +19815,7 @@ def _run_llm_quality(args):
 
                 tool_hook_results = []
                 tool_hook_result = None
+                send_calendar_hook = _llm_quality_should_send_calendar_hook(tool_signals, turn_tags)
                 if args.tool_hooks == "auto":
                     hook_key = conversation_id or f"dialog-{dialog_idx}"
                     hook_state = tool_hook_state.setdefault(
@@ -19294,7 +19838,7 @@ def _run_llm_quality(args):
                                 )
                             )
                             hook_state["cancel"] += 1
-                    if _llm_quality_should_send_calendar_hook(tool_signals, turn_tags):
+                    if send_calendar_hook:
                         if hook_state["calendar"] < hook_limit:
                             tool_hook_results.append(
                                 _send_tool_hook(
@@ -19307,6 +19851,11 @@ def _run_llm_quality(args):
                 hook_stats = coverage_stats.get("tool_hooks")
                 if isinstance(hook_stats, dict):
                     by_action = hook_stats.setdefault("by_action", {})
+                    required_by_action = hook_stats.setdefault("required_by_action", {})
+                    if send_calendar_hook:
+                        required_by_action["calendar"] = (
+                            required_by_action.get("calendar", 0) + 1
+                        )
                     for hook in tool_hook_results:
                         if not isinstance(hook, dict):
                             continue

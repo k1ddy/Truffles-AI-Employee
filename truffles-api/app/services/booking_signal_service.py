@@ -187,6 +187,30 @@ def has_daypart_stem(normalized: str) -> bool:
     return bool(normalized and any(stem in normalized for stem in stems))
 
 
+def has_pending_time_question_marker(normalized: str) -> bool:
+    markers = get_booking_text_tokens("pending_time_question_markers")
+    return bool(normalized and any(marker in normalized for marker in markers))
+
+
+def looks_like_time_preference_statement(
+    message_text: str | None,
+    *,
+    normalized_text: str | None = None,
+) -> bool:
+    if not isinstance(message_text, str) or not message_text.strip():
+        return False
+    if "?" in message_text:
+        return False
+    normalized = normalized_text.strip() if isinstance(normalized_text, str) else _normalize_text(message_text)
+    if not normalized:
+        return False
+    preference_markers = get_system_lexicon_list("daypart_preference_markers")
+    if not preference_markers or not any(marker in normalized for marker in preference_markers):
+        return False
+    context_tokens = get_system_lexicon_list("hours_followup_phrases")
+    return bool(context_tokens and any(token in normalized for token in context_tokens))
+
+
 def extract_time_token(text: str | None) -> str | None:
     if not text:
         return None

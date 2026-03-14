@@ -591,11 +591,33 @@ class TestManagerResolve:
             "pending_sla": {"ping_sent_at": now.isoformat()},
             "handover_confirmation": {"required": True},
             "pending_resume": {
-                "context_manager": {"current_goal": "booking"},
+                "context_manager": {
+                    "current_goal": "booking",
+                    "canonical_dialog_state": {
+                        "owner_id": "context_manager.dialog_state.v1",
+                        "version": "v1",
+                        "interaction_state": {
+                            "resume_slot": "datetime",
+                            "interaction_target": "time",
+                            "interaction_relation": "ask_about_requested_slot",
+                            "interaction_owner": "llm_policy_core:ask_about_requested_slot",
+                            "grounded_referents": {"service": "Педикюр"},
+                        },
+                    },
+                },
                 "expected_reply_type": "time",
+                "expected_reply_reason": "booking_time_availability_followup",
                 "intent_queue": ["booking"],
                 "booking": {"active": True, "service": "Педикюр", "datetime": "послезавтра"},
-                "session_memory": {"active_goal": "booking"},
+                "session_memory": {
+                    "active_goal": "booking",
+                    "interaction_state": {
+                        "resume_slot": "datetime",
+                        "interaction_target": "time",
+                        "interaction_relation": "ask_about_requested_slot",
+                        "interaction_owner": "llm_policy_core:ask_about_requested_slot",
+                    },
+                },
                 "last_service_hint": "Педикюр",
                 "last_service_hint_at": "2026-02-18T00:00:00+00:00",
             },
@@ -621,10 +643,24 @@ class TestManagerResolve:
         assert ctx.get("pending_sla") is None
         assert ctx.get("handover_confirmation") is None
         assert ctx.get("context_manager", {}).get("current_goal") == "booking"
+        assert (
+            ctx.get("context_manager", {})
+            .get("canonical_dialog_state", {})
+            .get("interaction_state", {})
+            .get("interaction_target")
+            == "time"
+        )
         assert ctx.get("expected_reply_type") == "time"
+        assert ctx.get("expected_reply_reason") == "booking_time_availability_followup"
         assert ctx.get("intent_queue") == ["booking"]
         assert ctx.get("booking", {}).get("datetime") == "послезавтра"
         assert ctx.get("session_memory", {}).get("active_goal") == "booking"
+        assert (
+            ctx.get("session_memory", {})
+            .get("interaction_state", {})
+            .get("interaction_owner")
+            == "llm_policy_core:ask_about_requested_slot"
+        )
         assert isinstance(ctx.get("session_memory", {}).get("last_updated_at"), str)
         assert ctx.get("last_service_hint") == "Педикюр"
         assert ctx.get("last_service_hint_at") == "2026-02-18T00:00:00+00:00"
@@ -748,6 +784,7 @@ class TestManagerReturn:
             "pending_resume": {
                 "context_manager": {"current_goal": "booking"},
                 "expected_reply_type": "name",
+                "expected_reply_reason": "booking_prompt",
                 "intent_queue": ["booking", "check_booking"],
                 "booking": {"active": True, "service": "Маникюр"},
                 "session_memory": {"active_goal": "booking"},
@@ -772,6 +809,7 @@ class TestManagerReturn:
         ctx = conversation.context
         assert ctx.get("pending_resume") is None
         assert ctx.get("expected_reply_type") == "name"
+        assert ctx.get("expected_reply_reason") == "booking_prompt"
         assert ctx.get("intent_queue") == ["booking", "check_booking"]
         assert ctx.get("booking", {}).get("service") == "Маникюр"
         assert ctx.get("last_service_hint") == "Маникюр"

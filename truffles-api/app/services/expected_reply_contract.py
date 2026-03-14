@@ -251,6 +251,10 @@ def resolve_tool_expected_reply_contract(
         booking_has_datetime=booking_has_datetime,
         booking_has_name=booking_has_name,
     )
+    catalog_service_progress_expected = {
+        EXPECTED_REPLY_SERVICE,
+        EXPECTED_REPLY_TIME,
+    }
 
     if normalized_action == "catalog.service_query":
         services_overview_update = resolve_services_overview_contract_update(
@@ -274,9 +278,21 @@ def resolve_tool_expected_reply_contract(
                 "promotions",
                 "presence_fallback",
                 "price_item_fallback",
-                "service_not_found",
-                "not_found_fallback",
             }
+            and booking_has_service
+            and (
+                not booking_has_datetime
+                or current_expected in catalog_service_progress_expected
+                or memory_expected in catalog_service_progress_expected
+            )
+        ):
+            return ExpectedReplyContractDecision(
+                expected_reply_type=EXPECTED_REPLY_TIME,
+                reason="catalog_service_booking_progress",
+            )
+        if (
+            booking_active
+            and normalized_decision in {"service_not_found", "not_found_fallback"}
             and booking_has_service
             and not booking_has_datetime
         ):
@@ -323,6 +339,11 @@ def resolve_tool_expected_reply_contract(
             return ExpectedReplyContractDecision(
                 reason="calendar_book_slot_committed",
                 clear_expected_reply=True,
+            )
+        if normalized_decision == "specialist_missing":
+            return ExpectedReplyContractDecision(
+                expected_reply_type=EXPECTED_REPLY_NAME,
+                reason="calendar_book_slot_specialist_followup",
             )
         if normalized_decision == "conflict":
             return ExpectedReplyContractDecision(

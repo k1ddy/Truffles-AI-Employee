@@ -12,6 +12,7 @@ from app.services.intent_service import (
     _build_policy_core_response_format,
     _build_service_query_hint_response_format,
     _build_specialist_hint_response_format,
+    _load_policy_core_prompt,
     extract_customer_name_hint_llm,
     extract_service_query_hint_llm,
     interpret_expected_reply,
@@ -573,6 +574,191 @@ class TestPolicyCoreTimeoutRetry:
             {"key": "parking_note", "value": "Рядом со входом", "source": "booking_slot"},
         ]
 
+    def test_policy_core_preserves_pending_question_contract(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "slots": {"service": "маникюр", "datetime": "", "name": ""},
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+                "needs_manager": False,
+                "risk_signals": [],
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "На какое время лучше записаться?",
+                expected_reply_type="time",
+            )
+
+        assert result["ok"] is True
+        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["pending_question_target"] == "time"
+        assert result["payload"]["active_question_relation"] == "ask_about_requested_slot"
+
+    def test_policy_core_preserves_slot_compare_pending_question_contract(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "slots": {"service": "маникюр", "datetime": "", "name": ""},
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+                "needs_manager": False,
+                "risk_signals": [],
+                "pending_question_act": "slot_compare",
+                "pending_question_target": "time",
+                "active_question_relation": "slot_compare",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "А на какое время?",
+                expected_reply_type="time",
+            )
+
+        assert result["ok"] is True
+        assert result["payload"]["pending_question_act"] == "slot_compare"
+        assert result["payload"]["pending_question_target"] == "time"
+        assert result["payload"]["active_question_relation"] == "slot_compare"
+
+    def test_policy_core_preserves_specialist_availability_followup_contract(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "slots": {"service": "маникюр", "datetime": "", "name": ""},
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+                "needs_manager": False,
+                "risk_signals": [],
+                "subject_kind": "specialist",
+                "capability": "live_availability",
+                "temporal_scope": "date_range",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "specialist",
+                "active_question_relation": "specialist_availability_followup",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Какой мастер свободен на этой неделе?",
+                expected_reply_type="time",
+            )
+
+        assert result["ok"] is True
+        assert result["payload"]["subject_kind"] == "specialist"
+        assert result["payload"]["capability"] == "live_availability"
+        assert result["payload"]["temporal_scope"] == "date_range"
+        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["pending_question_target"] == "specialist"
+        assert (
+            result["payload"]["active_question_relation"]
+            == "specialist_availability_followup"
+        )
+
+    def test_policy_core_preserves_grounded_specialist_availability_transition_contract(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "slots": {"service": "маникюр", "datetime": "завтра", "name": ""},
+                "next_question": "name",
+                "open_questions": ["name"],
+                "needs_manager": False,
+                "risk_signals": [],
+                "subject_kind": "specialist",
+                "capability": "live_availability",
+                "temporal_scope": "specific_time",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "specialist",
+                "active_question_relation": "specialist_availability_followup",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "А какие мастера доступны?",
+                expected_reply_type="time",
+            )
+
+        assert result["ok"] is True
+        assert result["payload"]["subject_kind"] == "specialist"
+        assert result["payload"]["capability"] == "live_availability"
+        assert result["payload"]["temporal_scope"] == "specific_time"
+        assert result["payload"]["next_question"] == "name"
+        assert result["payload"]["open_questions"] == ["name"]
+        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["pending_question_target"] == "specialist"
+        assert (
+            result["payload"]["active_question_relation"]
+            == "specialist_availability_followup"
+        )
+
+    def test_policy_core_preserves_active_name_time_availability_followup_contract(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.pop("expected_reply_type", None)
+        payload.update(
+            {
+                "tool_action": "collect",
+                "slots": {"service": "маникюр", "datetime": "15:00", "name": ""},
+                "next_question": "name",
+                "open_questions": ["name"],
+                "needs_manager": False,
+                "risk_signals": [],
+                "subject_kind": "booking",
+                "capability": "live_availability",
+                "temporal_scope": "specific_time",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "А есть ли свободные слоты на 15:00?",
+                expected_reply_type="name",
+            )
+
+        assert result["ok"] is True
+        assert result["payload"]["subject_kind"] == "booking"
+        assert result["payload"]["capability"] == "live_availability"
+        assert result["payload"]["temporal_scope"] == "specific_time"
+        assert result["payload"]["next_question"] == "name"
+        assert result["payload"]["open_questions"] == ["name"]
+        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["pending_question_target"] == "time"
+        assert result["payload"]["active_question_relation"] == "ask_about_requested_slot"
+
+    def test_policy_core_prompt_free_slots_question_keeps_pending_time_contract(self):
+        prompt = _load_policy_core_prompt()
+
+        assert "Когда у вас есть свободные слоты?" in prompt
+        assert "Не используй `calendar.list_slots` без `temporal_scope`" in prompt
+        assert '`pending_question_act="ask_about_requested_slot"`' in prompt
+        assert '`pending_question_target="time"`' in prompt
+        assert '`active_question_relation="ask_about_requested_slot"`' in prompt
+        assert "Какой мастер свободен на этой неделе?" in prompt
+        assert "А какие мастера доступны?" in prompt
+        assert "А есть ли свободные слоты на 15:00?" in prompt
+        assert '`active_question_relation="specialist_availability_followup"`' in prompt
+        assert '`next_question="name"`' in prompt
+        assert '`subject_kind="booking"`' in prompt
+        assert "alternate-time availability follow-up" in prompt
+
     def test_retries_without_response_format_when_provider_rejects_it(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         payload = self._policy_payload()
@@ -604,6 +790,9 @@ class TestPolicyCoreTimeoutRetry:
         assert "capability" in schema["properties"]
         assert "temporal_scope" in schema["properties"]
         assert "resolution_mode" in schema["properties"]
+        assert "pending_question_act" in schema["properties"]
+        assert "pending_question_target" in schema["properties"]
+        assert "active_question_relation" in schema["properties"]
         assert "resolver_id" in schema["properties"]
         assert "resolver_version" in schema["properties"]
         for keyword in ("allOf", "oneOf", "anyOf", "not", "enum"):

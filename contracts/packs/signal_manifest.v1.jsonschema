@@ -80,7 +80,8 @@
           "type": "object",
           "required": [
             "datetime_duration_context_markers",
-            "datetime_daypart_stems"
+            "datetime_daypart_stems",
+            "pending_time_question_markers"
           ],
           "additionalProperties": false,
           "properties": {
@@ -88,6 +89,9 @@
               "$ref": "#/$defs/textList"
             },
             "datetime_daypart_stems": {
+              "$ref": "#/$defs/textList"
+            },
+            "pending_time_question_markers": {
               "$ref": "#/$defs/textList"
             }
           }

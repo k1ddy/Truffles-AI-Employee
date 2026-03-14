@@ -28,6 +28,7 @@ RE_ENTRY_REQUIRED_KEY = "re_entry_required"
 PENDING_RESUME_SNAPSHOT_KEYS = {
     "context_manager",
     "expected_reply_type",
+    "expected_reply_reason",
     "intent_queue",
     "booking",
     "session_memory",
@@ -37,6 +38,7 @@ PENDING_RESUME_SNAPSHOT_KEYS = {
 PENDING_RESUME_CLEAR_KEYS = {
     "context_manager",
     "expected_reply_type",
+    "expected_reply_reason",
     "intent_queue",
     "booking",
     "session_memory",
@@ -617,6 +619,9 @@ def _restore_pending_resume_context(context: dict | None, *, now: datetime) -> t
     expected_reply_type = pending_resume.get("expected_reply_type")
     if isinstance(expected_reply_type, str) and expected_reply_type.strip():
         restored["expected_reply_type"] = expected_reply_type.strip()
+    expected_reply_reason = pending_resume.get("expected_reply_reason")
+    if isinstance(expected_reply_reason, str) and expected_reply_reason.strip():
+        restored["expected_reply_reason"] = expected_reply_reason.strip()
 
     intent_queue = pending_resume.get("intent_queue")
     if isinstance(intent_queue, list):

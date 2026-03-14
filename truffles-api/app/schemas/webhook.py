@@ -130,9 +130,20 @@ class ResponseContract(BaseModel):
     language: Optional[str] = None
 
 
+class InteractionStateContract(BaseModel):
+    resume_slot: Optional[str] = None
+    interaction_target: Optional[str] = None
+    interaction_relation: Optional[str] = None
+    interaction_owner: Optional[str] = None
+    grounded_referents: Optional[dict[str, str]] = None
+    confirmation_state: Optional[dict[str, Any]] = None
+    degrade_reason: Optional[str] = None
+
+
 class MemoryContract(BaseModel):
     mode: Optional[str] = None
     slots: Optional[dict[str, Any]] = None
+    interaction_state: Optional[InteractionStateContract] = None
     summary: Optional[str] = None
     last_updated: Optional[str] = None
     ttl: Optional[int] = None

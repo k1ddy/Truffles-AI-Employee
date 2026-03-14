@@ -89,3 +89,43 @@ def test_consult_followup_kept_for_service_expected_reply(monkeypatch):
         )
         is True
     )
+
+
+def test_locked_consult_topic_shift_replaces_stale_time_resume(monkeypatch):
+    monkeypatch.setattr(legacy, "_is_booking_request", lambda _text, client_slug=None: False)
+
+    assert (
+        webhook_response._should_shift_locked_consult_topic_to_service_choice(
+            booking_goal_locked=True,
+            booking_followup_appended=False,
+            consult_action="consult_reply",
+            consult_meta={
+                "consult_topic": "nails_design",
+                "consult_question": "Я интересуюсь дизайном ногтей.",
+            },
+            message_text="Я интересуюсь дизайном ногтей.",
+            expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+            client_slug="demo_salon",
+        )
+        is True
+    )
+
+
+def test_locked_consult_topic_shift_does_not_replace_booking_signal(monkeypatch):
+    monkeypatch.setattr(legacy, "_is_booking_request", lambda _text, client_slug=None: True)
+
+    assert (
+        webhook_response._should_shift_locked_consult_topic_to_service_choice(
+            booking_goal_locked=True,
+            booking_followup_appended=False,
+            consult_action="consult_reply",
+            consult_meta={
+                "consult_topic": "nails_design",
+                "consult_question": "Я интересуюсь дизайном ногтей.",
+            },
+            message_text="Запишите меня на этот дизайн ногтей.",
+            expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+            client_slug="demo_salon",
+        )
+        is False
+    )

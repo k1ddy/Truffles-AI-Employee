@@ -45,6 +45,9 @@ def test_cross_domain_contract_suite_info_booking_tool_registry(case):
 
     assert booking_signal_service.extract_time_token("Можно на 14:30?") == "14:30"
     assert booking_signal_service.has_duration_context_marker("сколько длится процедура")
+    assert booking_signal_service.looks_like_time_preference_statement(
+        "Мне по времени удобнее вечером."
+    )
 
     reply, error = tool_registry_service._catalog_portfolio(
         case["slug"],

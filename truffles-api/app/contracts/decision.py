@@ -118,6 +118,11 @@ class ExpectedReplyState:
     expected_reply_blocked_by_info: bool
     memory_expected_reply_type: str | None
     current_goal: str | None
+    matched_expected_reply_type: str | None = None
+    matched_booking_followup_state: dict[str, Any] | None = None
+    matched_booking_followup_prompt: str | None = None
+    matched_booking_followup_expected: str | None = None
+    matched_booking_filled_slots: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

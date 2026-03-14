@@ -1,3 +1,5 @@
+import pytest
+
 from app.routers.webhook.info import (
     _anchor_group_hit,
     _build_info_intent_reply,
@@ -191,6 +193,44 @@ def test_detect_info_class_intents_hours_signal_for_how_long_you_work_phrase():
     assert "duration" not in intents
     assert meta.get("info_signals", {}).get("hours") is True
     assert meta.get("info_signals", {}).get("duration") is False
+
+
+@pytest.mark.parametrize(
+    "message_text",
+    [
+        "Я предпочитаю утренние часы.",
+        "Мне подходят только утренние часы.",
+    ],
+)
+def test_detect_info_class_intents_daypart_preference_statement_does_not_trigger_hours_or_duration(
+    message_text,
+):
+    intents, meta = _detect_info_class_intents(
+        message_text,
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "hours" not in intents
+    assert "duration" not in intents
+    assert meta.get("info_signals", {}).get("hours") is False
+    assert meta.get("info_signals", {}).get("duration") is False
+    assert meta.get("daypart_preference_statement") is True
+    assert set(meta.get("suppressed_info_intents") or []) == {"hours", "duration"}
+
+
+def test_detect_info_class_intents_hours_question_with_daypart_remains_hours():
+    intents, meta = _detect_info_class_intents(
+        "Во сколько вы открываетесь утром?",
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "hours" in intents
+    assert "duration" not in intents
+    assert meta.get("info_signals", {}).get("hours") is True
+    assert meta.get("info_signals", {}).get("duration") is False
+    assert meta.get("daypart_preference_statement") is not True
 
 
 def test_detect_info_class_intents_special_offers_phrase_does_not_trigger_master():

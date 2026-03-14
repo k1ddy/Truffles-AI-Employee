@@ -38,7 +38,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 Сводка опирается на правила ниже и не вводит новых норм.
 
 - Цель: довести диалог до следующего шага (FACT/COLLECT/HANDOFF) и вести к записи/продаже.
-- Контекст: держит линию разговора (current_goal/expected_reply_type), не противоречит; при перегрузе опирается на compact_summary.
+- Контекст: держит линию разговора (`current_goal`, `expected_reply_type`, `interaction_state`), не противоречит; при перегрузе опирается на compact_summary.
 - Тон: спокойный, уверенный, заботливый; 2–3 предложения, без воды.
 - Язык: ChatGPT-like естественность, но строго domain-bound.
 - Факты: только из `client_pack`/`consult_playbooks`; нет факта → уточнение/эскалация; скидки/акции не выдумывает.
@@ -136,8 +136,8 @@ _Примечание:_ текущая реализация fact resolver опи
 - **Consult:** pack‑first (`consult_playbooks`); LLM‑советы только из `allowed_advice`, без фактов о бизнесе.
 - **Goal‑first:** каждая реплика (кроме HANDOFF/pending/manager_active) заканчивается следующим шагом; при явной записи — сразу следующий слот.
 - **Truthfulness:** запрещены выдуманные факты/скидки/условия/медсоветы; нет факта в pack/tools → уточнение или handoff.
-- **ChatGPT‑like память:** не противоречит сказанному ранее; опирается на `current_goal`, `expected_reply_type`, заполненные слоты и `compact_summary`.
-- **Booking intake:** сбор слотов записи (`expected_reply_type`); при перебивке — факт‑ответ и возврат к последнему booking‑вопросу.
+- **ChatGPT‑like память:** не противоречит сказанному ранее; опирается на `current_goal`, `expected_reply_type`, `interaction_state`, заполненные слоты и `compact_summary`.
+- **Booking intake:** сбор слотов записи (`expected_reply_type`); при перебивке — факт‑ответ и возврат к последнему booking‑вопросу с сохранением active pending-question interaction contract.
 - **Hard‑LAW:** оплата (подтверждение/проверка/возвраты), медицинка, жалобы, переносы → только эскалация, без рекомендаций/офферов.
 - **Policy‑gates:** скидки и способы оплаты разрешены **только** по явным правилам в `client_pack`; иначе эскалация.
 - **Clarify limit:** максимум 2 уточнения (`clarify_limit=2`), далее эскалация.
@@ -181,6 +181,15 @@ _Примечание:_ текущая реализация fact resolver опи
 - Decision trace/meta: `stage=booking_interrupt`, `booking_info_interrupt=true`, `booking_info_intents` сохраняются.
 - Если `expected_reply_match=false` и есть in‑domain сигнал → ответ по факту/consult и вернуть slot‑вопрос; слот не заполняем.
 - Если сообщение не относится к записи и нет booking-сигнала → не сбрасываем booking; отвечаем нейтрально и повторяем slot‑вопрос.
+
+**Pending-question interaction contract (binding):**
+- `expected_reply_type` остаётся resume axis для открытого слота; side-question не переписывает его молча.
+- `pending_question_target` обозначает interaction target текущего side-question/follow-up, а не generic fallback для resume.
+- `active_question_relation` обязателен для любого turn, который работает поверх активного pending-question state.
+- Активные pending-question family трактуются как owner-matrix rows: каждая строка задаёт semantic contract, `interaction_owner`, allowed degrade и forbidden compression.
+- На каждый inbound допустим ровно один `interaction_owner`; deterministic слой может валидировать/блокировать/деградировать контракт, но не имеет права silently invent/reset owner row после semantic owner без явного reason-code.
+- Allowed degrade: явный clarify по missing referent/service/temporal scope или relation-preserving degraded reply с наблюдаемыми `reason_code`, `decision_meta`, `decision_trace`; после уже зафиксированного grounding boundary допускается только explicit contract-safe transition на следующий resume slot.
+- Forbidden compression: generic `booking_prompt` без relation evidence, generic `master` truth reply как semantic success для live availability row, и reopening `service_choice` после уже grounded service, если pricing/info interrupt пришёл при активном `expected_reply_type=time`.
 
 **Booking signal (P0):**
 - Сигнал записи считается активным, если есть `current_goal=booking` или `expected_reply_type`, либо LLM-Intent/slots показывают запись (service/master/time/name) с достаточной уверенностью.
@@ -285,8 +294,9 @@ _Примечание:_ текущая реализация fact resolver опи
 
 **Context capsule & memory overflow (P0, PLAN)**
 - Храним только структурные поля: `current_goal`, `expected_reply_type`, `slots`, `last_question`, `safety_flags`,
-  `preferences` (только подтверждённые), `intent_queue`, `style_reference_pending`, `asr_inflight`,
+  `preferences` (только подтверждённые), `intent_queue`, `interaction_state`, `style_reference_pending`, `asr_inflight`,
   `quiet_hours_timestamps`, `compact_summary`.
+- `interaction_state` хранит минимум: `resume_slot`, `interaction_target`, `interaction_relation`, `interaction_owner`, `grounded_referents`, `confirmation_state`, `degrade_reason`.
 - Rolling summary: каждые K сообщений обновляем `compact_summary`; LLM видит summary + последние N реплик.
 - Overflow: при превышении лимита контекста сбрасываем “сырой” текст, сохраняем capsule + summary.
 - Trace retention: P0‑стадии сохраняются всегда; остальное допускает сэмплинг/агрегацию.
@@ -300,7 +310,7 @@ _Примечание:_ текущая реализация fact resolver опи
 - Trace/meta: `intent_queue`, `intent_queue_reason`, `expected_reply_type=intent_choice`.
 
 **Long-form стабильность (P0)**
-- Цель диалога не теряется 10-15 сообщений: `current_goal` и `expected_reply_type` сохраняются между перебивками.
+- Цель диалога не теряется 10-15 сообщений: `current_goal`, `expected_reply_type`, и активный `interaction_state` сохраняются между перебивками.
 - `primary_goal` и `goal_stack` сохраняются; отложенные цели возвращаются после закрытия перебивки.
 - При перебивке в booking: дать факт-ответ и вернуть к последнему booking-вопросу.
 - При OOD в booking: мягкий отказ + вернуть к booking-вопросу.

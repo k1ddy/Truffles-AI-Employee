@@ -90,6 +90,8 @@ def _load_quality_helpers():
         "_llm_quality_collect_hardcode_core_violations",
         "_llm_quality_build_hardcode_core_gate_status",
         "_llm_quality_is_doc_only_changed_file",
+        "_llm_quality_load_json_object",
+        "_llm_quality_resolve_manual_audit_status",
         "_llm_quality_build_run_economy_status",
         "_llm_quality_parse_coverage_tokens",
         "_llm_quality_build_quality_constant_status",
@@ -108,12 +110,10 @@ def _load_quality_helpers():
         "_llm_quality_collect_artifact_integrity",
         "_llm_quality_collect_evidence_handoff_status",
         "_llm_quality_build_governance_closure_status",
-        "_llm_quality_load_json_object",
         "_llm_quality_is_iso_timestamp",
         "_llm_quality_extract_chain_id",
         "_llm_quality_extract_oracle_conflict_count",
         "_llm_quality_validate_manual_audit_sla",
-        "_llm_quality_resolve_manual_audit_status",
         "_llm_quality_sync_manual_audit_summary",
         "_llm_quality_find_latest_pending_manual_audit",
         "_llm_quality_find_latest_completed_manual_audit",
@@ -941,6 +941,153 @@ def test_run_economy_allows_non_canonical_lock_retry_for_process_stop_reason():
     assert allowed["non_canonical_lock_retry_eligible"] is True
     assert allowed["non_canonical_lock_retry_applied"] is True
     assert "lock_fingerprint_unchanged_after_non_canonical" not in allowed["reasons"]
+
+
+def test_run_economy_allows_non_canonical_lock_retry_for_audited_infra_invalid_lock(tmp_path):
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    initial = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    lock_fingerprint = initial["lock_fingerprint"]
+    assert isinstance(lock_fingerprint, str) and lock_fingerprint
+
+    previous_run_dir = tmp_path / "previous-lock"
+    previous_run_dir.mkdir()
+    summary_path = previous_run_dir / "summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "infra_valid": False,
+                "artifact_integrity": {"valid": True},
+                "manual_audit": {"status": "done"},
+                "quality_status": {
+                    "run_integrity_valid": False,
+                    "infra_reasons": ["webhook_errors"],
+                    "run_integrity_reasons": ["run_completion_gap"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    allowed = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        allow_non_canonical_lock_retry=True,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        previous_lock_state={
+            "lock_fingerprint": lock_fingerprint,
+            "canonical_valid": False,
+            "stop_reason": "max_failures_reached:1",
+            "summary_path": str(summary_path),
+            "run_id": "lock-infra-fail",
+        },
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    assert allowed["valid"] is True
+    assert allowed["non_canonical_lock_retry_eligible"] is True
+    assert allowed["non_canonical_lock_retry_reason"] == "audited_infra_invalid_non_canonical"
+    assert allowed["non_canonical_lock_retry_applied"] is True
+    assert "lock_fingerprint_unchanged_after_non_canonical" not in allowed["reasons"]
+
+
+def test_run_economy_blocks_non_canonical_lock_retry_for_unaudited_infra_invalid_lock(tmp_path):
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    initial = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    lock_fingerprint = initial["lock_fingerprint"]
+    assert isinstance(lock_fingerprint, str) and lock_fingerprint
+
+    previous_run_dir = tmp_path / "previous-lock-pending"
+    previous_run_dir.mkdir()
+    summary_path = previous_run_dir / "summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "infra_valid": False,
+                "artifact_integrity": {"valid": True},
+                "manual_audit": {"status": "pending"},
+                "quality_status": {
+                    "run_integrity_valid": False,
+                    "infra_reasons": ["webhook_errors"],
+                    "run_integrity_reasons": ["run_completion_gap"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    blocked = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file=None,
+        baseline_summary=None,
+        reset_before_dialog=False,
+        allow_no_code_delta=False,
+        allow_non_canonical_lock_retry=True,
+        changed_files=["truffles-api/app/routers/webhook/decision.py"],
+        previous_lock_state={
+            "lock_fingerprint": lock_fingerprint,
+            "canonical_valid": False,
+            "stop_reason": "max_failures_reached:1",
+            "summary_path": str(summary_path),
+            "run_id": "lock-infra-pending",
+        },
+        run_mode="llm",
+        dialog_count=10,
+        min_turns=10,
+        max_turns=15,
+        include_media=True,
+        scenario_coverage="booking,info,interrupt,handoff",
+    )
+    assert blocked["valid"] is False
+    assert blocked["non_canonical_lock_retry_eligible"] is False
+    assert blocked["non_canonical_lock_retry_reason"] is None
+    assert blocked["non_canonical_lock_retry_applied"] is False
+    assert "lock_fingerprint_unchanged_after_non_canonical" in blocked["reasons"]
+    assert "lock_retry_override_not_eligible" in blocked["reasons"]
 
 
 def test_run_economy_blocks_non_canonical_lock_retry_for_non_process_stop_reason():
