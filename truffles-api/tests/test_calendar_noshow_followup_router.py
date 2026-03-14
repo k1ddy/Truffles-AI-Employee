@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from app.routers import calendar as calendar_router
+from app.services.audit_service import AuditEvent
 from app.services.console_errors import ConsoleAPIError
 
 
@@ -32,6 +33,14 @@ def _booking_response_payload(booking_id: str) -> dict:
         "google_event_id": None,
         "created_at": "2026-02-18T09:00:00+00:00",
     }
+
+
+def _added_rows(db, row_type):
+    return [
+        call.args[0]
+        for call in getattr(db.add, "call_args_list", [])
+        if call.args and isinstance(call.args[0], row_type)
+    ]
 
 
 @pytest.mark.asyncio
@@ -61,14 +70,14 @@ async def test_register_booking_no_show_followup_records_audit(monkeypatch):
     monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: booking)
     monkeypatch.setattr(
         calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: _booking_response_payload(str(booking_id)),
+        "_build_booking_response_for_context",
+        lambda **_kwargs: _booking_response_payload(str(booking_id)),
     )
 
     response = await calendar_router.register_booking_no_show_followup(
         request=SimpleNamespace(),
         booking_id=str(booking_id),
-        data=calendar_router.BookingNoShowFollowUpRequest(note="Позвонить и предложить новый слот"),
+        data=calendar_router.BookingNoShowFollowUpRequest(note="Позвонить и предложить новый слот", version=3),
         db=db,
     )
 
@@ -76,7 +85,9 @@ async def test_register_booking_no_show_followup_records_audit(monkeypatch):
     assert response.booking.status == "NO_SHOW"
     assert response.booking.no_show_followup_done is True
 
-    audit_row = db.add.call_args.args[0]
+    audit_rows = _added_rows(db, calendar_router.AppointmentAudit)
+    assert len(audit_rows) == 1
+    audit_row = audit_rows[0]
     assert audit_row.action == "no_show_followup"
     assert audit_row.prev_status == "NO_SHOW"
     assert audit_row.new_status == "NO_SHOW"
@@ -85,6 +96,8 @@ async def test_register_booking_no_show_followup_records_audit(monkeypatch):
     assert audit_row.payload.get("follow_up_closed_by") == str(agent_id)
     assert audit_row.payload.get("follow_up_closed_at")
     assert audit_row.payload.get("note") == "Позвонить и предложить новый слот"
+    observation_rows = _added_rows(db, AuditEvent)
+    assert any(row.event_type == "calendar_booking_action_applied" for row in observation_rows)
     db.commit.assert_called_once()
 
 
@@ -120,14 +133,14 @@ async def test_register_booking_no_show_followup_is_idempotent_when_already_clos
     monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: booking)
     monkeypatch.setattr(
         calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: _booking_response_payload(str(booking_id)),
+        "_build_booking_response_for_context",
+        lambda **_kwargs: _booking_response_payload(str(booking_id)),
     )
 
     response = await calendar_router.register_booking_no_show_followup(
         request=SimpleNamespace(),
         booking_id=str(booking_id),
-        data=calendar_router.BookingNoShowFollowUpRequest(),
+        data=calendar_router.BookingNoShowFollowUpRequest(version=3),
         db=db,
     )
 
@@ -137,7 +150,37 @@ async def test_register_booking_no_show_followup_is_idempotent_when_already_clos
 
 
 @pytest.mark.asyncio
-async def test_register_booking_no_show_followup_allows_rebooked_without_link(monkeypatch):
+async def test_register_booking_no_show_followup_rejects_stale_version(monkeypatch):
+    booking_id = uuid4()
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=uuid4()),
+        agent=SimpleNamespace(id=uuid4(), name="Manager"),
+    )
+    booking = SimpleNamespace(id=booking_id, status="NO_SHOW", version=4)
+    db = Mock()
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: booking)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await calendar_router.register_booking_no_show_followup(
+            request=SimpleNamespace(),
+            booking_id=str(booking_id),
+            data=calendar_router.BookingNoShowFollowUpRequest(version=3),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "BOOKING_VERSION_CONFLICT"
+    observation_rows = _added_rows(db, AuditEvent)
+    assert len(observation_rows) == 1
+    assert observation_rows[0].event_type == "calendar_booking_action_version_conflict"
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_register_booking_no_show_followup_requires_rebook_link(monkeypatch):
     booking_id = uuid4()
     context = SimpleNamespace(
         client=SimpleNamespace(id=uuid4()),
@@ -145,32 +188,23 @@ async def test_register_booking_no_show_followup_allows_rebooked_without_link(mo
     )
     booking = SimpleNamespace(id=booking_id, status="NO_SHOW", version=1)
     db = Mock()
-    audit_query = Mock()
-    audit_query.filter.return_value = audit_query
-    audit_query.order_by.return_value = audit_query
-    audit_query.first.return_value = None
-    db.query.side_effect = lambda model: audit_query if model is calendar_router.AppointmentAudit else Mock()
-
     monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
     monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: booking)
-    monkeypatch.setattr(
-        calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: _booking_response_payload(str(booking_id)),
-    )
 
-    response = await calendar_router.register_booking_no_show_followup(
-        request=SimpleNamespace(),
-        booking_id=str(booking_id),
-        data=calendar_router.BookingNoShowFollowUpRequest(result="rebooked"),
-        db=db,
-    )
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await calendar_router.register_booking_no_show_followup(
+            request=SimpleNamespace(),
+            booking_id=str(booking_id),
+            data=calendar_router.BookingNoShowFollowUpRequest(result="rebooked", version=1),
+            db=db,
+        )
 
-    assert response.success is True
-    audit_row = db.add.call_args.args[0]
-    assert audit_row.payload.get("result") == "rebooked"
-    assert audit_row.payload.get("rebooked_appointment_id") is None
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"
+    observation_rows = _added_rows(db, AuditEvent)
+    assert len(observation_rows) == 1
+    assert observation_rows[0].event_type == "calendar_booking_action_invalid"
     db.commit.assert_called_once()
 
 
@@ -195,13 +229,16 @@ async def test_register_booking_no_show_followup_rejects_rebook_link_for_contact
             data=calendar_router.BookingNoShowFollowUpRequest(
                 result="contacted",
                 rebooked_appointment_id=str(uuid4()),
+                version=1,
             ),
             db=db,
         )
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.code == "INVALID_PARAM"
-    db.add.assert_not_called()
+    observation_rows = _added_rows(db, AuditEvent)
+    assert len(observation_rows) == 1
+    assert observation_rows[0].event_type == "calendar_booking_action_invalid"
 
 
 @pytest.mark.asyncio
@@ -222,7 +259,14 @@ async def test_register_booking_no_show_followup_records_rebooked_link(monkeypat
 
     rebook_query = Mock()
     rebook_query.filter.return_value = rebook_query
-    rebook_query.first.return_value = SimpleNamespace(id=rebooked_id, client_id=context.client.id)
+    rebook_query.first.return_value = SimpleNamespace(
+        id=rebooked_id,
+        client_id=context.client.id,
+        version=2,
+        case_id=None,
+        conversation_id=None,
+        branch_id=uuid4(),
+    )
 
     def _query_side_effect(model):
         if model is calendar_router.AppointmentAudit:
@@ -238,8 +282,8 @@ async def test_register_booking_no_show_followup_records_rebooked_link(monkeypat
     monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: booking)
     monkeypatch.setattr(
         calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: _booking_response_payload(str(booking_id)),
+        "_build_booking_response_for_context",
+        lambda **_kwargs: _booking_response_payload(str(booking_id)),
     )
 
     response = await calendar_router.register_booking_no_show_followup(
@@ -248,14 +292,19 @@ async def test_register_booking_no_show_followup_records_rebooked_link(monkeypat
         data=calendar_router.BookingNoShowFollowUpRequest(
             result="rebooked",
             rebooked_appointment_id=str(rebooked_id),
+            version=3,
         ),
         db=db,
     )
 
     assert response.success is True
-    audit_row = db.add.call_args.args[0]
+    audit_rows = _added_rows(db, calendar_router.AppointmentAudit)
+    assert len(audit_rows) == 1
+    audit_row = audit_rows[0]
     assert audit_row.payload.get("result") == "rebooked"
     assert audit_row.payload.get("rebooked_appointment_id") == str(rebooked_id)
+    observation_rows = _added_rows(db, AuditEvent)
+    assert any(row.event_type == "calendar_booking_action_applied" for row in observation_rows)
     db.commit.assert_called_once()
 
 
@@ -281,14 +330,16 @@ async def test_register_booking_no_show_followup_rejects_non_no_show(monkeypatch
         await calendar_router.register_booking_no_show_followup(
             request=SimpleNamespace(),
             booking_id=str(booking_id),
-            data=calendar_router.BookingNoShowFollowUpRequest(),
+            data=calendar_router.BookingNoShowFollowUpRequest(version=1),
             db=db,
         )
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.code == "BOOKING_STATUS_REQUIRED"
-    db.add.assert_not_called()
-    db.commit.assert_not_called()
+    observation_rows = _added_rows(db, AuditEvent)
+    assert len(observation_rows) == 1
+    assert observation_rows[0].event_type == "calendar_booking_action_invalid"
+    db.commit.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -366,8 +417,8 @@ async def test_update_booking_status_reopens_resolved_linked_case_on_no_show(mon
     monkeypatch.setattr(calendar_router, "record_audit_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: {
+        "_build_booking_response_for_context",
+        lambda **_kwargs: {
             **_booking_response_payload(str(booking_id)),
             "status": "NO_SHOW",
             "case_id": str(case_id),
@@ -378,7 +429,7 @@ async def test_update_booking_status_reopens_resolved_linked_case_on_no_show(mon
     response = await calendar_router.update_booking_status(
         request=SimpleNamespace(),
         booking_id=str(booking_id),
-        data=calendar_router.BookingStatusUpdateRequest(status="NO_SHOW"),
+        data=calendar_router.BookingStatusUpdateRequest(status="NO_SHOW", version=2),
         db=db,
     )
 
@@ -425,14 +476,14 @@ async def test_update_booking_status_sets_follow_up_defaults_on_no_show_without_
     monkeypatch.setattr(calendar_router, "record_audit_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: _booking_response_payload(str(booking_id)),
+        "_build_booking_response_for_context",
+        lambda **_kwargs: _booking_response_payload(str(booking_id)),
     )
 
     response = await calendar_router.update_booking_status(
         request=SimpleNamespace(),
         booking_id=str(booking_id),
-        data=calendar_router.BookingStatusUpdateRequest(status="NO_SHOW"),
+        data=calendar_router.BookingStatusUpdateRequest(status="NO_SHOW", version=1),
         db=db,
     )
 
@@ -466,6 +517,8 @@ async def test_register_booking_no_show_followup_links_rebooked_booking_to_same_
     rebooked = SimpleNamespace(
         id=rebooked_id,
         client_id=client_id,
+        version=2,
+        status="CONFIRMED",
         case_id=None,
         conversation_id=None,
         branch_id=uuid4(),
@@ -495,8 +548,8 @@ async def test_register_booking_no_show_followup_links_rebooked_booking_to_same_
     monkeypatch.setattr(calendar_router, "record_audit_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: {
+        "_build_booking_response_for_context",
+        lambda **_kwargs: {
             **_booking_response_payload(str(booking_id)),
             "case_id": str(case_id),
             "conversation_id": str(conversation_id),
@@ -509,6 +562,7 @@ async def test_register_booking_no_show_followup_links_rebooked_booking_to_same_
         data=calendar_router.BookingNoShowFollowUpRequest(
             result="rebooked",
             rebooked_appointment_id=str(rebooked_id),
+            version=1,
         ),
         db=db,
     )
@@ -539,6 +593,7 @@ async def test_register_booking_no_show_followup_rejects_rebooked_booking_case_c
     rebooked = SimpleNamespace(
         id=rebooked_id,
         client_id=client_id,
+        version=2,
         case_id=uuid4(),
         conversation_id=booking.conversation_id,
         branch_id=uuid4(),
@@ -573,6 +628,7 @@ async def test_register_booking_no_show_followup_rejects_rebooked_booking_case_c
             data=calendar_router.BookingNoShowFollowUpRequest(
                 result="rebooked",
                 rebooked_appointment_id=str(rebooked_id),
+                version=1,
             ),
             db=db,
         )
@@ -595,6 +651,7 @@ async def test_update_booking_follow_up_governance_updates_owner_and_due(monkeyp
     booking = SimpleNamespace(
         id=booking_id,
         status="NO_SHOW",
+        version=2,
         follow_up_owner_id=None,
         follow_up_due_at=None,
     )
@@ -617,11 +674,11 @@ async def test_update_booking_follow_up_governance_updates_owner_and_due(monkeyp
     )
     monkeypatch.setattr(
         calendar_router,
-        "_build_booking_response",
-        lambda _db, _booking: {
+        "_build_booking_response_for_context",
+        lambda **kwargs: {
             **_booking_response_payload(str(booking_id)),
-            "follow_up_owner_id": str(_booking.follow_up_owner_id) if _booking.follow_up_owner_id else None,
-            "follow_up_due_at": _booking.follow_up_due_at.isoformat() if _booking.follow_up_due_at else None,
+            "follow_up_owner_id": str(kwargs["booking"].follow_up_owner_id) if kwargs["booking"].follow_up_owner_id else None,
+            "follow_up_due_at": kwargs["booking"].follow_up_due_at.isoformat() if kwargs["booking"].follow_up_due_at else None,
         },
     )
 
@@ -631,6 +688,7 @@ async def test_update_booking_follow_up_governance_updates_owner_and_due(monkeyp
         data=calendar_router.BookingFollowUpGovernanceRequest(
             owner_agent_id=str(owner_agent_id),
             due_at=due_at,
+            version=2,
         ),
         db=db,
     )
@@ -640,6 +698,44 @@ async def test_update_booking_follow_up_governance_updates_owner_and_due(monkeyp
     assert booking.follow_up_due_at == due_at
     db.commit.assert_called_once()
     db.refresh.assert_called_once_with(booking)
+
+
+@pytest.mark.asyncio
+async def test_update_booking_follow_up_governance_rejects_stale_version(monkeypatch):
+    booking_id = uuid4()
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=uuid4()),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        allowed_branch_ids={uuid4()},
+    )
+    booking = SimpleNamespace(
+        id=booking_id,
+        status="NO_SHOW",
+        version=5,
+        follow_up_owner_id=None,
+        follow_up_due_at=None,
+    )
+    db = Mock()
+
+    monkeypatch.setattr(calendar_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(calendar_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_router, "_resolve_booking_for_context", lambda *_args, **_kwargs: booking)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await calendar_router.update_booking_follow_up_governance(
+            request=SimpleNamespace(),
+            booking_id=str(booking_id),
+            data=calendar_router.BookingFollowUpGovernanceRequest(owner_agent_id=str(uuid4()), version=4),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "BOOKING_VERSION_CONFLICT"
+    observation_rows = _added_rows(db, AuditEvent)
+    assert len(observation_rows) == 1
+    assert observation_rows[0].event_type == "calendar_booking_action_version_conflict"
+    db.commit.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -654,6 +750,7 @@ async def test_update_booking_follow_up_governance_rejects_non_privileged_role(m
     booking = SimpleNamespace(
         id=booking_id,
         status="NO_SHOW",
+        version=1,
         follow_up_owner_id=None,
         follow_up_due_at=None,
     )
@@ -667,7 +764,7 @@ async def test_update_booking_follow_up_governance_rejects_non_privileged_role(m
         await calendar_router.update_booking_follow_up_governance(
             request=SimpleNamespace(),
             booking_id=str(booking_id),
-            data=calendar_router.BookingFollowUpGovernanceRequest(owner_agent_id=str(uuid4())),
+            data=calendar_router.BookingFollowUpGovernanceRequest(owner_agent_id=str(uuid4()), version=1),
             db=db,
         )
 
@@ -687,6 +784,7 @@ async def test_update_booking_follow_up_governance_rejects_closed_follow_up(monk
     booking = SimpleNamespace(
         id=booking_id,
         status="NO_SHOW",
+        version=1,
         follow_up_owner_id=None,
         follow_up_due_at=None,
     )
@@ -716,7 +814,7 @@ async def test_update_booking_follow_up_governance_rejects_closed_follow_up(monk
         await calendar_router.update_booking_follow_up_governance(
             request=SimpleNamespace(),
             booking_id=str(booking_id),
-            data=calendar_router.BookingFollowUpGovernanceRequest(due_at=datetime.now(timezone.utc)),
+            data=calendar_router.BookingFollowUpGovernanceRequest(due_at=datetime.now(timezone.utc), version=1),
             db=db,
         )
 

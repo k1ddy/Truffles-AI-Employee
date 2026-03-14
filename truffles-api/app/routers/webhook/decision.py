@@ -9668,7 +9668,21 @@ async def _handle_webhook_payload(
             _apply_runtime_truth(conversation.branch_id)
         timing_context["conversation_id"] = str(conversation.id)
         if metadata and conversation:
-            sim_context = apply_simulation_context(conversation, metadata)
+            tenant_origin_source = (
+                tenant_context.get("origin_source")
+                if isinstance(tenant_context, dict)
+                else None
+            )
+            internal_simulation_source = bool(
+                isinstance(tenant_context, dict)
+                and (tenant_origin_source or tenant_context.get("source"))
+                == "console_consultant_verification"
+            )
+            sim_context = apply_simulation_context(
+                conversation,
+                metadata,
+                allow_internal_source=internal_simulation_source,
+            )
             if sim_context:
                 timing_context["simulation"] = dict(sim_context)
 

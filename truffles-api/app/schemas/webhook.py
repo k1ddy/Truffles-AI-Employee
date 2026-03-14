@@ -50,6 +50,7 @@ class WebhookTenantContext(BaseModel):
     branch_slug: str | None = None
     instance_id: str | None = None
     source: str | None = None
+    origin_source: str | None = None
 
 
 class WebhookRequest(BaseModel):

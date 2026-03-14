@@ -1,4 +1,10 @@
 import api from "@/lib/api";
+import {
+    buildCalendarBookingActionAvailabilityMap,
+    getCalendarVisitActionOptions,
+    type CalendarActionPermissions,
+    type CalendarBookingLike,
+} from "@/lib/calendar-action-registry";
 
 export interface Booking {
     id: string;
@@ -9,6 +15,7 @@ export interface Booking {
     customer_name: string | null;
     customer_phone: string | null;
     service_type: string | null;
+    notes?: string | null;
     status: string;
     no_show_followup_done?: boolean;
     no_show_followup_result?: "contacted" | "rebooked" | null;
@@ -23,6 +30,35 @@ export interface Booking {
     case_id?: string | null;
     needs_action?: boolean;
     attention_reason?: string | null;
+    version: number;
+    allowed_actions?: Array<
+        | "edit_booking"
+        | "cancel_booking"
+        | "mark_completed"
+        | "mark_no_show"
+        | "record_follow_up_contacted"
+        | "record_follow_up_rebooked"
+        | "manage_follow_up_governance"
+        | "open_case_from_booking"
+    >;
+    blocked_actions?: Array<{
+        action_id:
+            | "edit_booking"
+            | "cancel_booking"
+            | "mark_completed"
+            | "mark_no_show"
+            | "record_follow_up_contacted"
+            | "record_follow_up_rebooked"
+            | "manage_follow_up_governance"
+            | "open_case_from_booking";
+        reason_code:
+            | "permission_required"
+            | "active_status_only"
+            | "open_no_show_required"
+            | "follow_up_already_closed"
+            | "case_link_required";
+    }>;
+    last_actor_type?: string | null;
     created_at: string;
 }
 
@@ -41,17 +77,36 @@ export interface BookingCreateRequest {
 export interface BookingStatusUpdateRequest {
     status: "COMPLETED" | "NO_SHOW";
     reason?: string;
+    version: number;
+}
+
+export interface BookingUpdateRequest {
+    specialist_id: string;
+    start_at: string;
+    end_at: string;
+    customer_name: string;
+    customer_phone: string;
+    service_type: string;
+    notes?: string;
+    version: number;
+}
+
+export interface BookingCancelRequest {
+    reason?: string;
+    version: number;
 }
 
 export interface BookingNoShowFollowUpRequest {
     result?: "contacted" | "rebooked";
     rebooked_appointment_id?: string;
     note?: string;
+    version: number;
 }
 
 export interface BookingFollowUpGovernanceRequest {
     owner_agent_id?: string | null;
     due_at?: string | null;
+    version: number;
 }
 
 export interface BookingActionResponse {
@@ -69,6 +124,29 @@ export interface BookingsListResponse {
     cursor?: string | null;
     has_more?: boolean;
 }
+
+export interface CalendarOperatorEventRequest {
+    event_type: "filter_apply" | "filter_reset" | "double_submit_blocked";
+    action_id:
+        | "apply_filters"
+        | "reset_filters"
+        | "create_booking"
+        | "edit_booking"
+        | "reschedule_booking"
+        | "cancel_booking"
+        | "mark_completed"
+        | "mark_no_show"
+        | "record_follow_up_contacted"
+        | "record_follow_up_rebooked"
+        | "manage_follow_up_governance";
+    surface: "filter_panel" | "booking_panel" | "follow_up_panel" | "follow_up_governance" | "composer";
+    booking_id?: string;
+}
+
+const DEFAULT_CALENDAR_WRITE_PERMISSIONS: CalendarActionPermissions = {
+    canWriteCalendar: true,
+    canManageFollowUpGovernance: false,
+};
 
 export type BookingQueueLane = "attention" | "all";
 export type BookingQueueMode = "ops" | "history";
@@ -129,9 +207,19 @@ export async function updateBookingStatus(bookingId: string, data: BookingStatus
     return response.data;
 }
 
+export async function updateBooking(bookingId: string, data: BookingUpdateRequest): Promise<BookingActionResponse> {
+    const response = await api.patch(`/calendar/bookings/${bookingId}`, data);
+    return response.data;
+}
+
+export async function cancelBooking(bookingId: string, data: BookingCancelRequest): Promise<BookingActionResponse> {
+    const response = await api.post(`/calendar/bookings/${bookingId}/cancel`, data);
+    return response.data;
+}
+
 export async function registerNoShowFollowUp(
     bookingId: string,
-    data: BookingNoShowFollowUpRequest = {},
+    data: BookingNoShowFollowUpRequest,
 ): Promise<BookingActionResponse> {
     const response = await api.post(`/calendar/bookings/${bookingId}/no-show-followup`, data);
     return response.data;
@@ -145,15 +233,32 @@ export async function updateBookingFollowUpGovernance(
     return response.data;
 }
 
+export async function recordCalendarOperatorEvent(data: CalendarOperatorEventRequest): Promise<void> {
+    await api.post("/calendar/operator-events", data);
+}
+
 export function getVisitActionOptions(status: string): Array<{ status: BookingStatusUpdateRequest["status"]; label: string }> {
-    const normalized = status.toUpperCase();
-    if (["HOLD", "PENDING_CONFIRMATION", "CONFIRMED", "RESCHEDULE_REQUESTED", "CHECKED_IN"].includes(normalized)) {
-        return [
-            { status: "COMPLETED", label: "Пришел" },
-            { status: "NO_SHOW", label: "Не пришел" },
-        ];
-    }
-    return [];
+    return getCalendarVisitActionOptions(
+        { status } satisfies CalendarBookingLike,
+        DEFAULT_CALENDAR_WRITE_PERMISSIONS,
+    ).map((action) => ({
+        status: action.status,
+        label: action.label,
+    }));
+}
+
+export function canEditBooking(status: string): boolean {
+    return buildCalendarBookingActionAvailabilityMap(
+        { status } satisfies CalendarBookingLike,
+        DEFAULT_CALENDAR_WRITE_PERMISSIONS,
+    ).edit_booking.state === "enabled";
+}
+
+export function canCancelBooking(status: string): boolean {
+    return buildCalendarBookingActionAvailabilityMap(
+        { status } satisfies CalendarBookingLike,
+        DEFAULT_CALENDAR_WRITE_PERMISSIONS,
+    ).cancel_booking.state === "enabled";
 }
 
 export function bookingNeedsAttention(booking: Booking): boolean {

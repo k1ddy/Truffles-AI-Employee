@@ -1,0 +1,44 @@
+# SESSION 2026-03-14-owner-consultant-verification-wave2-a920 — Session 2026-03-14-owner-consultant-verification-wave2-a920
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave2-a920.md
+- block_id: CONSOLE-OWNER-CONSULTANT-VERIFICATION-WAVE2-A920
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-13-owner-consultant-verification-program-a920@wave2
+- worktree: /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920
+- base_ref: origin/main
+- scope: Wave2 safe simulation kernel for owner/admin consultant verification: session/turn storage, rollback-only runtime execution, internal simulation-source allow, and API contract.
+- done:
+  - Added consultant verification session + turn persistence models and migration `057_add_console_consultant_verification.sql`.
+  - Extended `console_consultant_verification.py` from overview-only helper into a session service that creates/list/gets sessions and appends owner messages through the real reasoning runtime.
+  - Implemented rollback-only simulation execution so runtime commits flush only inside the simulation unit of work and all transient writes are rolled back after artifact capture.
+  - Added internal Console simulation-source allow in `state_service.py` + webhook decision wiring so safe simulation works without `TEST_MODE` or outbound allowlists.
+  - Added Console API endpoints and synced OpenAPI/frontend API client for the new owner/admin session contract.
+  - Added deterministic tests for route registration/delegation, simulation rollback wrapper, and internal-source simulation context acceptance.
+- next:
+  - Start Wave3 on top of the shipped session APIs: owner-readable chat workspace, transcript rendering, verdict chips, and explanation panels.
+  - Keep local Playwright owner/admin auth timeout as separate infra/auth-env debt; Wave2 backend kernel is not blocked by it.
+- evidence:
+  - truffles-api/app/models/console_consultant_verification_session.py
+  - truffles-api/app/models/console_consultant_verification_turn.py
+  - truffles-api/migrations/057_add_console_consultant_verification.sql
+  - truffles-api/app/services/console_consultant_verification.py
+  - truffles-api/app/services/state_service.py
+  - truffles-api/app/routers/webhook/decision.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/app/schemas/console.py
+  - truffles-api/tests/test_console_consultant_verification_api.py
+  - truffles-api/tests/test_state_service_simulation.py
+  - contracts/console_api/openapi.v1.yaml
+  - console-web/src/lib/api-client.ts
+  - console-web/src/types/api.generated.ts
+  - `cd truffles-api && pytest -q tests/test_console_consultant_verification_api.py tests/test_state_service_simulation.py tests/test_console_owner_business.py -k 'consultant_verification or simulation'`
+  - `cd truffles-api && ruff check app/models/__init__.py app/models/console_consultant_verification_session.py app/models/console_consultant_verification_turn.py app/services/console_consultant_verification.py app/schemas/console.py app/routers/console.py app/services/state_service.py app/routers/webhook/decision.py tests/test_console_consultant_verification_api.py tests/test_state_service_simulation.py`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check`
+  - `cd console-web && npm run generate:api`
+- last_updated: 2026-03-14T11:05:00+05:00

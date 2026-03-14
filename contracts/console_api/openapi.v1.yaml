@@ -1354,6 +1354,398 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
+  /console/v1/business/consultant-verification/overview:
+    get:
+      tags:
+      - console
+      summary: Get Business Consultant Verification Overview
+      operationId: get_business_consultant_verification_overview_console_v1_business_consultant_verification_overview_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleConsultantVerificationOverviewResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+  /console/v1/business/consultant-verification/sessions:
+    get:
+      tags:
+      - console
+      summary: List Business Consultant Verification Sessions
+      operationId: list_business_consultant_verification_sessions_console_v1_business_consultant_verification_sessions_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleConsultantVerificationSessionListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+    post:
+      tags:
+      - console
+      summary: Create Business Consultant Verification Session
+      operationId: create_business_consultant_verification_session_console_v1_business_consultant_verification_sessions_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleConsultantVerificationSessionCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleConsultantVerificationSessionResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/business/consultant-verification/sessions/{session_id}:
+    get:
+      tags:
+      - console
+      summary: Get Business Consultant Verification Session
+      operationId: get_business_consultant_verification_session_console_v1_business_consultant_verification_sessions__session_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleConsultantVerificationSessionResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/business/consultant-verification/sessions/{session_id}/messages:
+    post:
+      tags:
+      - console
+      summary: Append Business Consultant Verification Message
+      operationId: append_business_consultant_verification_message_console_v1_business_consultant_verification_sessions__session_id__messages_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleConsultantVerificationMessageCreateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleConsultantVerificationSessionResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/business/consultant-verification/findings:
+    get:
+      tags:
+      - console
+      summary: List Business Consultant Verification Findings
+      operationId: list_business_consultant_verification_findings_console_v1_business_consultant_verification_findings_get
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleConsultantVerificationFindingListResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - console
+      summary: Create Business Consultant Verification Finding
+      operationId: create_business_consultant_verification_finding_console_v1_business_consultant_verification_findings_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleConsultantVerificationFindingCreateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleConsultantVerificationFindingRecord'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/business/consultant-verification/readiness:
+    get:
+      tags:
+      - console
+      summary: Get Business Consultant Verification Readiness
+      operationId: get_business_consultant_verification_readiness_console_v1_business_consultant_verification_readiness_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleConsultantVerificationReadinessResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+  /console/v1/business/consultant-verification/compare:
+    post:
+      tags:
+      - console
+      summary: Run Business Consultant Verification Compare
+      operationId: run_business_consultant_verification_compare_console_v1_business_consultant_verification_compare_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleConsultantVerificationCompareRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleConsultantVerificationCompareResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/business/consultant-verification/findings/{finding_id}:
+    patch:
+      tags:
+      - console
+      summary: Update Business Consultant Verification Finding
+      operationId: update_business_consultant_verification_finding_console_v1_business_consultant_verification_findings__finding_id__patch
+      parameters:
+      - name: finding_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Finding Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleConsultantVerificationFindingUpdateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleConsultantVerificationFindingRecord'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/subscription/summary:
     get:
       tags:
@@ -7292,6 +7684,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/calendar/operator-events:
+    post:
+      tags:
+      - Calendar
+      summary: Record Calendar Operator Event
+      description: Record bounded operator-side Calendar telemetry for replay and
+        failure-family review.
+      operationId: record_calendar_operator_event_console_v1_calendar_operator_events_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalendarOperatorEventRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarOperatorEventResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/calendar/bookings/{booking_id}/cancel:
     post:
       tags:
@@ -7306,14 +7725,45 @@ paths:
         schema:
           type: string
           title: Booking Id
-      - name: reason
-        in: query
-        required: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingCancelRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/calendar/bookings/{booking_id}:
+    patch:
+      tags:
+      - Calendar
+      summary: Update Booking
+      description: Update an existing booking.
+      operationId: update_booking_console_v1_calendar_bookings__booking_id__patch
+      parameters:
+      - name: booking_id
+        in: path
+        required: true
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Reason
+          type: string
+          title: Booking Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingUpdate'
       responses:
         '200':
           description: Successful Response
@@ -7539,6 +7989,50 @@ components:
       - success
       - booking
       title: BookingActionResponse
+    BookingBlockedAction:
+      properties:
+        action_id:
+          type: string
+          enum:
+          - edit_booking
+          - cancel_booking
+          - mark_completed
+          - mark_no_show
+          - record_follow_up_contacted
+          - record_follow_up_rebooked
+          - manage_follow_up_governance
+          - open_case_from_booking
+          title: Action Id
+        reason_code:
+          type: string
+          enum:
+          - permission_required
+          - active_status_only
+          - open_no_show_required
+          - follow_up_already_closed
+          - case_link_required
+          title: Reason Code
+      type: object
+      required:
+      - action_id
+      - reason_code
+      title: BookingBlockedAction
+    BookingCancelRequest:
+      properties:
+        reason:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+          title: Reason
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
+      type: object
+      required:
+      - version
+      title: BookingCancelRequest
     BookingCaseEffect:
       properties:
         case_id:
@@ -7573,19 +8067,19 @@ components:
           format: date-time
           title: End At
         customer_name:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
+          maxLength: 255
+          minLength: 1
           title: Customer Name
         customer_phone:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
+          maxLength: 32
+          minLength: 7
           title: Customer Phone
         service_type:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
+          maxLength: 255
+          minLength: 1
           title: Service Type
         notes:
           anyOf:
@@ -7607,6 +8101,9 @@ components:
       - specialist_id
       - start_at
       - end_at
+      - customer_name
+      - customer_phone
+      - service_type
       title: BookingCreate
     BookingFollowUpGovernanceRequest:
       properties:
@@ -7621,7 +8118,13 @@ components:
             format: date-time
           - type: 'null'
           title: Due At
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
       type: object
+      required:
+      - version
       title: BookingFollowUpGovernanceRequest
     BookingNoShowFollowUpRequest:
       properties:
@@ -7643,7 +8146,13 @@ components:
             maxLength: 500
           - type: 'null'
           title: Note
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
       type: object
+      required:
+      - version
       title: BookingNoShowFollowUpRequest
     BookingResponse:
       properties:
@@ -7677,6 +8186,11 @@ components:
           - type: string
           - type: 'null'
           title: Service Type
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
         status:
           type: string
           title: Status
@@ -7747,6 +8261,34 @@ components:
           - type: string
           - type: 'null'
           title: Attention Reason
+        version:
+          type: integer
+          title: Version
+          default: 1
+        allowed_actions:
+          items:
+            type: string
+            enum:
+            - edit_booking
+            - cancel_booking
+            - mark_completed
+            - mark_no_show
+            - record_follow_up_contacted
+            - record_follow_up_rebooked
+            - manage_follow_up_governance
+            - open_case_from_booking
+          type: array
+          title: Allowed Actions
+        blocked_actions:
+          items:
+            $ref: '#/components/schemas/BookingBlockedAction'
+          type: array
+          title: Blocked Actions
+        last_actor_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Actor Type
         created_at:
           type: string
           title: Created At
@@ -7773,10 +8315,62 @@ components:
             maxLength: 500
           - type: 'null'
           title: Reason
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
       type: object
       required:
       - status
+      - version
       title: BookingStatusUpdateRequest
+    BookingUpdate:
+      properties:
+        specialist_id:
+          type: string
+          title: Specialist Id
+        start_at:
+          type: string
+          format: date-time
+          title: Start At
+        end_at:
+          type: string
+          format: date-time
+          title: End At
+        customer_name:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Customer Name
+        customer_phone:
+          type: string
+          maxLength: 32
+          minLength: 7
+          title: Customer Phone
+        service_type:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Service Type
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+        version:
+          type: integer
+          minimum: 1.0
+          title: Version
+      type: object
+      required:
+      - specialist_id
+      - start_at
+      - end_at
+      - customer_name
+      - customer_phone
+      - service_type
+      - version
+      title: BookingUpdate
     BookingsListResponse:
       properties:
         items:
@@ -7797,6 +8391,59 @@ components:
       required:
       - items
       title: BookingsListResponse
+    CalendarOperatorEventRequest:
+      properties:
+        event_type:
+          type: string
+          enum:
+          - filter_apply
+          - filter_reset
+          - double_submit_blocked
+          title: Event Type
+        action_id:
+          type: string
+          enum:
+          - apply_filters
+          - reset_filters
+          - create_booking
+          - edit_booking
+          - reschedule_booking
+          - cancel_booking
+          - mark_completed
+          - mark_no_show
+          - record_follow_up_contacted
+          - record_follow_up_rebooked
+          - manage_follow_up_governance
+          title: Action Id
+        surface:
+          type: string
+          enum:
+          - filter_panel
+          - booking_panel
+          - follow_up_panel
+          - follow_up_governance
+          - composer
+          title: Surface
+        booking_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Booking Id
+      type: object
+      required:
+      - event_type
+      - action_id
+      - surface
+      title: CalendarOperatorEventRequest
+    CalendarOperatorEventResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+      type: object
+      required:
+      - success
+      title: CalendarOperatorEventResponse
     CapabilitiesPayload-Input:
       properties:
         domain_slug:
@@ -12071,6 +12718,882 @@ components:
       - target_id
       - expires_at
       title: ConsoleConfirmationResponse
+    ConsoleConsultantVerificationCompareCaseRecord:
+      properties:
+        case_id:
+          type: string
+          title: Case Id
+        label:
+          type: string
+          title: Label
+        source:
+          type: string
+          enum:
+          - prompt
+          - finding
+          title: Source
+        finding_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Finding Id
+        live_turn:
+          $ref: '#/components/schemas/ConsoleConsultantVerificationTurnRecord'
+        draft_turn:
+          $ref: '#/components/schemas/ConsoleConsultantVerificationTurnRecord'
+        delta:
+          type: string
+          enum:
+          - improved
+          - unchanged
+          - regressed
+          - needs_review
+          title: Delta
+        delta_label:
+          type: string
+          title: Delta Label
+        summary:
+          type: string
+          title: Summary
+        retested_finding:
+          type: boolean
+          title: Retested Finding
+          default: false
+      type: object
+      required:
+      - case_id
+      - label
+      - source
+      - live_turn
+      - draft_turn
+      - delta
+      - delta_label
+      - summary
+      title: ConsoleConsultantVerificationCompareCaseRecord
+    ConsoleConsultantVerificationCompareReadiness:
+      properties:
+        status:
+          type: string
+          enum:
+          - ready
+          - needs_attention
+          - blocked
+          title: Status
+        status_label:
+          type: string
+          title: Status Label
+        summary:
+          type: string
+          title: Summary
+        draft_hash:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Draft Hash
+        compared_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Compared At
+        total_cases:
+          type: integer
+          title: Total Cases
+          default: 0
+        improved_total:
+          type: integer
+          title: Improved Total
+          default: 0
+        unchanged_total:
+          type: integer
+          title: Unchanged Total
+          default: 0
+        regressed_total:
+          type: integer
+          title: Regressed Total
+          default: 0
+        manual_review_total:
+          type: integer
+          title: Manual Review Total
+          default: 0
+        retested_total:
+          type: integer
+          title: Retested Total
+          default: 0
+        compare_required:
+          type: boolean
+          title: Compare Required
+          default: false
+      type: object
+      required:
+      - status
+      - status_label
+      - summary
+      title: ConsoleConsultantVerificationCompareReadiness
+    ConsoleConsultantVerificationCompareRequest:
+      properties:
+        prompt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Prompt
+        finding_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Finding Id
+        mark_finding_retested:
+          type: boolean
+          title: Mark Finding Retested
+          default: false
+      additionalProperties: false
+      type: object
+      title: ConsoleConsultantVerificationCompareRequest
+    ConsoleConsultantVerificationCompareResponse:
+      properties:
+        readiness:
+          $ref: '#/components/schemas/ConsoleConsultantVerificationCompareReadiness'
+        cases:
+          items:
+            $ref: '#/components/schemas/ConsoleConsultantVerificationCompareCaseRecord'
+          type: array
+          title: Cases
+          default: []
+      type: object
+      required:
+      - readiness
+      title: ConsoleConsultantVerificationCompareResponse
+    ConsoleConsultantVerificationFindingCreateRequest:
+      properties:
+        assistant_turn_id:
+          type: string
+          format: uuid
+          title: Assistant Turn Id
+        owner_note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Owner Note
+      additionalProperties: false
+      type: object
+      required:
+      - assistant_turn_id
+      title: ConsoleConsultantVerificationFindingCreateRequest
+    ConsoleConsultantVerificationFindingListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleConsultantVerificationFindingRecord'
+          type: array
+          title: Items
+          default: []
+      type: object
+      title: ConsoleConsultantVerificationFindingListResponse
+    ConsoleConsultantVerificationFindingRecord:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        actor_agent_id:
+          type: string
+          format: uuid
+          title: Actor Agent Id
+        actor_role:
+          type: string
+          enum:
+          - owner
+          - admin
+          - manager
+          - support
+          - platform_admin
+          - specialist
+          - viewer
+          title: Actor Role
+        session_id:
+          type: string
+          format: uuid
+          title: Session Id
+        owner_turn_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Turn Id
+        assistant_turn_id:
+          type: string
+          format: uuid
+          title: Assistant Turn Id
+        source_mode:
+          type: string
+          enum:
+          - live
+          - draft
+          title: Source Mode
+        challenge_mode:
+          type: string
+          enum:
+          - as_client
+          - stress
+          title: Challenge Mode
+        family_key:
+          type: string
+          title: Family Key
+        family_kind:
+          type: string
+          enum:
+          - knowledge_gap
+          - policy_boundary
+          - clarification_loop
+          - answer_quality
+          title: Family Kind
+        family_label:
+          type: string
+          title: Family Label
+        status:
+          type: string
+          enum:
+          - new
+          - in_review
+          - needs_data
+          - fixed
+          - retested
+          title: Status
+        status_label:
+          type: string
+          title: Status Label
+        owner_prompt:
+          type: string
+          title: Owner Prompt
+        assistant_excerpt:
+          type: string
+          title: Assistant Excerpt
+        owner_note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Owner Note
+        resolution_note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Resolution Note
+        outcome:
+          anyOf:
+          - type: string
+            enum:
+            - fact
+            - collect
+            - handoff
+          - type: 'null'
+          title: Outcome
+        business_verdict:
+          anyOf:
+          - type: string
+            enum:
+            - answered
+            - needs_clarification
+            - handoff
+            - gap_detected
+          - type: 'null'
+          title: Business Verdict
+        decision_reason_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Decision Reason Code
+        source_refs:
+          items:
+            type: string
+          type: array
+          title: Source Refs
+          default: []
+        latest_preview:
+          type: object
+          title: Latest Preview
+          default: {}
+        linked_knowledge_backlog_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Linked Knowledge Backlog Id
+        linked_learning_candidate_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Linked Learning Candidate Id
+        repeat_count:
+          type: integer
+          title: Repeat Count
+          default: 1
+        first_captured_at:
+          type: string
+          title: First Captured At
+        last_captured_at:
+          type: string
+          title: Last Captured At
+        created_at:
+          type: string
+          title: Created At
+        updated_at:
+          type: string
+          title: Updated At
+      type: object
+      required:
+      - id
+      - client_id
+      - actor_agent_id
+      - actor_role
+      - session_id
+      - assistant_turn_id
+      - source_mode
+      - challenge_mode
+      - family_key
+      - family_kind
+      - family_label
+      - status
+      - status_label
+      - owner_prompt
+      - assistant_excerpt
+      - first_captured_at
+      - last_captured_at
+      - created_at
+      - updated_at
+      title: ConsoleConsultantVerificationFindingRecord
+    ConsoleConsultantVerificationFindingUpdateRequest:
+      properties:
+        status:
+          type: string
+          enum:
+          - new
+          - in_review
+          - needs_data
+          - fixed
+          - retested
+          title: Status
+        resolution_note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Resolution Note
+      additionalProperties: false
+      type: object
+      required:
+      - status
+      title: ConsoleConsultantVerificationFindingUpdateRequest
+    ConsoleConsultantVerificationMessageCreateRequest:
+      properties:
+        content:
+          type: string
+          title: Content
+      additionalProperties: false
+      type: object
+      required:
+      - content
+      title: ConsoleConsultantVerificationMessageCreateRequest
+    ConsoleConsultantVerificationOverviewResponse:
+      properties:
+        generated_at:
+          type: string
+          title: Generated At
+        feature_enabled:
+          type: boolean
+          title: Feature Enabled
+          default: false
+        status:
+          type: string
+          enum:
+          - ready
+          - needs_attention
+          - not_enabled
+          title: Status
+        status_label:
+          type: string
+          title: Status Label
+        summary:
+          type: string
+          title: Summary
+        next_wave_summary:
+          type: string
+          title: Next Wave Summary
+        knowledge_last_published_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Knowledge Last Published At
+        knowledge_stale_hours:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Knowledge Stale Hours
+        readiness_cards:
+          items:
+            $ref: '#/components/schemas/ConsoleConsultantVerificationReadinessCard'
+          type: array
+          title: Readiness Cards
+          default: []
+        stress_test_examples:
+          items:
+            type: string
+          type: array
+          title: Stress Test Examples
+          default: []
+        scenario_catalog:
+          items:
+            $ref: '#/components/schemas/ConsoleConsultantVerificationScenarioItem'
+          type: array
+          title: Scenario Catalog
+          default: []
+        actions:
+          items:
+            $ref: '#/components/schemas/ConsoleBusinessActionItem'
+          type: array
+          title: Actions
+          default: []
+      type: object
+      required:
+      - generated_at
+      - status
+      - status_label
+      - summary
+      - next_wave_summary
+      title: ConsoleConsultantVerificationOverviewResponse
+    ConsoleConsultantVerificationReadinessCard:
+      properties:
+        id:
+          type: string
+          title: Id
+        title:
+          type: string
+          title: Title
+        summary:
+          type: string
+          title: Summary
+        state:
+          type: string
+          enum:
+          - ready
+          - needs_attention
+          - planned
+          title: State
+        state_label:
+          type: string
+          title: State Label
+        evidence_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Evidence Label
+        href:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Href
+      type: object
+      required:
+      - id
+      - title
+      - summary
+      - state
+      - state_label
+      title: ConsoleConsultantVerificationReadinessCard
+    ConsoleConsultantVerificationReadinessResponse:
+      properties:
+        readiness:
+          $ref: '#/components/schemas/ConsoleConsultantVerificationCompareReadiness'
+      type: object
+      required:
+      - readiness
+      title: ConsoleConsultantVerificationReadinessResponse
+    ConsoleConsultantVerificationScenarioItem:
+      properties:
+        id:
+          type: string
+          title: Id
+        title:
+          type: string
+          title: Title
+        description:
+          type: string
+          title: Description
+        prompt:
+          type: string
+          title: Prompt
+        category:
+          type: string
+          enum:
+          - core_info
+          - pricing
+          - booking
+          - policy
+          - handoff
+          - stress
+          title: Category
+        source:
+          type: string
+          enum:
+          - domain_blueprint
+          - capabilities
+          - reference_pack
+          title: Source
+        source_label:
+          type: string
+          title: Source Label
+        recommended_challenge_mode:
+          type: string
+          enum:
+          - as_client
+          - stress
+          title: Recommended Challenge Mode
+          default: as_client
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+          default: []
+      type: object
+      required:
+      - id
+      - title
+      - description
+      - prompt
+      - category
+      - source
+      - source_label
+      title: ConsoleConsultantVerificationScenarioItem
+    ConsoleConsultantVerificationSessionCreateRequest:
+      properties:
+        source_mode:
+          type: string
+          enum:
+          - live
+          - draft
+          title: Source Mode
+          default: live
+        challenge_mode:
+          type: string
+          enum:
+          - as_client
+          - stress
+          title: Challenge Mode
+          default: as_client
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+      additionalProperties: false
+      type: object
+      title: ConsoleConsultantVerificationSessionCreateRequest
+    ConsoleConsultantVerificationSessionListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleConsultantVerificationSessionRecord'
+          type: array
+          title: Items
+          default: []
+      type: object
+      title: ConsoleConsultantVerificationSessionListResponse
+    ConsoleConsultantVerificationSessionRecord:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        actor_agent_id:
+          type: string
+          format: uuid
+          title: Actor Agent Id
+        actor_role:
+          type: string
+          enum:
+          - owner
+          - admin
+          - manager
+          - support
+          - platform_admin
+          - specialist
+          - viewer
+          title: Actor Role
+        source_mode:
+          type: string
+          enum:
+          - live
+          - draft
+          title: Source Mode
+        challenge_mode:
+          type: string
+          enum:
+          - as_client
+          - stress
+          title: Challenge Mode
+        status:
+          type: string
+          enum:
+          - active
+          - completed
+          title: Status
+          default: active
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        turns_total:
+          type: integer
+          title: Turns Total
+          default: 0
+        latest_outcome:
+          anyOf:
+          - type: string
+            enum:
+            - fact
+            - collect
+            - handoff
+          - type: 'null'
+          title: Latest Outcome
+        latest_business_verdict:
+          anyOf:
+          - type: string
+            enum:
+            - answered
+            - needs_clarification
+            - handoff
+            - gap_detected
+          - type: 'null'
+          title: Latest Business Verdict
+        latest_preview:
+          type: object
+          title: Latest Preview
+          default: {}
+        created_at:
+          type: string
+          title: Created At
+        updated_at:
+          type: string
+          title: Updated At
+        last_message_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Message At
+      type: object
+      required:
+      - id
+      - client_id
+      - actor_agent_id
+      - actor_role
+      - source_mode
+      - challenge_mode
+      - created_at
+      - updated_at
+      title: ConsoleConsultantVerificationSessionRecord
+    ConsoleConsultantVerificationSessionResponse:
+      properties:
+        session:
+          $ref: '#/components/schemas/ConsoleConsultantVerificationSessionRecord'
+        turns:
+          items:
+            $ref: '#/components/schemas/ConsoleConsultantVerificationTurnRecord'
+          type: array
+          title: Turns
+          default: []
+        summary:
+          allOf:
+          - $ref: '#/components/schemas/ConsoleConsultantVerificationSessionSummary'
+          default:
+            assistant_turns_total: 0
+            answered_total: 0
+            needs_clarification_total: 0
+            handoff_total: 0
+            gap_detected_total: 0
+            replay_prompt_total: 0
+            weak_turns: []
+      type: object
+      required:
+      - session
+      title: ConsoleConsultantVerificationSessionResponse
+    ConsoleConsultantVerificationSessionSummary:
+      properties:
+        assistant_turns_total:
+          type: integer
+          title: Assistant Turns Total
+          default: 0
+        answered_total:
+          type: integer
+          title: Answered Total
+          default: 0
+        needs_clarification_total:
+          type: integer
+          title: Needs Clarification Total
+          default: 0
+        handoff_total:
+          type: integer
+          title: Handoff Total
+          default: 0
+        gap_detected_total:
+          type: integer
+          title: Gap Detected Total
+          default: 0
+        replay_prompt_total:
+          type: integer
+          title: Replay Prompt Total
+          default: 0
+        latest_verdict:
+          anyOf:
+          - type: string
+            enum:
+            - answered
+            - needs_clarification
+            - handoff
+            - gap_detected
+          - type: 'null'
+          title: Latest Verdict
+        weak_turns:
+          items:
+            $ref: '#/components/schemas/ConsoleConsultantVerificationSessionWeakTurn'
+          type: array
+          title: Weak Turns
+          default: []
+      type: object
+      title: ConsoleConsultantVerificationSessionSummary
+    ConsoleConsultantVerificationSessionWeakTurn:
+      properties:
+        assistant_turn_id:
+          type: string
+          format: uuid
+          title: Assistant Turn Id
+        assistant_turn_index:
+          type: integer
+          title: Assistant Turn Index
+        owner_prompt:
+          type: string
+          title: Owner Prompt
+        assistant_excerpt:
+          type: string
+          title: Assistant Excerpt
+        business_verdict:
+          type: string
+          enum:
+          - answered
+          - needs_clarification
+          - handoff
+          - gap_detected
+          title: Business Verdict
+      type: object
+      required:
+      - assistant_turn_id
+      - assistant_turn_index
+      - owner_prompt
+      - assistant_excerpt
+      - business_verdict
+      title: ConsoleConsultantVerificationSessionWeakTurn
+    ConsoleConsultantVerificationTurnRecord:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        turn_index:
+          type: integer
+          title: Turn Index
+        role:
+          type: string
+          enum:
+          - owner
+          - consultant
+          - system
+          title: Role
+        content:
+          type: string
+          title: Content
+        created_at:
+          type: string
+          title: Created At
+        outcome:
+          anyOf:
+          - type: string
+            enum:
+            - fact
+            - collect
+            - handoff
+          - type: 'null'
+          title: Outcome
+        business_verdict:
+          anyOf:
+          - type: string
+            enum:
+            - answered
+            - needs_clarification
+            - handoff
+            - gap_detected
+          - type: 'null'
+          title: Business Verdict
+        source_refs:
+          items:
+            type: string
+          type: array
+          title: Source Refs
+          default: []
+        decision_meta:
+          type: object
+          title: Decision Meta
+          default: {}
+        decision_trace:
+          items:
+            type: object
+          type: array
+          title: Decision Trace
+          default: []
+        preview:
+          type: object
+          title: Preview
+          default: {}
+        would_handoff:
+          type: boolean
+          title: Would Handoff
+          default: false
+        would_book:
+          type: boolean
+          title: Would Book
+          default: false
+        gap_detected:
+          type: boolean
+          title: Gap Detected
+          default: false
+      type: object
+      required:
+      - id
+      - turn_index
+      - role
+      - content
+      - created_at
+      title: ConsoleConsultantVerificationTurnRecord
     ConsoleDataTrustSummaryResponse:
       properties:
         generated_at:
@@ -13167,6 +14690,11 @@ components:
           - type: string
           - type: 'null'
           title: Diff
+        draft_hash:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Draft Hash
       type: object
       required:
       - valid

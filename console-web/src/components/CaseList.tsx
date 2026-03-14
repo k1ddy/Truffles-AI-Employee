@@ -82,6 +82,7 @@ interface CasesResponse {
 
 type CaseListVariant = "table" | "compact";
 type BulkActionMode = "reassign" | "route" | "snooze" | null;
+type SecondaryPanelSection = "saved_views" | "filters" | "view" | "bulk";
 type QueueViewDefinition = {
     id: InboxQueueViewId;
     label: string;
@@ -665,6 +666,8 @@ export default function CaseList({
     const [selectedTeamTargetBranchIdDraft, setSelectedTeamTargetBranchIdDraft] = useState("");
     const [selectedTeamTargetRoleDraft, setSelectedTeamTargetRoleDraft] = useState<ConsoleRole | "">("");
     const [visibleFields, setVisibleFields] = useState<InboxCaseVisibleFields>(DEFAULT_VISIBLE_FIELDS);
+    const [secondaryPanelOpen, setSecondaryPanelOpen] = useState(false);
+    const [secondaryPanelSection, setSecondaryPanelSection] = useState<SecondaryPanelSection>("saved_views");
     const [fieldPanelOpen, setFieldPanelOpen] = useState(false);
     const [documentVisible, setDocumentVisible] = useState(true);
     const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
@@ -727,6 +730,19 @@ export default function CaseList({
     );
     const resetPagination = () => {
         setCursor(undefined);
+    };
+    const openSecondaryPanel = (section: SecondaryPanelSection) => {
+        setSecondaryPanelSection(section);
+        if (section === "filters") {
+            setShowAdvancedFilters(true);
+        }
+        if (section === "view") {
+            setFieldPanelOpen(true);
+        }
+        setSecondaryPanelOpen(true);
+    };
+    const closeSecondaryPanel = () => {
+        setSecondaryPanelOpen(false);
     };
 
     useEffect(() => {
@@ -1114,13 +1130,7 @@ export default function CaseList({
     const effectiveSortBy = resolveEffectiveSortBy(modeScope, activeViewId, effectiveFilters.sortBy);
     const defaultSortBy = getDefaultSortForModeScope(modeScope, activeViewId);
     const defaultSortLabel = sortOptions.find((option) => option.id === defaultSortBy)?.label ?? "По умолчанию";
-    const advancedFiltersActive = hasAdvancedCaseRefinements(effectiveFilters, { branchFilterEnabled });
-    const filtersToggleLabel = filtersCollapsed
-        ? advancedFiltersActive
-            ? "Фильтры активны"
-            : "Фильтры"
-        : "Скрыть фильтры";
-    const showAdvancedFiltersRow = !filtersCollapsed && showAdvancedFilters;
+    const showAdvancedFiltersRow = showAdvancedFilters;
     const hasAnyFiltersApplied = hasAnyCaseFiltersApplied({
         modeScope,
         activeViewId,
@@ -1129,7 +1139,7 @@ export default function CaseList({
         branchFilterEnabled,
     });
     const headingClass = filtersCompact ? "text-base" : isCompact ? "text-lg" : "text-xl";
-    const isTight = filtersCompact || filtersCollapsed;
+    const isTight = filtersCompact;
     const autoRefreshLabel = autoRefreshEnabled ? "Автообновление: Вкл" : "Автообновление: Выкл";
     const autoRefreshButtonClass = autoRefreshEnabled
         ? "text-emerald-700 hover:text-emerald-900"
@@ -1138,9 +1148,9 @@ export default function CaseList({
     const filterContainerClass = `flex flex-col border border-border/60 rounded-lg ${
         isTight ? "gap-2 p-2" : "gap-3 p-3"
     } ${isCompact ? "sticky top-0 z-10 bg-card/95 backdrop-blur" : "bg-muted"}`;
-    const searchInputClass = `px-3 border border-border/60 rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 ${
-        filtersCollapsed ? "min-w-[120px]" : "min-w-[160px]"
-    } ${isTight ? "py-1.5 text-xs" : "py-2 text-sm"}`;
+    const searchInputClass = `min-w-[160px] px-3 border border-border/60 rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 ${
+        isTight ? "py-1.5 text-xs" : "py-2 text-sm"
+    }`;
     const selectClass = `px-3 border border-border/60 rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 ${
         isTight ? "py-1.5 text-xs" : "py-2 text-xs"
     }`;
@@ -1722,6 +1732,13 @@ export default function CaseList({
     }, [selectedCaseIds.length]);
 
     useEffect(() => {
+        if (selectedCaseIds.length > 0 || secondaryPanelSection !== "bulk") {
+            return;
+        }
+        setSecondaryPanelSection("saved_views");
+    }, [secondaryPanelSection, selectedCaseIds.length]);
+
+    useEffect(() => {
         if (bulkActionMode !== "reassign") {
             setBulkAssigneeId("");
         }
@@ -1899,7 +1916,6 @@ export default function CaseList({
         setFiltersCollapsed(false);
         setSelectedCaseIds([]);
         setBulkSummary(null);
-        setFieldPanelOpen(false);
         resetPagination();
         setModeScope("open");
         setActiveViewId("all_open");
@@ -1953,6 +1969,12 @@ export default function CaseList({
         ? `Показано ${loadedCases} из ${totalCases} ${caseNoun(totalCases)}`
         : `${loadedCases} ${caseNoun(loadedCases)}`;
     const casesCountLabel = `${countBaseLabel}${data?.has_more ? " (есть ещё)" : ""}`;
+    const secondaryPanelTabs: { id: SecondaryPanelSection; label: string }[] = [
+        { id: "saved_views", label: "Виды" },
+        { id: "filters", label: "Фильтры" },
+        { id: "view", label: "Вид" },
+        ...(canBulkManage ? [{ id: "bulk" as const, label: "Действия" }] : []),
+    ];
 
     return (
         <div className={isCompact ? "flex flex-col h-full" : "w-full"}>
@@ -1968,34 +1990,12 @@ export default function CaseList({
                 <div className="flex items-center gap-3">
                     <button
                         type="button"
-                        onClick={() => setFieldPanelOpen((prev) => !prev)}
-                        className="text-xs font-semibold text-muted-foreground hover:text-foreground"
-                        data-testid="cases-field-toggle"
+                        onClick={() => openSecondaryPanel("saved_views")}
+                        className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                        data-testid="cases-secondary-panel-toggle"
                     >
-                        Вид {enabledFieldCount}/{FIELD_ORDER.length}
+                        Панели
                     </button>
-                    {canBulkManage && visibleCases.length > 0 && (
-                        <button
-                            type="button"
-                            onClick={toggleSelectAllVisible}
-                            className="text-xs font-semibold text-muted-foreground hover:text-foreground"
-                            data-testid="cases-bulk-select-all"
-                        >
-                            {allVisibleSelected ? "Снять выбор" : "Выбрать все"}
-                        </button>
-                    )}
-                    {filtersCompact && (
-                        <button
-                            type="button"
-                            onClick={() => setFiltersCollapsed((prev) => !prev)}
-                            className={`text-xs font-semibold ${
-                                filtersCollapsed && advancedFiltersActive ? "text-amber-700" : "text-muted-foreground hover:text-foreground"
-                            }`}
-                            data-testid="cases-filters-toggle"
-                        >
-                            {filtersToggleLabel}
-                        </button>
-                    )}
                     <button
                         onClick={() => { resetPagination(); refetch(); }}
                         className="text-xs text-muted-foreground hover:text-foreground"
@@ -2051,357 +2051,8 @@ export default function CaseList({
                             : "Поиск по открытым и закрытым заявкам. Очередные режимы доступны только в списке открытых заявок."}
                     </div>
                 )}
-                <div className="rounded-xl border border-border/60 bg-card/80 p-3" data-testid="cases-saved-views">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                Сохранённые виды
-                            </div>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                                Личные виды и командные пресеты поверх текущего server-owned состояния.
-                            </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    void handleCopyQueueLink();
-                                }}
-                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
-                                data-testid="cases-queue-copy-link"
-                            >
-                                Копировать ссылку
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleOpenSaveViewComposer}
-                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
-                                disabled={savedViewMutationPending}
-                                data-testid="cases-saved-view-save"
-                            >
-                                Сохранить текущий
-                            </button>
-                            {selectedSavedView && savedViewDirty && (
-                                <>
-                                    <button
-                                        type="button"
-                                        onClick={() => handleApplySavedView(selectedSavedView.id)}
-                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
-                                        disabled={savedViewMutationPending}
-                                        data-testid="cases-saved-view-reapply"
-                                    >
-                                        Вернуть вид
-                                    </button>
-                                    {canMutateSelectedSavedView && (
-                                        <button
-                                            type="button"
-                                            onClick={handleUpdateSavedView}
-                                            className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary"
-                                            disabled={savedViewMutationPending}
-                                            data-testid="cases-saved-view-update"
-                                        >
-                                            Обновить вид
-                                        </button>
-                                    )}
-                                </>
-                            )}
-                            {selectedSavedView && !savedViewDirty && selectedTeamTargetingDirty && canMutateSelectedSavedView && (
-                                <button
-                                    type="button"
-                                    onClick={handleUpdateSavedView}
-                                    className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary"
-                                    disabled={savedViewMutationPending}
-                                    data-testid="cases-saved-view-update"
-                                >
-                                    Сохранить targeting
-                                </button>
-                            )}
-                            {selectedSavedView && canMutateSelectedSavedView && (
-                                <>
-                                    <button
-                                        type="button"
-                                        onClick={handleToggleSavedViewDefault}
-                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
-                                        disabled={savedViewMutationPending}
-                                        data-testid="cases-saved-view-default"
-                                    >
-                                        {selectedSavedView.is_default ? "Снять дефолт" : "Сделать дефолтом"}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleDeleteSavedView}
-                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-destructive"
-                                        disabled={savedViewMutationPending}
-                                        data-testid="cases-saved-view-delete"
-                                    >
-                                        Удалить
-                                    </button>
-                                </>
-                            )}
-                        </div>
-                    </div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                        <select
-                            value={activeSavedViewId ?? ""}
-                            onChange={(event) => {
-                                const nextId = event.target.value;
-                                if (!nextId) {
-                                    setActiveSavedViewId(null);
-                                    return;
-                                }
-                                handleApplySavedView(nextId);
-                            }}
-                            className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                            disabled={savedViewsLoading || savedViewMutationPending}
-                            data-testid="cases-saved-view-select"
-                        >
-                            <option value="">
-                                {savedViewsLoading
-                                    ? "Загружаем виды..."
-                                    : savedViews.length === 0
-                                        ? "Нет сохранённых видов"
-                                        : "Выберите сохранённый вид"}
-                            </option>
-                            {teamSavedViews.length > 0 && (
-                                <optgroup label="Командные пресеты">
-                                    {teamSavedViews.map((view) => (
-                                        <option key={view.id} value={view.id}>
-                                            {buildSavedViewOptionLabel(view, branchMap)}
-                                        </option>
-                                    ))}
-                                </optgroup>
-                            )}
-                            {personalSavedViews.length > 0 && (
-                                <optgroup label="Личные виды">
-                                    {personalSavedViews.map((view) => (
-                                        <option key={view.id} value={view.id}>
-                                            {buildSavedViewOptionLabel(view, branchMap)}
-                                        </option>
-                                    ))}
-                                </optgroup>
-                            )}
-                        </select>
-                        {selectedSavedView && (
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
-                                    {selectedSavedView.name}
-                                </span>
-                                <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
-                                    {SAVED_VIEW_SCOPE_LABELS[selectedSavedViewScope]}
-                                </span>
-                                {selectedSavedViewBranchLabel && (
-                                    <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
-                                        {selectedSavedViewBranchLabel}
-                                    </span>
-                                )}
-                                {selectedSavedViewRoleLabel && (
-                                    <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
-                                        {selectedSavedViewRoleLabel}
-                                    </span>
-                                )}
-                                {selectedSavedView.is_default && (
-                                    <span className="rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary">
-                                        default
-                                    </span>
-                                )}
-                                {isTeamSavedView(selectedSavedView) && selectedSavedView.is_applicable === false && (
-                                    <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
-                                        вне текущего контура
-                                    </span>
-                                )}
-                                {savedViewDirty && (
-                                    <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-900">
-                                        изменён
-                                    </span>
-                                )}
-                                {selectedTeamTargetingDirty && (
-                                    <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-900">
-                                        targeting изменён
-                                    </span>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    {selectedSavedViewScope === "team" && canManageTeamPresets && selectedSavedView && (
-                        <div className="mt-3 grid gap-2 border-t border-border/60 pt-3 sm:grid-cols-2">
-                            <label className="space-y-1">
-                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                    Командный филиал
-                                </span>
-                                <select
-                                    value={selectedTeamTargetBranchIdDraft}
-                                    onChange={(event) => setSelectedTeamTargetBranchIdDraft(event.target.value)}
-                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    disabled={savedViewMutationPending}
-                                    data-testid="cases-saved-view-team-branch"
-                                >
-                                    <option value="">Все филиалы</option>
-                                    {selectableBranches.map((branch) => (
-                                        <option key={branch.id} value={branch.id}>
-                                            {branch.name ?? branch.id}
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
-                            <label className="space-y-1">
-                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                    Командная роль
-                                </span>
-                                <select
-                                    value={selectedTeamTargetRoleDraft}
-                                    onChange={(event) => setSelectedTeamTargetRoleDraft(event.target.value as ConsoleRole | "")}
-                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    disabled={savedViewMutationPending}
-                                    data-testid="cases-saved-view-team-role"
-                                >
-                                    <option value="">Все роли</option>
-                                    {savedViewTargetRoleOptions.map((role) => (
-                                        <option key={role} value={role}>
-                                            {SAVED_VIEW_ROLE_LABELS[role]}
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
-                        </div>
-                    )}
-                    {saveViewComposerOpen && (
-                        <div className="mt-3 flex flex-col gap-3 border-t border-border/60 pt-3">
-                            <input
-                                ref={saveViewInputRef}
-                                type="text"
-                                value={saveViewDraftName}
-                                onChange={(event) => setSaveViewDraftName(event.target.value)}
-                                onKeyDown={(event) => {
-                                    if (event.key === "Enter") {
-                                        event.preventDefault();
-                                        handleSaveCurrentView();
-                                    }
-                                }}
-                                placeholder="Например: Мои открытые"
-                                className="min-w-[220px] flex-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                data-testid="cases-saved-view-name-input"
-                            />
-                            {canManageTeamPresets && (
-                                <div className="grid gap-2 sm:grid-cols-3">
-                                    <label className="space-y-1">
-                                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                            Scope
-                                        </span>
-                                        <select
-                                            value={saveViewScopeDraft}
-                                            onChange={(event) => setSaveViewScopeDraft(event.target.value as "personal" | "team")}
-                                            className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                            disabled={createSavedViewMutation.isPending}
-                                            data-testid="cases-saved-view-scope"
-                                        >
-                                            <option value="personal">Личный</option>
-                                            <option value="team">Команда</option>
-                                        </select>
-                                    </label>
-                                    {saveViewScopeDraft === "team" && (
-                                        <>
-                                            <label className="space-y-1">
-                                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                                    Филиал
-                                                </span>
-                                                <select
-                                                    value={saveViewTargetBranchIdDraft}
-                                                    onChange={(event) => setSaveViewTargetBranchIdDraft(event.target.value)}
-                                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                                    disabled={createSavedViewMutation.isPending}
-                                                    data-testid="cases-saved-view-target-branch"
-                                                >
-                                                    <option value="">Все филиалы</option>
-                                                    {selectableBranches.map((branch) => (
-                                                        <option key={branch.id} value={branch.id}>
-                                                            {branch.name ?? branch.id}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </label>
-                                            <label className="space-y-1">
-                                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                                    Роль
-                                                </span>
-                                                <select
-                                                    value={saveViewTargetRoleDraft}
-                                                    onChange={(event) => setSaveViewTargetRoleDraft(event.target.value as ConsoleRole | "")}
-                                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                                    disabled={createSavedViewMutation.isPending}
-                                                    data-testid="cases-saved-view-target-role"
-                                                >
-                                                    <option value="">Все роли</option>
-                                                    {savedViewTargetRoleOptions.map((role) => (
-                                                        <option key={role} value={role}>
-                                                            {SAVED_VIEW_ROLE_LABELS[role]}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </label>
-                                        </>
-                                    )}
-                                </div>
-                            )}
-                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <input
-                                    type="checkbox"
-                                    checked={saveViewDefaultDraft}
-                                    onChange={(event) => {
-                                        setSaveViewDefaultTouched(true);
-                                        setSaveViewDefaultDraft(event.target.checked);
-                                    }}
-                                    className="h-4 w-4 rounded border-border/60"
-                                    disabled={createSavedViewMutation.isPending}
-                                    data-testid="cases-saved-view-default-checkbox"
-                                />
-                                <span>
-                                    {saveViewScopeDraft === "team"
-                                        ? "Сделать дефолтным командным пресетом"
-                                        : "Сделать дефолтным личным видом"}
-                                </span>
-                                {!saveViewDefaultTouched && (
-                                    <span className="text-muted-foreground/80">
-                                        {suggestedSaveViewDefault ? "рекомендуется" : "по желанию"}
-                                    </span>
-                                )}
-                            </label>
-                            <div className="text-xs text-muted-foreground">
-                                {saveViewScopeDraft === "team"
-                                    ? `Командных пресетов в этом targeting: ${matchingScopeSavedViewCount}`
-                                    : `Личных видов: ${matchingScopeSavedViewCount}`}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={handleSaveCurrentView}
-                                    className="rounded-full border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary"
-                                    disabled={createSavedViewMutation.isPending}
-                                    data-testid="cases-saved-view-name-submit"
-                                >
-                                    {createSavedViewMutation.isPending ? "Сохраняем..." : "Сохранить"}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setSaveViewDraftName("");
-                                        setSaveViewComposerOpen(false);
-                                        setSaveViewScopeDraft("personal");
-                                        setSaveViewTargetBranchIdDraft("");
-                                        setSaveViewTargetRoleDraft("");
-                                        setSaveViewDefaultDraft(false);
-                                        setSaveViewDefaultTouched(false);
-                                    }}
-                                    className="rounded-full border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
-                                    disabled={createSavedViewMutation.isPending}
-                                >
-                                    Отмена
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
                 {isCompact ? (
-                    <div className="grid w-full gap-3" data-testid="cases-filter-compact-layout">
+                    <div className="grid w-full gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(220px,1fr)]" data-testid="cases-filter-compact-layout">
                         <input
                             type="text"
                             value={searchValue}
@@ -2410,45 +2061,24 @@ export default function CaseList({
                             className={compactSearchInputClass}
                             data-testid="cases-filter-search"
                         />
-                        {!filtersCollapsed && (
-                            <label className="space-y-1">
-                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                    Ответственный
-                                </span>
-                                <select
-                                    value={ownerScopeValue}
-                                    onChange={(event) => applyOwnerScopeValue(event.target.value)}
-                                    className={compactSelectClass}
-                                    disabled={queueAssigneesLoading}
-                                    data-testid="cases-filter-owner-scope"
-                                >
-                                    {ownerScopeOptions.map((option) => (
-                                        <option key={option.value} value={option.value}>
-                                            {option.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
-                        )}
-                        <div className="flex flex-wrap items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setShowAdvancedFilters((prev) => !prev)}
-                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
-                                data-testid="cases-filter-advanced-toggle"
+                        <label className="space-y-1">
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                Ответственный
+                            </span>
+                            <select
+                                value={ownerScopeValue}
+                                onChange={(event) => applyOwnerScopeValue(event.target.value)}
+                                className={compactSelectClass}
+                                disabled={queueAssigneesLoading}
+                                data-testid="cases-filter-owner-scope"
                             >
-                                {showAdvancedFilters ? "Скрыть фильтры" : "Фильтры"}
-                            </button>
-                            {hasAnyFiltersApplied && (
-                                <button
-                                    onClick={resetAllFilters}
-                                    className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-destructive"
-                                    data-testid="cases-filter-clear"
-                                >
-                                    Сбросить
-                                </button>
-                            )}
-                        </div>
+                                {ownerScopeOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
                     </div>
                 ) : (
                     <div className="flex w-full items-center gap-2 overflow-x-auto pb-1">
@@ -2473,25 +2103,6 @@ export default function CaseList({
                                 </option>
                             ))}
                         </select>
-                        {!filtersCollapsed && (
-                            <button
-                                type="button"
-                                onClick={() => setShowAdvancedFilters((prev) => !prev)}
-                                className="text-xs text-muted-foreground hover:text-foreground whitespace-nowrap"
-                                data-testid="cases-filter-advanced-toggle"
-                            >
-                                {showAdvancedFilters ? "Скрыть фильтры" : "Фильтры"}
-                            </button>
-                        )}
-                        {hasAnyFiltersApplied && (
-                            <button
-                                onClick={resetAllFilters}
-                                className="text-xs text-muted-foreground hover:text-destructive whitespace-nowrap"
-                                data-testid="cases-filter-clear"
-                            >
-                                Сбросить
-                            </button>
-                        )}
                     </div>
                 )}
                 <div className="flex flex-wrap items-center gap-2 text-[11px]" data-testid="cases-queue-view-summary">
@@ -2516,25 +2127,21 @@ export default function CaseList({
                         </span>
                     )}
                     {effectiveFilters.query && (
-                        <button
-                            type="button"
-                            onClick={() => setSearchValue("")}
+                        <span
                             className="rounded-full border border-border/60 bg-card px-2 py-1 font-semibold text-foreground/80"
                             data-testid="cases-search-summary"
                         >
-                            Поиск: {effectiveFilters.query} ×
-                        </button>
+                            Поиск: {effectiveFilters.query}
+                        </span>
                     )}
                     {refinementChips.map((chip) => (
-                        <button
+                        <span
                             key={chip.key}
-                            type="button"
-                            onClick={chip.onClear}
                             className="rounded-full border border-border/60 bg-card px-2 py-1 font-semibold text-foreground/80"
                             data-testid={chip.key === "owner" ? "cases-owner-summary" : `cases-filter-chip-${chip.key}`}
                         >
-                            {chip.label} ×
-                        </button>
+                            {chip.label}
+                        </span>
                     ))}
                     {refreshStatusLabel && (
                         <span
@@ -2547,159 +2154,9 @@ export default function CaseList({
                         </span>
                     )}
                 </div>
-                {fieldPanelOpen && (
-                    <div className="grid w-full gap-3 border-t border-border/60 pt-3 md:grid-cols-[1fr_auto]" data-testid="cases-field-panel">
-                        <div className="flex flex-wrap items-center gap-3">
-                            {FIELD_ORDER.map((field) => (
-                                <label key={field} className="flex items-center gap-2 text-xs text-foreground/80">
-                                    <input
-                                        type="checkbox"
-                                        checked={visibleFields[field]}
-                                        onChange={(event) => updateVisibleField(field, event.target.checked)}
-                                        className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                        data-testid={`cases-field-${field}`}
-                                    />
-                                    {FIELD_LABELS[field]}
-                                </label>
-                            ))}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                            <button
-                                type="button"
-                                onClick={() => setAutoRefreshEnabled((prev) => !prev)}
-                                className={`font-semibold ${autoRefreshButtonClass}`}
-                                aria-pressed={autoRefreshEnabled}
-                                data-testid="cases-auto-refresh-toggle"
-                            >
-                                {autoRefreshLabel}
-                            </button>
-                        </div>
-                    </div>
-                )}
-                {showAdvancedFiltersRow && (
-                    <div
-                        className="grid w-full gap-3 border-t border-border/60 pt-2 md:grid-cols-2 xl:grid-cols-4"
-                        data-testid="cases-filters-advanced"
-                    >
-                        <label className="space-y-1">
-                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                Порядок
-                            </span>
-                            <select
-                                value={effectiveFilters.sortBy ?? "__default__"}
-                                onChange={(e) => {
-                                    resetPagination();
-                                    const nextSortBy = e.target.value;
-                                    setFilters({
-                                        ...filters,
-                                        sortBy: nextSortBy === "__default__"
-                                            ? undefined
-                                            : nextSortBy as NonNullable<CaseFilters["sortBy"]>,
-                                    });
-                                }}
-                                className={compactSelectClass}
-                                data-testid="cases-filter-sort-select"
-                            >
-                                <option value="__default__">
-                                    По умолчанию для режима ({defaultSortLabel})
-                                </option>
-                                {visibleSortOptions.map((option) => (
-                                    <option key={option.id} value={option.id}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                        {branchFilterEnabled && (
-                            <label className="space-y-1">
-                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                    Филиал
-                                </span>
-                                <select
-                                    value={filters.branchId || ""}
-                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, branchId: e.target.value || undefined }); }}
-                                    className={compactSelectClass}
-                                    data-testid="cases-filter-branch"
-                                >
-                                    <option value="">Все филиалы</option>
-                                    {selectableBranches.map((branch) => (
-                                        <option key={branch.id} value={branch.id}>
-                                            {branch.name ?? branch.id}
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
-                        )}
-                        <div className="grid gap-3 sm:grid-cols-2 xl:col-span-2">
-                            <label className="space-y-1">
-                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                    {modeScope === "resolved" ? "Закрыта с" : "Создана с"}
-                                </span>
-                                <input
-                                    type="date"
-                                    value={filters.dateFrom || ""}
-                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, dateFrom: e.target.value || undefined }); }}
-                                    className={compactSelectClass}
-                                    data-testid="cases-filter-date-from"
-                                />
-                            </label>
-                            <label className="space-y-1">
-                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                    {modeScope === "resolved" ? "Закрыта по" : "Создана по"}
-                                </span>
-                                <input
-                                    type="date"
-                                    value={filters.dateTo || ""}
-                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, dateTo: e.target.value || undefined }); }}
-                                    className={compactSelectClass}
-                                    data-testid="cases-filter-date-to"
-                                />
-                            </label>
-                        </div>
-                        {modeScope === "open" && (
-                            <div className="flex flex-wrap items-center gap-3 xl:col-span-4">
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={filters.hasDeliveryError}
-                                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasDeliveryError: e.target.checked }); }}
-                                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                        data-testid="cases-filter-delivery-error"
-                                    />
-                                    <span className="text-sm text-foreground/80">Есть ошибки доставки</span>
-                                </label>
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={filters.hasPendingOutbox}
-                                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasPendingOutbox: e.target.checked }); }}
-                                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                        data-testid="cases-filter-pending-outbox"
-                                    />
-                                    <span className="text-sm text-foreground/80">Есть исходящие в очереди</span>
-                                </label>
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={filters.hasHumanLock}
-                                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasHumanLock: e.target.checked }); }}
-                                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                                        data-testid="cases-filter-human-lock"
-                                    />
-                                    <span className="text-sm text-foreground/80">Бот на паузе</span>
-                                </label>
-                            </div>
-                        )}
-                    </div>
-                )}
                 {!filtersCompact && (
                     <div className="text-xs text-muted-foreground" data-testid="cases-count">
                         {casesCountLabel}
-                    </div>
-                )}
-                {storageEnabled && (
-                    <div className="text-[11px] text-muted-foreground" data-testid="cases-workspace-persistence">
-                        Вид менеджера сохраняется 24 часа
                     </div>
                 )}
             </div>
@@ -2707,292 +2164,39 @@ export default function CaseList({
             {canBulkManage && selectedCases.length > 0 && (
                 <div
                     className="mt-3 rounded-xl border border-border/60 bg-card p-3"
-                    data-testid="cases-bulk-toolbar"
+                    data-testid="cases-bulk-selection-summary"
                 >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="space-y-1">
-                            <p className="text-sm font-semibold" data-testid="cases-bulk-count">
+                            <p className="text-sm font-semibold" data-testid="cases-bulk-selection-count">
                                 Выбрано {selectedCases.length} {caseNoun(selectedCases.length)}
                             </p>
                             <p className="text-xs text-muted-foreground">
                                 {bulkBranchLabel
-                                    ? `Передача и распределение доступны для филиала ${bulkBranchLabel}. Отсрочка работает для всей выборки.`
-                                    : "Для передачи и распределения выберите заявки одного филиала. Отсрочка доступна для всей выборки."}
+                                    ? `Передача и распределение доступны для филиала ${bulkBranchLabel}. Формы вынесены в панель действий.`
+                                    : "Откройте панель действий, чтобы передать, распределить или отложить выборку."}
                             </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setBulkSummary(null);
-                                    setBulkActionMode((current) => current === "reassign" ? null : "reassign");
-                                }}
-                                disabled={!!bulkReassignDisabledReason || bulkActionMutation.isPending}
-                                className={bulkToggleClass(bulkActionMode === "reassign")}
-                                data-testid="cases-bulk-toggle-reassign"
+                                onClick={() => openSecondaryPanel("bulk")}
+                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                data-testid="cases-bulk-open-panel"
                             >
-                                Передать
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setBulkSummary(null);
-                                    setBulkActionMode((current) => current === "route" ? null : "route");
-                                }}
-                                disabled={!!bulkRouteDisabledReason || bulkActionMutation.isPending}
-                                className={bulkToggleClass(bulkActionMode === "route")}
-                                data-testid="cases-bulk-toggle-route"
-                            >
-                                Распределить
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setBulkSummary(null);
-                                    setBulkActionMode((current) => current === "snooze" ? null : "snooze");
-                                }}
-                                disabled={bulkActionMutation.isPending}
-                                className={bulkToggleClass(bulkActionMode === "snooze")}
-                                data-testid="cases-bulk-toggle-snooze"
-                            >
-                                Отложить
+                                Действия
                             </button>
                             <button
                                 type="button"
                                 onClick={clearBulkSelection}
                                 disabled={bulkActionMutation.isPending}
                                 className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                data-testid="cases-bulk-clear"
+                                data-testid="cases-bulk-selection-clear"
                             >
                                 Снять выбор
                             </button>
                         </div>
                     </div>
-
-                    {bulkActionMode === "route" && (
-                        <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="cases-bulk-route-panel">
-                            {bulkRouteDisabledReason ? (
-                                <p className="text-xs text-amber-700" data-testid="cases-bulk-route-hint">
-                                    {bulkRouteDisabledReason}
-                                </p>
-                            ) : (
-                                <div className="flex flex-col gap-3">
-                                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3">
-                                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-900/70">
-                                            Политика
-                                        </p>
-                                        <select
-                                            value={bulkRoutingPolicy}
-                                            onChange={(event) => setBulkRoutingPolicy(event.target.value as CaseRoutingPolicy)}
-                                            disabled={bulkActionMutation.isPending}
-                                            className="mt-2 w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold text-emerald-950 disabled:opacity-50"
-                                            data-testid="cases-bulk-route-policy-select"
-                                        >
-                                            {Object.entries(CASE_ROUTING_POLICY_LABELS).map(([value, label]) => (
-                                                <option key={value} value={value}>
-                                                    {label}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <p className="mt-2 text-xs text-emerald-900/80">
-                                            {CASE_ROUTING_POLICY_HINTS[bulkRoutingPolicy]}
-                                        </p>
-                                    </div>
-                                    <div className="flex flex-wrap justify-end gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setBulkActionMode(null)}
-                                            disabled={bulkActionMutation.isPending}
-                                            className="rounded-full border border-border/60 px-4 py-2 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            Отмена
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => bulkActionMutation.mutate()}
-                                            disabled={bulkActionMutation.isPending}
-                                            className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                            data-testid="cases-bulk-route-submit"
-                                        >
-                                            {bulkActionMutation.isPending ? "Распределяем..." : "Распределить по политике"}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {bulkActionMode === "reassign" && (
-                        <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="cases-bulk-reassign-panel">
-                            {bulkReassignDisabledReason ? (
-                                <p className="text-xs text-amber-700" data-testid="cases-bulk-reassign-hint">
-                                    {bulkReassignDisabledReason}
-                                </p>
-                            ) : (
-                                <div className="flex flex-col gap-3">
-                                    {recommendedBulkAssignee && (
-                                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3">
-                                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-900/70">
-                                                Рекомендуем
-                                            </p>
-                                            <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-                                                <div className="space-y-1">
-                                                    <p
-                                                        className="text-xs text-emerald-900"
-                                                        data-testid="cases-bulk-reassign-recommendation"
-                                                    >
-                                                        {recommendedBulkAssignee.agent_name} · {recommendedBulkAssignee.open_case_count ?? 0} в работе.
-                                                    </p>
-                                                    {formatBulkAssigneeAvailability(recommendedBulkAssignee) ? (
-                                                        <p className="text-[11px] text-emerald-900/80">
-                                                            {formatBulkAssigneeAvailability(recommendedBulkAssignee)}
-                                                        </p>
-                                                    ) : null}
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setBulkAssigneeId(String(recommendedBulkAssignee.agent_id))}
-                                                    className="rounded-full border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-900"
-                                                    disabled={assigneesLoading || bulkActionMutation.isPending || bulkAssigneeId === String(recommendedBulkAssignee.agent_id)}
-                                                    data-testid="cases-bulk-reassign-recommend"
-                                                >
-                                                    {bulkAssigneeId === String(recommendedBulkAssignee.agent_id)
-                                                        ? "Рекомендация выбрана"
-                                                        : `Выбрать ${recommendedBulkAssignee.agent_name}`}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
-                                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                                        <select
-                                            value={bulkAssigneeId}
-                                            onChange={(event) => setBulkAssigneeId(event.target.value)}
-                                            className="min-w-[220px] rounded-lg border border-border/60 bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                            disabled={assigneesLoading || bulkActionMutation.isPending}
-                                            data-testid="cases-bulk-reassign-select"
-                                        >
-                                            <option value="">Выберите менеджера</option>
-                                            {bulkAssignees.map((option) => (
-                                                <option
-                                                    key={option.agent_id}
-                                                    value={option.agent_id}
-                                                    disabled={!option.assignment_eligible}
-                                                >
-                                                    {formatBulkAssigneeOptionLabel(option)}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <button
-                                            type="button"
-                                            onClick={() => bulkActionMutation.mutate()}
-                                            disabled={
-                                                !selectedBulkAssignee
-                                                || !selectedBulkAssignee.assignment_eligible
-                                                || assigneesLoading
-                                                || bulkActionMutation.isPending
-                                            }
-                                            className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                            data-testid="cases-bulk-reassign-submit"
-                                        >
-                                            {bulkActionMutation.isPending ? "Передаём..." : "Передать выбранному"}
-                                        </button>
-                                    </div>
-                                    {selectedBulkAssignee && (
-                                        <div className="rounded-lg border border-border/60 bg-background px-3 py-2 text-xs">
-                                            <p className="font-medium text-foreground">
-                                                {selectedBulkAssignee.agent_name}
-                                            </p>
-                                            <p className="mt-1 text-muted-foreground">
-                                                {formatBulkAssigneeOptionLabel(selectedBulkAssignee)}
-                                            </p>
-                                            {formatBulkAssigneeUnavailableReason(selectedBulkAssignee) ? (
-                                                <p className="mt-1 text-amber-700">
-                                                    {formatBulkAssigneeUnavailableReason(selectedBulkAssignee)}
-                                                </p>
-                                            ) : null}
-                                        </div>
-                                    )}
-                                    <div className="flex flex-wrap justify-end gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setBulkActionMode(null)}
-                                            disabled={bulkActionMutation.isPending}
-                                            className="rounded-full border border-border/60 px-4 py-2 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            Отмена
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {bulkActionMode === "snooze" && (
-                        <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="cases-bulk-snooze-panel">
-                            <div className="flex flex-col gap-3">
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        max={1440}
-                                        value={bulkSnoozeMinutes}
-                                        onChange={(event) => {
-                                            const next = Number(event.target.value);
-                                            const normalized = Number.isFinite(next)
-                                                ? Math.min(Math.max(next, 1), 1440)
-                                                : 30;
-                                            setBulkSnoozeMinutes(normalized);
-                                        }}
-                                        className="w-28 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                        data-testid="cases-bulk-snooze-minutes"
-                                    />
-                                    <span className="text-xs text-muted-foreground">минут</span>
-                                    {BULK_SNOOZE_PRESETS.map((preset) => (
-                                        <button
-                                            key={preset}
-                                            type="button"
-                                            onClick={() => setBulkSnoozeMinutes(preset)}
-                                            className="rounded-full border border-border/60 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground"
-                                            data-testid={`cases-bulk-snooze-preset-${preset}`}
-                                        >
-                                            {preset}
-                                        </button>
-                                    ))}
-                                </div>
-                                <input
-                                    type="text"
-                                    value={bulkSnoozeReason}
-                                    onChange={(event) => setBulkSnoozeReason(event.target.value)}
-                                    className="rounded-lg border border-border/60 bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    placeholder="Причина для команды, например: ждём подтверждение клиента"
-                                    data-testid="cases-bulk-snooze-reason"
-                                />
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setBulkActionMode(null)}
-                                        disabled={bulkActionMutation.isPending}
-                                        className="rounded-full border border-border/60 px-4 py-2 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        Отмена
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => bulkActionMutation.mutate()}
-                                        disabled={bulkActionMutation.isPending}
-                                        className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                        data-testid="cases-bulk-snooze-submit"
-                                    >
-                                        {bulkActionMutation.isPending ? "Сохраняем..." : "Отложить выборку"}
-                                    </button>
-                                    <p className="text-xs text-muted-foreground">
-                                        Отсрочка убирает заявки из срочного фокуса, но не закрывает их.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
                     {bulkSummary && (
                         <div
                             className={`mt-3 rounded-lg px-3 py-2 text-xs ${
@@ -3002,7 +2206,7 @@ export default function CaseList({
                                         ? "bg-amber-50 text-amber-800"
                                         : "bg-red-50 text-red-800"
                             }`}
-                            data-testid="cases-bulk-summary"
+                            data-testid="cases-bulk-selection-summary-status"
                         >
                             <p className="font-semibold">{bulkSummary.label}</p>
                             <p>{bulkSummary.detail}</p>
@@ -3270,6 +2474,943 @@ export default function CaseList({
                             )}
                         </tbody>
                     </table>
+                </div>
+            )}
+
+            {secondaryPanelOpen && (
+                <div className="fixed inset-0 z-40" data-testid="cases-secondary-panel-overlay">
+                    <div
+                        className="absolute inset-0 bg-foreground/20"
+                        onClick={closeSecondaryPanel}
+                        aria-hidden="true"
+                    />
+                    <div
+                        className="absolute inset-y-0 right-0 flex h-full w-full max-w-[560px] flex-col gap-4 overflow-y-auto bg-background p-4 shadow-xl"
+                        data-testid="cases-secondary-panel"
+                    >
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                                <p className="text-sm font-semibold">Панели очереди</p>
+                                <p className="text-xs text-muted-foreground">
+                                    Saved views, дополнительные фильтры, настройки вида и bulk-действия вынесены из первого экрана.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeSecondaryPanel}
+                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                data-testid="cases-secondary-panel-close"
+                            >
+                                Закрыть
+                            </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                            {secondaryPanelTabs.map((tab) => (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => openSecondaryPanel(tab.id)}
+                                    className={pillClass(secondaryPanelSection === tab.id)}
+                                    data-testid={`cases-secondary-tab-${tab.id}`}
+                                >
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        {secondaryPanelSection === "saved_views" && (
+                            <div className="rounded-xl border border-border/60 bg-card/80 p-4" data-testid="cases-saved-views">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                            Сохранённые виды
+                                        </div>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            Личные виды и командные пресеты поверх текущего server-owned состояния.
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                void handleCopyQueueLink();
+                                            }}
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                            data-testid="cases-queue-copy-link"
+                                        >
+                                            Копировать ссылку
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleOpenSaveViewComposer}
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                            disabled={savedViewMutationPending}
+                                            data-testid="cases-saved-view-save"
+                                        >
+                                            Сохранить текущий
+                                        </button>
+                                        {selectedSavedView && savedViewDirty && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleApplySavedView(selectedSavedView.id)}
+                                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                                    disabled={savedViewMutationPending}
+                                                    data-testid="cases-saved-view-reapply"
+                                                >
+                                                    Вернуть вид
+                                                </button>
+                                                {canMutateSelectedSavedView && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleUpdateSavedView}
+                                                        className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary"
+                                                        disabled={savedViewMutationPending}
+                                                        data-testid="cases-saved-view-update"
+                                                    >
+                                                        Обновить вид
+                                                    </button>
+                                                )}
+                                            </>
+                                        )}
+                                        {selectedSavedView && !savedViewDirty && selectedTeamTargetingDirty && canMutateSelectedSavedView && (
+                                            <button
+                                                type="button"
+                                                onClick={handleUpdateSavedView}
+                                                className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary"
+                                                disabled={savedViewMutationPending}
+                                                data-testid="cases-saved-view-update"
+                                            >
+                                                Сохранить targeting
+                                            </button>
+                                        )}
+                                        {selectedSavedView && canMutateSelectedSavedView && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleToggleSavedViewDefault}
+                                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                                    disabled={savedViewMutationPending}
+                                                    data-testid="cases-saved-view-default"
+                                                >
+                                                    {selectedSavedView.is_default ? "Снять дефолт" : "Сделать дефолтом"}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleDeleteSavedView}
+                                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-destructive"
+                                                    disabled={savedViewMutationPending}
+                                                    data-testid="cases-saved-view-delete"
+                                                >
+                                                    Удалить
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                                    <select
+                                        value={activeSavedViewId ?? ""}
+                                        onChange={(event) => {
+                                            const nextId = event.target.value;
+                                            if (!nextId) {
+                                                setActiveSavedViewId(null);
+                                                return;
+                                            }
+                                            handleApplySavedView(nextId);
+                                        }}
+                                        className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        disabled={savedViewsLoading || savedViewMutationPending}
+                                        data-testid="cases-saved-view-select"
+                                    >
+                                        <option value="">
+                                            {savedViewsLoading
+                                                ? "Загружаем виды..."
+                                                : savedViews.length === 0
+                                                    ? "Нет сохранённых видов"
+                                                    : "Выберите сохранённый вид"}
+                                        </option>
+                                        {teamSavedViews.length > 0 && (
+                                            <optgroup label="Командные пресеты">
+                                                {teamSavedViews.map((view) => (
+                                                    <option key={view.id} value={view.id}>
+                                                        {buildSavedViewOptionLabel(view, branchMap)}
+                                                    </option>
+                                                ))}
+                                            </optgroup>
+                                        )}
+                                        {personalSavedViews.length > 0 && (
+                                            <optgroup label="Личные виды">
+                                                {personalSavedViews.map((view) => (
+                                                    <option key={view.id} value={view.id}>
+                                                        {buildSavedViewOptionLabel(view, branchMap)}
+                                                    </option>
+                                                ))}
+                                            </optgroup>
+                                        )}
+                                    </select>
+                                    {selectedSavedView && (
+                                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                            <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
+                                                {selectedSavedView.name}
+                                            </span>
+                                            <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
+                                                {SAVED_VIEW_SCOPE_LABELS[selectedSavedViewScope]}
+                                            </span>
+                                            {selectedSavedViewBranchLabel && (
+                                                <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
+                                                    {selectedSavedViewBranchLabel}
+                                                </span>
+                                            )}
+                                            {selectedSavedViewRoleLabel && (
+                                                <span className="rounded-full bg-muted px-2 py-1 font-semibold text-foreground/80">
+                                                    {selectedSavedViewRoleLabel}
+                                                </span>
+                                            )}
+                                            {selectedSavedView.is_default && (
+                                                <span className="rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary">
+                                                    default
+                                                </span>
+                                            )}
+                                            {isTeamSavedView(selectedSavedView) && selectedSavedView.is_applicable === false && (
+                                                <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
+                                                    вне текущего контура
+                                                </span>
+                                            )}
+                                            {savedViewDirty && (
+                                                <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-900">
+                                                    изменён
+                                                </span>
+                                            )}
+                                            {selectedTeamTargetingDirty && (
+                                                <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-900">
+                                                    targeting изменён
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                                {selectedSavedViewScope === "team" && canManageTeamPresets && selectedSavedView && (
+                                    <div className="mt-3 grid gap-2 border-t border-border/60 pt-3 sm:grid-cols-2">
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                Командный филиал
+                                            </span>
+                                            <select
+                                                value={selectedTeamTargetBranchIdDraft}
+                                                onChange={(event) => setSelectedTeamTargetBranchIdDraft(event.target.value)}
+                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                disabled={savedViewMutationPending}
+                                                data-testid="cases-saved-view-team-branch"
+                                            >
+                                                <option value="">Все филиалы</option>
+                                                {selectableBranches.map((branch) => (
+                                                    <option key={branch.id} value={branch.id}>
+                                                        {branch.name ?? branch.id}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                Командная роль
+                                            </span>
+                                            <select
+                                                value={selectedTeamTargetRoleDraft}
+                                                onChange={(event) => setSelectedTeamTargetRoleDraft(event.target.value as ConsoleRole | "")}
+                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                disabled={savedViewMutationPending}
+                                                data-testid="cases-saved-view-team-role"
+                                            >
+                                                <option value="">Все роли</option>
+                                                {savedViewTargetRoleOptions.map((role) => (
+                                                    <option key={role} value={role}>
+                                                        {SAVED_VIEW_ROLE_LABELS[role]}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                    </div>
+                                )}
+                                {saveViewComposerOpen && (
+                                    <div className="mt-3 flex flex-col gap-3 border-t border-border/60 pt-3">
+                                        <input
+                                            ref={saveViewInputRef}
+                                            type="text"
+                                            value={saveViewDraftName}
+                                            onChange={(event) => setSaveViewDraftName(event.target.value)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === "Enter") {
+                                                    event.preventDefault();
+                                                    handleSaveCurrentView();
+                                                }
+                                            }}
+                                            placeholder="Например: Мои открытые"
+                                            className="min-w-[220px] flex-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                            data-testid="cases-saved-view-name-input"
+                                        />
+                                        {canManageTeamPresets && (
+                                            <div className="grid gap-2 sm:grid-cols-3">
+                                                <label className="space-y-1">
+                                                    <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                        Scope
+                                                    </span>
+                                                    <select
+                                                        value={saveViewScopeDraft}
+                                                        onChange={(event) => setSaveViewScopeDraft(event.target.value as "personal" | "team")}
+                                                        className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                        disabled={createSavedViewMutation.isPending}
+                                                        data-testid="cases-saved-view-scope"
+                                                    >
+                                                        <option value="personal">Личный</option>
+                                                        <option value="team">Команда</option>
+                                                    </select>
+                                                </label>
+                                                {saveViewScopeDraft === "team" && (
+                                                    <>
+                                                        <label className="space-y-1">
+                                                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                                Филиал
+                                                            </span>
+                                                            <select
+                                                                value={saveViewTargetBranchIdDraft}
+                                                                onChange={(event) => setSaveViewTargetBranchIdDraft(event.target.value)}
+                                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                                disabled={createSavedViewMutation.isPending}
+                                                                data-testid="cases-saved-view-target-branch"
+                                                            >
+                                                                <option value="">Все филиалы</option>
+                                                                {selectableBranches.map((branch) => (
+                                                                    <option key={branch.id} value={branch.id}>
+                                                                        {branch.name ?? branch.id}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        </label>
+                                                        <label className="space-y-1">
+                                                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                                Роль
+                                                            </span>
+                                                            <select
+                                                                value={saveViewTargetRoleDraft}
+                                                                onChange={(event) => setSaveViewTargetRoleDraft(event.target.value as ConsoleRole | "")}
+                                                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                                disabled={createSavedViewMutation.isPending}
+                                                                data-testid="cases-saved-view-target-role"
+                                                            >
+                                                                <option value="">Все роли</option>
+                                                                {savedViewTargetRoleOptions.map((role) => (
+                                                                    <option key={role} value={role}>
+                                                                        {SAVED_VIEW_ROLE_LABELS[role]}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        </label>
+                                                    </>
+                                                )}
+                                            </div>
+                                        )}
+                                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                            <input
+                                                type="checkbox"
+                                                checked={saveViewDefaultDraft}
+                                                onChange={(event) => {
+                                                    setSaveViewDefaultTouched(true);
+                                                    setSaveViewDefaultDraft(event.target.checked);
+                                                }}
+                                                className="h-4 w-4 rounded border-border/60"
+                                                disabled={createSavedViewMutation.isPending}
+                                                data-testid="cases-saved-view-default-checkbox"
+                                            />
+                                            <span>
+                                                {saveViewScopeDraft === "team"
+                                                    ? "Сделать дефолтным командным пресетом"
+                                                    : "Сделать дефолтным личным видом"}
+                                            </span>
+                                            {!saveViewDefaultTouched && (
+                                                <span className="text-muted-foreground/80">
+                                                    {suggestedSaveViewDefault ? "рекомендуется" : "по желанию"}
+                                                </span>
+                                            )}
+                                        </label>
+                                        <div className="text-xs text-muted-foreground">
+                                            {saveViewScopeDraft === "team"
+                                                ? `Командных пресетов в этом targeting: ${matchingScopeSavedViewCount}`
+                                                : `Личных видов: ${matchingScopeSavedViewCount}`}
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={handleSaveCurrentView}
+                                                className="rounded-full border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary"
+                                                disabled={createSavedViewMutation.isPending}
+                                                data-testid="cases-saved-view-name-submit"
+                                            >
+                                                {createSavedViewMutation.isPending ? "Сохраняем..." : "Сохранить"}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setSaveViewDraftName("");
+                                                    setSaveViewComposerOpen(false);
+                                                    setSaveViewScopeDraft("personal");
+                                                    setSaveViewTargetBranchIdDraft("");
+                                                    setSaveViewTargetRoleDraft("");
+                                                    setSaveViewDefaultDraft(false);
+                                                    setSaveViewDefaultTouched(false);
+                                                }}
+                                                className="rounded-full border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                                disabled={createSavedViewMutation.isPending}
+                                            >
+                                                Отмена
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {secondaryPanelSection === "filters" && (
+                            <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                            Дополнительные фильтры
+                                        </div>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            Расширенные уточнения, clear-all и служебные сигналы вынесены из первого экрана.
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowAdvancedFilters((prev) => !prev)}
+                                            className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                            data-testid="cases-filter-advanced-toggle"
+                                        >
+                                            {showAdvancedFilters ? "Скрыть фильтры" : "Показать фильтры"}
+                                        </button>
+                                        {hasAnyFiltersApplied && (
+                                            <button
+                                                type="button"
+                                                onClick={resetAllFilters}
+                                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-destructive"
+                                                data-testid="cases-filter-clear"
+                                            >
+                                                Сбросить
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                {showAdvancedFiltersRow && (
+                                    <div
+                                        className="mt-4 grid w-full gap-3 border-t border-border/60 pt-4 md:grid-cols-2 xl:grid-cols-4"
+                                        data-testid="cases-filters-advanced"
+                                    >
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                Порядок
+                                            </span>
+                                            <select
+                                                value={effectiveFilters.sortBy ?? "__default__"}
+                                                onChange={(e) => {
+                                                    resetPagination();
+                                                    const nextSortBy = e.target.value;
+                                                    setFilters({
+                                                        ...filters,
+                                                        sortBy: nextSortBy === "__default__"
+                                                            ? undefined
+                                                            : nextSortBy as NonNullable<CaseFilters["sortBy"]>,
+                                                    });
+                                                }}
+                                                className={compactSelectClass}
+                                                data-testid="cases-filter-sort-select"
+                                            >
+                                                <option value="__default__">
+                                                    По умолчанию для режима ({defaultSortLabel})
+                                                </option>
+                                                {visibleSortOptions.map((option) => (
+                                                    <option key={option.id} value={option.id}>
+                                                        {option.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                        {branchFilterEnabled && (
+                                            <label className="space-y-1">
+                                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                    Филиал
+                                                </span>
+                                                <select
+                                                    value={filters.branchId || ""}
+                                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, branchId: e.target.value || undefined }); }}
+                                                    className={compactSelectClass}
+                                                    data-testid="cases-filter-branch"
+                                                >
+                                                    <option value="">Все филиалы</option>
+                                                    {selectableBranches.map((branch) => (
+                                                        <option key={branch.id} value={branch.id}>
+                                                            {branch.name ?? branch.id}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                        )}
+                                        <div className="grid gap-3 sm:grid-cols-2 xl:col-span-2">
+                                            <label className="space-y-1">
+                                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                    {modeScope === "resolved" ? "Закрыта с" : "Создана с"}
+                                                </span>
+                                                <input
+                                                    type="date"
+                                                    value={filters.dateFrom || ""}
+                                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, dateFrom: e.target.value || undefined }); }}
+                                                    className={compactSelectClass}
+                                                    data-testid="cases-filter-date-from"
+                                                />
+                                            </label>
+                                            <label className="space-y-1">
+                                                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                                    {modeScope === "resolved" ? "Закрыта по" : "Создана по"}
+                                                </span>
+                                                <input
+                                                    type="date"
+                                                    value={filters.dateTo || ""}
+                                                    onChange={(e) => { resetPagination(); setFilters({ ...filters, dateTo: e.target.value || undefined }); }}
+                                                    className={compactSelectClass}
+                                                    data-testid="cases-filter-date-to"
+                                                />
+                                            </label>
+                                        </div>
+                                        {modeScope === "open" && (
+                                            <div className="flex flex-wrap items-center gap-3 xl:col-span-4">
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={filters.hasDeliveryError}
+                                                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasDeliveryError: e.target.checked }); }}
+                                                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                                        data-testid="cases-filter-delivery-error"
+                                                    />
+                                                    <span className="text-sm text-foreground/80">Есть ошибки доставки</span>
+                                                </label>
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={filters.hasPendingOutbox}
+                                                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasPendingOutbox: e.target.checked }); }}
+                                                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                                        data-testid="cases-filter-pending-outbox"
+                                                    />
+                                                    <span className="text-sm text-foreground/80">Есть исходящие в очереди</span>
+                                                </label>
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={filters.hasHumanLock}
+                                                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasHumanLock: e.target.checked }); }}
+                                                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                                        data-testid="cases-filter-human-lock"
+                                                    />
+                                                    <span className="text-sm text-foreground/80">Бот на паузе</span>
+                                                </label>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {secondaryPanelSection === "view" && (
+                            <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                            Вид очереди
+                                        </div>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            Поля карточек и автообновление больше не спорят с first-screen triage.
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setFieldPanelOpen((prev) => !prev)}
+                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                        data-testid="cases-field-toggle"
+                                    >
+                                        Вид {enabledFieldCount}/{FIELD_ORDER.length}
+                                    </button>
+                                </div>
+                                {fieldPanelOpen && (
+                                    <div className="mt-4 grid w-full gap-3 border-t border-border/60 pt-4 md:grid-cols-[1fr_auto]" data-testid="cases-field-panel">
+                                        <div className="flex flex-wrap items-center gap-3">
+                                            {FIELD_ORDER.map((field) => (
+                                                <label key={field} className="flex items-center gap-2 text-xs text-foreground/80">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={visibleFields[field]}
+                                                        onChange={(event) => updateVisibleField(field, event.target.checked)}
+                                                        className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                                        data-testid={`cases-field-${field}`}
+                                                    />
+                                                    {FIELD_LABELS[field]}
+                                                </label>
+                                            ))}
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                            <button
+                                                type="button"
+                                                onClick={() => setAutoRefreshEnabled((prev) => !prev)}
+                                                className={`font-semibold ${autoRefreshButtonClass}`}
+                                                aria-pressed={autoRefreshEnabled}
+                                                data-testid="cases-auto-refresh-toggle"
+                                            >
+                                                {autoRefreshLabel}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                                {storageEnabled && (
+                                    <div className="mt-4 text-[11px] text-muted-foreground" data-testid="cases-workspace-persistence">
+                                        Вид менеджера сохраняется 24 часа
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {secondaryPanelSection === "bulk" && canBulkManage && (
+                            <div className="rounded-xl border border-border/60 bg-card/80 p-4">
+                                {selectedCases.length === 0 ? (
+                                    <div className="space-y-3" data-testid="cases-bulk-empty">
+                                        <div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                                Массовые действия
+                                            </div>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                Формы вынесены из first screen. Сначала отметьте заявки в списке или выберите всю текущую выдачу.
+                                            </p>
+                                        </div>
+                                        {visibleCases.length > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={toggleSelectAllVisible}
+                                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                                data-testid="cases-bulk-select-all"
+                                            >
+                                                {allVisibleSelected ? "Снять выбор" : "Выбрать все"}
+                                            </button>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div
+                                        className="rounded-xl border border-border/60 bg-card p-3"
+                                        data-testid="cases-bulk-toolbar"
+                                    >
+                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                            <div className="space-y-1">
+                                                <p className="text-sm font-semibold" data-testid="cases-bulk-count">
+                                                    Выбрано {selectedCases.length} {caseNoun(selectedCases.length)}
+                                                </p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {bulkBranchLabel
+                                                        ? `Передача и распределение доступны для филиала ${bulkBranchLabel}. Отсрочка работает для всей выборки.`
+                                                        : "Для передачи и распределения выберите заявки одного филиала. Отсрочка доступна для всей выборки."}
+                                                </p>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setBulkSummary(null);
+                                                        setBulkActionMode((current) => current === "reassign" ? null : "reassign");
+                                                    }}
+                                                    disabled={!!bulkReassignDisabledReason || bulkActionMutation.isPending}
+                                                    className={bulkToggleClass(bulkActionMode === "reassign")}
+                                                    data-testid="cases-bulk-toggle-reassign"
+                                                >
+                                                    Передать
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setBulkSummary(null);
+                                                        setBulkActionMode((current) => current === "route" ? null : "route");
+                                                    }}
+                                                    disabled={!!bulkRouteDisabledReason || bulkActionMutation.isPending}
+                                                    className={bulkToggleClass(bulkActionMode === "route")}
+                                                    data-testid="cases-bulk-toggle-route"
+                                                >
+                                                    Распределить
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setBulkSummary(null);
+                                                        setBulkActionMode((current) => current === "snooze" ? null : "snooze");
+                                                    }}
+                                                    disabled={bulkActionMutation.isPending}
+                                                    className={bulkToggleClass(bulkActionMode === "snooze")}
+                                                    data-testid="cases-bulk-toggle-snooze"
+                                                >
+                                                    Отложить
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={clearBulkSelection}
+                                                    disabled={bulkActionMutation.isPending}
+                                                    className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                                    data-testid="cases-bulk-clear"
+                                                >
+                                                    Снять выбор
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {bulkActionMode === "route" && (
+                                            <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="cases-bulk-route-panel">
+                                                {bulkRouteDisabledReason ? (
+                                                    <p className="text-xs text-amber-700" data-testid="cases-bulk-route-hint">
+                                                        {bulkRouteDisabledReason}
+                                                    </p>
+                                                ) : (
+                                                    <div className="flex flex-col gap-3">
+                                                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3">
+                                                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-900/70">
+                                                                Политика
+                                                            </p>
+                                                            <select
+                                                                value={bulkRoutingPolicy}
+                                                                onChange={(event) => setBulkRoutingPolicy(event.target.value as CaseRoutingPolicy)}
+                                                                disabled={bulkActionMutation.isPending}
+                                                                className="mt-2 w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold text-emerald-950 disabled:opacity-50"
+                                                                data-testid="cases-bulk-route-policy-select"
+                                                            >
+                                                                {Object.entries(CASE_ROUTING_POLICY_LABELS).map(([value, label]) => (
+                                                                    <option key={value} value={value}>
+                                                                        {label}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            <p className="mt-2 text-xs text-emerald-900/80">
+                                                                {CASE_ROUTING_POLICY_HINTS[bulkRoutingPolicy]}
+                                                            </p>
+                                                        </div>
+                                                        <div className="flex flex-wrap justify-end gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setBulkActionMode(null)}
+                                                                disabled={bulkActionMutation.isPending}
+                                                                className="rounded-full border border-border/60 px-4 py-2 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                                            >
+                                                                Отмена
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => bulkActionMutation.mutate()}
+                                                                disabled={bulkActionMutation.isPending}
+                                                                className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                                                data-testid="cases-bulk-route-submit"
+                                                            >
+                                                                {bulkActionMutation.isPending ? "Распределяем..." : "Распределить по политике"}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {bulkActionMode === "reassign" && (
+                                            <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="cases-bulk-reassign-panel">
+                                                {bulkReassignDisabledReason ? (
+                                                    <p className="text-xs text-amber-700" data-testid="cases-bulk-reassign-hint">
+                                                        {bulkReassignDisabledReason}
+                                                    </p>
+                                                ) : (
+                                                    <div className="flex flex-col gap-3">
+                                                        {recommendedBulkAssignee && (
+                                                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3">
+                                                                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-900/70">
+                                                                    Рекомендуем
+                                                                </p>
+                                                                <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                                                                    <div className="space-y-1">
+                                                                        <p
+                                                                            className="text-xs text-emerald-900"
+                                                                            data-testid="cases-bulk-reassign-recommendation"
+                                                                        >
+                                                                            {recommendedBulkAssignee.agent_name} · {recommendedBulkAssignee.open_case_count ?? 0} в работе.
+                                                                        </p>
+                                                                        {formatBulkAssigneeAvailability(recommendedBulkAssignee) ? (
+                                                                            <p className="text-[11px] text-emerald-900/80">
+                                                                                {formatBulkAssigneeAvailability(recommendedBulkAssignee)}
+                                                                            </p>
+                                                                        ) : null}
+                                                                    </div>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setBulkAssigneeId(String(recommendedBulkAssignee.agent_id))}
+                                                                        className="rounded-full border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-900"
+                                                                        disabled={assigneesLoading || bulkActionMutation.isPending || bulkAssigneeId === String(recommendedBulkAssignee.agent_id)}
+                                                                        data-testid="cases-bulk-reassign-recommend"
+                                                                    >
+                                                                        {bulkAssigneeId === String(recommendedBulkAssignee.agent_id)
+                                                                            ? "Рекомендация выбрана"
+                                                                            : `Выбрать ${recommendedBulkAssignee.agent_name}`}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                                                            <select
+                                                                value={bulkAssigneeId}
+                                                                onChange={(event) => setBulkAssigneeId(event.target.value)}
+                                                                className="min-w-[220px] rounded-lg border border-border/60 bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                                disabled={assigneesLoading || bulkActionMutation.isPending}
+                                                                data-testid="cases-bulk-reassign-select"
+                                                            >
+                                                                <option value="">Выберите менеджера</option>
+                                                                {bulkAssignees.map((option) => (
+                                                                    <option
+                                                                        key={option.agent_id}
+                                                                        value={option.agent_id}
+                                                                        disabled={!option.assignment_eligible}
+                                                                    >
+                                                                        {formatBulkAssigneeOptionLabel(option)}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => bulkActionMutation.mutate()}
+                                                                disabled={
+                                                                    !selectedBulkAssignee
+                                                                    || !selectedBulkAssignee.assignment_eligible
+                                                                    || assigneesLoading
+                                                                    || bulkActionMutation.isPending
+                                                                }
+                                                                className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                                                data-testid="cases-bulk-reassign-submit"
+                                                            >
+                                                                {bulkActionMutation.isPending ? "Передаём..." : "Передать выбранному"}
+                                                            </button>
+                                                        </div>
+                                                        {selectedBulkAssignee && (
+                                                            <div className="rounded-lg border border-border/60 bg-background px-3 py-2 text-xs">
+                                                                <p className="font-medium text-foreground">
+                                                                    {selectedBulkAssignee.agent_name}
+                                                                </p>
+                                                                <p className="mt-1 text-muted-foreground">
+                                                                    {formatBulkAssigneeOptionLabel(selectedBulkAssignee)}
+                                                                </p>
+                                                                {formatBulkAssigneeUnavailableReason(selectedBulkAssignee) ? (
+                                                                    <p className="mt-1 text-amber-700">
+                                                                        {formatBulkAssigneeUnavailableReason(selectedBulkAssignee)}
+                                                                    </p>
+                                                                ) : null}
+                                                            </div>
+                                                        )}
+                                                        <div className="flex flex-wrap justify-end gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setBulkActionMode(null)}
+                                                                disabled={bulkActionMutation.isPending}
+                                                                className="rounded-full border border-border/60 px-4 py-2 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                                            >
+                                                                Отмена
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {bulkActionMode === "snooze" && (
+                                            <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="cases-bulk-snooze-panel">
+                                                <div className="flex flex-col gap-3">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <input
+                                                            type="number"
+                                                            min={1}
+                                                            max={1440}
+                                                            value={bulkSnoozeMinutes}
+                                                            onChange={(event) => {
+                                                                const next = Number(event.target.value);
+                                                                const normalized = Number.isFinite(next)
+                                                                    ? Math.min(Math.max(next, 1), 1440)
+                                                                    : 30;
+                                                                setBulkSnoozeMinutes(normalized);
+                                                            }}
+                                                            className="w-28 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                            data-testid="cases-bulk-snooze-minutes"
+                                                        />
+                                                        <span className="text-xs text-muted-foreground">минут</span>
+                                                        {BULK_SNOOZE_PRESETS.map((preset) => (
+                                                            <button
+                                                                key={preset}
+                                                                type="button"
+                                                                onClick={() => setBulkSnoozeMinutes(preset)}
+                                                                className="rounded-full border border-border/60 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground"
+                                                                data-testid={`cases-bulk-snooze-preset-${preset}`}
+                                                            >
+                                                                {preset}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                    <input
+                                                        type="text"
+                                                        value={bulkSnoozeReason}
+                                                        onChange={(event) => setBulkSnoozeReason(event.target.value)}
+                                                        className="rounded-lg border border-border/60 bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                        placeholder="Причина для команды, например: ждём подтверждение клиента"
+                                                        data-testid="cases-bulk-snooze-reason"
+                                                    />
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setBulkActionMode(null)}
+                                                            disabled={bulkActionMutation.isPending}
+                                                            className="rounded-full border border-border/60 px-4 py-2 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                                        >
+                                                            Отмена
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => bulkActionMutation.mutate()}
+                                                            disabled={bulkActionMutation.isPending}
+                                                            className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                                            data-testid="cases-bulk-snooze-submit"
+                                                        >
+                                                            {bulkActionMutation.isPending ? "Сохраняем..." : "Отложить выборку"}
+                                                        </button>
+                                                        <p className="text-xs text-muted-foreground">
+                                                            Отсрочка убирает заявки из срочного фокуса, но не закрывает их.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {bulkSummary && (
+                                            <div
+                                                className={`mt-3 rounded-lg px-3 py-2 text-xs ${
+                                                    bulkSummary.tone === "success"
+                                                        ? "bg-emerald-50 text-emerald-800"
+                                                        : bulkSummary.tone === "warning"
+                                                            ? "bg-amber-50 text-amber-800"
+                                                            : "bg-red-50 text-red-800"
+                                                }`}
+                                                data-testid="cases-bulk-summary"
+                                            >
+                                                <p className="font-semibold">{bulkSummary.label}</p>
+                                                <p>{bulkSummary.detail}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
 

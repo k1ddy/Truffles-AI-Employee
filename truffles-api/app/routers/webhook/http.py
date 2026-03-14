@@ -442,6 +442,7 @@ def _run_preflight(
         "client_id": client_id,
         "client_slug": client.name,
         "source": tenant_source,
+        "origin_source": incoming_tenant_context.origin_source if incoming_tenant_context else None,
         "instance_id": effective_instance_id or None,
         "branch_id": branch_id,
         "branch_slug": getattr(resolved_branch, "slug", None) if resolved_branch else None,

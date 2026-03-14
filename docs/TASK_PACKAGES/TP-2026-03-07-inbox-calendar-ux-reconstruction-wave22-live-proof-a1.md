@@ -9,6 +9,12 @@
 ## Название/цель
 Закрыть последний оставшийся blocker программы: получить live no-mocks evidence по explicit safe case и не допустить fake-pass, если safe case для мутации не предоставлен.
 
+## Closure verdict
+- Closed on `2026-03-07` after `PR #946` merged into `main`.
+- The hardened live helper now distinguishes between `inaccessible`, `accessible but unsuitable`, and `ready for reopen-proof` cases.
+- User-provided case `01fdf4ed-ccdd-4752-9592-f44ee2614458` was confirmed accessible but unsuitable because its hydrated state was `В работе` with no visible reopen control.
+- Explicit live no-mocks proof passed on safe demo case `2e2de879-e4be-405e-83f6-c11dd95cad65`.
+
 ## Canon refs
 - `AGENTS.md`
 - `STATE.md`
@@ -83,7 +89,9 @@
 ## Evidence
 - updated `inspect_case` reporter metadata for the live-proof lane
 - deterministic and targeted live test output
-- session/master TP note that classifies the program as `blocked` until a safe live case exists
+- user-provided unsuitable case evidence (`01fdf4ed-ccdd-4752-9592-f44ee2614458`)
+- passing explicit safe-case evidence on `2e2de879-e4be-405e-83f6-c11dd95cad65`
+- session/master TP note that closes the semantic program with explicit live proof
 
 ## Rollback
 - revert the live-proof annotation/doc split if it destabilizes the current validation lane
@@ -94,14 +102,14 @@
 - Open a new product wave while this blocker is unresolved.
 
 ## Residual architecture debt (mandatory)
-- `Current residuals accepted in this block`: only the need for a safe explicit live case id provided by Brain/Top Architect.
-- `Why not in this block`: safe-case selection is an operational approval step, not an engineering-only implementation detail.
-- `Risk if deferred`: the semantic program stays operationally unclosed even though merged product semantics are green.
-- `Linked follow-up Task Package(s)`: none beyond this closure block.
-- `Expiry/trigger to stop deferral`: once a safe explicit live case id is available, this block must be executed immediately.
+- `Current residuals accepted in this block`: none for the original program scope.
+- `Why not in this block`: the only purpose of this TP was explicit live closure; that objective is now complete.
+- `Risk if deferred`: none for closure; future live scenarios should be tracked under new TPs if they extend scope.
+- `Linked follow-up Task Package(s)`: none.
+- `Expiry/trigger to stop deferral`: not applicable after closure.
 
 ## Next-block contract (mandatory)
-- `Next block objective`: run and classify the real live mutation proof on the approved safe case.
+- `Next block objective`: no mandatory next block; propagate the closure verdict into session/master canon and keep the runbook as reusable SOP.
 - `First deterministic check command`: `cd console-web && PLAYWRIGHT_BASE_URL=http://localhost:3100 npx playwright test e2e/inspect_case.spec.ts --project=chromium --reporter=line --workers=1`
-- `Blocked-by conditions`: no approved safe live case id; live auth env unavailable.
+- `Blocked-by conditions`: none for closure; future executions still require explicit safe case approval.
 - `Owner role for closure`: Brain / Top Architect.

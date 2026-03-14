@@ -53,6 +53,8 @@ def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
         "/calendar/specialists/{specialist_id}/disable": {"post"},
         "/calendar/slots": {"get"},
         "/calendar/bookings": {"get", "post"},
+        "/calendar/operator-events": {"post"},
+        "/calendar/bookings/{booking_id}": {"patch"},
         "/calendar/bookings/{booking_id}/cancel": {"post"},
         "/calendar/bookings/{booking_id}/status": {"post"},
         "/calendar/bookings/{booking_id}/no-show-followup": {"post"},
@@ -83,9 +85,14 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
         ("SlotResponse",),
         ("SlotsResponse",),
         ("BookingCreate",),
+        ("BookingUpdate",),
+        ("BookingCancelRequest",),
         ("BookingStatusUpdateRequest",),
         ("BookingNoShowFollowUpRequest",),
         ("BookingFollowUpGovernanceRequest",),
+        ("BookingBlockedAction",),
+        ("CalendarOperatorEventRequest",),
+        ("CalendarOperatorEventResponse",),
         ("BookingResponse",),
         ("BookingCaseEffect",),
         ("BookingActionResponse",),
@@ -117,6 +124,19 @@ def test_booking_status_update_contract_uses_simple_terminal_statuses() -> None:
         assert status_enum == ["COMPLETED", "NO_SHOW"]
     else:
         assert status_schema.get("type") == "string"
+
+
+def test_booking_create_contract_requires_operator_grade_customer_fields() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    booking_create = schemas.get("BookingCreate") or {}
+    properties = booking_create.get("properties") or {}
+    required = set(booking_create.get("required") or [])
+
+    assert {"specialist_id", "start_at", "end_at", "customer_name", "customer_phone", "service_type"} <= required
+    assert (properties.get("customer_name") or {}).get("type") == "string"
+    assert (properties.get("customer_phone") or {}).get("type") == "string"
+    assert (properties.get("service_type") or {}).get("type") == "string"
 
 
 def test_booking_response_contract_exposes_no_show_followup_flag() -> None:
@@ -152,6 +172,64 @@ def test_booking_response_contract_exposes_no_show_followup_flag() -> None:
     assert (properties.get("needs_action") or {}).get("type") == "boolean"
     assert "attention_reason" in properties
     assert _has_string_type(properties.get("attention_reason") or {})
+    assert "notes" in properties
+    assert _has_string_type(properties.get("notes") or {})
+    assert "version" in properties
+    assert _has_integer_type(properties.get("version") or {})
+    assert "allowed_actions" in properties
+    assert (properties.get("allowed_actions") or {}).get("type") == "array"
+    assert "blocked_actions" in properties
+    assert (properties.get("blocked_actions") or {}).get("type") == "array"
+    assert "last_actor_type" in properties
+    assert _has_string_type(properties.get("last_actor_type") or {})
+
+
+def test_booking_update_contract_requires_operator_grade_fields() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    booking_update = schemas.get("BookingUpdate") or {}
+    properties = booking_update.get("properties") or {}
+    required = set(booking_update.get("required") or [])
+
+    assert {"specialist_id", "start_at", "end_at", "customer_name", "customer_phone", "service_type", "version"} <= required
+    assert (properties.get("specialist_id") or {}).get("type") == "string"
+    assert (properties.get("customer_name") or {}).get("type") == "string"
+    assert (properties.get("customer_phone") or {}).get("type") == "string"
+    assert (properties.get("service_type") or {}).get("type") == "string"
+    assert _has_string_type(properties.get("notes") or {})
+    assert _has_integer_type(properties.get("version") or {})
+
+
+def test_booking_update_and_cancel_contracts_expose_request_bodies() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+
+    update_path = _find_path(paths, "/calendar/bookings/{booking_id}") or {}
+    update_op = update_path.get("patch") or {}
+    update_schema = (
+        (((update_op.get("requestBody") or {}).get("content") or {}).get("application/json") or {})
+        .get("schema")
+        or {}
+    )
+    assert (update_schema.get("$ref") or "").endswith("/BookingUpdate")
+
+    cancel_path = _find_path(paths, "/calendar/bookings/{booking_id}/cancel") or {}
+    cancel_op = cancel_path.get("post") or {}
+    cancel_schema = (
+        (((cancel_op.get("requestBody") or {}).get("content") or {}).get("application/json") or {})
+        .get("schema")
+        or {}
+    )
+    assert (cancel_schema.get("$ref") or "").endswith("/BookingCancelRequest")
+
+    operator_path = _find_path(paths, "/calendar/operator-events") or {}
+    operator_op = operator_path.get("post") or {}
+    operator_schema = (
+        (((operator_op.get("requestBody") or {}).get("content") or {}).get("application/json") or {})
+        .get("schema")
+        or {}
+    )
+    assert (operator_schema.get("$ref") or "").endswith("/CalendarOperatorEventRequest")
 
 
 def test_booking_action_response_contract_exposes_case_effects() -> None:
@@ -201,6 +279,52 @@ def test_booking_follow_up_governance_contract_exposes_request_body() -> None:
         or {}
     )
     assert (request_schema.get("$ref") or "").endswith("/BookingFollowUpGovernanceRequest")
+
+
+def test_booking_no_show_follow_up_contract_exposes_rebook_link_field() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    no_show_schema = schemas.get("BookingNoShowFollowUpRequest") or {}
+    properties = no_show_schema.get("properties") or {}
+    required = set(no_show_schema.get("required") or [])
+
+    assert "result" in properties
+    assert "rebooked_appointment_id" in properties
+    assert _has_string_type(properties.get("rebooked_appointment_id") or {})
+    assert "note" in properties
+    assert _has_string_type(properties.get("note") or {})
+    assert "version" in properties
+    assert _has_integer_type(properties.get("version") or {})
+    assert "version" in required
+
+
+def test_booking_cancel_status_and_follow_up_governance_contracts_require_version() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+
+    for schema_name in (
+        "BookingCancelRequest",
+        "BookingStatusUpdateRequest",
+        "BookingFollowUpGovernanceRequest",
+    ):
+        schema = schemas.get(schema_name) or {}
+        properties = schema.get("properties") or {}
+        required = set(schema.get("required") or [])
+        assert "version" in properties
+        assert _has_integer_type(properties.get("version") or {})
+        assert "version" in required
+
+
+def test_booking_blocked_action_contract_exposes_machine_readable_reason_codes() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    blocked_action = schemas.get("BookingBlockedAction") or {}
+    properties = blocked_action.get("properties") or {}
+
+    assert "action_id" in properties
+    assert _has_string_type(properties.get("action_id") or {})
+    assert "reason_code" in properties
+    assert _has_string_type(properties.get("reason_code") or {})
 
 
 def test_queue_state_current_contract_exposes_surface_and_scope_params() -> None:

@@ -518,6 +518,144 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/business/consultant-verification/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Business Consultant Verification Overview */
+        get: operations["get_business_consultant_verification_overview_console_v1_business_consultant_verification_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/business/consultant-verification/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Business Consultant Verification Sessions */
+        get: operations["list_business_consultant_verification_sessions_console_v1_business_consultant_verification_sessions_get"];
+        put?: never;
+        /** Create Business Consultant Verification Session */
+        post: operations["create_business_consultant_verification_session_console_v1_business_consultant_verification_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/business/consultant-verification/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Business Consultant Verification Session */
+        get: operations["get_business_consultant_verification_session_console_v1_business_consultant_verification_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/business/consultant-verification/sessions/{session_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Append Business Consultant Verification Message */
+        post: operations["append_business_consultant_verification_message_console_v1_business_consultant_verification_sessions__session_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/business/consultant-verification/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Business Consultant Verification Findings */
+        get: operations["list_business_consultant_verification_findings_console_v1_business_consultant_verification_findings_get"];
+        put?: never;
+        /** Create Business Consultant Verification Finding */
+        post: operations["create_business_consultant_verification_finding_console_v1_business_consultant_verification_findings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/business/consultant-verification/readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Business Consultant Verification Readiness */
+        get: operations["get_business_consultant_verification_readiness_console_v1_business_consultant_verification_readiness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/business/consultant-verification/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Business Consultant Verification Compare */
+        post: operations["run_business_consultant_verification_compare_console_v1_business_consultant_verification_compare_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/business/consultant-verification/findings/{finding_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Business Consultant Verification Finding */
+        patch: operations["update_business_consultant_verification_finding_console_v1_business_consultant_verification_findings__finding_id__patch"];
+        trace?: never;
+    };
     "/console/v1/subscription/summary": {
         parameters: {
             query?: never;
@@ -2546,6 +2684,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/calendar/operator-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Calendar Operator Event
+         * @description Record bounded operator-side Calendar telemetry for replay and failure-family review.
+         */
+        post: operations["record_calendar_operator_event_console_v1_calendar_operator_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/calendar/bookings/{booking_id}/cancel": {
         parameters: {
             query?: never;
@@ -2564,6 +2722,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/bookings/{booking_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Booking
+         * @description Update an existing booking.
+         */
+        patch: operations["update_booking_console_v1_calendar_bookings__booking_id__patch"];
         trace?: never;
     };
     "/console/v1/calendar/bookings/{booking_id}/status": {
@@ -2722,6 +2900,26 @@ export interface components {
             /** Case Effects */
             case_effects?: components["schemas"]["BookingCaseEffect"][];
         };
+        /** BookingBlockedAction */
+        BookingBlockedAction: {
+            /**
+             * Action Id
+             * @enum {string}
+             */
+            action_id: "edit_booking" | "cancel_booking" | "mark_completed" | "mark_no_show" | "record_follow_up_contacted" | "record_follow_up_rebooked" | "manage_follow_up_governance" | "open_case_from_booking";
+            /**
+             * Reason Code
+             * @enum {string}
+             */
+            reason_code: "permission_required" | "active_status_only" | "open_no_show_required" | "follow_up_already_closed" | "case_link_required";
+        };
+        /** BookingCancelRequest */
+        BookingCancelRequest: {
+            /** Reason */
+            reason?: string | null;
+            /** Version */
+            version: number;
+        };
         /** BookingCaseEffect */
         BookingCaseEffect: {
             /** Case Id */
@@ -2749,11 +2947,11 @@ export interface components {
              */
             end_at: string;
             /** Customer Name */
-            customer_name?: string | null;
+            customer_name: string;
             /** Customer Phone */
-            customer_phone?: string | null;
+            customer_phone: string;
             /** Service Type */
-            service_type?: string | null;
+            service_type: string;
             /** Notes */
             notes?: string | null;
             /** Conversation Id */
@@ -2767,6 +2965,8 @@ export interface components {
             owner_agent_id?: string | null;
             /** Due At */
             due_at?: string | null;
+            /** Version */
+            version: number;
         };
         /** BookingNoShowFollowUpRequest */
         BookingNoShowFollowUpRequest: {
@@ -2780,6 +2980,8 @@ export interface components {
             rebooked_appointment_id?: string | null;
             /** Note */
             note?: string | null;
+            /** Version */
+            version: number;
         };
         /** BookingResponse */
         BookingResponse: {
@@ -2799,6 +3001,8 @@ export interface components {
             customer_phone?: string | null;
             /** Service Type */
             service_type?: string | null;
+            /** Notes */
+            notes?: string | null;
             /** Status */
             status: string;
             /**
@@ -2838,6 +3042,17 @@ export interface components {
             needs_action: boolean;
             /** Attention Reason */
             attention_reason?: string | null;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Allowed Actions */
+            allowed_actions?: ("edit_booking" | "cancel_booking" | "mark_completed" | "mark_no_show" | "record_follow_up_contacted" | "record_follow_up_rebooked" | "manage_follow_up_governance" | "open_case_from_booking")[];
+            /** Blocked Actions */
+            blocked_actions?: components["schemas"]["BookingBlockedAction"][];
+            /** Last Actor Type */
+            last_actor_type?: string | null;
             /** Created At */
             created_at: string;
         };
@@ -2847,6 +3062,33 @@ export interface components {
             status: string;
             /** Reason */
             reason?: string | null;
+            /** Version */
+            version: number;
+        };
+        /** BookingUpdate */
+        BookingUpdate: {
+            /** Specialist Id */
+            specialist_id: string;
+            /**
+             * Start At
+             * Format: date-time
+             */
+            start_at: string;
+            /**
+             * End At
+             * Format: date-time
+             */
+            end_at: string;
+            /** Customer Name */
+            customer_name: string;
+            /** Customer Phone */
+            customer_phone: string;
+            /** Service Type */
+            service_type: string;
+            /** Notes */
+            notes?: string | null;
+            /** Version */
+            version: number;
         };
         /** BookingsListResponse */
         BookingsListResponse: {
@@ -2859,6 +3101,31 @@ export interface components {
              * @default false
              */
             has_more: boolean;
+        };
+        /** CalendarOperatorEventRequest */
+        CalendarOperatorEventRequest: {
+            /**
+             * Event Type
+             * @enum {string}
+             */
+            event_type: "filter_apply" | "filter_reset" | "double_submit_blocked";
+            /**
+             * Action Id
+             * @enum {string}
+             */
+            action_id: "apply_filters" | "reset_filters" | "create_booking" | "edit_booking" | "reschedule_booking" | "cancel_booking" | "mark_completed" | "mark_no_show" | "record_follow_up_contacted" | "record_follow_up_rebooked" | "manage_follow_up_governance";
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "filter_panel" | "booking_panel" | "follow_up_panel" | "follow_up_governance" | "composer";
+            /** Booking Id */
+            booking_id?: string | null;
+        };
+        /** CalendarOperatorEventResponse */
+        CalendarOperatorEventResponse: {
+            /** Success */
+            success: boolean;
         };
         /** CapabilitiesPayload */
         "CapabilitiesPayload-Input": {
@@ -5124,6 +5391,574 @@ export interface components {
             /** Expires At */
             expires_at: string;
         };
+        /** ConsoleConsultantVerificationCompareCaseRecord */
+        ConsoleConsultantVerificationCompareCaseRecord: {
+            /** Case Id */
+            case_id: string;
+            /** Label */
+            label: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "prompt" | "finding";
+            /** Finding Id */
+            finding_id?: string | null;
+            live_turn: components["schemas"]["ConsoleConsultantVerificationTurnRecord"];
+            draft_turn: components["schemas"]["ConsoleConsultantVerificationTurnRecord"];
+            /**
+             * Delta
+             * @enum {string}
+             */
+            delta: "improved" | "unchanged" | "regressed" | "needs_review";
+            /** Delta Label */
+            delta_label: string;
+            /** Summary */
+            summary: string;
+            /**
+             * Retested Finding
+             * @default false
+             */
+            retested_finding: boolean;
+        };
+        /** ConsoleConsultantVerificationCompareReadiness */
+        ConsoleConsultantVerificationCompareReadiness: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "needs_attention" | "blocked";
+            /** Status Label */
+            status_label: string;
+            /** Summary */
+            summary: string;
+            /** Draft Hash */
+            draft_hash?: string | null;
+            /** Compared At */
+            compared_at?: string | null;
+            /**
+             * Total Cases
+             * @default 0
+             */
+            total_cases: number;
+            /**
+             * Improved Total
+             * @default 0
+             */
+            improved_total: number;
+            /**
+             * Unchanged Total
+             * @default 0
+             */
+            unchanged_total: number;
+            /**
+             * Regressed Total
+             * @default 0
+             */
+            regressed_total: number;
+            /**
+             * Manual Review Total
+             * @default 0
+             */
+            manual_review_total: number;
+            /**
+             * Retested Total
+             * @default 0
+             */
+            retested_total: number;
+            /**
+             * Compare Required
+             * @default false
+             */
+            compare_required: boolean;
+        };
+        /** ConsoleConsultantVerificationCompareRequest */
+        ConsoleConsultantVerificationCompareRequest: {
+            /** Prompt */
+            prompt?: string | null;
+            /** Finding Id */
+            finding_id?: string | null;
+            /**
+             * Mark Finding Retested
+             * @default false
+             */
+            mark_finding_retested: boolean;
+        };
+        /** ConsoleConsultantVerificationCompareResponse */
+        ConsoleConsultantVerificationCompareResponse: {
+            readiness: components["schemas"]["ConsoleConsultantVerificationCompareReadiness"];
+            /**
+             * Cases
+             * @default []
+             */
+            cases: components["schemas"]["ConsoleConsultantVerificationCompareCaseRecord"][];
+        };
+        /** ConsoleConsultantVerificationFindingCreateRequest */
+        ConsoleConsultantVerificationFindingCreateRequest: {
+            /**
+             * Assistant Turn Id
+             * Format: uuid
+             */
+            assistant_turn_id: string;
+            /** Owner Note */
+            owner_note?: string | null;
+        };
+        /** ConsoleConsultantVerificationFindingListResponse */
+        ConsoleConsultantVerificationFindingListResponse: {
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["ConsoleConsultantVerificationFindingRecord"][];
+        };
+        /** ConsoleConsultantVerificationFindingRecord */
+        ConsoleConsultantVerificationFindingRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Actor Agent Id
+             * Format: uuid
+             */
+            actor_agent_id: string;
+            /**
+             * Actor Role
+             * @enum {string}
+             */
+            actor_role: "owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer";
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Owner Turn Id */
+            owner_turn_id?: string | null;
+            /**
+             * Assistant Turn Id
+             * Format: uuid
+             */
+            assistant_turn_id: string;
+            /**
+             * Source Mode
+             * @enum {string}
+             */
+            source_mode: "live" | "draft";
+            /**
+             * Challenge Mode
+             * @enum {string}
+             */
+            challenge_mode: "as_client" | "stress";
+            /** Family Key */
+            family_key: string;
+            /**
+             * Family Kind
+             * @enum {string}
+             */
+            family_kind: "knowledge_gap" | "policy_boundary" | "clarification_loop" | "answer_quality";
+            /** Family Label */
+            family_label: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "new" | "in_review" | "needs_data" | "fixed" | "retested";
+            /** Status Label */
+            status_label: string;
+            /** Owner Prompt */
+            owner_prompt: string;
+            /** Assistant Excerpt */
+            assistant_excerpt: string;
+            /** Owner Note */
+            owner_note?: string | null;
+            /** Resolution Note */
+            resolution_note?: string | null;
+            /** Outcome */
+            outcome?: ("fact" | "collect" | "handoff") | null;
+            /** Business Verdict */
+            business_verdict?: ("answered" | "needs_clarification" | "handoff" | "gap_detected") | null;
+            /** Decision Reason Code */
+            decision_reason_code?: string | null;
+            /**
+             * Source Refs
+             * @default []
+             */
+            source_refs: string[];
+            /**
+             * Latest Preview
+             * @default {}
+             */
+            latest_preview: Record<string, never>;
+            /** Linked Knowledge Backlog Id */
+            linked_knowledge_backlog_id?: string | null;
+            /** Linked Learning Candidate Id */
+            linked_learning_candidate_id?: string | null;
+            /**
+             * Repeat Count
+             * @default 1
+             */
+            repeat_count: number;
+            /** First Captured At */
+            first_captured_at: string;
+            /** Last Captured At */
+            last_captured_at: string;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /** ConsoleConsultantVerificationFindingUpdateRequest */
+        ConsoleConsultantVerificationFindingUpdateRequest: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "new" | "in_review" | "needs_data" | "fixed" | "retested";
+            /** Resolution Note */
+            resolution_note?: string | null;
+        };
+        /** ConsoleConsultantVerificationMessageCreateRequest */
+        ConsoleConsultantVerificationMessageCreateRequest: {
+            /** Content */
+            content: string;
+        };
+        /** ConsoleConsultantVerificationOverviewResponse */
+        ConsoleConsultantVerificationOverviewResponse: {
+            /** Generated At */
+            generated_at: string;
+            /**
+             * Feature Enabled
+             * @default false
+             */
+            feature_enabled: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "needs_attention" | "not_enabled";
+            /** Status Label */
+            status_label: string;
+            /** Summary */
+            summary: string;
+            /** Next Wave Summary */
+            next_wave_summary: string;
+            /** Knowledge Last Published At */
+            knowledge_last_published_at?: string | null;
+            /** Knowledge Stale Hours */
+            knowledge_stale_hours?: number | null;
+            /**
+             * Readiness Cards
+             * @default []
+             */
+            readiness_cards: components["schemas"]["ConsoleConsultantVerificationReadinessCard"][];
+            /**
+             * Stress Test Examples
+             * @default []
+             */
+            stress_test_examples: string[];
+            /**
+             * Scenario Catalog
+             * @default []
+             */
+            scenario_catalog: components["schemas"]["ConsoleConsultantVerificationScenarioItem"][];
+            /**
+             * Actions
+             * @default []
+             */
+            actions: components["schemas"]["ConsoleBusinessActionItem"][];
+        };
+        /** ConsoleConsultantVerificationReadinessCard */
+        ConsoleConsultantVerificationReadinessCard: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Summary */
+            summary: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ready" | "needs_attention" | "planned";
+            /** State Label */
+            state_label: string;
+            /** Evidence Label */
+            evidence_label?: string | null;
+            /** Href */
+            href?: string | null;
+        };
+        /** ConsoleConsultantVerificationReadinessResponse */
+        ConsoleConsultantVerificationReadinessResponse: {
+            readiness: components["schemas"]["ConsoleConsultantVerificationCompareReadiness"];
+        };
+        /** ConsoleConsultantVerificationScenarioItem */
+        ConsoleConsultantVerificationScenarioItem: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Prompt */
+            prompt: string;
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "core_info" | "pricing" | "booking" | "policy" | "handoff" | "stress";
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "domain_blueprint" | "capabilities" | "reference_pack";
+            /** Source Label */
+            source_label: string;
+            /**
+             * Recommended Challenge Mode
+             * @default as_client
+             * @enum {string}
+             */
+            recommended_challenge_mode: "as_client" | "stress";
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+        };
+        /** ConsoleConsultantVerificationSessionCreateRequest */
+        ConsoleConsultantVerificationSessionCreateRequest: {
+            /**
+             * Source Mode
+             * @default live
+             * @enum {string}
+             */
+            source_mode: "live" | "draft";
+            /**
+             * Challenge Mode
+             * @default as_client
+             * @enum {string}
+             */
+            challenge_mode: "as_client" | "stress";
+            /** Title */
+            title?: string | null;
+        };
+        /** ConsoleConsultantVerificationSessionListResponse */
+        ConsoleConsultantVerificationSessionListResponse: {
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["ConsoleConsultantVerificationSessionRecord"][];
+        };
+        /** ConsoleConsultantVerificationSessionRecord */
+        ConsoleConsultantVerificationSessionRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Actor Agent Id
+             * Format: uuid
+             */
+            actor_agent_id: string;
+            /**
+             * Actor Role
+             * @enum {string}
+             */
+            actor_role: "owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer";
+            /**
+             * Source Mode
+             * @enum {string}
+             */
+            source_mode: "live" | "draft";
+            /**
+             * Challenge Mode
+             * @enum {string}
+             */
+            challenge_mode: "as_client" | "stress";
+            /**
+             * Status
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "completed";
+            /** Title */
+            title?: string | null;
+            /**
+             * Turns Total
+             * @default 0
+             */
+            turns_total: number;
+            /** Latest Outcome */
+            latest_outcome?: ("fact" | "collect" | "handoff") | null;
+            /** Latest Business Verdict */
+            latest_business_verdict?: ("answered" | "needs_clarification" | "handoff" | "gap_detected") | null;
+            /**
+             * Latest Preview
+             * @default {}
+             */
+            latest_preview: Record<string, never>;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Last Message At */
+            last_message_at?: string | null;
+        };
+        /** ConsoleConsultantVerificationSessionResponse */
+        ConsoleConsultantVerificationSessionResponse: {
+            session: components["schemas"]["ConsoleConsultantVerificationSessionRecord"];
+            /**
+             * Turns
+             * @default []
+             */
+            turns: components["schemas"]["ConsoleConsultantVerificationTurnRecord"][];
+            /**
+             * @default {
+             *       "assistant_turns_total": 0,
+             *       "answered_total": 0,
+             *       "needs_clarification_total": 0,
+             *       "handoff_total": 0,
+             *       "gap_detected_total": 0,
+             *       "replay_prompt_total": 0,
+             *       "weak_turns": []
+             *     }
+             */
+            summary: components["schemas"]["ConsoleConsultantVerificationSessionSummary"];
+        };
+        /** ConsoleConsultantVerificationSessionSummary */
+        ConsoleConsultantVerificationSessionSummary: {
+            /**
+             * Assistant Turns Total
+             * @default 0
+             */
+            assistant_turns_total: number;
+            /**
+             * Answered Total
+             * @default 0
+             */
+            answered_total: number;
+            /**
+             * Needs Clarification Total
+             * @default 0
+             */
+            needs_clarification_total: number;
+            /**
+             * Handoff Total
+             * @default 0
+             */
+            handoff_total: number;
+            /**
+             * Gap Detected Total
+             * @default 0
+             */
+            gap_detected_total: number;
+            /**
+             * Replay Prompt Total
+             * @default 0
+             */
+            replay_prompt_total: number;
+            /** Latest Verdict */
+            latest_verdict?: ("answered" | "needs_clarification" | "handoff" | "gap_detected") | null;
+            /**
+             * Weak Turns
+             * @default []
+             */
+            weak_turns: components["schemas"]["ConsoleConsultantVerificationSessionWeakTurn"][];
+        };
+        /** ConsoleConsultantVerificationSessionWeakTurn */
+        ConsoleConsultantVerificationSessionWeakTurn: {
+            /**
+             * Assistant Turn Id
+             * Format: uuid
+             */
+            assistant_turn_id: string;
+            /** Assistant Turn Index */
+            assistant_turn_index: number;
+            /** Owner Prompt */
+            owner_prompt: string;
+            /** Assistant Excerpt */
+            assistant_excerpt: string;
+            /**
+             * Business Verdict
+             * @enum {string}
+             */
+            business_verdict: "answered" | "needs_clarification" | "handoff" | "gap_detected";
+        };
+        /** ConsoleConsultantVerificationTurnRecord */
+        ConsoleConsultantVerificationTurnRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Turn Index */
+            turn_index: number;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "owner" | "consultant" | "system";
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: string;
+            /** Outcome */
+            outcome?: ("fact" | "collect" | "handoff") | null;
+            /** Business Verdict */
+            business_verdict?: ("answered" | "needs_clarification" | "handoff" | "gap_detected") | null;
+            /**
+             * Source Refs
+             * @default []
+             */
+            source_refs: string[];
+            /**
+             * Decision Meta
+             * @default {}
+             */
+            decision_meta: Record<string, never>;
+            /**
+             * Decision Trace
+             * @default []
+             */
+            decision_trace: Record<string, never>[];
+            /**
+             * Preview
+             * @default {}
+             */
+            preview: Record<string, never>;
+            /**
+             * Would Handoff
+             * @default false
+             */
+            would_handoff: boolean;
+            /**
+             * Would Book
+             * @default false
+             */
+            would_book: boolean;
+            /**
+             * Gap Detected
+             * @default false
+             */
+            gap_detected: boolean;
+        };
         /** ConsoleDataTrustSummaryResponse */
         ConsoleDataTrustSummaryResponse: {
             /** Generated At */
@@ -5728,6 +6563,8 @@ export interface components {
             warnings: string[];
             /** Diff */
             diff?: string | null;
+            /** Draft Hash */
+            draft_hash?: string | null;
         };
         /** ConsoleLearningCandidate */
         ConsoleLearningCandidate: {
@@ -10879,6 +11716,523 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    get_business_consultant_verification_overview_console_v1_business_consultant_verification_overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleConsultantVerificationOverviewResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    list_business_consultant_verification_sessions_console_v1_business_consultant_verification_sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleConsultantVerificationSessionListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    create_business_consultant_verification_session_console_v1_business_consultant_verification_sessions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleConsultantVerificationSessionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleConsultantVerificationSessionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_business_consultant_verification_session_console_v1_business_consultant_verification_sessions__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleConsultantVerificationSessionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    append_business_consultant_verification_message_console_v1_business_consultant_verification_sessions__session_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleConsultantVerificationMessageCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleConsultantVerificationSessionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_business_consultant_verification_findings_console_v1_business_consultant_verification_findings_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleConsultantVerificationFindingListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_business_consultant_verification_finding_console_v1_business_consultant_verification_findings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleConsultantVerificationFindingCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleConsultantVerificationFindingRecord"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_business_consultant_verification_readiness_console_v1_business_consultant_verification_readiness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleConsultantVerificationReadinessResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    run_business_consultant_verification_compare_console_v1_business_consultant_verification_compare_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleConsultantVerificationCompareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleConsultantVerificationCompareResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_business_consultant_verification_finding_console_v1_business_consultant_verification_findings__finding_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                finding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleConsultantVerificationFindingUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleConsultantVerificationFindingRecord"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -17274,18 +18628,88 @@ export interface operations {
             };
         };
     };
+    record_calendar_operator_event_console_v1_calendar_operator_events_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarOperatorEventRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarOperatorEventResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     cancel_booking_console_v1_calendar_bookings__booking_id__cancel_post: {
         parameters: {
-            query?: {
-                reason?: string | null;
-            };
+            query?: never;
             header?: never;
             path: {
                 booking_id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_booking_console_v1_calendar_bookings__booking_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                booking_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

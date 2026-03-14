@@ -176,6 +176,18 @@ from app.schemas.console import (
     ConsoleCompliancePolicyVersionRecord,
     ConsoleConfirmationCreateRequest,
     ConsoleConfirmationResponse,
+    ConsoleConsultantVerificationCompareRequest,
+    ConsoleConsultantVerificationCompareResponse,
+    ConsoleConsultantVerificationFindingCreateRequest,
+    ConsoleConsultantVerificationFindingListResponse,
+    ConsoleConsultantVerificationFindingRecord,
+    ConsoleConsultantVerificationFindingUpdateRequest,
+    ConsoleConsultantVerificationMessageCreateRequest,
+    ConsoleConsultantVerificationOverviewResponse,
+    ConsoleConsultantVerificationReadinessResponse,
+    ConsoleConsultantVerificationSessionCreateRequest,
+    ConsoleConsultantVerificationSessionListResponse,
+    ConsoleConsultantVerificationSessionResponse,
     ConsoleDataTrustSummaryResponse,
     ConsoleDomainCatalogItem,
     ConsoleDomainCatalogListResponse,
@@ -487,6 +499,42 @@ from app.services.console_case_routing import (
     normalize_case_routing_policy as _normalize_case_routing_policy_service,
 )
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
+from app.services.console_consultant_verification import (
+    append_consultant_verification_message as _append_consultant_verification_message,
+)
+from app.services.console_consultant_verification import (
+    build_consultant_verification_overview as _build_consultant_verification_overview,
+)
+from app.services.console_consultant_verification import (
+    create_consultant_verification_finding as _create_consultant_verification_finding,
+)
+from app.services.console_consultant_verification import (
+    create_consultant_verification_session as _create_consultant_verification_session,
+)
+from app.services.console_consultant_verification import (
+    derive_consultant_verification_status as _derive_consultant_verification_status,
+)
+from app.services.console_consultant_verification import (
+    get_consultant_verification_readiness as _get_consultant_verification_readiness,
+)
+from app.services.console_consultant_verification import (
+    get_consultant_verification_session as _get_consultant_verification_session,
+)
+from app.services.console_consultant_verification import (
+    list_consultant_verification_findings as _list_consultant_verification_findings,
+)
+from app.services.console_consultant_verification import (
+    list_consultant_verification_sessions as _list_consultant_verification_sessions,
+)
+from app.services.console_consultant_verification import (
+    resolve_consultant_verification_enabled as _resolve_consultant_verification_enabled,
+)
+from app.services.console_consultant_verification import (
+    run_consultant_verification_compare as _run_consultant_verification_compare,
+)
+from app.services.console_consultant_verification import (
+    update_consultant_verification_finding as _update_consultant_verification_finding,
+)
 from app.services.console_control_tower_program import (
     build_admin_control_tower_action_center_response as _build_admin_control_tower_action_center_response,
 )
@@ -528,8 +576,9 @@ from app.services.console_idempotency import (
 )
 from app.services.console_knowledge_preflight import (
     DEFAULT_PREFLIGHT_WINDOW_MINUTES,
-    build_knowledge_draft_hash,
+    build_knowledge_draft_hash_from_payload,
     build_knowledge_validate_payload,
+    has_recent_knowledge_compare_preflight,
     has_recent_knowledge_preflight,
 )
 from app.services.console_membership_state import (
@@ -15761,6 +15810,262 @@ async def list_business_incidents(
     )
 
 
+@router.get(
+    "/business/consultant-verification/overview",
+    response_model=ConsoleConsultantVerificationOverviewResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_business_consultant_verification_overview(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleConsultantVerificationOverviewResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access consultant verification overview",
+    )
+    return _build_consultant_verification_overview(
+        db=db,
+        context=context,
+        now=datetime.now(timezone.utc),
+        allowed_branch_ids=_resolve_branch_scope(context),
+    )
+
+
+@router.get(
+    "/business/consultant-verification/sessions",
+    response_model=ConsoleConsultantVerificationSessionListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_business_consultant_verification_sessions(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleConsultantVerificationSessionListResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can list consultant verification sessions",
+    )
+    return _list_consultant_verification_sessions(
+        db=db,
+        context=context,
+        allowed_branch_ids=_resolve_branch_scope(context),
+    )
+
+
+@router.post(
+    "/business/consultant-verification/sessions",
+    response_model=ConsoleConsultantVerificationSessionResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def create_business_consultant_verification_session(
+    body: ConsoleConsultantVerificationSessionCreateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleConsultantVerificationSessionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can start consultant verification sessions",
+    )
+    return _create_consultant_verification_session(
+        db=db,
+        context=context,
+        request=body,
+        allowed_branch_ids=_resolve_branch_scope(context),
+        now=datetime.now(timezone.utc),
+    )
+
+
+@router.get(
+    "/business/consultant-verification/sessions/{session_id}",
+    response_model=ConsoleConsultantVerificationSessionResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def get_business_consultant_verification_session(
+    session_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleConsultantVerificationSessionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access consultant verification sessions",
+    )
+    return _get_consultant_verification_session(
+        db=db,
+        context=context,
+        session_id=session_id,
+        allowed_branch_ids=_resolve_branch_scope(context),
+    )
+
+
+@router.post(
+    "/business/consultant-verification/sessions/{session_id}/messages",
+    response_model=ConsoleConsultantVerificationSessionResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def append_business_consultant_verification_message(
+    session_id: UUID,
+    body: ConsoleConsultantVerificationMessageCreateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleConsultantVerificationSessionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can send consultant verification messages",
+    )
+    return await _append_consultant_verification_message(
+        db=db,
+        context=context,
+        session_id=session_id,
+        content=body.content,
+        allowed_branch_ids=_resolve_branch_scope(context),
+        now=datetime.now(timezone.utc),
+    )
+
+
+@router.get(
+    "/business/consultant-verification/findings",
+    response_model=ConsoleConsultantVerificationFindingListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_business_consultant_verification_findings(
+    request: Request,
+    status: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> ConsoleConsultantVerificationFindingListResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can list consultant verification findings",
+    )
+    return _list_consultant_verification_findings(
+        db=db,
+        context=context,
+        allowed_branch_ids=_resolve_branch_scope(context),
+        status=status,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/business/consultant-verification/readiness",
+    response_model=ConsoleConsultantVerificationReadinessResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_business_consultant_verification_readiness(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleConsultantVerificationReadinessResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can view consultant verification readiness",
+    )
+    return _get_consultant_verification_readiness(
+        db=db,
+        context=context,
+        allowed_branch_ids=_resolve_branch_scope(context),
+    )
+
+
+@router.post(
+    "/business/consultant-verification/compare",
+    response_model=ConsoleConsultantVerificationCompareResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def run_business_consultant_verification_compare(
+    body: ConsoleConsultantVerificationCompareRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleConsultantVerificationCompareResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can compare live vs draft consultant behavior",
+    )
+    return await _run_consultant_verification_compare(
+        db=db,
+        context=context,
+        request=body,
+        allowed_branch_ids=_resolve_branch_scope(context),
+        now=datetime.now(timezone.utc),
+    )
+
+
+@router.post(
+    "/business/consultant-verification/findings",
+    response_model=ConsoleConsultantVerificationFindingRecord,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def create_business_consultant_verification_finding(
+    body: ConsoleConsultantVerificationFindingCreateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleConsultantVerificationFindingRecord:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can flag consultant verification findings",
+    )
+    return _create_consultant_verification_finding(
+        db=db,
+        context=context,
+        request=body,
+        allowed_branch_ids=_resolve_branch_scope(context),
+        now=datetime.now(timezone.utc),
+    )
+
+
+@router.patch(
+    "/business/consultant-verification/findings/{finding_id}",
+    response_model=ConsoleConsultantVerificationFindingRecord,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def update_business_consultant_verification_finding(
+    finding_id: UUID,
+    body: ConsoleConsultantVerificationFindingUpdateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleConsultantVerificationFindingRecord:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can update consultant verification findings",
+    )
+    return _update_consultant_verification_finding(
+        db=db,
+        context=context,
+        finding_id=finding_id,
+        request=body,
+        allowed_branch_ids=_resolve_branch_scope(context),
+        now=datetime.now(timezone.utc),
+    )
+
+
 _DEFAULT_STARTER_INCLUDED_MESSAGES = 1000
 _DEFAULT_STARTER_INCLUDED_WHATSAPP_CHANNELS = 1
 
@@ -19045,7 +19350,10 @@ async def validate_knowledge(
         require_booking=require_booking,
     )
     valid = not errors
-    draft_hash = build_knowledge_draft_hash(body.draft_text)
+    draft_hash = build_knowledge_draft_hash_from_payload(
+        payload,
+        fallback_draft_text=body.draft_text,
+    )
     if payload:
         upsert_draft(
             db,
@@ -19077,6 +19385,7 @@ async def validate_knowledge(
         errors=errors,
         warnings=warnings,
         diff=diff or None,
+        draft_hash=draft_hash,
     )
 
 
@@ -19105,7 +19414,18 @@ async def publish_knowledge(
         if onboarding_inputs.has_capabilities
         else None
     )
-    draft_hash = build_knowledge_draft_hash(body.draft_text)
+    current = get_current_published(db, branch_id=branch.id)
+    current_payload = current.payload_json if current else None
+    payload, errors, warnings, _diff = validate_draft(
+        body.draft_text,
+        current_payload=current_payload,
+        domain_slug=onboarding_inputs.reference_pack_domain_slug,
+        require_booking=require_booking,
+    )
+    draft_hash = build_knowledge_draft_hash_from_payload(
+        payload,
+        fallback_draft_text=body.draft_text,
+    )
 
     if not body.skip_preflight_check:
         has_preflight = has_recent_knowledge_preflight(
@@ -19125,15 +19445,24 @@ async def publish_knowledge(
                     "window_minutes": DEFAULT_PREFLIGHT_WINDOW_MINUTES,
                 },
             )
-
-    current = get_current_published(db, branch_id=branch.id)
-    current_payload = current.payload_json if current else None
-    payload, errors, warnings, _diff = validate_draft(
-        body.draft_text,
-        current_payload=current_payload,
-        domain_slug=onboarding_inputs.reference_pack_domain_slug,
-        require_booking=require_booking,
-    )
+        has_compare = has_recent_knowledge_compare_preflight(
+            db=db,
+            client_id=context.client.id,
+            branch_id=branch.id,
+            draft_hash=draft_hash,
+            window_minutes=DEFAULT_PREFLIGHT_WINDOW_MINUTES,
+            require_ready=True,
+        )
+        if not has_compare:
+            raise ConsoleAPIError(
+                409,
+                "KNOWLEDGE_COMPARE_REQUIRED",
+                "Run live vs draft compare for this draft before Publish",
+                {
+                    "draft_hash": draft_hash,
+                    "window_minutes": DEFAULT_PREFLIGHT_WINDOW_MINUTES,
+                },
+            )
     if not payload or errors:
         raise ConsoleAPIError(
             400,

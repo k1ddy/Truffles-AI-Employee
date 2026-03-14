@@ -248,12 +248,53 @@ TENANTS_FLEET_PROJECTION_LAST_COMPACTION_DELETED_ROWS = _get_or_create_metric(
     "Rows deleted in the latest projection compaction run.",
     (),
 )
+CALENDAR_BOOKING_ACTION_DENIED_TOTAL = _get_or_create_metric(
+    Counter,
+    "calendar_booking_action_denied_total",
+    "Calendar booking lifecycle actions denied by role or status guard.",
+    ("client_slug", "action_id", "actor_class", "status", "reason_code"),
+)
+CALENDAR_BOOKING_VERSION_CONFLICT_TOTAL = _get_or_create_metric(
+    Counter,
+    "calendar_booking_version_conflict_total",
+    "Calendar booking lifecycle mutations rejected because the booking version was stale.",
+    ("client_slug", "action_id", "actor_class"),
+)
+CALENDAR_BOOKING_DOUBLE_SUBMIT_BLOCKED_TOTAL = _get_or_create_metric(
+    Counter,
+    "calendar_booking_double_submit_blocked_total",
+    "Calendar UI double-submit attempts blocked before reaching the lifecycle mutation route.",
+    ("client_slug", "action_id", "actor_class", "surface"),
+)
+CALENDAR_FOLLOWUP_INVALID_TOTAL = _get_or_create_metric(
+    Counter,
+    "calendar_followup_invalid_total",
+    "Calendar follow-up and governance mutations rejected because the payload or status was invalid.",
+    ("client_slug", "action_id", "actor_class", "reason_code"),
+)
+CALENDAR_FILTER_APPLY_TOTAL = _get_or_create_metric(
+    Counter,
+    "calendar_filter_apply_total",
+    "Calendar filter apply actions recorded by the operator UI.",
+    ("client_slug", "actor_class"),
+)
+CALENDAR_FILTER_RESET_TOTAL = _get_or_create_metric(
+    Counter,
+    "calendar_filter_reset_total",
+    "Calendar filter reset actions recorded by the operator UI.",
+    ("client_slug", "actor_class"),
+)
 
 
 def _normalize_client_slug(client_slug: str | None) -> str:
     if isinstance(client_slug, str) and client_slug.strip():
         return client_slug.strip()
     return "unknown"
+
+
+def _normalize_metric_label(value: str | None, *, default: str = "unknown") -> str:
+    normalized = str(value or "").strip()
+    return normalized or default
 
 
 def generate_latest_metrics() -> bytes:
@@ -513,6 +554,92 @@ def record_tenants_fleet_projection_compaction(
         TENANTS_FLEET_PROJECTION_LAST_COMPACTION_DELETED_ROWS.set(safe_deleted)
     if TENANTS_FLEET_PROJECTION_COMPACTION_ROWS_TOTAL is not None and safe_deleted > 0:
         TENANTS_FLEET_PROJECTION_COMPACTION_ROWS_TOTAL.inc(safe_deleted)
+
+
+def record_calendar_booking_action_denied(
+    client_slug: str | None,
+    *,
+    action_id: str,
+    actor_class: str,
+    status: str | None,
+    reason_code: str,
+) -> None:
+    if CALENDAR_BOOKING_ACTION_DENIED_TOTAL is None:
+        return
+    CALENDAR_BOOKING_ACTION_DENIED_TOTAL.labels(
+        client_slug=_normalize_client_slug(client_slug),
+        action_id=_normalize_metric_label(action_id),
+        actor_class=_normalize_metric_label(actor_class),
+        status=_normalize_metric_label(status),
+        reason_code=_normalize_metric_label(reason_code),
+    ).inc()
+
+
+def record_calendar_booking_version_conflict(
+    client_slug: str | None,
+    *,
+    action_id: str,
+    actor_class: str,
+) -> None:
+    if CALENDAR_BOOKING_VERSION_CONFLICT_TOTAL is None:
+        return
+    CALENDAR_BOOKING_VERSION_CONFLICT_TOTAL.labels(
+        client_slug=_normalize_client_slug(client_slug),
+        action_id=_normalize_metric_label(action_id),
+        actor_class=_normalize_metric_label(actor_class),
+    ).inc()
+
+
+def record_calendar_booking_double_submit_blocked(
+    client_slug: str | None,
+    *,
+    action_id: str,
+    actor_class: str,
+    surface: str,
+) -> None:
+    if CALENDAR_BOOKING_DOUBLE_SUBMIT_BLOCKED_TOTAL is None:
+        return
+    CALENDAR_BOOKING_DOUBLE_SUBMIT_BLOCKED_TOTAL.labels(
+        client_slug=_normalize_client_slug(client_slug),
+        action_id=_normalize_metric_label(action_id),
+        actor_class=_normalize_metric_label(actor_class),
+        surface=_normalize_metric_label(surface),
+    ).inc()
+
+
+def record_calendar_followup_invalid(
+    client_slug: str | None,
+    *,
+    action_id: str,
+    actor_class: str,
+    reason_code: str,
+) -> None:
+    if CALENDAR_FOLLOWUP_INVALID_TOTAL is None:
+        return
+    CALENDAR_FOLLOWUP_INVALID_TOTAL.labels(
+        client_slug=_normalize_client_slug(client_slug),
+        action_id=_normalize_metric_label(action_id),
+        actor_class=_normalize_metric_label(actor_class),
+        reason_code=_normalize_metric_label(reason_code),
+    ).inc()
+
+
+def record_calendar_filter_apply(client_slug: str | None, *, actor_class: str) -> None:
+    if CALENDAR_FILTER_APPLY_TOTAL is None:
+        return
+    CALENDAR_FILTER_APPLY_TOTAL.labels(
+        client_slug=_normalize_client_slug(client_slug),
+        actor_class=_normalize_metric_label(actor_class),
+    ).inc()
+
+
+def record_calendar_filter_reset(client_slug: str | None, *, actor_class: str) -> None:
+    if CALENDAR_FILTER_RESET_TOTAL is None:
+        return
+    CALENDAR_FILTER_RESET_TOTAL.labels(
+        client_slug=_normalize_client_slug(client_slug),
+        actor_class=_normalize_metric_label(actor_class),
+    ).inc()
 
 
 def http_in_progress_inc(method: str) -> None:
