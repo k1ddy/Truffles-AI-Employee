@@ -205,7 +205,7 @@ export async function startKeycloakLogin(page: Page, options: KeycloakAuthOption
     const providerWaitTimeoutMs = options.providerWaitTimeoutMs ?? 15000;
     const baseOrigin = new URL(baseURL).origin;
 
-    await page.goto(buildSignInUrl(baseURL), { waitUntil: 'domcontentloaded' });
+    await page.goto(buildSignInUrl(baseURL), { waitUntil: 'commit' });
     const providerForm = page.locator('form[action*="keycloak"]').first();
     const action = await providerForm.getAttribute('action');
     const actionOrigin = action ? new URL(action).origin : baseURL;
@@ -227,6 +227,7 @@ export async function startKeycloakLogin(page: Page, options: KeycloakAuthOption
         providerButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
         providerForm.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
     ]);
+    const transitionPromise = waitForAuthTransition(page, options);
     if (await providerButton.isVisible().catch(() => false)) {
         await providerButton.click();
     } else if (await providerForm.isVisible().catch(() => false)) {
@@ -239,7 +240,7 @@ export async function startKeycloakLogin(page: Page, options: KeycloakAuthOption
         return false;
     }
 
-    await waitForAuthTransition(page, options);
+    await transitionPromise;
     return true;
 }
 
