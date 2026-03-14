@@ -579,6 +579,7 @@ def resolve_consultant_verification_enabled(context: ConsoleAuthContext) -> bool
 def derive_consultant_verification_status(
     *,
     feature_enabled: bool,
+    branch_selected: bool,
     has_published_knowledge: bool,
     knowledge_stale_hours: Optional[int],
 ) -> tuple[str, str, str]:
@@ -587,6 +588,12 @@ def derive_consultant_verification_status(
             "not_enabled",
             "Контур проверки еще не включен",
             "Сейчас доступен обзор готовности. Интерактивный тестовый чат включается по пилотному rollout.",
+        )
+    if not branch_selected:
+        return (
+            "needs_attention",
+            "Сначала выберите филиал",
+            "Проверка консультанта и знания оцениваются в рамках конкретного филиала. Сначала выберите branch в контексте Console.",
         )
     if not has_published_knowledge:
         return (
@@ -617,6 +624,7 @@ def _card_state_label(state: str) -> str:
 
 def _build_readiness_cards(
     *,
+    branch_selected: bool,
     has_published_knowledge: bool,
     knowledge_last_published_at: Optional[str],
     knowledge_stale_hours: Optional[int],
@@ -624,7 +632,13 @@ def _build_readiness_cards(
     scenario_library_enabled: bool,
     branch_scope_limited: bool,
 ) -> list[ConsoleConsultantVerificationReadinessCard]:
-    if not has_published_knowledge:
+    if not branch_selected:
+        knowledge_state = "needs_attention"
+        knowledge_summary = (
+            "Сначала выберите филиал в Console. Только после этого можно честно проверить знания и ответы именно этого branch."
+        )
+        evidence_label = "Филиал не выбран"
+    elif not has_published_knowledge:
         knowledge_state = "needs_attention"
         knowledge_summary = (
             "Опубликуйте актуальные знания бизнеса, чтобы будущий тест отражал реальные услуги, цены и правила."
@@ -724,11 +738,22 @@ def _build_readiness_cards(
 def _build_consultant_verification_actions(
     *,
     feature_enabled: bool,
+    branch_selected: bool,
     has_published_knowledge: bool,
     knowledge_stale_hours: Optional[int],
 ) -> list[ConsoleBusinessActionItem]:
     actions: list[ConsoleBusinessActionItem] = []
-    if not has_published_knowledge:
+    if not branch_selected:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="select_branch_before_verification",
+                severity="critical",
+                title="Выберите филиал перед проверкой",
+                description="Проверка консультанта, compare и publish доказательства привязаны к конкретному филиалу.",
+                href="/business",
+            )
+        )
+    elif not has_published_knowledge:
         actions.append(
             ConsoleBusinessActionItem(
                 id="publish_knowledge_before_verification",
@@ -773,20 +798,39 @@ def _build_consultant_verification_actions(
     return actions
 
 
-def _load_latest_published_knowledge(
+def _resolve_verification_branch_id(
+    *,
+    context: ConsoleAuthContext,
+    allowed_branch_ids: Optional[set[UUID]],
+    required: bool,
+) -> UUID | None:
+    branch_id = getattr(context, "selected_branch_id", None) or getattr(context, "effective_branch_id", None)
+    if branch_id is None and getattr(context, "branch_restricted", False):
+        branches = getattr(context, "branches", None) or []
+        if len(branches) == 1:
+            candidate = getattr(branches[0], "id", None)
+            if isinstance(candidate, UUID):
+                branch_id = candidate
+    if branch_id is not None and allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
+        raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Selected branch is outside your scope")
+    if required and branch_id is None:
+        raise ConsoleAPIError(400, "BRANCH_SELECTION_REQUIRED", "Select a branch before consultant verification")
+    return branch_id
+
+
+def _load_published_knowledge_for_branch(
     *,
     db: Session,
     client_id: UUID,
-    allowed_branch_ids: Optional[list[UUID]],
+    branch_id: UUID | None,
 ) -> Optional[KnowledgeVersion]:
+    if branch_id is None:
+        return None
     query = db.query(KnowledgeVersion).filter(
         KnowledgeVersion.client_id == client_id,
+        KnowledgeVersion.branch_id == branch_id,
         KnowledgeVersion.status == "published",
     )
-    if allowed_branch_ids is not None:
-        if not allowed_branch_ids:
-            return None
-        query = query.filter(KnowledgeVersion.branch_id.in_(allowed_branch_ids))
     return query.order_by(
         KnowledgeVersion.published_at.desc(),
         KnowledgeVersion.created_at.desc(),
@@ -801,6 +845,12 @@ def build_consultant_verification_overview(
     allowed_branch_ids: Optional[list[UUID]],
 ) -> ConsoleConsultantVerificationOverviewResponse:
     feature_enabled = resolve_consultant_verification_enabled(context)
+    normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
+    branch_id = _resolve_verification_branch_id(
+        context=context,
+        allowed_branch_ids=normalized_branch_ids,
+        required=False,
+    )
     effective_capabilities = _load_effective_capabilities(db, context=context)
     domain_slug = _normalize_domain_slug(effective_capabilities.domain_slug) or _resolve_client_domain_slug(context)
     reference_pack = _load_reference_pack(db, domain_slug=domain_slug)
@@ -809,10 +859,10 @@ def build_consultant_verification_overview(
         capabilities=effective_capabilities,
         reference_pack=reference_pack,
     )
-    latest_knowledge = _load_latest_published_knowledge(
+    latest_knowledge = _load_published_knowledge_for_branch(
         db=db,
         client_id=context.client.id,
-        allowed_branch_ids=allowed_branch_ids,
+        branch_id=branch_id,
     )
     knowledge_last_published_at = None
     knowledge_stale_hours = None
@@ -826,6 +876,7 @@ def build_consultant_verification_overview(
     has_published_knowledge = knowledge_last_published_at is not None
     status, status_label, summary = derive_consultant_verification_status(
         feature_enabled=feature_enabled,
+        branch_selected=branch_id is not None,
         has_published_knowledge=has_published_knowledge,
         knowledge_stale_hours=knowledge_stale_hours,
     )
@@ -841,6 +892,7 @@ def build_consultant_verification_overview(
         knowledge_last_published_at=knowledge_last_published_at,
         knowledge_stale_hours=knowledge_stale_hours,
         readiness_cards=_build_readiness_cards(
+            branch_selected=branch_id is not None,
             has_published_knowledge=has_published_knowledge,
             knowledge_last_published_at=knowledge_last_published_at,
             knowledge_stale_hours=knowledge_stale_hours,
@@ -857,6 +909,7 @@ def build_consultant_verification_overview(
         scenario_catalog=scenario_catalog,
         actions=_build_consultant_verification_actions(
             feature_enabled=feature_enabled,
+            branch_selected=branch_id is not None,
             has_published_knowledge=has_published_knowledge,
             knowledge_stale_hours=knowledge_stale_hours,
         ),
@@ -888,12 +941,15 @@ def _ensure_session_scope(
     *,
     context: ConsoleAuthContext,
     allowed_branch_ids: Optional[set[UUID]],
+    current_branch_id: UUID | None = None,
 ) -> None:
     if session_row.client_id != context.client.id:
         raise ConsoleAPIError(404, "NOT_FOUND", "Consultant verification session not found")
     if allowed_branch_ids is not None:
         if session_row.branch_id is None or session_row.branch_id not in allowed_branch_ids:
             raise ConsoleAPIError(404, "NOT_FOUND", "Consultant verification session not found")
+    if current_branch_id is not None and session_row.branch_id != current_branch_id:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Consultant verification session not found")
 
 
 def _build_runtime_remote_jid(session_id: UUID) -> str:
@@ -1790,12 +1846,11 @@ def _resolve_compare_branch_id(
     context: ConsoleAuthContext,
     allowed_branch_ids: Optional[set[UUID]],
 ) -> UUID:
-    branch_id = context.selected_branch_id or context.effective_branch_id
-    if not branch_id:
-        raise ConsoleAPIError(400, "BRANCH_SELECTION_REQUIRED", "Select a branch before compare")
-    if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
-        raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Selected branch is outside your scope")
-    return branch_id
+    return _resolve_verification_branch_id(
+        context=context,
+        allowed_branch_ids=allowed_branch_ids,
+        required=True,
+    )
 
 
 def _load_latest_draft_version(
@@ -1843,6 +1898,63 @@ def _resolve_compare_draft_truth(
         allow_fallback=False,
     )
     return runtime_truth, draft_hash
+
+
+def _resolve_live_runtime_truth(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    branch_id: UUID,
+) -> RuntimeTruth:
+    live_truth = build_runtime_truth(
+        db,
+        client_slug=_resolve_client_slug(context.client),
+        client_id=context.client.id,
+        branch_id=branch_id,
+        allow_fallback=False,
+    )
+    if not isinstance(live_truth.truth, dict) or not live_truth.truth:
+        raise ConsoleAPIError(
+            409,
+            "LIVE_KNOWLEDGE_REQUIRED",
+            "Publish at least one live knowledge version before compare",
+        )
+    return live_truth
+
+
+def _resolve_verification_session_runtime_truth(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    session_row: ConsoleConsultantVerificationSession,
+) -> tuple[RuntimeTruth, dict[str, Any]]:
+    branch_id = session_row.branch_id
+    if branch_id is None:
+        raise ConsoleAPIError(400, "BRANCH_SELECTION_REQUIRED", "Select a branch before consultant verification")
+    if session_row.source_mode == "draft":
+        runtime_truth, draft_hash = _resolve_compare_draft_truth(
+            db=db,
+            context=context,
+            branch_id=branch_id,
+        )
+        return runtime_truth, {
+            "truth_source": runtime_truth.source,
+            "truth_version_id": runtime_truth.version_id,
+            "truth_compiled_hash": runtime_truth.compiled_hash,
+            "draft_hash": draft_hash,
+            "branch_id": str(branch_id),
+        }
+    runtime_truth = _resolve_live_runtime_truth(
+        db=db,
+        context=context,
+        branch_id=branch_id,
+    )
+    return runtime_truth, {
+        "truth_source": runtime_truth.source,
+        "truth_version_id": runtime_truth.version_id,
+        "truth_compiled_hash": runtime_truth.compiled_hash,
+        "branch_id": str(branch_id),
+    }
 
 
 def _resolve_compare_readiness(
@@ -2133,6 +2245,11 @@ def _get_finding_for_context(
     context: ConsoleAuthContext,
     allowed_branch_ids: Optional[set[UUID]],
 ) -> ConsoleConsultantVerificationFinding:
+    current_branch_id = _resolve_verification_branch_id(
+        context=context,
+        allowed_branch_ids=allowed_branch_ids,
+        required=False,
+    )
     finding = (
         db.query(ConsoleConsultantVerificationFinding)
         .filter(ConsoleConsultantVerificationFinding.id == finding_id)
@@ -2145,6 +2262,8 @@ def _get_finding_for_context(
     if allowed_branch_ids is not None:
         if not finding.branch_id or finding.branch_id not in allowed_branch_ids:
             raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+    if current_branch_id is not None and finding.branch_id != current_branch_id:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Consultant verification finding not found")
     return finding
 
 
@@ -2199,6 +2318,11 @@ def _get_session_for_context(
     context: ConsoleAuthContext,
     allowed_branch_ids: Optional[set[UUID]],
 ) -> ConsoleConsultantVerificationSession:
+    current_branch_id = _resolve_verification_branch_id(
+        context=context,
+        allowed_branch_ids=allowed_branch_ids,
+        required=False,
+    )
     session_row = (
         db.query(ConsoleConsultantVerificationSession)
         .filter(ConsoleConsultantVerificationSession.id == session_id)
@@ -2210,6 +2334,7 @@ def _get_session_for_context(
         session_row,
         context=context,
         allowed_branch_ids=allowed_branch_ids,
+        current_branch_id=current_branch_id,
     )
     return session_row
 
@@ -2223,11 +2348,17 @@ def create_consultant_verification_session(
     now: datetime,
 ) -> ConsoleConsultantVerificationSessionResponse:
     _require_verification_rollout(context)
+    normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
+    branch_id = _resolve_verification_branch_id(
+        context=context,
+        allowed_branch_ids=normalized_branch_ids,
+        required=True,
+    )
     session_id = uuid4()
     session_row = ConsoleConsultantVerificationSession(
         id=session_id,
         client_id=context.client.id,
-        branch_id=context.selected_branch_id or context.effective_branch_id,
+        branch_id=branch_id,
         actor_agent_id=context.agent.id,
         actor_role=context.role,
         source_mode=request.source_mode,
@@ -2239,14 +2370,13 @@ def create_consultant_verification_session(
             "schema_version": _RUNTIME_SNAPSHOT_VERSION,
             "source_mode": request.source_mode,
             "challenge_mode": request.challenge_mode,
+            "branch_id": str(branch_id),
         },
         latest_preview={"simulation_mode": True, "simulation_id": str(session_id)},
         turns_total=0,
         created_at=now,
         updated_at=now,
     )
-    if allowed_branch_ids is not None and session_row.branch_id and session_row.branch_id not in set(allowed_branch_ids):
-        raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Selected branch is outside your scope")
     db.add(session_row)
     db.commit()
     db.refresh(session_row)
@@ -2261,11 +2391,20 @@ def list_consultant_verification_sessions(
     limit: int = 20,
 ) -> ConsoleConsultantVerificationSessionListResponse:
     _require_verification_rollout(context)
+    normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
+    branch_id = _resolve_verification_branch_id(
+        context=context,
+        allowed_branch_ids=normalized_branch_ids,
+        required=False,
+    )
     query = db.query(ConsoleConsultantVerificationSession).filter(
         ConsoleConsultantVerificationSession.client_id == context.client.id,
     )
-    normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
-    if normalized_branch_ids is not None:
+    if branch_id is not None:
+        query = query.filter(ConsoleConsultantVerificationSession.branch_id == branch_id)
+    elif not getattr(context, "branch_restricted", False):
+        return ConsoleConsultantVerificationSessionListResponse(items=[])
+    elif normalized_branch_ids is not None:
         if not normalized_branch_ids:
             return ConsoleConsultantVerificationSessionListResponse(items=[])
         query = query.filter(ConsoleConsultantVerificationSession.branch_id.in_(normalized_branch_ids))
@@ -2303,10 +2442,19 @@ def list_consultant_verification_findings(
 ) -> ConsoleConsultantVerificationFindingListResponse:
     _require_verification_rollout(context)
     normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
+    branch_id = _resolve_verification_branch_id(
+        context=context,
+        allowed_branch_ids=normalized_branch_ids,
+        required=False,
+    )
     query = db.query(ConsoleConsultantVerificationFinding).filter(
         ConsoleConsultantVerificationFinding.client_id == context.client.id,
     )
-    if normalized_branch_ids is not None:
+    if branch_id is not None:
+        query = query.filter(ConsoleConsultantVerificationFinding.branch_id == branch_id)
+    elif not getattr(context, "branch_restricted", False):
+        return ConsoleConsultantVerificationFindingListResponse(items=[])
+    elif normalized_branch_ids is not None:
         if not normalized_branch_ids:
             return ConsoleConsultantVerificationFindingListResponse(items=[])
         query = query.filter(ConsoleConsultantVerificationFinding.branch_id.in_(normalized_branch_ids))
@@ -2504,9 +2652,12 @@ def get_consultant_verification_readiness(
     context: ConsoleAuthContext,
     allowed_branch_ids: Optional[list[UUID]],
 ) -> ConsoleConsultantVerificationReadinessResponse:
-    _require_verification_rollout(context)
     normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
-    branch_id = context.selected_branch_id or context.effective_branch_id
+    branch_id = _resolve_verification_branch_id(
+        context=context,
+        allowed_branch_ids=normalized_branch_ids,
+        required=False,
+    )
     if not branch_id:
         return ConsoleConsultantVerificationReadinessResponse(
             readiness=ConsoleConsultantVerificationCompareReadiness(
@@ -2516,8 +2667,7 @@ def get_consultant_verification_readiness(
                 compare_required=False,
             )
         )
-    if normalized_branch_ids is not None and branch_id not in normalized_branch_ids:
-        raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Selected branch is outside your scope")
+    feature_enabled = resolve_consultant_verification_enabled(context)
 
     draft_version = _load_latest_draft_version(
         db=db,
@@ -2535,6 +2685,31 @@ def get_consultant_verification_readiness(
         )
 
     draft_hash = build_knowledge_draft_hash_from_payload(draft_version.payload_json)
+    live_version = _load_published_knowledge_for_branch(
+        db=db,
+        client_id=context.client.id,
+        branch_id=branch_id,
+    )
+    if not feature_enabled:
+        return ConsoleConsultantVerificationReadinessResponse(
+            readiness=ConsoleConsultantVerificationCompareReadiness(
+                status="ready",
+                status_label="Сравнение пока не требуется",
+                summary="Для этого клиента pilot compare еще не включен. Publish опирается на Validate и сохраненный draft.",
+                draft_hash=draft_hash,
+                compare_required=False,
+            )
+        )
+    if not isinstance(live_version, KnowledgeVersion):
+        return ConsoleConsultantVerificationReadinessResponse(
+            readiness=ConsoleConsultantVerificationCompareReadiness(
+                status="ready",
+                status_label="Первый publish — compare не требуется",
+                summary="Для этого филиала еще нет опубликованной live версии. Сначала можно сделать первый publish после успешного Validate.",
+                draft_hash=draft_hash,
+                compare_required=False,
+            )
+        )
     payload = get_recent_knowledge_compare_preflight(
         db=db,
         client_id=context.client.id,
@@ -2576,19 +2751,11 @@ async def run_consultant_verification_compare(
     if not prompt:
         raise ConsoleAPIError(400, "VALIDATION_ERROR", "Compare requires a prompt or finding_id")
 
-    live_truth = build_runtime_truth(
-        db,
-        client_slug=_resolve_client_slug(context.client),
-        client_id=context.client.id,
+    live_truth = _resolve_live_runtime_truth(
+        db=db,
+        context=context,
         branch_id=branch_id,
-        allow_fallback=False,
     )
-    if not isinstance(live_truth.truth, dict) or not live_truth.truth:
-        raise ConsoleAPIError(
-            409,
-            "LIVE_KNOWLEDGE_REQUIRED",
-            "Publish at least one live knowledge version before compare",
-        )
 
     draft_truth, draft_hash = _resolve_compare_draft_truth(
         db=db,
@@ -2734,6 +2901,11 @@ async def append_consultant_verification_message(
         allowed_branch_ids=normalized_branch_ids,
     )
     previous_turns = _load_session_turns(db, session_id=session_row.id)
+    runtime_truth, source_snapshot = _resolve_verification_session_runtime_truth(
+        db=db,
+        context=context,
+        session_row=session_row,
+    )
     simulation_result = await _run_consultant_verification_simulation(
         db=db,
         session_row=session_row,
@@ -2741,6 +2913,7 @@ async def append_consultant_verification_message(
         previous_turns=previous_turns,
         content=normalized_content,
         now=now,
+        runtime_truth_override=runtime_truth,
     )
 
     next_index = int(session_row.turns_total or 0) + 1
@@ -2778,7 +2951,11 @@ async def append_consultant_verification_message(
         created_at=assistant_payload.get("created_at") or now,
     )
 
-    session_row.runtime_snapshot = _as_json_dict(simulation_result.get("runtime_snapshot"))
+    next_runtime_snapshot = _as_json_dict(simulation_result.get("runtime_snapshot"))
+    next_runtime_snapshot.update(source_snapshot)
+    next_runtime_snapshot["source_mode"] = session_row.source_mode
+    next_runtime_snapshot["challenge_mode"] = session_row.challenge_mode
+    session_row.runtime_snapshot = next_runtime_snapshot
     session_row.latest_preview = _as_json_dict(assistant_turn.preview)
     session_row.latest_outcome = assistant_turn.outcome
     session_row.latest_business_verdict = assistant_turn.business_verdict

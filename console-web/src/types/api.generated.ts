@@ -6488,6 +6488,30 @@ export interface components {
             payload?: Record<string, never> | null;
             /** Content */
             content?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Draft Version Id */
+            draft_version_id?: string | null;
+            /** Draft Payload */
+            draft_payload?: Record<string, never> | null;
+            /** Draft Content */
+            draft_content?: string | null;
+            /** Draft Updated At */
+            draft_updated_at?: string | null;
+            /**
+             * Edit Base Source
+             * @default none
+             * @enum {string}
+             */
+            edit_base_source: "draft" | "published" | "none";
+            /** Edit Base Version Id */
+            edit_base_version_id?: string | null;
+            /** Edit Base Payload */
+            edit_base_payload?: Record<string, never> | null;
+            /** Edit Base Content */
+            edit_base_content?: string | null;
+            /** Edit Base Updated At */
+            edit_base_updated_at?: string | null;
         };
         /** ConsoleKnowledgeHistoryItem */
         ConsoleKnowledgeHistoryItem: {

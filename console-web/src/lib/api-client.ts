@@ -921,6 +921,16 @@ export type KnowledgeCurrentResponse = {
     version_id?: string | null;
     payload?: unknown;
     content?: string | null;
+    updated_at?: string | null;
+    draft_version_id?: string | null;
+    draft_payload?: unknown;
+    draft_content?: string | null;
+    draft_updated_at?: string | null;
+    edit_base_source?: "draft" | "published" | "none";
+    edit_base_version_id?: string | null;
+    edit_base_payload?: unknown;
+    edit_base_content?: string | null;
+    edit_base_updated_at?: string | null;
 };
 export type KnowledgeValidationResponse = {
     valid?: boolean;
@@ -928,6 +938,7 @@ export type KnowledgeValidationResponse = {
     warnings?: string[];
     diff?: string | null;
     draft_hash?: string | null;
+    draft_saved?: boolean;
 };
 export type KnowledgePublishResponse = {
     success?: boolean;

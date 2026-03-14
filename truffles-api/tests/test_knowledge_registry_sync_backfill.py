@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
 from app.services import knowledge_registry_service as service
 
 
@@ -98,3 +100,42 @@ def test_backfill_client_published_branches_syncs_only_branches_with_published_p
     assert captured_calls[0]["branch_id"] == first_branch.id
     assert captured_calls[0]["knowledge_tag"] == "branch-a"
     assert captured_calls[0]["version_id"] == first_version.id
+
+
+def test_publish_version_blocks_lossy_structured_rewrite_before_compile(monkeypatch):
+    branch = SimpleNamespace(id=uuid4(), client_id=uuid4())
+    current = SimpleNamespace(
+        payload_json={
+            "client_pack": {
+                "guest_policy": {"allow_new_clients": True},
+                "policy": {"payment_info": {"methods": ["card"]}},
+            }
+        },
+        status="published",
+    )
+
+    monkeypatch.setattr(service, "get_current_published", lambda *_args, **_kwargs: current)
+    monkeypatch.setattr(
+        service,
+        "compile_pack_payload",
+        lambda *_args, **_kwargs: pytest.fail("compiler should not run for lossy structured rewrite"),
+    )
+
+    with pytest.raises(service.PackCompilerError) as exc_info:
+        service.publish_version(
+            SimpleNamespace(add=lambda *_args, **_kwargs: None),
+            branch=branch,
+            payload_json={
+                "client_pack": {
+                    "guest_policy": "",
+                    "policy": {"payment_info": "Оплата наличными"},
+                }
+            },
+            actor_id=uuid4(),
+            source_version_id=None,
+        )
+
+    assert exc_info.value.errors == [
+        "Lossy structured field rewrite blocked: client_pack.guest_policy",
+        "Lossy structured field rewrite blocked: client_pack.policy.payment_info",
+    ]

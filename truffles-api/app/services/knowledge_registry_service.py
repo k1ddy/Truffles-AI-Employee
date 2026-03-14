@@ -13,10 +13,12 @@ from app.logging_config import get_logger
 from app.models import Branch, Client, KnowledgeVersion
 from app.services.knowledge_service import QDRANT_API_KEY, QDRANT_COLLECTION, QDRANT_HOST, get_embedding
 from app.services.knowledge_validation import (
+    LOSSY_STRUCTURED_REWRITE_ERROR_PREFIX,
     build_diff,
     build_payload_checksum,
     build_summary,
     dump_pack_yaml,
+    get_lossy_structured_rewrite_paths,
     parse_draft_text,
     strip_compiled_artifacts,
     validate_payload,
@@ -223,6 +225,22 @@ def get_current_published(
     )
 
 
+def get_latest_draft(
+    db,
+    *,
+    branch_id: UUID,
+) -> KnowledgeVersion | None:
+    return (
+        db.query(KnowledgeVersion)
+        .filter(
+            KnowledgeVersion.branch_id == branch_id,
+            KnowledgeVersion.status == "draft",
+        )
+        .order_by(KnowledgeVersion.created_at.desc())
+        .first()
+    )
+
+
 def list_history(
     db,
     *,
@@ -250,12 +268,10 @@ def upsert_draft(
     actor_id: UUID | None,
 ) -> KnowledgeVersion:
     draft = (
-        db.query(KnowledgeVersion)
-        .filter(
-            KnowledgeVersion.branch_id == branch_id,
-            KnowledgeVersion.status == "draft",
+        get_latest_draft(
+            db,
+            branch_id=branch_id,
         )
-        .first()
     )
     now = datetime.now(timezone.utc)
     if draft:
@@ -290,6 +306,24 @@ def publish_version(
 ) -> KnowledgeVersion:
     now = datetime.now(timezone.utc)
     payload_clean = strip_compiled_artifacts(payload_json)
+    current = get_current_published(db, branch_id=branch.id)
+    current_payload = (
+        strip_compiled_artifacts(current.payload_json)
+        if current and isinstance(current.payload_json, dict)
+        else None
+    )
+    blocked_paths = get_lossy_structured_rewrite_paths(
+        payload_clean,
+        previous_payload=current_payload,
+    )
+    if blocked_paths:
+        raise PackCompilerError(
+            "Pack compiler blocked lossy structured rewrite",
+            errors=[
+                f"{LOSSY_STRUCTURED_REWRITE_ERROR_PREFIX}{path}"
+                for path in blocked_paths
+            ],
+        )
     try:
         compiled = compile_pack_payload(payload_clean, compiled_at=now)
     except PackCompilerError:
@@ -298,7 +332,6 @@ def publish_version(
     pack_yaml = dump_pack_yaml(payload_json)
     checksum = build_payload_checksum(payload_json)
 
-    current = get_current_published(db, branch_id=branch.id)
     if current:
         current.status = "archived"
 

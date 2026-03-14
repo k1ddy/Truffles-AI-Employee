@@ -10,6 +10,7 @@ from app.schemas.console import (
     ConsoleConsultantVerificationOverviewResponse,
     ConsoleIncidentItem,
     ConsoleKnowledgePublishRequest,
+    ConsoleKnowledgeValidateRequest,
     ConsoleMetricFactMeta,
     ConsoleOwnerOperationApplyRequest,
     ConsoleOwnerOperationMetricSnapshot,
@@ -317,16 +318,25 @@ def test_resolve_consultant_verification_enabled_prefers_nested_flag() -> None:
 def test_derive_consultant_verification_status_thresholds() -> None:
     disabled_status, disabled_label, disabled_summary = console_router._derive_consultant_verification_status(
         feature_enabled=False,
+        branch_selected=True,
         has_published_knowledge=True,
         knowledge_stale_hours=4,
     )
     missing_status, missing_label, missing_summary = console_router._derive_consultant_verification_status(
         feature_enabled=True,
+        branch_selected=True,
         has_published_knowledge=False,
+        knowledge_stale_hours=None,
+    )
+    branch_status, branch_label, branch_summary = console_router._derive_consultant_verification_status(
+        feature_enabled=True,
+        branch_selected=False,
+        has_published_knowledge=True,
         knowledge_stale_hours=None,
     )
     ready_status, ready_label, ready_summary = console_router._derive_consultant_verification_status(
         feature_enabled=True,
+        branch_selected=True,
         has_published_knowledge=True,
         knowledge_stale_hours=12,
     )
@@ -337,6 +347,9 @@ def test_derive_consultant_verification_status_thresholds() -> None:
     assert missing_status == "needs_attention"
     assert "знания" in missing_label.lower()
     assert "знаний" in missing_summary.lower()
+    assert branch_status == "needs_attention"
+    assert "филиал" in branch_label.lower()
+    assert "branch" in branch_summary.lower()
     assert ready_status == "ready"
     assert "основа" in ready_label.lower()
     assert "без реальных действий" in ready_summary.lower()
@@ -715,6 +728,47 @@ def test_knowledge_publish_request_defaults_preflight_gate_enabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_knowledge_current_returns_published_and_saved_draft(monkeypatch):
+    branch = SimpleNamespace(id=uuid4())
+    published = SimpleNamespace(
+        id=uuid4(),
+        payload_json={"client_pack": {"salon": {"name": "Published"}}},
+        pack_yaml=None,
+        published_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+    )
+    draft = SimpleNamespace(
+        id=uuid4(),
+        payload_json={"client_pack": {"salon": {"name": "Draft"}}},
+        pack_yaml=None,
+        published_at=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
+    monkeypatch.setattr(console_router, "get_current_published", lambda *_args, **_kwargs: published)
+    monkeypatch.setattr(console_router, "get_latest_draft", lambda *_args, **_kwargs: draft)
+
+    response = await console_router.get_knowledge_current(
+        request=SimpleNamespace(),
+        db=Mock(),
+    )
+
+    assert response.version_id == published.id
+    assert response.draft_version_id == draft.id
+    assert response.edit_base_source == "draft"
+    assert response.edit_base_version_id == draft.id
+
+
+@pytest.mark.asyncio
 async def test_publish_knowledge_requires_recent_preflight(monkeypatch):
     branch = SimpleNamespace(id=uuid4())
     context = SimpleNamespace(
@@ -747,6 +801,295 @@ async def test_publish_knowledge_requires_recent_preflight(monkeypatch):
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.code == "KNOWLEDGE_PREFLIGHT_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_validate_knowledge_blocks_draft_persist_on_lossy_structured_rewrite(monkeypatch):
+    branch = SimpleNamespace(id=uuid4())
+    current = SimpleNamespace(
+        payload_json={
+            "client_pack": {
+                "guest_policy": {"allow_new_clients": True},
+                "policy": {"payment_info": {"methods": ["card"]}},
+            }
+        }
+    )
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+    db = Mock()
+    upsert_mock = Mock()
+    audit_mock = Mock()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
+    monkeypatch.setattr(console_router, "ensure_onboarding_step", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_inputs",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            has_capabilities=False,
+            reference_pack_domain_slug="beauty",
+        ),
+    )
+    monkeypatch.setattr(console_router, "get_current_published", lambda *_args, **_kwargs: current)
+    monkeypatch.setattr(console_router, "upsert_draft", upsert_mock)
+    monkeypatch.setattr(console_router, "record_audit_event", audit_mock)
+
+    response = await console_router.validate_knowledge(
+        body=ConsoleKnowledgeValidateRequest(
+            draft_text="""
+client_pack:
+  guest_policy: ""
+  policy:
+    payment_info: "Оплата наличными"
+"""
+        ),
+        request=SimpleNamespace(),
+        db=db,
+    )
+
+    assert response.valid is False
+    assert response.draft_saved is False
+    assert "Lossy structured field rewrite blocked: client_pack.guest_policy" in response.errors
+    assert "Lossy structured field rewrite blocked: client_pack.policy.payment_info" in response.errors
+    upsert_mock.assert_not_called()
+    audit_mock.assert_called_once()
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_publish_knowledge_surfaces_pack_compiler_lossy_rewrite_errors(monkeypatch):
+    branch = SimpleNamespace(id=uuid4())
+    current = SimpleNamespace(id=uuid4(), payload_json={"client_pack": {"salon": {"name": "Demo"}}})
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(
+            id=uuid4(),
+            company_id=uuid4(),
+            name="demo_salon",
+            config={"consultant_verification_enabled": False},
+        ),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
+    monkeypatch.setattr(console_router, "ensure_onboarding_step", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_inputs",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            has_capabilities=False,
+            reference_pack_domain_slug="beauty",
+        ),
+    )
+    monkeypatch.setattr(console_router, "get_current_published", lambda *_args, **_kwargs: current)
+    monkeypatch.setattr(console_router, "validate_draft", lambda *_args, **_kwargs: ({"sections": []}, [], [], None))
+    monkeypatch.setattr(console_router, "has_recent_knowledge_preflight", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "publish_version",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            console_router.PackCompilerError(
+                "Pack compiler blocked lossy structured rewrite",
+                errors=["Lossy structured field rewrite blocked: client_pack.policy.payment_info"],
+            )
+        ),
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.publish_knowledge(
+            body=ConsoleKnowledgePublishRequest(draft_text="knowledge draft"),
+            request=SimpleNamespace(),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "KNOWLEDGE_INVALID"
+    assert exc_info.value.details == {
+        "errors": ["Lossy structured field rewrite blocked: client_pack.policy.payment_info"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_knowledge_requires_compare_for_existing_live_when_rollout_enabled(monkeypatch):
+    branch = SimpleNamespace(id=uuid4())
+    current = SimpleNamespace(id=uuid4(), payload_json={"client_pack": {"salon": {"name": "Demo"}}})
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(
+            id=uuid4(),
+            company_id=uuid4(),
+            name="demo_salon",
+            config={"consultant_verification_enabled": True},
+        ),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
+    monkeypatch.setattr(console_router, "ensure_onboarding_step", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_inputs",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            has_capabilities=False,
+            reference_pack_domain_slug=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "get_current_published", lambda *_args, **_kwargs: current)
+    monkeypatch.setattr(console_router, "validate_draft", lambda *_args, **_kwargs: ({"sections": []}, [], [], None))
+    monkeypatch.setattr(console_router, "has_recent_knowledge_preflight", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(console_router, "has_recent_knowledge_compare_preflight", lambda *_args, **_kwargs: False)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.publish_knowledge(
+            body=ConsoleKnowledgePublishRequest(draft_text="knowledge draft"),
+            request=SimpleNamespace(),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "KNOWLEDGE_COMPARE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_publish_knowledge_allows_first_publish_without_compare(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        knowledge_safe_mode=True,
+        knowledge_safe_mode_reason="old",
+        knowledge_safe_mode_at=None,
+    )
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(
+            id=uuid4(),
+            company_id=uuid4(),
+            name="demo_salon",
+            config={"consultant_verification_enabled": True},
+        ),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+    db = Mock()
+    version_id = uuid4()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
+    monkeypatch.setattr(console_router, "ensure_onboarding_step", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_inputs",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            has_capabilities=False,
+            reference_pack_domain_slug=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "get_current_published", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "has_recent_knowledge_preflight", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "has_recent_knowledge_compare_preflight",
+        lambda *_args, **_kwargs: pytest.fail("compare should not be required for first publish"),
+    )
+    monkeypatch.setattr(console_router, "validate_draft", lambda *_args, **_kwargs: ({"sections": []}, [], [], None))
+    monkeypatch.setattr(
+        console_router,
+        "publish_version",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            id=version_id,
+            payload_json={"sections": []},
+            published_at=datetime.now(timezone.utc),
+        ),
+    )
+    monkeypatch.setattr(console_router, "sync_published_branch_docs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "extract_compiled_artifacts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
+
+    response = await console_router.publish_knowledge(
+        body=ConsoleKnowledgePublishRequest(draft_text="knowledge draft"),
+        request=SimpleNamespace(),
+        db=db,
+    )
+
+    assert response.success is True
+    assert response.version_id == version_id
+
+
+@pytest.mark.asyncio
+async def test_publish_knowledge_allows_live_update_without_compare_when_rollout_disabled(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        knowledge_safe_mode=True,
+        knowledge_safe_mode_reason="old",
+        knowledge_safe_mode_at=None,
+    )
+    current = SimpleNamespace(id=uuid4(), payload_json={"client_pack": {"salon": {"name": "Demo"}}})
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(
+            id=uuid4(),
+            company_id=uuid4(),
+            name="demo_salon",
+            config={"consultant_verification_enabled": False},
+        ),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+    db = Mock()
+    version_id = uuid4()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
+    monkeypatch.setattr(console_router, "ensure_onboarding_step", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_inputs",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            has_capabilities=False,
+            reference_pack_domain_slug=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "get_current_published", lambda *_args, **_kwargs: current)
+    monkeypatch.setattr(console_router, "has_recent_knowledge_preflight", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "has_recent_knowledge_compare_preflight",
+        lambda *_args, **_kwargs: pytest.fail("compare should be skipped when rollout is disabled"),
+    )
+    monkeypatch.setattr(console_router, "validate_draft", lambda *_args, **_kwargs: ({"sections": []}, [], [], None))
+    monkeypatch.setattr(
+        console_router,
+        "publish_version",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            id=version_id,
+            payload_json={"sections": []},
+            published_at=datetime.now(timezone.utc),
+        ),
+    )
+    monkeypatch.setattr(console_router, "sync_published_branch_docs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "extract_compiled_artifacts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
+
+    response = await console_router.publish_knowledge(
+        body=ConsoleKnowledgePublishRequest(draft_text="knowledge draft"),
+        request=SimpleNamespace(),
+        db=db,
+    )
+
+    assert response.success is True
+    assert response.version_id == version_id
 
 
 @pytest.mark.asyncio

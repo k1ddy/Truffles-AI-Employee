@@ -1,6 +1,6 @@
 # SESSION 2026-03-14-owner-consultant-verification-closeout-a920 — Session 2026-03-14-owner-consultant-verification-closeout-a920
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-closeout-a920.md
 - block_id: CONSOLE-OWNER-CONSULTANT-VERIFICATION-CLOSEOUT-A920
@@ -9,7 +9,7 @@
 - reuse_gate: required
 - release_safety_gate: required
 - context_integrity_gate: required
-- branch: feat/2026-03-13-owner-consultant-verification-program-a920
+- branch: feat/2026-03-13-owner-consultant-verification-program-a920@closeout
 - worktree: /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920
 - base_ref: origin/main
 - scope: Closeout proof for owner/admin consultant verification: deterministic checks, UI proof, auth/e2e blocker triage, and explicit go/no-go status.

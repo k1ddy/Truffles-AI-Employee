@@ -3247,6 +3247,16 @@ class ConsoleKnowledgeCurrentResponse(BaseModel):
     version_id: Optional[UUID] = None
     payload: Optional[dict] = None
     content: Optional[str] = None
+    updated_at: Optional[str] = None
+    draft_version_id: Optional[UUID] = None
+    draft_payload: Optional[dict] = None
+    draft_content: Optional[str] = None
+    draft_updated_at: Optional[str] = None
+    edit_base_source: Literal["draft", "published", "none"] = "none"
+    edit_base_version_id: Optional[UUID] = None
+    edit_base_payload: Optional[dict] = None
+    edit_base_content: Optional[str] = None
+    edit_base_updated_at: Optional[str] = None
 
 
 class ConsoleKnowledgeValidateRequest(BaseModel):
@@ -3259,6 +3269,7 @@ class ConsoleKnowledgeValidateResponse(BaseModel):
     warnings: list[str]
     diff: Optional[str] = None
     draft_hash: Optional[str] = None
+    draft_saved: bool = False
 
 
 class ConsoleKnowledgePublishRequest(BaseModel):

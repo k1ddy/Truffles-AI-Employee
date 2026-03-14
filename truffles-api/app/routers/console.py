@@ -758,6 +758,7 @@ from app.services.integration_guardrails_service import run_integration_watchdog
 from app.services.knowledge_registry_service import (
     apply_pack_index_to_client_config,
     get_current_published,
+    get_latest_draft,
     list_history,
     publish_version,
     restore_version,
@@ -765,7 +766,7 @@ from app.services.knowledge_registry_service import (
     upsert_draft,
     validate_draft,
 )
-from app.services.knowledge_validation import dump_pack_yaml
+from app.services.knowledge_validation import dump_pack_yaml, should_block_draft_persist
 from app.services.learned_response_service import (
     approve_learned_response,
     is_agent_allowed_to_approve,
@@ -19306,13 +19307,36 @@ async def get_knowledge_current(
     require_console_permission(context, "knowledge", "read")
     branch = _resolve_branch_from_context(context)
     version = get_current_published(db, branch_id=branch.id)
-    if not version:
+    draft = get_latest_draft(db, branch_id=branch.id)
+
+    def _version_content(row: KnowledgeVersion | None) -> str | None:
+        if not row or not isinstance(row.payload_json, dict):
+            return None
+        return row.pack_yaml or dump_pack_yaml(row.payload_json) or None
+
+    def _version_updated_at(row: KnowledgeVersion | None) -> str | None:
+        if not row:
+            return None
+        timestamp = row.published_at or row.created_at
+        return timestamp.isoformat() if isinstance(timestamp, datetime) else None
+
+    edit_base = draft or version
+    if not version and not draft:
         return ConsoleKnowledgeCurrentResponse(version_id=None, payload=None, content=None)
-    content = version.pack_yaml or dump_pack_yaml(version.payload_json)
     return ConsoleKnowledgeCurrentResponse(
-        version_id=version.id,
-        payload=version.payload_json,
-        content=content or None,
+        version_id=version.id if version else None,
+        payload=version.payload_json if version else None,
+        content=_version_content(version),
+        updated_at=_version_updated_at(version),
+        draft_version_id=draft.id if draft else None,
+        draft_payload=draft.payload_json if draft else None,
+        draft_content=_version_content(draft),
+        draft_updated_at=_version_updated_at(draft),
+        edit_base_source="draft" if draft else ("published" if version else "none"),
+        edit_base_version_id=edit_base.id if edit_base else None,
+        edit_base_payload=edit_base.payload_json if edit_base else None,
+        edit_base_content=_version_content(edit_base),
+        edit_base_updated_at=_version_updated_at(edit_base),
     )
 
 
@@ -19350,18 +19374,20 @@ async def validate_knowledge(
         require_booking=require_booking,
     )
     valid = not errors
+    draft_saved = bool(payload) and not should_block_draft_persist(errors)
     draft_hash = build_knowledge_draft_hash_from_payload(
         payload,
         fallback_draft_text=body.draft_text,
     )
     if payload:
-        upsert_draft(
-            db,
-            branch_id=branch.id,
-            client_id=context.client.id,
-            payload_json=payload,
-            actor_id=context.agent.id,
-        )
+        if draft_saved:
+            upsert_draft(
+                db,
+                branch_id=branch.id,
+                client_id=context.client.id,
+                payload_json=payload,
+                actor_id=context.agent.id,
+            )
         record_audit_event(
             db,
             actor=context.agent,
@@ -19386,6 +19412,7 @@ async def validate_knowledge(
         warnings=warnings,
         diff=diff or None,
         draft_hash=draft_hash,
+        draft_saved=draft_saved,
     )
 
 
@@ -19445,24 +19472,26 @@ async def publish_knowledge(
                     "window_minutes": DEFAULT_PREFLIGHT_WINDOW_MINUTES,
                 },
             )
-        has_compare = has_recent_knowledge_compare_preflight(
-            db=db,
-            client_id=context.client.id,
-            branch_id=branch.id,
-            draft_hash=draft_hash,
-            window_minutes=DEFAULT_PREFLIGHT_WINDOW_MINUTES,
-            require_ready=True,
-        )
-        if not has_compare:
-            raise ConsoleAPIError(
-                409,
-                "KNOWLEDGE_COMPARE_REQUIRED",
-                "Run live vs draft compare for this draft before Publish",
-                {
-                    "draft_hash": draft_hash,
-                    "window_minutes": DEFAULT_PREFLIGHT_WINDOW_MINUTES,
-                },
+        compare_required = bool(current) and _resolve_consultant_verification_enabled(context)
+        if compare_required:
+            has_compare = has_recent_knowledge_compare_preflight(
+                db=db,
+                client_id=context.client.id,
+                branch_id=branch.id,
+                draft_hash=draft_hash,
+                window_minutes=DEFAULT_PREFLIGHT_WINDOW_MINUTES,
+                require_ready=True,
             )
+            if not has_compare:
+                raise ConsoleAPIError(
+                    409,
+                    "KNOWLEDGE_COMPARE_REQUIRED",
+                    "Run live vs draft compare for this draft before Publish",
+                    {
+                        "draft_hash": draft_hash,
+                        "window_minutes": DEFAULT_PREFLIGHT_WINDOW_MINUTES,
+                    },
+                )
     if not payload or errors:
         raise ConsoleAPIError(
             400,

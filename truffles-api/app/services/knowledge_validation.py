@@ -55,6 +55,7 @@ REQUIRED_PACK_FIELDS = REQUIRED_CLIENT_PACK_FIELDS + REQUIRED_POLICY_FIELDS
 MINIMUM_DATA_CONTRACT_VERSION = "minimum_data_contract.v2"
 MINIMUM_DATA_REQUIRED_LANGUAGES = ("ru", "kk")
 MINIMUM_DATA_REQUIRED_FIELDS = REQUIRED_PACK_FIELDS
+LOSSY_STRUCTURED_REWRITE_ERROR_PREFIX = "Lossy structured field rewrite blocked: "
 _MINIMUM_DATA_DURATION_KEYS = (
     "duration_text",
     "duration",
@@ -117,6 +118,19 @@ _FIELD_VALIDATION_ALIASES: dict[str, tuple[str, ...]] = {
         "client_pack.languages",
     ),
 }
+
+_STRUCTURED_REWRITE_GUARDED_PATHS: tuple[str, ...] = (
+    "client_pack.guest_policy",
+    "client_pack.policy.hard_law",
+    "client_pack.policy.payment_info",
+    "client_pack.policy.reschedule",
+    "client_pack.policy.cancel",
+    "client_pack.policy.medical",
+    "client_pack.policy.legal",
+    "client_pack.policy.complaint",
+    "client_pack.policy.discounts",
+    "client_pack.policy.guard_topics",
+)
 
 
 def _normalize_domain_slug(domain_slug: str | None) -> str | None:
@@ -205,6 +219,14 @@ def _is_empty_value(value: Any) -> bool:
     if isinstance(value, (list, dict)):
         return len(value) == 0
     return False
+
+
+def _matches_structured_shape(previous_value: Any, next_value: Any) -> bool:
+    if isinstance(previous_value, dict):
+        return isinstance(next_value, dict) and len(next_value) > 0
+    if isinstance(previous_value, list):
+        return isinstance(next_value, list) and len(next_value) > 0
+    return True
 
 
 def _normalize_payload(data: dict) -> dict:
@@ -309,6 +331,39 @@ def get_missing_required_fields(
     return missing
 
 
+def get_lossy_structured_rewrite_paths(
+    payload: dict,
+    *,
+    previous_payload: dict | None,
+) -> list[str]:
+    if not isinstance(previous_payload, dict):
+        return []
+    normalized_previous = _normalize_payload(previous_payload)
+    normalized_next = _normalize_payload(payload)
+    blocked: list[str] = []
+    for path in _STRUCTURED_REWRITE_GUARDED_PATHS:
+        previous_value = _get_nested_value(normalized_previous, path)
+        if previous_value is _MISSING or _is_empty_value(previous_value):
+            continue
+        if not isinstance(previous_value, (dict, list)):
+            continue
+        next_value = _get_nested_value(normalized_next, path)
+        if next_value is _MISSING or _is_empty_value(next_value):
+            blocked.append(path)
+            continue
+        if not _matches_structured_shape(previous_value, next_value):
+            blocked.append(path)
+    return blocked
+
+
+def is_lossy_structured_rewrite_error(message: str) -> bool:
+    return isinstance(message, str) and message.startswith(LOSSY_STRUCTURED_REWRITE_ERROR_PREFIX)
+
+
+def should_block_draft_persist(errors: list[str]) -> bool:
+    return any(is_lossy_structured_rewrite_error(message) for message in errors)
+
+
 def get_missing_minimum_data_fields(payload: dict) -> list[str]:
     normalized = _normalize_payload(payload)
     domain_slug = _extract_domain_slug_from_payload(normalized)
@@ -380,6 +435,13 @@ def validate_payload(
 ) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
+
+    if previous_payload:
+        for path in get_lossy_structured_rewrite_paths(
+            payload,
+            previous_payload=previous_payload,
+        ):
+            errors.append(f"{LOSSY_STRUCTURED_REWRITE_ERROR_PREFIX}{path}")
 
     missing_fields = get_missing_required_fields(
         payload,
