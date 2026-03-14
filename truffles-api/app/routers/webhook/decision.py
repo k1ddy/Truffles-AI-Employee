@@ -276,9 +276,9 @@ from app.routers.webhook.runtime_primitives import (
     MSG_AI_ERROR,
     MSG_BOOKING_ASK_DATETIME,
     MSG_BOOKING_ASK_NAME,
+    MSG_BOOKING_ASK_SERVICE,
     MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE,
     MSG_BOOKING_SPECIALIST_AVAILABILITY_FOLLOWUP,
-    MSG_BOOKING_ASK_SERVICE,
     MSG_BOOKING_TIMEOUT_PENDING_QUESTION_TIME,
     MSG_DELIVERY_FAILED,
     MSG_EXPECTED_SERVICE_OFF_TOPIC,
@@ -336,9 +336,17 @@ from app.services.ai_service import (
 )
 from app.services.booking_signal_service import (
     has_daypart_stem as _has_daypart_stem,
+)
+from app.services.booking_signal_service import (
     has_pending_time_question_marker as _has_pending_time_question_marker,
+)
+from app.services.booking_signal_service import (
     looks_like_time_preference_statement as _looks_like_time_preference_statement,
+)
+from app.services.booking_signal_service import (
     match_booking_hour_fallback as _match_booking_hour_fallback,
+)
+from app.services.booking_signal_service import (
     pick_daypart_token as _pick_daypart_token,
 )
 from app.services.booking_transition_owner import (
@@ -358,12 +366,6 @@ from app.services.capability_manifest_service import (
 from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
-from app.services.owner_resolver import (
-    TimeoutOwnerBoundaryInput,
-    build_owner_resolution_input,
-    resolve_interaction_owner,
-    resolve_timeout_owner_boundary,
-)
 from app.services.expected_reply_contract import (
     resolve_services_overview_contract_update,
     resolve_tool_expected_reply_contract,
@@ -407,6 +409,12 @@ from app.services.knowledge_validation import (
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
 from app.services.outbox_service import build_inbound_message_id
+from app.services.owner_resolver import (
+    TimeoutOwnerBoundaryInput,
+    build_owner_resolution_input,
+    resolve_interaction_owner,
+    resolve_timeout_owner_boundary,
+)
 from app.services.pack_runtime_service import (
     PackDecision,
     _detect_promotion_intent,
@@ -435,10 +443,10 @@ from app.services.pack_runtime_service import (
     semantic_question_type,
     semantic_service_match,
 )
-from app.services.signal_manifest_service import get_booking_text_tokens
 from app.services.pack_runtime_service import (
     _normalize_text as _normalize_service_text,
 )
+from app.services.signal_manifest_service import get_booking_text_tokens
 from app.services.state_machine import ConversationState
 from app.services.state_service import (
     PENDING_RESUME_CLEAR_KEYS,
@@ -6960,6 +6968,36 @@ def _resolve_specialist_name_hint_with_trace(
     saved_message: Any,
     tool_action: str | None,
 ) -> str | None:
+    def _record_branch_catalog_hint(
+        specialist_name_hint: str,
+        *,
+        match_mode: str = "exact",
+    ) -> str:
+        hint_meta = {
+            "specialist_hint_attempted": False,
+            "specialist_hint_ok": True,
+            "specialist_hint_error": None,
+            "specialist_hint_source": "branch_catalog",
+        }
+        if match_mode != "exact":
+            hint_meta["specialist_hint_match_mode"] = match_mode
+        if saved_message:
+            _update_message_decision_metadata(saved_message, hint_meta)
+        trace_payload = {
+            "stage": "specialist_hint",
+            "decision": "ok",
+            "tool_action": tool_action,
+            "attempted": False,
+            "confidence": 1.0,
+            "error": None,
+            "source": "branch_catalog",
+            "specialist_name": specialist_name_hint,
+        }
+        if match_mode != "exact":
+            trace_payload["match_mode"] = match_mode
+        _record_decision_trace(conversation, trace_payload)
+        return specialist_name_hint
+
     def _extract_surface_specialist_name_hint() -> str | None:
         if not isinstance(message_text, str) or not message_text.strip():
             return None
@@ -7008,6 +7046,10 @@ def _resolve_specialist_name_hint_with_trace(
         normalized_message = normalize_for_matching(message_text)
         if normalized_message:
             specialist_matches: list[str] = []
+            specialist_prefix_matches: list[str] = []
+            normalized_message_tokens = {
+                token for token in normalized_message.split() if isinstance(token, str) and token
+            }
             specialists = (
                 db.query(Specialist)
                 .filter(
@@ -7025,32 +7067,23 @@ def _resolve_specialist_name_hint_with_trace(
                 if not normalized_specialist_name:
                     continue
                 if f" {normalized_specialist_name} " not in padded_message:
+                    specialist_name_tokens = [
+                        token
+                        for token in normalized_specialist_name.split()
+                        if isinstance(token, str) and token
+                    ]
+                    if len(specialist_name_tokens) >= 2 and specialist_name_tokens[0] in normalized_message_tokens:
+                        specialist_prefix_matches.append(specialist_name.strip())
                     continue
                 specialist_matches.append(specialist_name.strip())
             if len(specialist_matches) == 1:
-                specialist_name_hint = specialist_matches[0]
-                hint_meta = {
-                    "specialist_hint_attempted": False,
-                    "specialist_hint_ok": True,
-                    "specialist_hint_error": None,
-                    "specialist_hint_source": "branch_catalog",
-                }
-                if saved_message:
-                    _update_message_decision_metadata(saved_message, hint_meta)
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "specialist_hint",
-                        "decision": "ok",
-                        "tool_action": tool_action,
-                        "attempted": False,
-                        "confidence": 1.0,
-                        "error": None,
-                        "source": "branch_catalog",
-                        "specialist_name": specialist_name_hint,
-                    },
+                return _record_branch_catalog_hint(specialist_matches[0])
+            unique_prefix_matches = list(dict.fromkeys(specialist_prefix_matches))
+            if not specialist_matches and len(unique_prefix_matches) == 1:
+                return _record_branch_catalog_hint(
+                    unique_prefix_matches[0],
+                    match_mode="first_name_unique",
                 )
-                return specialist_name_hint
     skip_hint_stage, hint_budget_remaining_ms = _should_skip_secondary_llm_stage(
         timing_context=timing_context,
         min_remaining_ms=WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS,
@@ -12428,9 +12461,7 @@ async def _handle_webhook_payload(
                 explicit_service_value = validated_service_value or raw_service_value.strip()
                 explicit_service_source = "policy_payload"
 
-        if not isinstance(policy_referent_resolution, dict) or not (
-            policy_referent_resolution.get("decision") in {"resolved", "missing"}
-        ):
+        if not isinstance(policy_referent_resolution, dict) or policy_referent_resolution.get("decision") not in {"resolved", "missing"}:
             policy_referent_resolution = _resolve_semantic_referent(
                 subject_kind=policy_subject_kind,
                 explicit_value=explicit_service_value,

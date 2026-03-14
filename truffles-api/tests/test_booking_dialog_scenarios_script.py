@@ -6,6 +6,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
+
 from app.services.scenario_contract_compiler import (
     compile_active_time_specialist_followup_expectations,
     should_compile_active_time_specialist_followup_expectations,
@@ -270,10 +271,12 @@ def test_sanitize_llm_turns_keeps_specialist_target_only_under_active_time_conte
 
     expect = sanitized[1].get("expect") or {}
     assert expect.get("reply_type") == "time"
-    assert "master" in (expect.get("info_sections") or [])
+    assert expect.get("info_sections") == []
     assert (expect.get("meta_any") or {}).get("pending_question_target") == ["specialist"]
+    assert (expect.get("meta_any") or {}).get("active_question_relation") == ["referent_followup"]
     assert any(
         entry.get("stage") == "booking_interrupt"
+        and entry.get("decision") == "info_reply"
         and entry.get("pending_question_target") == "specialist"
         for entry in (expect.get("trace_contains") or [])
     )
@@ -1043,9 +1046,14 @@ def test_sanitize_llm_turns_scrubs_stale_slot_constraint_expect_override_after_t
     assert expect.get("reply_type") == "name"
     assert (expect.get("meta_any") or {}).get("pending_question_act") is None
     assert (expect.get("meta_any") or {}).get("pending_question_target") is None
-    assert (expect.get("meta_any") or {}).get("expected_reply_type") is None
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["name"]
     assert not any(
         entry.get("stage") == "pending_question_interaction"
+        for entry in (expect.get("trace_contains") or [])
+    )
+    assert any(
+        entry.get("stage") == "question_contract"
+        and entry.get("expected_reply_type") == "name"
         for entry in (expect.get("trace_contains") or [])
     )
 
@@ -1788,11 +1796,12 @@ def test_sanitize_llm_turns_normalizes_partial_date_slot_constraint_under_active
 
     expect = sanitized[2].get("expect") or {}
     assert sanitized[2]["tags"] == ["time"]
-    assert expect.get("reply_type") == "time"
+    assert expect.get("reply_type") == "name"
     assert (expect.get("meta_any") or {}).get("pending_question_act") is None
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["name"]
     assert any(
         entry.get("stage") == "question_contract"
-        and entry.get("expected_reply_type") == "time"
+        and entry.get("expected_reply_type") == "name"
         for entry in (expect.get("trace_contains") or [])
     )
 
@@ -2051,14 +2060,15 @@ def test_sanitize_llm_turns_keeps_named_specialist_followup_after_time_fill():
 
     expect = sanitized[3].get("expect") or {}
     assert sanitized[3]["tags"] == ["booking"]
-    assert expect.get("reply_type") == "time"
+    assert expect.get("reply_type") == "name"
     assert expect.get("info_sections") == []
     assert (expect.get("meta_any") or {}).get("pending_question_target") == ["specialist"]
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["name"]
     assert any(
         entry.get("stage") == "pending_question_interaction"
         and entry.get("decision") == "booking_specialist_followup"
         and entry.get("pending_question_target") == "specialist"
-        and entry.get("expected_reply_type") == "time"
+        and entry.get("expected_reply_type") == "name"
         for entry in (expect.get("trace_contains") or [])
     )
 

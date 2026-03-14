@@ -8023,3 +8023,95 @@ Evidence:
 - `/tmp/booking_quality/p1.6o192-l2-dev-20260314-a1-r1/manual_audit.json`
 - `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o192-post-p1.6o191-proof-lane-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o193-scenario-generation-progress-error-detail-a1.md`
+
+
+### 2026-03-14 — `P1.6o193` preserves inner scenario-generation timeout detail; `P1.6o194` is the next admissible proof lane
+
+- Completed `P1.6o193` on deterministic contour:
+  - `ops/diagnose.py` now keeps the bounded last `batch_attempt_error.error` detail inside normalized `scenario_generation_timeout (...)` reasons instead of dropping the inner cause after timeout normalization;
+  - targeted tooling regressions now prove generated LLM batch assembly still works and timeout normalization preserves surfaced inner error text.
+- Published `P1.6o194` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o193`;
+  - no new proof-tooling refactor is admissible before that rerun is strict-audited and classified.
+
+Evidence:
+- `ops/diagnose.py`
+- `truffles-api/tests/test_diagnose_run_command.py`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o193-scenario-generation-progress-error-detail-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o194-post-p1.6o193-proof-lane-a1.md`
+
+### 2026-03-14 — `P1.6o194` surfaces concrete inner read-timeout blocker; `P1.6o195` is the next admissible deterministic slice
+
+- Completed `P1.6o194` proof lane as a truth-first blocker classification:
+  - fresh guarded `dev L2` rerun `p1.6o194-l2-dev-20260314-a1-r1` stayed blocked before scenario emission, but timeout normalization now surfaces the concrete inner failure: `scenario_generation_timeout (batch=2 attempt=1 event=batch_attempt_error error="The read operation timed out")`;
+  - strict audit recorded `artifact_integrity.valid=false`, `infra_valid=false`, `semantic_valid=false`, and missing `scenarios.json`, `responses.jsonl`, and `trace_bundle.jsonl`, so no semantic class was admitted.
+- Published `P1.6o195` as the next admissible continuation:
+  - reuse the generator's existing bounded inner retry path so generated LLM scenario batches no longer fail closed on the first retryable read timeout;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o195`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o194-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o194-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o194-l2-dev-20260314-a1-r1/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o194-post-p1.6o193-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o195-scenario-generation-read-timeout-inner-retry-a1.md`
+
+### 2026-03-14 — `P1.6o195` reuses bounded scenario-generation inner retry; `P1.6o196` is the next admissible proof lane
+
+- Completed `P1.6o195` on deterministic contour:
+  - generated LLM proof runs now default to the scenario generator's bounded inner retry budget (`--llm-max-attempts 3`) unless explicitly overridden;
+  - timeout budgeting is aligned with the effective inner retry count, so guarded proof no longer keeps scenario generation on a single-attempt read-timeout path.
+- Deterministic validation for `P1.6o195`:
+  - `python3 -m py_compile ops/diagnose.py truffles-api/tests/test_diagnose_run_command.py`
+  - `pytest -q truffles-api/tests/test_diagnose_run_command.py -k "scenario_timeout or generate_batch"` -> `4 passed, 17 deselected`
+- Published `P1.6o196` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o195`;
+  - no new proof-tooling refactor is admissible before that rerun is strict-audited and classified.
+
+Evidence:
+- `ops/diagnose.py`
+- `truffles-api/tests/test_diagnose_run_command.py`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o195-scenario-generation-read-timeout-inner-retry-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o196-post-p1.6o195-proof-lane-a1.md`
+
+### 2026-03-14 — `P1.6o196` clears scenario-generation blocker and reopens `M19` on real full-name branch data; `P1.6o197` is the next admissible deterministic block
+
+- Completed `P1.6o196` proof lane:
+  - fresh guarded `dev L2` rerun `p1.6o196-l2-dev-20260314-a1-r1` strict-audited with `artifact_integrity.valid=true`, `infra_valid=true`, `semantic_valid=false`, `stop_reason=max_failures_reached:1`, `run_integrity_reasons=[run_completion_gap]`, `oracle_arbitration.winner=contract`, and `judge_alignment=conflicted`;
+  - scenario-generation is no longer the blocker: the run emitted `scenarios.json`, `responses.jsonl`, and `trace_bundle.jsonl`, then stopped on a real semantic/runtime family.
+- Surfaced first fail for `P1.6o196`:
+  - `dialog 1 / turn 4 / "А можно записаться к Айгерим?"`;
+  - runtime reopened existing `M19`: invalid-schema degraded recovery missed `booking_specialist_followup` and fell to generic `policy_core_degraded_collect`, while contract-first audit surfaced the miss as `expected_meta_mismatch` / `expected_trace_miss` and kept runtime evidence authoritative;
+  - manual runtime inspection confirmed the conversation already had `branch_id=b7f75692-951e-421a-aae6-f5db97394799`, and active branch specialists include `Айгерим Болатова`, so the bounded root cause is exact full-name catalog matching against a partial first-name surface rather than missing branch context.
+- Published `P1.6o197` as the next admissible continuation:
+  - bounded runtime re-closure of reopened `M19` on real full-name branch data;
+  - no new proof rerun is admissible before deterministic closure of `P1.6o197`.
+
+Evidence:
+- `/tmp/booking_quality/p1.6o196-l2-dev-20260314-a1-r1/summary.json`
+- `/tmp/booking_quality/p1.6o196-l2-dev-20260314-a1-r1/brief.md`
+- `/tmp/booking_quality/p1.6o196-l2-dev-20260314-a1-r1/responses.jsonl`
+- `/tmp/booking_quality/p1.6o196-l2-dev-20260314-a1-r1/trace_bundle.jsonl`
+- `/tmp/booking_quality/p1.6o196-l2-dev-20260314-a1-r1/manual_audit.json`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o196-post-p1.6o195-proof-lane-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o197-invalid-schema-booking-request-unique-first-name-catalog-match-a1.md`
+
+### 2026-03-14 — `P1.6o197` re-closes reopened `M19` for unique first-name full-name catalog matches; `P1.6o198` is the next admissible proof lane
+
+- Completed `P1.6o197` on deterministic contour:
+  - `_resolve_specialist_name_hint_with_trace(...)` now reuses the existing branch-catalog matcher for unique first-name token surfaces before the secondary LLM, so real salon data like `Айгерим Болатова` can recover the surfaced `А можно записаться к Айгерим?` contour without another LLM hop;
+  - ambiguous same-first-name matches stay fail-closed and fall back to the secondary LLM;
+  - targeted endpoint/helper regressions now cover both the unique recovery path and the ambiguous fallback path.
+- Deterministic validation for `P1.6o197`:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "branch_catalog_match or unique_branch_first_name_match or ambiguous_first_name_uses_llm"` -> `4 passed, 414 deselected`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py -k "invalid_schema_specialist_followup or specialist_followup_owner_gap"` -> `3 passed, 104 deselected`
+- Published `P1.6o198` as the next admissible continuation:
+  - exactly one fresh guarded proof rerun is now allowed after deterministic closure of `P1.6o197`;
+  - no new runtime patch is admissible before that rerun is strict-audited and classified.
+
+Evidence:
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o197-invalid-schema-booking-request-unique-first-name-catalog-match-a1.md`
+- `docs/TASK_PACKAGES/TP-2026-03-14-p1.6o198-post-p1.6o197-proof-lane-a1.md`

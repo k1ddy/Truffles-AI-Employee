@@ -8,7 +8,6 @@ from app.services.expected_reply_contract import (
 )
 from app.services.interaction_owner_matrix_service import get_interaction_owner_row
 
-
 _ACTIVE_TIME_SPECIALIST_FOLLOWUP_ROW_ID = "M31"
 
 

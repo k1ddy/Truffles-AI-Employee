@@ -1303,7 +1303,15 @@ def _infer_context_from_dialog(
 
 
 def _format_turn(turn: dict[str, Any], ctx: dict[str, str]) -> dict[str, Any]:
-    text = turn["text"].format(**ctx)
+    format_ctx = _build_context(random.Random(0))
+    format_ctx.update(
+        {
+            key: value
+            for key, value in (ctx or {}).items()
+            if isinstance(key, str) and isinstance(value, str) and value
+        }
+    )
+    text = str(turn.get("text") or "").format_map(format_ctx)
     tags = list(turn.get("tags") or [])
     return {
         "kind": "text",
@@ -2119,7 +2127,7 @@ def _normalize_active_time_specialist_master_tags(
     *,
     active_reply_type: str | None,
 ) -> tuple[list[str], bool]:
-    if active_reply_type not in {None, "time"}:
+    if active_reply_type not in {None, "time", "name"}:
         return tags, False
     lowered_tags = {
         str(tag).strip().lower()
@@ -5082,6 +5090,7 @@ def _sanitize_expect_override_for_tags(
         return override
 
     cleaned = _normalize_llm_expect_override(override)
+    cleaned.pop("reply_type", None)
     for key in ("meta", "meta_any", "meta_contains"):
         mapping = cleaned.get(key)
         if not isinstance(mapping, dict):
@@ -5089,6 +5098,10 @@ def _sanitize_expect_override_for_tags(
         normalized_mapping = dict(mapping)
         normalized_mapping.pop("pending_question_act", None)
         normalized_mapping.pop("pending_question_target", None)
+        normalized_mapping.pop("pending_question_interaction", None)
+        normalized_mapping.pop("pending_question_owner", None)
+        normalized_mapping.pop("active_question_relation", None)
+        normalized_mapping.pop("expected_reply_type", None)
         if normalized_mapping:
             cleaned[key] = normalized_mapping
         else:
@@ -5097,7 +5110,7 @@ def _sanitize_expect_override_for_tags(
     trace_contains = [
         dict(entry)
         for entry in (cleaned.get("trace_contains") or [])
-        if entry.get("stage") != "pending_question_interaction"
+        if entry.get("stage") not in {"pending_question_interaction", "question_contract"}
     ]
     if trace_contains:
         cleaned["trace_contains"] = trace_contains

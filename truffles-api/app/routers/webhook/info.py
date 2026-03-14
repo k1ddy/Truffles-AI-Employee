@@ -17,6 +17,9 @@ from app.routers.webhook.runtime_primitives import (
     SESSION_MEMORY_SHORT_TOKENS,
 )
 from app.schemas.webhook import WebhookResponse
+from app.services.booking_signal_service import (
+    extract_daypart_token as _extract_daypart_token,
+)
 from app.services.expected_reply_contract import (
     should_override_truth_gate_off_topic_contract,
     truth_gate_expected_reply_prompt_contract,
@@ -50,9 +53,6 @@ from app.services.info_signal_service import (
 )
 from app.services.info_signal_service import (
     tokens_have_prefixes as _tokens_have_prefixes,
-)
-from app.services.booking_signal_service import (
-    extract_daypart_token as _extract_daypart_token,
 )
 from app.services.pack_runtime_service import (
     _build_fact_meta,
