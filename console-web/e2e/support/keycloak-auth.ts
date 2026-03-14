@@ -98,7 +98,7 @@ async function readAuthenticatedConsoleState(page: Page): Promise<ConsoleAuthSta
             const sessionError = session?.error ?? null;
             const meOk = Boolean(meResponse?.ok);
             return {
-                ok: meOk || (hasAccessToken && !sessionError),
+                ok: meOk,
                 sessionStatus: sessionResponse.status,
                 meStatus: meResponse?.status ?? null,
                 sessionError,

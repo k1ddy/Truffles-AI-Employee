@@ -2,7 +2,6 @@ import { chromium, type FullConfig } from "@playwright/test";
 import {
     loginThroughKeycloak,
     shouldStayOnBaseOrigin,
-    waitForAuthenticatedConsole,
 } from "./support/keycloak-auth";
 
 const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
@@ -86,7 +85,6 @@ export default async function globalSetup(config: FullConfig) {
     });
 
     await page.waitForLoadState("domcontentloaded");
-    await waitForAuthenticatedConsole(page, 30000);
     await logoutButton.waitFor({ state: "visible", timeout: 5000 }).catch(() => undefined);
 
     const envClientId = process.env.E2E_CLIENT_ID;

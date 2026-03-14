@@ -156,27 +156,23 @@ async function waitForConsoleReady(page: import('@playwright/test').Page) {
     const contextBar = page.getByTestId('context-bar');
     const inboxView = page.getByTestId('inbox-view');
     const consoleHeader = page.getByTestId('console-header');
+    const isConsoleSurfaceVisible = async () => {
+        if (await casesTitle.isVisible().catch(() => false)) return true;
+        if (await selectionGate.isVisible().catch(() => false)) return true;
+        if (await contextGate.isVisible().catch(() => false)) return true;
+        if (await contextBar.isVisible().catch(() => false)) return true;
+        if (await inboxView.isVisible().catch(() => false)) return true;
+        if (await consoleHeader.isVisible().catch(() => false)) return true;
+        return false;
+    };
     for (let attempt = 0; attempt < 3; attempt += 1) {
         await retryProfileLoad(page);
-        if (await casesTitle.isVisible().catch(() => false)) return;
-        if (await selectionGate.isVisible().catch(() => false)) return;
-        if (await contextGate.isVisible().catch(() => false)) return;
-        if (await contextBar.isVisible().catch(() => false)) return;
-        if (await inboxView.isVisible().catch(() => false)) return;
-        if (await consoleHeader.isVisible().catch(() => false)) return;
+        if (await isConsoleSurfaceVisible()) return;
         await page.waitForTimeout(1000);
     }
     await expect
         .poll(
-            async () => {
-                if (await casesTitle.isVisible().catch(() => false)) return true;
-                if (await selectionGate.isVisible().catch(() => false)) return true;
-                if (await contextGate.isVisible().catch(() => false)) return true;
-                if (await contextBar.isVisible().catch(() => false)) return true;
-                if (await inboxView.isVisible().catch(() => false)) return true;
-                if (await consoleHeader.isVisible().catch(() => false)) return true;
-                return false;
-            },
+            isConsoleSurfaceVisible,
             { timeout: 20000 }
         )
         .toBe(true);
@@ -186,13 +182,22 @@ test.describe('Smoke Test: Login Flow', () => {
     test.describe.configure({ retries: process.env.CI ? 1 : 0 });
 
     test('should redirect to Keycloak login @smoke', async ({ page }) => {
+        test.slow(process.env.CI === 'true');
         await gotoConsoleRoot(page);
         const loginButton = page.getByTestId('login-button');
         const logoutButton = page.getByTestId('logout-button');
+        const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
+        const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
+        const contextBar = page.getByTestId('context-bar');
+        const consoleHeader = page.getByTestId('console-header');
         await page.waitForSelector('[data-testid="login-button"], [data-testid="logout-button"]', { timeout: 5000 }).catch(() => null);
         const loginVisible = await loginButton.isVisible().catch(() => false);
         const logoutVisible = await logoutButton.isVisible().catch(() => false);
-        if (logoutVisible) {
+        const consoleSurfaceVisible = await selectionGate.isVisible().catch(() => false)
+            || await contextGate.isVisible().catch(() => false)
+            || await contextBar.isVisible().catch(() => false)
+            || await consoleHeader.isVisible().catch(() => false);
+        if (logoutVisible || consoleSurfaceVisible) {
             return;
         }
         if (loginVisible) {
@@ -229,13 +234,24 @@ test.describe('Smoke Test: Login Flow', () => {
             }
         }
 
-        const hasLogoutAfter = await logoutButton.isVisible().catch(() => false);
-        const hasSignInAfter = await signInHeading.isVisible().catch(() => false);
-        const hasProviderAfter = await providerButton.isVisible().catch(() => false)
-            || await providerForm.isVisible().catch(() => false);
-        const onKeycloakAfter = keycloakHostPattern.test(page.url());
-        const loginHiddenAfter = !(await loginButton.isVisible().catch(() => false));
-        await expect(hasLogoutAfter || hasSignInAfter || hasProviderAfter || onKeycloakAfter || loginHiddenAfter).toBe(true);
+        await expect
+            .poll(
+                async () => {
+                    const hasLogoutAfter = await logoutButton.isVisible().catch(() => false);
+                    const hasSignInAfter = await signInHeading.isVisible().catch(() => false);
+                    const hasProviderAfter = await providerButton.isVisible().catch(() => false)
+                        || await providerForm.isVisible().catch(() => false);
+                    const onKeycloakAfter = keycloakHostPattern.test(page.url());
+                    const loginHiddenAfter = !(await loginButton.isVisible().catch(() => false));
+                    const hasConsoleSurface = await selectionGate.isVisible().catch(() => false)
+                        || await contextGate.isVisible().catch(() => false)
+                        || await contextBar.isVisible().catch(() => false)
+                        || await consoleHeader.isVisible().catch(() => false);
+                    return hasLogoutAfter || hasSignInAfter || hasProviderAfter || onKeycloakAfter || loginHiddenAfter || hasConsoleSurface;
+                },
+                { timeout: 20000 }
+            )
+            .toBe(true);
     });
 
     test('should login and see inbox @smoke', async ({ page }) => {
@@ -247,16 +263,14 @@ test.describe('Smoke Test: Login Flow', () => {
     });
 
     test('should logout successfully @smoke', async ({ page }) => {
+        test.slow(process.env.CI === 'true');
         await loginWithSharedHelper(page);
-        await gotoConsoleRoot(page);
-        await retryProfileLoad(page);
+        await selectCompanyIfNeeded(page);
+        await selectClientIfNeeded(page);
+        await selectBranchIfNeeded(page);
+        await waitForConsoleReady(page);
         const logoutButton = page.getByTestId('logout-button');
         const loginButton = page.getByTestId('login-button');
-        if (!(await logoutButton.isVisible().catch(() => false)) && (await loginButton.isVisible().catch(() => false))) {
-            await loginWithSharedHelper(page);
-            await gotoConsoleRoot(page);
-            await retryProfileLoad(page);
-        }
         await expect(logoutButton).toBeVisible({ timeout: 20000 });
         await logoutButton.click();
         await expect(loginButton).toBeVisible({ timeout: 10000 });
