@@ -30,6 +30,18 @@ async function waitForConsoleApp(
     );
 }
 
+async function gotoConsoleRoot(page: import("@playwright/test").Page, baseURL: string) {
+    try {
+        await page.goto(baseURL, { waitUntil: "domcontentloaded", timeout: 30000 });
+    } catch (error) {
+        if (!(error instanceof Error) || (!error.message.includes("Timeout") && !error.message.includes("ERR_ABORTED"))) {
+            throw error;
+        }
+        await page.waitForTimeout(500);
+        await page.goto(baseURL, { waitUntil: "commit", timeout: 30000 });
+    }
+}
+
 export default async function globalSetup(config: FullConfig) {
     if (process.env.E2E_USE_STORAGE_STATE !== "1") {
         return;
@@ -51,7 +63,7 @@ export default async function globalSetup(config: FullConfig) {
     const page = await context.newPage();
     const stayOnBaseOrigin = shouldStayOnBaseOrigin(baseURL);
     const logoutButton = page.getByTestId("logout-button");
-    await page.goto(baseURL, { waitUntil: "domcontentloaded" });
+    await gotoConsoleRoot(page, baseURL);
     await loginThroughKeycloak(page, {
         baseURL,
         consoleHostPattern,
@@ -68,7 +80,7 @@ export default async function globalSetup(config: FullConfig) {
             if (!consoleHostPattern.test(page.url())) {
                 await waitForConsoleApp(page, consoleHostPattern);
             }
-            await page.goto(baseURL, { waitUntil: "domcontentloaded" });
+            await gotoConsoleRoot(page, baseURL);
         },
     });
 
