@@ -43,7 +43,14 @@ def _build_context(
         selected_branch_id=branch_id,
         effective_branch_id=branch_id,
         branch_restricted=branch_restricted,
-        branches=[SimpleNamespace(id=branch_id)] if branch_id else [],
+        branches=[
+            SimpleNamespace(
+                id=branch_id,
+                name="Almaty Downtown",
+                knowledge_safe_mode=False,
+                knowledge_safe_mode_reason=None,
+            )
+        ] if branch_id else [],
     )
 
 
@@ -152,6 +159,7 @@ def test_consultant_verification_routes_registered_in_openapi() -> None:
     assert "/console/v1/business/consultant-verification/findings/{finding_id}" in paths
     assert "/console/v1/business/consultant-verification/readiness" in paths
     assert "/console/v1/business/consultant-verification/compare" in paths
+    assert "/console/v1/knowledge/versions/{version_id}/retry-sync" in paths
 
 
 @pytest.mark.asyncio
@@ -1077,3 +1085,59 @@ def test_build_consultant_verification_overview_uses_selected_branch_knowledge(m
 
     assert captured["branch_id"] == branch_id
     assert response.status == "ready"
+    assert response.branch_selection_required is False
+    assert response.selected_branch_id == branch_id
+    assert response.selected_branch_name == "Almaty Downtown"
+    assert response.knowledge_sync_status == "pending" or response.knowledge_sync_status == "ready"
+
+
+def test_build_consultant_verification_overview_flags_failed_knowledge_sync(monkeypatch) -> None:
+    branch_id = uuid4()
+    context = _build_context(role="owner", branch_id=branch_id)
+    context.branches[0].knowledge_safe_mode = True
+    context.branches[0].knowledge_safe_mode_reason = "timed out"
+    version = KnowledgeVersion(
+        id=uuid4(),
+        client_id=context.client.id,
+        branch_id=branch_id,
+        status="published",
+        payload_json={"client_pack": {"salon": {"name": "Demo"}}},
+        published_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+        sync_status="failed",
+        sync_error="timed out",
+    )
+
+    monkeypatch.setattr(
+        verification_service,
+        "_load_effective_capabilities",
+        lambda *_args, **_kwargs: CapabilitiesPayload(),
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_reference_pack",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_build_scenario_catalog",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_published_knowledge_for_branch",
+        lambda **_kwargs: version,
+    )
+
+    response = verification_service.build_consultant_verification_overview(
+        db=Mock(),
+        context=context,
+        now=datetime.now(timezone.utc),
+        allowed_branch_ids=[branch_id],
+    )
+
+    assert response.status == "needs_attention"
+    assert response.knowledge_sync_status == "failed"
+    assert response.knowledge_sync_error == "timed out"
+    assert response.knowledge_safe_mode is True
+    assert "синхронизац" in response.summary.lower()

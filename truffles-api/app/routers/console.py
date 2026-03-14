@@ -215,6 +215,7 @@ from app.schemas.console import (
     ConsoleKnowledgePublishResponse,
     ConsoleKnowledgeRollbackRequest,
     ConsoleKnowledgeRollbackResponse,
+    ConsoleKnowledgeSyncRetryResponse,
     ConsoleKnowledgeValidateRequest,
     ConsoleKnowledgeValidateResponse,
     ConsoleLearningCandidate,
@@ -759,7 +760,12 @@ from app.services.knowledge_registry_service import (
     apply_pack_index_to_client_config,
     get_current_published,
     get_latest_draft,
+    knowledge_sync_status_label,
     list_history,
+    mark_knowledge_version_sync_failed,
+    mark_knowledge_version_sync_pending,
+    mark_knowledge_version_sync_ready,
+    normalize_knowledge_sync_status,
     publish_version,
     restore_version,
     sync_published_branch_docs,
@@ -2262,6 +2268,13 @@ def _serialize_branch(branch: Branch) -> ConsoleBranch:
         onboarding_updated_at=branch.onboarding_updated_at.isoformat()
         if branch.onboarding_updated_at
         else None,
+        knowledge_safe_mode=bool(getattr(branch, "knowledge_safe_mode", False)),
+        knowledge_safe_mode_reason=getattr(branch, "knowledge_safe_mode_reason", None),
+        knowledge_safe_mode_at=(
+            branch.knowledge_safe_mode_at.isoformat()
+            if isinstance(getattr(branch, "knowledge_safe_mode_at", None), datetime)
+            else None
+        ),
         go_live_state=go_live_state,
         go_live_reason=getattr(branch, "go_live_reason", None),
         go_live_reviewed_at=go_live_reviewed_at.isoformat() if go_live_reviewed_at else None,
@@ -19293,6 +19306,112 @@ async def create_console_confirmation(
         expires_at=confirmation.expires_at.isoformat(),
     )
 
+def _serialize_knowledge_sync_state(
+    version: KnowledgeVersion | None,
+    *,
+    branch: Branch | None = None,
+) -> dict[str, Any]:
+    status = normalize_knowledge_sync_status(getattr(version, "sync_status", None))
+    completed_at = getattr(version, "sync_completed_at", None)
+    if status == "pending" and version is None:
+        status = "pending"
+    return {
+        "sync_status": status if version is not None else None,
+        "sync_status_label": knowledge_sync_status_label(status) if version is not None else None,
+        "sync_error": getattr(version, "sync_error", None) if version is not None else None,
+        "sync_completed_at": completed_at.isoformat() if isinstance(completed_at, datetime) else None,
+        "knowledge_safe_mode": bool(getattr(branch, "knowledge_safe_mode", False)) if branch is not None else False,
+        "knowledge_safe_mode_reason": getattr(branch, "knowledge_safe_mode_reason", None) if branch is not None else None,
+        "knowledge_safe_mode_at": (
+            branch.knowledge_safe_mode_at.isoformat()
+            if branch is not None and isinstance(getattr(branch, "knowledge_safe_mode_at", None), datetime)
+            else None
+        ),
+    }
+
+
+def _apply_knowledge_version_sync(
+    *,
+    db: Session,
+    context,
+    branch: Branch,
+    version: KnowledgeVersion,
+    event_type_success: str,
+    event_type_failure: str,
+    audit_payload: dict[str, Any],
+    source: str,
+    backfill_other_branches: bool = True,
+) -> tuple[str, str | None, datetime]:
+    now = datetime.now(timezone.utc)
+    try:
+        sync_published_branch_docs(
+            db,
+            client_slug=context.client.name,
+            branch=branch,
+            version=version,
+            backfill_other_branches=backfill_other_branches,
+        )
+        compiled = extract_compiled_artifacts(version.payload_json, compile_if_missing=False)
+        pack_index = compiled.get("pack_index") if isinstance(compiled, dict) else None
+        if pack_index:
+            compiled_at = parse_compiled_at(compiled.get("compiled_at") if isinstance(compiled, dict) else None)
+            apply_pack_index_to_client_config(
+                context.client,
+                pack_index=pack_index,
+                version_id=version.id,
+                compiled_at=compiled_at or now,
+                source=source,
+                compiled_meta=build_compiled_pack_meta(
+                    compiled,
+                    version_id=version.id,
+                    source=source,
+                )
+                if isinstance(compiled, dict)
+                else None,
+            )
+        mark_knowledge_version_sync_ready(version, completed_at=now)
+        branch.knowledge_safe_mode = False
+        branch.knowledge_safe_mode_reason = None
+        branch.knowledge_safe_mode_at = now
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type=event_type_success,
+            entity_type="branch",
+            entity_id=branch.id,
+            payload=audit_payload,
+            client_id=context.client.id,
+            branch_id=branch.id,
+            actor_id=context.agent.id,
+            actor_name=context.agent.name,
+        )
+        db.commit()
+        return "ready", None, now
+    except Exception as exc:
+        error_message = str(exc)
+        mark_knowledge_version_sync_failed(
+            version,
+            error_message=error_message,
+            completed_at=now,
+        )
+        branch.knowledge_safe_mode = True
+        branch.knowledge_safe_mode_reason = error_message
+        branch.knowledge_safe_mode_at = now
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type=event_type_failure,
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={**audit_payload, "error": error_message},
+            client_id=context.client.id,
+            branch_id=branch.id,
+            actor_id=context.agent.id,
+            actor_name=context.agent.name,
+        )
+        db.commit()
+        return "failed", error_message, now
+
 
 @router.get(
     "/knowledge/current",
@@ -19322,12 +19441,19 @@ async def get_knowledge_current(
 
     edit_base = draft or version
     if not version and not draft:
-        return ConsoleKnowledgeCurrentResponse(version_id=None, payload=None, content=None)
+        return ConsoleKnowledgeCurrentResponse(
+            version_id=None,
+            payload=None,
+            content=None,
+            **_serialize_knowledge_sync_state(None, branch=branch),
+        )
+    sync_state = _serialize_knowledge_sync_state(version, branch=branch)
     return ConsoleKnowledgeCurrentResponse(
         version_id=version.id if version else None,
         payload=version.payload_json if version else None,
         content=_version_content(version),
         updated_at=_version_updated_at(version),
+        **sync_state,
         draft_version_id=draft.id if draft else None,
         draft_payload=draft.payload_json if draft else None,
         draft_content=_version_content(draft),
@@ -19508,6 +19634,7 @@ async def publish_knowledge(
             actor_id=context.agent.id,
             source_version_id=current.id if current else None,
         )
+        mark_knowledge_version_sync_pending(version)
         db.commit()
     except PackCompilerError as exc:
         raise ConsoleAPIError(
@@ -19517,88 +19644,39 @@ async def publish_knowledge(
             {"errors": exc.errors},
         ) from exc
 
-    now = datetime.now(timezone.utc)
-    try:
-        sync_published_branch_docs(
-            db,
-            client_slug=context.client.name,
-            branch=branch,
-            version=version,
-            backfill_other_branches=True,
-        )
-        compiled = extract_compiled_artifacts(version.payload_json, compile_if_missing=False)
-        pack_index = compiled.get("pack_index") if isinstance(compiled, dict) else None
-        if pack_index:
-            compiled_at = parse_compiled_at(compiled.get("compiled_at") if isinstance(compiled, dict) else None)
-            apply_pack_index_to_client_config(
-                context.client,
-                pack_index=pack_index,
-                version_id=version.id,
-                compiled_at=compiled_at or now,
-                source="knowledge_publish",
-                compiled_meta=build_compiled_pack_meta(
-                    compiled,
-                    version_id=version.id,
-                    source="knowledge_publish",
-                )
-                if isinstance(compiled, dict)
-                else None,
-            )
-        branch.knowledge_safe_mode = False
-        branch.knowledge_safe_mode_reason = None
-        branch.knowledge_safe_mode_at = now
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="knowledge_publish",
-            entity_type="branch",
-            entity_id=branch.id,
-            payload={
-                "version_id": str(version.id),
-                "warnings": warnings,
-                "draft_hash": draft_hash,
-                "skip_preflight_check": body.skip_preflight_check,
-            },
-            client_id=context.client.id,
-            branch_id=branch.id,
-            actor_id=context.agent.id,
-            actor_name=context.agent.name,
-        )
-        db.commit()
-    except Exception as exc:
-        branch.knowledge_safe_mode = True
-        branch.knowledge_safe_mode_reason = str(exc)
-        branch.knowledge_safe_mode_at = now
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="knowledge_publish_failed",
-            entity_type="branch",
-            entity_id=branch.id,
-            payload={
-                "version_id": str(version.id),
-                "error": str(exc),
-                "draft_hash": draft_hash,
-                "skip_preflight_check": body.skip_preflight_check,
-            },
-            client_id=context.client.id,
-            branch_id=branch.id,
-            actor_id=context.agent.id,
-            actor_name=context.agent.name,
-        )
-        db.commit()
-        raise ConsoleAPIError(
-            500,
-            "KNOWLEDGE_SYNC_FAILED",
-            "Knowledge publish failed",
-            {"error": str(exc)},
-        ) from exc
+    sync_status, sync_error, sync_completed_at = _apply_knowledge_version_sync(
+        db=db,
+        context=context,
+        branch=branch,
+        version=version,
+        event_type_success="knowledge_publish",
+        event_type_failure="knowledge_publish_failed",
+        audit_payload={
+            "version_id": str(version.id),
+            "warnings": warnings,
+            "draft_hash": draft_hash,
+            "skip_preflight_check": body.skip_preflight_check,
+        },
+        source="knowledge_publish",
+        backfill_other_branches=True,
+    )
 
     return ConsoleKnowledgePublishResponse(
         success=True,
         version_id=version.id,
         published_at=version.published_at.isoformat() if version.published_at else None,
-        message="Knowledge published",
+        message=(
+            "Версия опубликована и синхронизирована."
+            if sync_status == "ready"
+            else "Версия опубликована, но синхронизация завершилась с ошибкой."
+        ),
+        sync_status=sync_status,
+        sync_status_label=knowledge_sync_status_label(sync_status),
+        sync_error=sync_error,
+        sync_completed_at=sync_completed_at.isoformat() if sync_completed_at else None,
+        knowledge_safe_mode=bool(branch.knowledge_safe_mode),
+        knowledge_safe_mode_reason=branch.knowledge_safe_mode_reason,
+        partial_success=sync_status != "ready",
     )
 
 
@@ -19623,9 +19701,91 @@ async def list_knowledge_history(
                 created_at=item.created_at.isoformat() if item.created_at else None,
                 published_at=item.published_at.isoformat() if item.published_at else None,
                 summary=item.summary,
+                sync_status=normalize_knowledge_sync_status(getattr(item, "sync_status", None)),
+                sync_status_label=knowledge_sync_status_label(getattr(item, "sync_status", None)),
+                sync_error=getattr(item, "sync_error", None),
+                sync_completed_at=(
+                    item.sync_completed_at.isoformat()
+                    if isinstance(getattr(item, "sync_completed_at", None), datetime)
+                    else None
+                ),
             )
             for item in items
         ]
+    )
+
+
+@router.post(
+    "/knowledge/versions/{version_id}/retry-sync",
+    response_model=ConsoleKnowledgeSyncRetryResponse,
+    responses={
+        400: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def retry_knowledge_version_sync(
+    version_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleKnowledgeSyncRetryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "knowledge",
+        "write",
+        message="Only owner/admin can manage knowledge",
+    )
+    branch = _resolve_branch_from_context(context)
+    version = (
+        db.query(KnowledgeVersion)
+        .filter(
+            KnowledgeVersion.id == version_id,
+            KnowledgeVersion.branch_id == branch.id,
+            KnowledgeVersion.status == "published",
+        )
+        .first()
+    )
+    if not version:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Published knowledge version not found")
+
+    current_status = normalize_knowledge_sync_status(getattr(version, "sync_status", None))
+    if current_status == "ready" and not branch.knowledge_safe_mode:
+        sync_state = _serialize_knowledge_sync_state(version, branch=branch)
+        return ConsoleKnowledgeSyncRetryResponse(
+            success=True,
+            version_id=version.id,
+            message="Синхронизация уже актуальна.",
+            **sync_state,
+        )
+
+    mark_knowledge_version_sync_pending(version)
+    db.commit()
+    sync_status, sync_error, sync_completed_at = _apply_knowledge_version_sync(
+        db=db,
+        context=context,
+        branch=branch,
+        version=version,
+        event_type_success="knowledge_sync_retry",
+        event_type_failure="knowledge_sync_retry_failed",
+        audit_payload={"version_id": str(version.id)},
+        source="knowledge_sync_retry",
+        backfill_other_branches=True,
+    )
+    return ConsoleKnowledgeSyncRetryResponse(
+        success=True,
+        version_id=version.id,
+        sync_status=sync_status,
+        sync_status_label=knowledge_sync_status_label(sync_status),
+        sync_error=sync_error,
+        sync_completed_at=sync_completed_at.isoformat() if sync_completed_at else None,
+        knowledge_safe_mode=bool(branch.knowledge_safe_mode),
+        knowledge_safe_mode_reason=branch.knowledge_safe_mode_reason,
+        message=(
+            "Синхронизация успешно повторена."
+            if sync_status == "ready"
+            else "Синхронизация повторилась с ошибкой."
+        ),
     )
 
 
@@ -19682,6 +19842,7 @@ async def rollback_knowledge(
             source_version=version,
             actor_id=context.agent.id,
         )
+        mark_knowledge_version_sync_pending(restored)
         db.commit()
     except PackCompilerError as exc:
         raise ConsoleAPIError(
@@ -19691,101 +19852,46 @@ async def rollback_knowledge(
             {"errors": exc.errors},
         ) from exc
 
-    now = datetime.now(timezone.utc)
-    try:
-        sync_published_branch_docs(
-            db,
-            client_slug=context.client.name,
-            branch=branch,
-            version=restored,
-            backfill_other_branches=True,
-        )
-        compiled = extract_compiled_artifacts(restored.payload_json, compile_if_missing=False)
-        pack_index = compiled.get("pack_index") if isinstance(compiled, dict) else None
-        if pack_index:
-            compiled_at = parse_compiled_at(compiled.get("compiled_at") if isinstance(compiled, dict) else None)
-            apply_pack_index_to_client_config(
-                context.client,
-                pack_index=pack_index,
-                version_id=restored.id,
-                compiled_at=compiled_at or now,
-                source="knowledge_rollback",
-                compiled_meta=build_compiled_pack_meta(
-                    compiled,
-                    version_id=restored.id,
-                    source="knowledge_rollback",
-                )
-                if isinstance(compiled, dict)
-                else None,
-            )
-        branch.knowledge_safe_mode = False
-        branch.knowledge_safe_mode_reason = None
-        branch.knowledge_safe_mode_at = now
-        mark_confirmation_used(
-            db,
-            context,
-            confirmation,
-            action="knowledge_rollback",
-            target_type="knowledge_version",
-            target_id=body.version_id,
-            outcome="success",
-        )
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="knowledge_rollback",
-            entity_type="branch",
-            entity_id=branch.id,
-            payload={
-                "from_version_id": str(version.id),
-                "to_version_id": str(restored.id),
-            },
-            client_id=context.client.id,
-            branch_id=branch.id,
-            actor_id=context.agent.id,
-            actor_name=context.agent.name,
-        )
-        db.commit()
-    except Exception as exc:
-        branch.knowledge_safe_mode = True
-        branch.knowledge_safe_mode_reason = str(exc)
-        branch.knowledge_safe_mode_at = now
-        mark_confirmation_used(
-            db,
-            context,
-            confirmation,
-            action="knowledge_rollback",
-            target_type="knowledge_version",
-            target_id=body.version_id,
-            outcome="sync_failed",
-        )
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="knowledge_rollback_failed",
-            entity_type="branch",
-            entity_id=branch.id,
-            payload={
-                "from_version_id": str(version.id),
-                "to_version_id": str(restored.id),
-                "error": str(exc),
-            },
-            client_id=context.client.id,
-            branch_id=branch.id,
-            actor_id=context.agent.id,
-            actor_name=context.agent.name,
-        )
-        db.commit()
-        raise ConsoleAPIError(
-            500,
-            "KNOWLEDGE_SYNC_FAILED",
-            "Knowledge rollback failed",
-            {"error": str(exc)},
-        ) from exc
+    sync_status, sync_error, sync_completed_at = _apply_knowledge_version_sync(
+        db=db,
+        context=context,
+        branch=branch,
+        version=restored,
+        event_type_success="knowledge_rollback",
+        event_type_failure="knowledge_rollback_failed",
+        audit_payload={
+            "from_version_id": str(version.id),
+            "to_version_id": str(restored.id),
+        },
+        source="knowledge_rollback",
+        backfill_other_branches=True,
+    )
+    mark_confirmation_used(
+        db,
+        context,
+        confirmation,
+        action="knowledge_rollback",
+        target_type="knowledge_version",
+        target_id=body.version_id,
+        outcome="success" if sync_status == "ready" else "sync_failed",
+    )
+    db.commit()
 
     return ConsoleKnowledgeRollbackResponse(
         success=True,
         version_id=restored.id,
+        message=(
+            "Версия восстановлена и синхронизирована."
+            if sync_status == "ready"
+            else "Версия восстановлена, но синхронизация завершилась с ошибкой."
+        ),
+        sync_status=sync_status,
+        sync_status_label=knowledge_sync_status_label(sync_status),
+        sync_error=sync_error,
+        sync_completed_at=sync_completed_at.isoformat() if sync_completed_at else None,
+        knowledge_safe_mode=bool(branch.knowledge_safe_mode),
+        knowledge_safe_mode_reason=branch.knowledge_safe_mode_reason,
+        partial_success=sync_status != "ready",
     )
 
 

@@ -116,6 +116,9 @@ class ConsoleBranch(BaseModel):
     booking_settings: Optional[dict] = None
     onboarding_state: Optional[str] = None
     onboarding_updated_at: Optional[str] = None
+    knowledge_safe_mode: bool = False
+    knowledge_safe_mode_reason: Optional[str] = None
+    knowledge_safe_mode_at: Optional[str] = None
     go_live_state: ConsoleGoLiveState = "pending"
     go_live_reason: Optional[str] = None
     go_live_reviewed_at: Optional[str] = None
@@ -1507,8 +1510,16 @@ class ConsoleConsultantVerificationOverviewResponse(BaseModel):
     status_label: str
     summary: str
     next_wave_summary: str
+    branch_selection_required: bool = False
+    selected_branch_id: Optional[UUID] = None
+    selected_branch_name: Optional[str] = None
     knowledge_last_published_at: Optional[str] = None
     knowledge_stale_hours: Optional[int] = None
+    knowledge_sync_status: Optional[str] = None
+    knowledge_sync_status_label: Optional[str] = None
+    knowledge_sync_error: Optional[str] = None
+    knowledge_safe_mode: bool = False
+    knowledge_safe_mode_reason: Optional[str] = None
     readiness_cards: list[ConsoleConsultantVerificationReadinessCard] = []
     stress_test_examples: list[str] = []
     scenario_catalog: list["ConsoleConsultantVerificationScenarioItem"] = []
@@ -3248,6 +3259,13 @@ class ConsoleKnowledgeCurrentResponse(BaseModel):
     payload: Optional[dict] = None
     content: Optional[str] = None
     updated_at: Optional[str] = None
+    sync_status: Optional[str] = None
+    sync_status_label: Optional[str] = None
+    sync_error: Optional[str] = None
+    sync_completed_at: Optional[str] = None
+    knowledge_safe_mode: bool = False
+    knowledge_safe_mode_reason: Optional[str] = None
+    knowledge_safe_mode_at: Optional[str] = None
     draft_version_id: Optional[UUID] = None
     draft_payload: Optional[dict] = None
     draft_content: Optional[str] = None
@@ -3282,6 +3300,13 @@ class ConsoleKnowledgePublishResponse(BaseModel):
     version_id: Optional[UUID] = None
     published_at: Optional[str] = None
     message: Optional[str] = None
+    sync_status: str = "pending"
+    sync_status_label: Optional[str] = None
+    sync_error: Optional[str] = None
+    sync_completed_at: Optional[str] = None
+    knowledge_safe_mode: bool = False
+    knowledge_safe_mode_reason: Optional[str] = None
+    partial_success: bool = False
 
 
 class ConsoleKnowledgeHistoryItem(BaseModel):
@@ -3290,6 +3315,10 @@ class ConsoleKnowledgeHistoryItem(BaseModel):
     created_at: Optional[str] = None
     published_at: Optional[str] = None
     summary: Optional[str] = None
+    sync_status: Optional[str] = None
+    sync_status_label: Optional[str] = None
+    sync_error: Optional[str] = None
+    sync_completed_at: Optional[str] = None
 
 
 class ConsoleKnowledgeHistoryResponse(BaseModel):
@@ -3304,6 +3333,26 @@ class ConsoleKnowledgeRollbackRequest(BaseModel):
 class ConsoleKnowledgeRollbackResponse(BaseModel):
     success: bool
     version_id: Optional[UUID] = None
+    message: Optional[str] = None
+    sync_status: str = "pending"
+    sync_status_label: Optional[str] = None
+    sync_error: Optional[str] = None
+    sync_completed_at: Optional[str] = None
+    knowledge_safe_mode: bool = False
+    knowledge_safe_mode_reason: Optional[str] = None
+    partial_success: bool = False
+
+
+class ConsoleKnowledgeSyncRetryResponse(BaseModel):
+    success: bool
+    version_id: UUID
+    sync_status: str
+    sync_status_label: Optional[str] = None
+    sync_error: Optional[str] = None
+    sync_completed_at: Optional[str] = None
+    knowledge_safe_mode: bool = False
+    knowledge_safe_mode_reason: Optional[str] = None
+    message: Optional[str] = None
 
 
 class ConsoleTelegramHealthResponse(BaseModel):

@@ -66,6 +66,7 @@ from app.services.console_knowledge_preflight import (
     build_knowledge_draft_hash_from_payload,
     get_recent_knowledge_compare_preflight,
 )
+from app.services.knowledge_registry_service import knowledge_sync_status_label, normalize_knowledge_sync_status
 from app.services.knowledge_runtime import (
     RuntimeTruth,
     build_runtime_truth,
@@ -582,6 +583,7 @@ def derive_consultant_verification_status(
     branch_selected: bool,
     has_published_knowledge: bool,
     knowledge_stale_hours: Optional[int],
+    knowledge_sync_failed: bool,
 ) -> tuple[str, str, str]:
     if not feature_enabled:
         return (
@@ -600,6 +602,12 @@ def derive_consultant_verification_status(
             "needs_attention",
             "Сначала опубликуйте знания бизнеса",
             "Без опубликованных знаний владелец увидит только ограничения, а не качество ответов консультанта.",
+        )
+    if knowledge_sync_failed:
+        return (
+            "needs_attention",
+            "Сначала завершите синхронизацию знаний",
+            "Последняя версия уже опубликована, но синхронизация завершилась с ошибкой. Пока это не исправлено, проверка консультанта не будет честной.",
         )
     if knowledge_stale_hours is not None and knowledge_stale_hours > _KNOWLEDGE_STALE_HOURS_WARN:
         return (
@@ -628,6 +636,8 @@ def _build_readiness_cards(
     has_published_knowledge: bool,
     knowledge_last_published_at: Optional[str],
     knowledge_stale_hours: Optional[int],
+    knowledge_sync_status: Optional[str],
+    knowledge_sync_error: Optional[str],
     feature_enabled: bool,
     scenario_library_enabled: bool,
     branch_scope_limited: bool,
@@ -644,6 +654,12 @@ def _build_readiness_cards(
             "Опубликуйте актуальные знания бизнеса, чтобы будущий тест отражал реальные услуги, цены и правила."
         )
         evidence_label = "Публикация не найдена"
+    elif normalize_knowledge_sync_status(knowledge_sync_status) == "failed":
+        knowledge_state = "needs_attention"
+        knowledge_summary = (
+            "Последняя версия уже опубликована, но синхронизация завершилась с ошибкой. Сначала повторите синхронизацию, иначе owner увидит частично деградированную систему."
+        )
+        evidence_label = knowledge_sync_error or "Синхронизация завершилась с ошибкой"
     elif knowledge_stale_hours is not None and knowledge_stale_hours > _KNOWLEDGE_STALE_HOURS_WARN:
         knowledge_state = "needs_attention"
         knowledge_summary = (
@@ -864,14 +880,24 @@ def build_consultant_verification_overview(
         client_id=context.client.id,
         branch_id=branch_id,
     )
+    selected_branch = None
+    if branch_id is not None:
+        for candidate_branch in getattr(context, "branches", None) or []:
+            if getattr(candidate_branch, "id", None) == branch_id:
+                selected_branch = candidate_branch
+                break
     knowledge_last_published_at = None
     knowledge_stale_hours = None
+    knowledge_sync_status = None
+    knowledge_sync_error = None
     if latest_knowledge and latest_knowledge.published_at is not None:
         knowledge_last_published_at = latest_knowledge.published_at.isoformat()
         knowledge_stale_hours = max(
             0,
             int((now - latest_knowledge.published_at).total_seconds() // 3600),
         )
+        knowledge_sync_status = normalize_knowledge_sync_status(getattr(latest_knowledge, "sync_status", None))
+        knowledge_sync_error = getattr(latest_knowledge, "sync_error", None)
 
     has_published_knowledge = knowledge_last_published_at is not None
     status, status_label, summary = derive_consultant_verification_status(
@@ -879,6 +905,7 @@ def build_consultant_verification_overview(
         branch_selected=branch_id is not None,
         has_published_knowledge=has_published_knowledge,
         knowledge_stale_hours=knowledge_stale_hours,
+        knowledge_sync_failed=knowledge_sync_status == "failed" or bool(getattr(selected_branch, "knowledge_safe_mode", False)),
     )
     return ConsoleConsultantVerificationOverviewResponse(
         generated_at=now.isoformat(),
@@ -889,13 +916,23 @@ def build_consultant_verification_overview(
         next_wave_summary=(
             "Контур проверки уже включает safe simulation, owner chat, scenario replay, finding remediation и live vs draft compare перед Publish."
         ),
+        branch_selection_required=branch_id is None,
+        selected_branch_id=branch_id,
+        selected_branch_name=getattr(selected_branch, "name", None),
         knowledge_last_published_at=knowledge_last_published_at,
         knowledge_stale_hours=knowledge_stale_hours,
+        knowledge_sync_status=knowledge_sync_status,
+        knowledge_sync_status_label=knowledge_sync_status_label(knowledge_sync_status) if knowledge_sync_status else None,
+        knowledge_sync_error=knowledge_sync_error,
+        knowledge_safe_mode=bool(getattr(selected_branch, "knowledge_safe_mode", False)),
+        knowledge_safe_mode_reason=getattr(selected_branch, "knowledge_safe_mode_reason", None),
         readiness_cards=_build_readiness_cards(
             branch_selected=branch_id is not None,
             has_published_knowledge=has_published_knowledge,
             knowledge_last_published_at=knowledge_last_published_at,
             knowledge_stale_hours=knowledge_stale_hours,
+            knowledge_sync_status=knowledge_sync_status,
+            knowledge_sync_error=knowledge_sync_error or getattr(selected_branch, "knowledge_safe_mode_reason", None),
             feature_enabled=feature_enabled,
             scenario_library_enabled=feature_enabled,
             branch_scope_limited=allowed_branch_ids is not None,

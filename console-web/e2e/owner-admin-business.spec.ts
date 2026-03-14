@@ -40,10 +40,14 @@ async function mockKnowledgeWorkspace(
         current,
         readiness,
         validateResponse,
+        history,
+        retrySyncResponse,
     }: {
         current: Record<string, unknown>;
         readiness?: Record<string, unknown>;
         validateResponse?: Record<string, unknown>;
+        history?: Record<string, unknown>[];
+        retrySyncResponse?: Record<string, unknown> | (() => Record<string, unknown>);
     },
 ) {
     const companyId = '11111111-1111-4111-8111-111111111111';
@@ -96,8 +100,14 @@ async function mockKnowledgeWorkspace(
         await toJsonResponse(route, current);
     });
     await page.route(/.*\/api\/proxy\/knowledge\/history(?:\?.*)?$/, async (route) => {
-        await toJsonResponse(route, { items: [] });
+        await toJsonResponse(route, { items: history ?? [] });
     });
+    if (retrySyncResponse) {
+        await page.route(/.*\/api\/proxy\/knowledge\/versions\/[^/]+\/retry-sync(?:\?.*)?$/, async (route) => {
+            const payload = typeof retrySyncResponse === 'function' ? retrySyncResponse() : retrySyncResponse;
+            await toJsonResponse(route, payload);
+        });
+    }
     await page.route(/.*\/api\/proxy\/learning\/candidates(?:\?.*)?$/, async (route) => {
         await toJsonResponse(route, { items: [] });
     });
@@ -125,7 +135,9 @@ function isMockedKnowledgeWorkspaceTest(title: string) {
     return title.includes('knowledge saved draft provenance')
         || title.includes('knowledge structured draft preservation')
         || title.includes('knowledge remediation')
-        || title.includes('knowledge lossy rewrite');
+        || title.includes('knowledge lossy rewrite')
+        || title.includes('consultant verification branch gate')
+        || title.includes('knowledge publish sync failure');
 }
 
 async function resolveAuthOrigin(page: import('@playwright/test').Page) {
@@ -654,6 +666,211 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('knowledge-validation-errors')).toContainText('Нельзя упростить structured поле: Политика: оплата');
         await expect(page.getByTestId('knowledge-validation-draft-save-blocked')).toContainText('Черновик не сохранён на сервере');
         await expect(page.getByTestId('knowledge-validation-errors')).not.toContainText('Lossy structured field rewrite blocked: client_pack.policy.payment_info');
+    });
+
+    test('should let owner choose branch inline on consultant verification consultant verification branch gate', async ({ page }) => {
+        const companyId = '11111111-1111-4111-8111-111111111111';
+        const clientId = '22222222-2222-4222-8222-222222222222';
+        const branchId = '33333333-3333-4333-8333-333333333333';
+        let meCalls = 0;
+        let overviewCalls = 0;
+
+        await page.route(/.*\/api\/auth\/session(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, {
+                user: { name: 'Owner', email: 'owner@example.com' },
+                accessToken: 'e2e-owner-token',
+                expires: '2030-01-01T00:00:00.000Z',
+            });
+        });
+        await page.route('**/api/proxy/me', async (route) => {
+            meCalls += 1;
+            const branchSelected = meCalls > 1;
+            await toJsonResponse(route, {
+                agent: { id: '44444444-4444-4444-8444-444444444444', role: 'owner', name: 'Owner' },
+                client: { id: clientId, company_id: companyId, name: 'Demo Salon', slug: 'demo_salon' },
+                selected_company_id: companyId,
+                selected_branch_id: branchSelected ? branchId : null,
+                branches: [
+                    {
+                        id: branchId,
+                        client_id: clientId,
+                        company_id: companyId,
+                        name: 'Almaty Downtown',
+                        slug: 'almaty-downtown',
+                        knowledge_safe_mode: false,
+                    },
+                ],
+            });
+        });
+        await page.route(/.*\/api\/proxy\/business\/consultant-verification\/overview(?:\?.*)?$/, async (route) => {
+            overviewCalls += 1;
+            const branchSelected = overviewCalls > 1;
+            await toJsonResponse(route, {
+                generated_at: '2026-03-15T12:00:00Z',
+                feature_enabled: false,
+                status: branchSelected ? 'ready' : 'needs_attention',
+                status_label: branchSelected ? 'Основа для проверки подготовлена' : 'Сначала выберите филиал',
+                summary: branchSelected
+                    ? 'Права доступа и базовые данные готовы.'
+                    : 'Проверка консультанта и знания оцениваются в рамках конкретного филиала.',
+                next_wave_summary: 'Safe simulation runtime already enabled.',
+                branch_selection_required: !branchSelected,
+                selected_branch_id: branchSelected ? branchId : null,
+                selected_branch_name: branchSelected ? 'Almaty Downtown' : null,
+                knowledge_last_published_at: branchSelected ? '2026-03-15T11:30:00Z' : null,
+                knowledge_stale_hours: branchSelected ? 1 : null,
+                knowledge_sync_status: branchSelected ? 'ready' : null,
+                knowledge_sync_status_label: branchSelected ? 'Синхронизировано' : null,
+                knowledge_sync_error: null,
+                knowledge_safe_mode: false,
+                knowledge_safe_mode_reason: null,
+                readiness_cards: [
+                    {
+                        id: 'knowledge_readiness',
+                        title: 'Актуальные знания бизнеса',
+                        summary: branchSelected
+                            ? 'Проверка будет опираться на опубликованные знания.'
+                            : 'Сначала выберите филиал в Console. Только после этого можно честно проверить знания и ответы именно этого branch.',
+                        state: branchSelected ? 'ready' : 'needs_attention',
+                        state_label: branchSelected ? 'Готово' : 'Нужно подготовить',
+                        evidence_label: branchSelected ? 'Последняя публикация: 2026-03-15T11:30:00Z' : 'Филиал не выбран',
+                        href: '/knowledge',
+                    },
+                ],
+                stress_test_examples: ['Сколько стоит?'],
+                scenario_catalog: [],
+                actions: [],
+            });
+        });
+
+        await page.goto(`${resolvedBaseURL}/business/consultant-verification`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByTestId('consultant-verification-branch-gate')).toBeVisible();
+        await page.getByTestId('consultant-verification-branch-select').selectOption(branchId);
+        await page.getByTestId('consultant-verification-apply-branch').click();
+        await expect(page.getByTestId('consultant-verification-branch-gate')).toBeHidden();
+        await expect(page.getByTestId('consultant-verification-scope-card')).toContainText('Almaty Downtown');
+        await expect(page.getByTestId('consultant-verification-status-chip')).toContainText('ready');
+    });
+
+    test('should show published plus sync failed and allow sync retry knowledge publish sync failure', async ({ page }) => {
+        let syncRecovered = false;
+
+        await mockKnowledgeWorkspace(page, {
+            current: {
+                version_id: '99999999-9999-4999-8999-999999999999',
+                payload: {
+                    client_pack: {
+                        salon: { name: 'Sync Risk Salon' },
+                    },
+                },
+                content: JSON.stringify({
+                    client_pack: {
+                        salon: { name: 'Sync Risk Salon' },
+                    },
+                }, null, 2),
+                updated_at: '2026-03-15T10:00:00Z',
+                sync_status: 'failed',
+                sync_status_label: 'Нужна синхронизация',
+                sync_error: 'timed out',
+                knowledge_safe_mode: true,
+                knowledge_safe_mode_reason: 'timed out',
+                edit_base_source: 'published',
+                edit_base_version_id: '99999999-9999-4999-8999-999999999999',
+                edit_base_payload: {
+                    client_pack: {
+                        salon: { name: 'Sync Risk Salon' },
+                    },
+                },
+                edit_base_content: JSON.stringify({
+                    client_pack: {
+                        salon: { name: 'Sync Risk Salon' },
+                    },
+                }, null, 2),
+                edit_base_updated_at: '2026-03-15T10:00:00Z',
+            },
+            history: [
+                {
+                    id: '99999999-9999-4999-8999-999999999999',
+                    status: 'published',
+                    summary: 'Sync Risk Salon',
+                    published_at: '2026-03-15T10:00:00Z',
+                    sync_status: 'failed',
+                    sync_status_label: 'Нужна синхронизация',
+                    sync_error: 'timed out',
+                },
+            ],
+            retrySyncResponse: () => {
+                syncRecovered = true;
+                return {
+                    success: true,
+                    version_id: '99999999-9999-4999-8999-999999999999',
+                    sync_status: 'ready',
+                    sync_status_label: 'Синхронизировано',
+                    sync_error: null,
+                    message: 'Синхронизация успешно повторена.',
+                    knowledge_safe_mode: false,
+                    knowledge_safe_mode_reason: null,
+                };
+            },
+        });
+
+        await page.route(/.*\/api\/proxy\/knowledge\/current(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, syncRecovered
+                ? {
+                    version_id: '99999999-9999-4999-8999-999999999999',
+                    payload: { client_pack: { salon: { name: 'Sync Risk Salon' } } },
+                    content: JSON.stringify({ client_pack: { salon: { name: 'Sync Risk Salon' } } }, null, 2),
+                    updated_at: '2026-03-15T10:00:00Z',
+                    sync_status: 'ready',
+                    sync_status_label: 'Синхронизировано',
+                    sync_error: null,
+                    knowledge_safe_mode: false,
+                    knowledge_safe_mode_reason: null,
+                    edit_base_source: 'published',
+                    edit_base_version_id: '99999999-9999-4999-8999-999999999999',
+                    edit_base_payload: { client_pack: { salon: { name: 'Sync Risk Salon' } } },
+                    edit_base_content: JSON.stringify({ client_pack: { salon: { name: 'Sync Risk Salon' } } }, null, 2),
+                    edit_base_updated_at: '2026-03-15T10:00:00Z',
+                }
+                : {
+                    version_id: '99999999-9999-4999-8999-999999999999',
+                    payload: { client_pack: { salon: { name: 'Sync Risk Salon' } } },
+                    content: JSON.stringify({ client_pack: { salon: { name: 'Sync Risk Salon' } } }, null, 2),
+                    updated_at: '2026-03-15T10:00:00Z',
+                    sync_status: 'failed',
+                    sync_status_label: 'Нужна синхронизация',
+                    sync_error: 'timed out',
+                    knowledge_safe_mode: true,
+                    knowledge_safe_mode_reason: 'timed out',
+                    edit_base_source: 'published',
+                    edit_base_version_id: '99999999-9999-4999-8999-999999999999',
+                    edit_base_payload: { client_pack: { salon: { name: 'Sync Risk Salon' } } },
+                    edit_base_content: JSON.stringify({ client_pack: { salon: { name: 'Sync Risk Salon' } } }, null, 2),
+                    edit_base_updated_at: '2026-03-15T10:00:00Z',
+                },
+            );
+        });
+        await page.route(/.*\/api\/proxy\/knowledge\/history(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, {
+                items: [
+                    {
+                        id: '99999999-9999-4999-8999-999999999999',
+                        status: 'published',
+                        summary: 'Sync Risk Salon',
+                        published_at: '2026-03-15T10:00:00Z',
+                        sync_status: syncRecovered ? 'ready' : 'failed',
+                        sync_status_label: syncRecovered ? 'Синхронизировано' : 'Нужна синхронизация',
+                        sync_error: syncRecovered ? null : 'timed out',
+                    },
+                ],
+            });
+        });
+
+        await page.goto(`${resolvedBaseURL}/knowledge`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByTestId('knowledge-sync-warning')).toContainText('timed out');
+        await page.getByTestId('knowledge-sync-retry').click();
+        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Синхронизировано');
+        await expect(page.getByTestId('knowledge-sync-warning')).toBeHidden();
     });
 
     test('should render simple owner settings and explainability surface', async ({ page }) => {

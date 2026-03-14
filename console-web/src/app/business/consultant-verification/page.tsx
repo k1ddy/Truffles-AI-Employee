@@ -1,12 +1,15 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
+import toast from "react-hot-toast";
 
 import AccessDenied from "@/components/AccessDenied";
 import { ConsolePageError, ConsolePageSkeleton } from "@/components/PageStates";
 import { authApi, businessApi, canAccessConsole } from "@/lib/api-client";
+import { writeConsoleContextScopeToStorage } from "@/lib/console-context-storage";
 import ConsultantVerificationWorkspace from "./_components/ConsultantVerificationWorkspace";
 import { QUERY_PROFILE_CONTEXT, QUERY_PROFILE_DASHBOARD, keepPreviousData } from "@/lib/query-profiles";
 
@@ -40,6 +43,16 @@ function actionChipClass(severity: "critical" | "warn" | "info"): string {
     return "bg-slate-100 text-slate-700";
 }
 
+function syncChipClass(status?: string | null): string {
+    if (status === "ready") {
+        return "bg-emerald-100 text-emerald-800";
+    }
+    if (status === "failed") {
+        return "bg-red-100 text-red-800";
+    }
+    return "bg-slate-100 text-slate-700";
+}
+
 function formatHours(value?: number | null): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
         return "—";
@@ -58,6 +71,8 @@ const EXPECTATION_POINTS = [
 
 export default function BusinessConsultantVerificationPage() {
     const { data: session } = useSession();
+    const queryClient = useQueryClient();
+    const [branchDraftId, setBranchDraftId] = useState("");
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -71,6 +86,9 @@ export default function BusinessConsultantVerificationPage() {
 
     const role = meData?.agent?.role ?? "manager";
     const canReadBusiness = canAccessConsole(role, "business", "read");
+    const selectedClientId = meData?.client?.id ?? "";
+    const selectedCompanyId = meData?.selected_company_id ?? meData?.client?.company_id ?? "";
+    const branchOptions = useMemo(() => meData?.branches ?? [], [meData?.branches]);
 
     const { data, isLoading, error, refetch, isFetching } = useQuery({
         queryKey: ["business-consultant-verification-overview"],
@@ -83,6 +101,44 @@ export default function BusinessConsultantVerificationPage() {
         placeholderData: keepPreviousData,
         ...QUERY_PROFILE_DASHBOARD,
     });
+
+    useEffect(() => {
+        if (!branchDraftId) {
+            if (data?.selected_branch_id) {
+                setBranchDraftId(data.selected_branch_id);
+                return;
+            }
+            if (branchOptions.length === 1) {
+                setBranchDraftId(branchOptions[0]?.id ?? "");
+            }
+        }
+    }, [branchDraftId, branchOptions, data?.selected_branch_id]);
+
+    const selectedBranchContext = useMemo(() => {
+        const targetId = data?.selected_branch_id ?? meData?.selected_branch_id ?? "";
+        return branchOptions.find((branch) => branch.id === targetId) ?? null;
+    }, [branchOptions, data?.selected_branch_id, meData?.selected_branch_id]);
+    const branchSelectionRequired = Boolean(meData) && Boolean(data?.branch_selection_required);
+    const canApplyBranchContext = Boolean(branchDraftId && selectedClientId);
+
+    async function applyBranchContext() {
+        if (!canApplyBranchContext) {
+            toast.error("Сначала выберите филиал.");
+            return;
+        }
+        writeConsoleContextScopeToStorage({
+            companyId: selectedCompanyId || "",
+            clientId: selectedClientId || "",
+            branchId: branchDraftId,
+        });
+        await queryClient.invalidateQueries({ queryKey: ["console-me"] });
+        await queryClient.refetchQueries({ queryKey: ["console-me"], exact: true });
+        await queryClient.invalidateQueries({ queryKey: ["business-consultant-verification-overview"] });
+        await queryClient.invalidateQueries({ queryKey: ["business-consultant-verification-sessions"] });
+        await queryClient.invalidateQueries({ queryKey: ["business-consultant-verification-findings"] });
+        await queryClient.invalidateQueries({ queryKey: ["business-consultant-verification-readiness"] });
+        toast.success("Контекст филиала применен.");
+    }
 
     if (!session) {
         return (
@@ -155,6 +211,107 @@ export default function BusinessConsultantVerificationPage() {
                     </Link>
                 </div>
             </div>
+
+            <section
+                className="rounded-xl border border-border/60 bg-card p-4"
+                data-testid="consultant-verification-scope-card"
+            >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <p className="text-sm text-muted-foreground">Текущий контекст проверки</p>
+                        <p className="mt-1 text-base font-semibold text-foreground">
+                            {meData?.client?.name ?? "Клиент не выбран"} · {data.selected_branch_name ?? selectedBranchContext?.name ?? "Филиал не выбран"}
+                        </p>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                            Проверка использует только знания и ответы выбранного филиала. Если branch не выбран, страница не
+                            должна отправлять вас в слепой цикл между вкладками.
+                        </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className={`rounded-full px-3 py-1 font-semibold ${syncChipClass(data.knowledge_sync_status)}`}>
+                            {data.knowledge_sync_status_label ?? "Контекст нужен"}
+                        </span>
+                        <span className={`rounded-full px-3 py-1 font-semibold ${statusChipClass(data.status)}`}>
+                            {data.status_label}
+                        </span>
+                    </div>
+                </div>
+                <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        Клиент: {meData?.client?.name ?? "не выбран"}
+                    </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        Branch: {data.selected_branch_name ?? selectedBranchContext?.name ?? "не выбран"}
+                    </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        Последняя публикация: {data.knowledge_last_published_at ? new Date(data.knowledge_last_published_at).toLocaleString("ru-RU") : "—"}
+                    </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        Статус синхронизации: {data.knowledge_sync_status_label ?? "—"}
+                    </div>
+                </div>
+                {data.knowledge_sync_error ? (
+                    <p
+                        className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+                        data-testid="consultant-verification-sync-warning"
+                    >
+                        Последняя синхронизация завершилась с ошибкой: {data.knowledge_sync_error}
+                    </p>
+                ) : null}
+            </section>
+
+            {branchSelectionRequired ? (
+                <section
+                    className="mt-4 rounded-xl border border-amber-300/70 bg-amber-50 p-4"
+                    data-testid="consultant-verification-branch-gate"
+                >
+                    <p className="text-xs uppercase tracking-[0.16em] text-amber-800">Требуется выбор</p>
+                    <h2 className="mt-1 text-lg font-semibold text-foreground">Выберите филиал прямо здесь</h2>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                        `Проверка консультанта` больше не должна отправлять owner в другую вкладку только ради выбора branch.
+                    </p>
+                    {branchOptions.length > 0 ? (
+                        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                            <select
+                                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                value={branchDraftId}
+                                onChange={(event) => setBranchDraftId(event.target.value)}
+                                data-testid="consultant-verification-branch-select"
+                            >
+                                <option value="">Выберите филиал</option>
+                                {branchOptions.map((branch) => (
+                                    <option key={branch.id} value={branch.id}>
+                                        {`${branch.name ?? branch.slug ?? branch.id} · ${branch.slug ?? String(branch.id).slice(0, 8)}`}
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                className="btn-primary"
+                                onClick={() => {
+                                    void applyBranchContext();
+                                }}
+                                disabled={!canApplyBranchContext || isFetching}
+                                data-testid="consultant-verification-apply-branch"
+                            >
+                                Применить контекст
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="mt-4 rounded-lg border border-border/60 bg-background px-3 py-3 text-sm text-muted-foreground">
+                            Нет доступных филиалов в текущем контексте. Сначала выберите клиента или откройте Workspace.
+                        </div>
+                    )}
+                    <div className="mt-4 flex flex-wrap gap-3 text-sm">
+                        <Link href="/knowledge" className="btn-ghost">
+                            Открыть Знания
+                        </Link>
+                        <Link href="/company-workspace" className="btn-ghost">
+                            Открыть Workspace
+                        </Link>
+                    </div>
+                </section>
+            ) : null}
 
             <section
                 className="rounded-xl border border-border/60 bg-card p-4"
@@ -233,7 +390,7 @@ export default function BusinessConsultantVerificationPage() {
                 ))}
             </section>
 
-            {data.feature_enabled ? <ConsultantVerificationWorkspace overview={data} /> : null}
+            {data.feature_enabled && !branchSelectionRequired ? <ConsultantVerificationWorkspace overview={data} /> : null}
 
             <section className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_0.8fr]">
                 <article
