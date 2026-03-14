@@ -17,6 +17,9 @@ from app.models.compliance_lifecycle_run import ComplianceLifecycleRun
 from app.models.compliance_policy_version import CompliancePolicyVersion
 from app.models.console_branch_change import ConsoleBranchChange
 from app.models.console_confirmation import ConsoleConfirmation
+from app.models.console_consultant_verification_finding import ConsoleConsultantVerificationFinding
+from app.models.console_consultant_verification_session import ConsoleConsultantVerificationSession
+from app.models.console_consultant_verification_turn import ConsoleConsultantVerificationTurn
 from app.models.console_idempotency import ConsoleIdempotencyKey
 from app.models.console_macro import ConsoleMacro
 from app.models.console_ops_job import ConsoleOpsJob
@@ -81,6 +84,9 @@ __all__ = [
     "ClientSettings",
     "ConsoleConfirmation",
     "ConsoleBranchChange",
+    "ConsoleConsultantVerificationFinding",
+    "ConsoleConsultantVerificationSession",
+    "ConsoleConsultantVerificationTurn",
     "ConsoleIdempotencyKey",
     "ConsoleMacro",
     "ConsoleOpsJob",

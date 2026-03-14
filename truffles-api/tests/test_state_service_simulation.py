@@ -64,3 +64,28 @@ def test_apply_simulation_context_allows_allowlisted_jid(monkeypatch):
 
     assert isinstance(applied, dict)
     assert applied.get("id") == "sim-3"
+
+
+def test_apply_simulation_context_allows_internal_console_source(monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.delenv("SIMULATION_ALLOWLIST_JIDS", raising=False)
+    monkeypatch.delenv("OUTBOUND_ALLOWLIST_JIDS", raising=False)
+
+    conversation = SimpleNamespace(id=uuid4(), context={})
+    metadata = SimpleNamespace(
+        remoteJid="77015557777@s.whatsapp.net",
+        simulation_mode=True,
+        simulation_id="sim-console",
+        simulation_llm=True,
+        simulation_time=None,
+    )
+
+    applied = state_service.apply_simulation_context(
+        conversation,
+        metadata,
+        allow_internal_source=True,
+    )
+
+    assert isinstance(applied, dict)
+    assert applied.get("id") == "sim-console"
+    assert conversation.context.get("simulation", {}).get("mode") is True

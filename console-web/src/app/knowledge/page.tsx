@@ -10,6 +10,7 @@ import toast from "react-hot-toast";
 import {
     adminApi,
     authApi,
+    businessApi,
     canAccessConsole,
     confirmationsApi,
     knowledgeApi,
@@ -518,6 +519,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const [gatewayError, setGatewayError] = useState<string | null>(null);
     const [selectedVersionId, setSelectedVersionId] = useState("");
     const [lastValidatedDraft, setLastValidatedDraft] = useState<string | null>(null);
+    const [lastValidatedDraftHash, setLastValidatedDraftHash] = useState<string | null>(null);
     const [lastPublishAt, setLastPublishAt] = useState<string | null>(null);
     const [lastRollbackAt, setLastRollbackAt] = useState<string | null>(null);
     const [showRollbackConfirm, setShowRollbackConfirm] = useState(false);
@@ -613,6 +615,16 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             return response.data;
         },
         enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired,
+        retry: false,
+    });
+
+    const consultantVerificationReadinessQuery = useQuery({
+        queryKey: ["knowledge-consultant-verification-readiness", selectedClientId, selectedBranchId],
+        queryFn: async () => {
+            const response = await businessApi.getConsultantVerificationReadiness();
+            return response.data;
+        },
+        enabled: !!session && !!meData && !apiUnavailable && canEdit && !branchSelectionRequired && !!selectedBranchId,
         retry: false,
     });
 
@@ -1083,12 +1095,15 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const hasErrors = validation.errors.length > 0;
     const hasWarnings = validation.warnings.length > 0;
     const isDraftDirty = lastValidatedDraft !== null && lastValidatedDraft !== draftText;
+    const consultantVerificationReadiness = consultantVerificationReadinessQuery.data?.readiness;
+    const compareReady = consultantVerificationReadiness?.status === "ready";
     const canPublish = canEdit
         && !apiUnavailable
         && validation.ran
         && !hasErrors
         && !isDraftDirty
         && (!hasWarnings || ackWarnings)
+        && compareReady
         && draftText.trim().length > 0;
 
     const validateMutation = useMutation({
@@ -1101,9 +1116,14 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             const warnings = normalizeStringList(data?.warnings);
             const diff = typeof data?.diff === "string" ? data.diff : "";
             const valid = data?.valid ?? errors.length === 0;
+            const draftHash = typeof data?.draft_hash === "string" ? data.draft_hash : null;
             setValidation({ ran: true, errors, warnings, diff });
             setLastValidatedDraft(draftText);
+            setLastValidatedDraftHash(draftHash);
             setAckWarnings(false);
+            void queryClient.invalidateQueries({
+                queryKey: ["knowledge-consultant-verification-readiness", selectedClientId, selectedBranchId],
+            });
             if (valid) {
                 toast.success("Валидация пройдена");
             } else {
@@ -1155,6 +1175,11 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             if (extractApiErrorCode(error) === "KNOWLEDGE_PREFLIGHT_REQUIRED") {
                 toast.error("Сначала выполните Validate для текущего draft, затем Publish.");
                 setStepIndex(1);
+                return;
+            }
+            if (extractApiErrorCode(error) === "KNOWLEDGE_COMPARE_REQUIRED") {
+                toast.error("Сначала выполните live vs draft compare для текущего draft.");
+                setStepIndex(3);
                 return;
             }
             const code = extractApiErrorCode(error);
@@ -2528,6 +2553,35 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                         {isDraftDirty ? "yes" : "no"}
                                     </span>
                                 </div>
+                                <div className="flex items-center justify-between mt-2">
+                                    <span>Consultant compare</span>
+                                    <span className={compareReady ? "text-green-600" : "text-amber-600"}>
+                                        {consultantVerificationReadiness?.status_label ?? "not run"}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="rounded-lg border border-border/60 bg-muted/20 p-4 text-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                        <p className="font-medium text-foreground">Проверка live vs draft</p>
+                                        <p className="mt-1 text-muted-foreground">
+                                            {consultantVerificationReadiness?.summary
+                                                ?? "После Validate откройте проверку консультанта и прогоните хотя бы один compare-кейс."}
+                                        </p>
+                                    </div>
+                                    <Link
+                                        href="/business/consultant-verification"
+                                        className="text-sm font-medium text-foreground underline underline-offset-4"
+                                    >
+                                        Открыть compare
+                                    </Link>
+                                </div>
+                                {lastValidatedDraftHash ? (
+                                    <p className="mt-3 text-xs text-muted-foreground">
+                                        Draft hash: {lastValidatedDraftHash}
+                                    </p>
+                                ) : null}
                             </div>
 
                             {hasWarnings && (
@@ -2553,7 +2607,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             </button>
                             {!canPublish && (
                                 <p className="text-xs text-muted-foreground">
-                                    Publish доступен только после валидации без ошибок и подтверждения warnings.
+                                    Publish доступен только после Validate без ошибок, подтверждения warnings и green compare для текущего draft.
                                 </p>
                             )}
                         </div>

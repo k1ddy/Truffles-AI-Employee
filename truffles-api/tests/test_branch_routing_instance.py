@@ -615,6 +615,78 @@ def test_preflight_rejects_invalid_tenant_context_contract(client_slug: str):
 
 
 @pytest.mark.parametrize("client_slug", ["demo_salon", "generic"])
+def test_preflight_preserves_origin_source_in_effective_tenant_context(client_slug: str):
+    client = SimpleNamespace(id=uuid4(), name=client_slug, company_id=None)
+    settings = SimpleNamespace(branch_resolution_mode="hybrid", webhook_secret=None)
+    resolved_branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=client.id,
+        instance_id="instance-1",
+        knowledge_tag="branch-a",
+        slug="branch-a",
+        is_active=True,
+    )
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = resolved_branch
+    branch_query.filter.return_value.all.return_value = []
+
+    def _query_side_effect(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Branch or getattr(model, "key", None) == "phone":
+            return branch_query
+        return Mock()
+
+    db = Mock()
+    db.query.side_effect = _query_side_effect
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug=client_slug,
+        body=WebhookBody(
+            message="hello",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                instanceId="instance-1",
+            ),
+        ),
+        tenant_context={
+            "client_id": str(client.id),
+            "client_slug": client_slug,
+            "source": "system",
+            "origin_source": "console_consultant_verification",
+            "instance_id": "instance-1",
+        },
+    )
+
+    with patch("app.routers.webhook.http._lookup_sender_branch", return_value=None), patch(
+        "app.routers.webhook.http.resolve_active_branch_by_instance",
+        return_value=SimpleNamespace(branch=resolved_branch, match_mode="exact"),
+    ):
+        response, preflight_payload = _run_preflight(
+            payload,
+            db,
+            provided_secret=None,
+            enforce_secret=False,
+            conversation_id=None,
+            resolve_trace_conversation=lambda **_: None,
+            record_early_trace=lambda *args, **kwargs: False,
+        )
+
+    assert response is None
+    assert preflight_payload["tenant_context"]["source"] == "system"
+    assert preflight_payload["tenant_context"]["origin_source"] == "console_consultant_verification"
+
+
+@pytest.mark.parametrize("client_slug", ["demo_salon", "generic"])
 def test_preflight_rejects_tenant_context_branch_mismatch(client_slug: str):
     client = SimpleNamespace(id=uuid4(), name=client_slug, company_id=None)
     settings = SimpleNamespace(branch_resolution_mode="hybrid", webhook_secret=None)

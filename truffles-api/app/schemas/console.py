@@ -1369,6 +1369,8 @@ class ConsoleHealthResponse(BaseModel):
 
 ConsoleBusinessSeverity = Literal["critical", "warn", "info"]
 ConsoleBusinessStatus = Literal["healthy", "degraded", "unhealthy"]
+ConsoleConsultantVerificationStatus = Literal["ready", "needs_attention", "not_enabled"]
+ConsoleConsultantVerificationCardState = Literal["ready", "needs_attention", "planned"]
 ConsoleSubscriptionQuotaSource = Literal["company_billing_info", "client_config", "unknown"]
 ConsoleSubscriptionAlertLevel = Literal["normal", "warning_80", "limit_100"]
 ConsoleFactKind = Literal["fact", "estimate", "missing"]
@@ -1486,6 +1488,264 @@ class ConsoleBusinessSummaryResponse(BaseModel):
     first_response_p90_seconds: Optional[float] = None
     actions: list[ConsoleBusinessActionItem] = []
     metric_meta: dict[str, ConsoleMetricFactMeta] = {}
+
+
+class ConsoleConsultantVerificationReadinessCard(BaseModel):
+    id: str
+    title: str
+    summary: str
+    state: ConsoleConsultantVerificationCardState
+    state_label: str
+    evidence_label: Optional[str] = None
+    href: Optional[str] = None
+
+
+class ConsoleConsultantVerificationOverviewResponse(BaseModel):
+    generated_at: str
+    feature_enabled: bool = False
+    status: ConsoleConsultantVerificationStatus
+    status_label: str
+    summary: str
+    next_wave_summary: str
+    knowledge_last_published_at: Optional[str] = None
+    knowledge_stale_hours: Optional[int] = None
+    readiness_cards: list[ConsoleConsultantVerificationReadinessCard] = []
+    stress_test_examples: list[str] = []
+    scenario_catalog: list["ConsoleConsultantVerificationScenarioItem"] = []
+    actions: list[ConsoleBusinessActionItem] = []
+
+
+ConsoleConsultantVerificationSourceMode = Literal["live", "draft"]
+ConsoleConsultantVerificationChallengeMode = Literal["as_client", "stress"]
+ConsoleConsultantVerificationSessionStatus = Literal["active", "completed"]
+ConsoleConsultantVerificationOutcome = Literal["fact", "collect", "handoff"]
+ConsoleConsultantVerificationBusinessVerdict = Literal[
+    "answered",
+    "needs_clarification",
+    "handoff",
+    "gap_detected",
+]
+ConsoleConsultantVerificationTurnRole = Literal["owner", "consultant", "system"]
+ConsoleConsultantVerificationScenarioCategory = Literal[
+    "core_info",
+    "pricing",
+    "booking",
+    "policy",
+    "handoff",
+    "stress",
+]
+ConsoleConsultantVerificationScenarioSource = Literal[
+    "domain_blueprint",
+    "capabilities",
+    "reference_pack",
+]
+ConsoleConsultantVerificationFindingStatus = Literal[
+    "new",
+    "in_review",
+    "needs_data",
+    "fixed",
+    "retested",
+]
+ConsoleConsultantVerificationFindingFamilyKind = Literal[
+    "knowledge_gap",
+    "policy_boundary",
+    "clarification_loop",
+    "answer_quality",
+]
+ConsoleConsultantVerificationCompareCaseSource = Literal["prompt", "finding"]
+ConsoleConsultantVerificationCompareDelta = Literal[
+    "improved",
+    "unchanged",
+    "regressed",
+    "needs_review",
+]
+ConsoleConsultantVerificationReadinessStatus = Literal[
+    "ready",
+    "needs_attention",
+    "blocked",
+]
+
+
+class ConsoleConsultantVerificationSessionCreateRequest(ConsoleRequestModel):
+    source_mode: ConsoleConsultantVerificationSourceMode = "live"
+    challenge_mode: ConsoleConsultantVerificationChallengeMode = "as_client"
+    title: Optional[StrictStr] = None
+
+
+class ConsoleConsultantVerificationMessageCreateRequest(ConsoleRequestModel):
+    content: StrictStr
+
+
+class ConsoleConsultantVerificationFindingCreateRequest(ConsoleRequestModel):
+    assistant_turn_id: UUID
+    owner_note: Optional[StrictStr] = None
+
+
+class ConsoleConsultantVerificationFindingUpdateRequest(ConsoleRequestModel):
+    status: ConsoleConsultantVerificationFindingStatus
+    resolution_note: Optional[StrictStr] = None
+
+
+class ConsoleConsultantVerificationCompareRequest(ConsoleRequestModel):
+    prompt: Optional[StrictStr] = None
+    finding_id: Optional[UUID] = None
+    mark_finding_retested: bool = False
+
+
+class ConsoleConsultantVerificationScenarioItem(BaseModel):
+    id: str
+    title: str
+    description: str
+    prompt: str
+    category: ConsoleConsultantVerificationScenarioCategory
+    source: ConsoleConsultantVerificationScenarioSource
+    source_label: str
+    recommended_challenge_mode: ConsoleConsultantVerificationChallengeMode = "as_client"
+    tags: list[str] = []
+
+
+class ConsoleConsultantVerificationTurnRecord(BaseModel):
+    id: UUID
+    turn_index: int
+    role: ConsoleConsultantVerificationTurnRole
+    content: str
+    created_at: str
+    outcome: Optional[ConsoleConsultantVerificationOutcome] = None
+    business_verdict: Optional[ConsoleConsultantVerificationBusinessVerdict] = None
+    source_refs: list[str] = []
+    decision_meta: dict[str, Any] = {}
+    decision_trace: list[dict[str, Any]] = []
+    preview: dict[str, Any] = {}
+    would_handoff: bool = False
+    would_book: bool = False
+    gap_detected: bool = False
+
+
+class ConsoleConsultantVerificationSessionWeakTurn(BaseModel):
+    assistant_turn_id: UUID
+    assistant_turn_index: int
+    owner_prompt: str
+    assistant_excerpt: str
+    business_verdict: ConsoleConsultantVerificationBusinessVerdict
+
+
+class ConsoleConsultantVerificationSessionSummary(BaseModel):
+    assistant_turns_total: int = 0
+    answered_total: int = 0
+    needs_clarification_total: int = 0
+    handoff_total: int = 0
+    gap_detected_total: int = 0
+    replay_prompt_total: int = 0
+    latest_verdict: Optional[ConsoleConsultantVerificationBusinessVerdict] = None
+    weak_turns: list[ConsoleConsultantVerificationSessionWeakTurn] = []
+
+
+class ConsoleConsultantVerificationFindingRecord(BaseModel):
+    id: UUID
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    actor_agent_id: UUID
+    actor_role: ConsoleAgentRole
+    session_id: UUID
+    owner_turn_id: Optional[UUID] = None
+    assistant_turn_id: UUID
+    source_mode: ConsoleConsultantVerificationSourceMode
+    challenge_mode: ConsoleConsultantVerificationChallengeMode
+    family_key: str
+    family_kind: ConsoleConsultantVerificationFindingFamilyKind
+    family_label: str
+    status: ConsoleConsultantVerificationFindingStatus
+    status_label: str
+    owner_prompt: str
+    assistant_excerpt: str
+    owner_note: Optional[str] = None
+    resolution_note: Optional[str] = None
+    outcome: Optional[ConsoleConsultantVerificationOutcome] = None
+    business_verdict: Optional[ConsoleConsultantVerificationBusinessVerdict] = None
+    decision_reason_code: Optional[str] = None
+    source_refs: list[str] = []
+    latest_preview: dict[str, Any] = {}
+    linked_knowledge_backlog_id: Optional[UUID] = None
+    linked_learning_candidate_id: Optional[UUID] = None
+    repeat_count: int = 1
+    first_captured_at: str
+    last_captured_at: str
+    created_at: str
+    updated_at: str
+
+
+class ConsoleConsultantVerificationFindingListResponse(BaseModel):
+    items: list[ConsoleConsultantVerificationFindingRecord] = []
+
+
+class ConsoleConsultantVerificationCompareCaseRecord(BaseModel):
+    case_id: str
+    label: str
+    source: ConsoleConsultantVerificationCompareCaseSource
+    finding_id: Optional[UUID] = None
+    live_turn: ConsoleConsultantVerificationTurnRecord
+    draft_turn: ConsoleConsultantVerificationTurnRecord
+    delta: ConsoleConsultantVerificationCompareDelta
+    delta_label: str
+    summary: str
+    retested_finding: bool = False
+
+
+class ConsoleConsultantVerificationCompareReadiness(BaseModel):
+    status: ConsoleConsultantVerificationReadinessStatus
+    status_label: str
+    summary: str
+    draft_hash: Optional[str] = None
+    compared_at: Optional[str] = None
+    total_cases: int = 0
+    improved_total: int = 0
+    unchanged_total: int = 0
+    regressed_total: int = 0
+    manual_review_total: int = 0
+    retested_total: int = 0
+    compare_required: bool = False
+
+
+class ConsoleConsultantVerificationCompareResponse(BaseModel):
+    readiness: ConsoleConsultantVerificationCompareReadiness
+    cases: list[ConsoleConsultantVerificationCompareCaseRecord] = []
+
+
+class ConsoleConsultantVerificationSessionRecord(BaseModel):
+    id: UUID
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    actor_agent_id: UUID
+    actor_role: ConsoleAgentRole
+    source_mode: ConsoleConsultantVerificationSourceMode
+    challenge_mode: ConsoleConsultantVerificationChallengeMode
+    status: ConsoleConsultantVerificationSessionStatus = "active"
+    title: Optional[str] = None
+    turns_total: int = 0
+    latest_outcome: Optional[ConsoleConsultantVerificationOutcome] = None
+    latest_business_verdict: Optional[ConsoleConsultantVerificationBusinessVerdict] = None
+    latest_preview: dict[str, Any] = {}
+    created_at: str
+    updated_at: str
+    last_message_at: Optional[str] = None
+
+
+class ConsoleConsultantVerificationSessionResponse(BaseModel):
+    session: ConsoleConsultantVerificationSessionRecord
+    turns: list[ConsoleConsultantVerificationTurnRecord] = []
+    summary: ConsoleConsultantVerificationSessionSummary = ConsoleConsultantVerificationSessionSummary()
+
+
+class ConsoleConsultantVerificationSessionListResponse(BaseModel):
+    items: list[ConsoleConsultantVerificationSessionRecord] = []
+
+
+class ConsoleConsultantVerificationReadinessResponse(BaseModel):
+    readiness: ConsoleConsultantVerificationCompareReadiness
+
+
+ConsoleConsultantVerificationOverviewResponse.model_rebuild()
+ConsoleConsultantVerificationSessionResponse.model_rebuild()
 
 
 class ConsoleSubscriptionEvidenceItem(BaseModel):
@@ -2998,6 +3258,7 @@ class ConsoleKnowledgeValidateResponse(BaseModel):
     errors: list[str]
     warnings: list[str]
     diff: Optional[str] = None
+    draft_hash: Optional[str] = None
 
 
 class ConsoleKnowledgePublishRequest(BaseModel):

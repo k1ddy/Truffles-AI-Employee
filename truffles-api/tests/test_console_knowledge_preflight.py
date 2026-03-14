@@ -56,6 +56,17 @@ def test_build_knowledge_validate_payload_contains_hash_and_counts() -> None:
     assert payload["draft_hash"] == "abc123"
 
 
+def test_build_knowledge_draft_hash_from_payload_is_format_stable() -> None:
+    left = preflight.build_knowledge_draft_hash_from_payload(
+        {"client_pack": {"salon": {"name": "Demo"}, "operations": {"hours": {"days": "Mon-Sun"}}}},
+    )
+    right = preflight.build_knowledge_draft_hash_from_payload(
+        {"client_pack": {"operations": {"hours": {"days": "Mon-Sun"}}, "salon": {"name": "Demo"}}},
+    )
+
+    assert left == right
+
+
 def test_has_recent_knowledge_preflight_true_for_matching_valid_event() -> None:
     draft_hash = preflight.build_knowledge_draft_hash("draft")
     db = _DBStub(
@@ -86,6 +97,40 @@ def test_has_recent_knowledge_preflight_false_for_hash_mismatch() -> None:
         client_id=uuid4(),
         branch_id=uuid4(),
         draft_hash="target_hash",
+    )
+
+    assert result is False
+
+
+def test_has_recent_knowledge_compare_preflight_true_for_ready_match() -> None:
+    db = _DBStub(
+        [
+            _event({"draft_hash": "draft-1", "status": "ready", "ready": True}),
+        ]
+    )
+
+    result = preflight.has_recent_knowledge_compare_preflight(
+        db=db,
+        client_id=uuid4(),
+        branch_id=uuid4(),
+        draft_hash="draft-1",
+    )
+
+    assert result is True
+
+
+def test_has_recent_knowledge_compare_preflight_false_when_not_ready() -> None:
+    db = _DBStub(
+        [
+            _event({"draft_hash": "draft-1", "status": "needs_attention", "ready": False}),
+        ]
+    )
+
+    result = preflight.has_recent_knowledge_compare_preflight(
+        db=db,
+        client_id=uuid4(),
+        branch_id=uuid4(),
+        draft_hash="draft-1",
     )
 
     assert result is False

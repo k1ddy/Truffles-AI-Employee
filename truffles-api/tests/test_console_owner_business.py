@@ -7,6 +7,7 @@ import pytest
 
 from app.routers import console as console_router
 from app.schemas.console import (
+    ConsoleConsultantVerificationOverviewResponse,
     ConsoleIncidentItem,
     ConsoleKnowledgePublishRequest,
     ConsoleMetricFactMeta,
@@ -286,6 +287,59 @@ def test_derive_business_status_thresholds() -> None:
     assert unhealthy_status == "unhealthy"
     assert degraded_status == "degraded"
     assert healthy_status == "healthy"
+
+
+def test_resolve_consultant_verification_enabled_prefers_nested_flag() -> None:
+    context_enabled = _build_context(
+        role="owner",
+        client_config={
+            "console_features": {
+                "consultant_verification": {
+                    "enabled": True,
+                }
+            },
+            "consultant_verification_enabled": False,
+        },
+    )
+    context_disabled = _build_context(
+        role="owner",
+        client_config={
+            "owner_consultant_verification": {
+                "enabled": "false",
+            }
+        },
+    )
+
+    assert console_router._resolve_consultant_verification_enabled(context_enabled) is True
+    assert console_router._resolve_consultant_verification_enabled(context_disabled) is False
+
+
+def test_derive_consultant_verification_status_thresholds() -> None:
+    disabled_status, disabled_label, disabled_summary = console_router._derive_consultant_verification_status(
+        feature_enabled=False,
+        has_published_knowledge=True,
+        knowledge_stale_hours=4,
+    )
+    missing_status, missing_label, missing_summary = console_router._derive_consultant_verification_status(
+        feature_enabled=True,
+        has_published_knowledge=False,
+        knowledge_stale_hours=None,
+    )
+    ready_status, ready_label, ready_summary = console_router._derive_consultant_verification_status(
+        feature_enabled=True,
+        has_published_knowledge=True,
+        knowledge_stale_hours=12,
+    )
+
+    assert disabled_status == "not_enabled"
+    assert "не включен" in disabled_label.lower()
+    assert "обзор" in disabled_summary.lower()
+    assert missing_status == "needs_attention"
+    assert "знания" in missing_label.lower()
+    assert "знаний" in missing_summary.lower()
+    assert ready_status == "ready"
+    assert "основа" in ready_label.lower()
+    assert "без реальных действий" in ready_summary.lower()
 
 
 def test_derive_data_trust_status_thresholds() -> None:
@@ -681,6 +735,7 @@ async def test_publish_knowledge_requires_recent_preflight(monkeypatch):
             reference_pack_domain_slug=None,
         ),
     )
+    monkeypatch.setattr(console_router, "get_current_published", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(console_router, "has_recent_knowledge_preflight", lambda *_args, **_kwargs: False)
 
     with pytest.raises(ConsoleAPIError) as exc_info:
@@ -923,6 +978,53 @@ async def test_business_summary_requires_business_permission(monkeypatch):
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_consultant_verification_overview_requires_business_permission(monkeypatch):
+    context = _build_context(role="support")
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_business_consultant_verification_overview(
+            request=SimpleNamespace(),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_consultant_verification_overview_returns_service_payload(monkeypatch):
+    context = _build_context(role="owner")
+    db = SimpleNamespace()
+    expected = ConsoleConsultantVerificationOverviewResponse(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        feature_enabled=False,
+        status="not_enabled",
+        status_label="Контур проверки еще не включен",
+        summary="Сейчас доступен обзор готовности.",
+        next_wave_summary="Следующая волна подключит безопасный тестовый диалог.",
+        readiness_cards=[],
+        stress_test_examples=["Задайте неудобный вопрос."],
+        actions=[],
+    )
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "_resolve_branch_scope", lambda _context: None)
+    monkeypatch.setattr(
+        console_router,
+        "_build_consultant_verification_overview",
+        lambda **kwargs: expected,
+    )
+
+    response = await console_router.get_business_consultant_verification_overview(
+        request=SimpleNamespace(),
+        db=db,
+    )
+
+    assert response == expected
 
 
 @pytest.mark.asyncio

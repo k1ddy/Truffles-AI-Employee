@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import {
     buildSignInUrl,
@@ -5,7 +7,7 @@ import {
     shouldStayOnBaseOrigin,
 } from './support/keycloak-auth';
 
-const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
+const consoleHostPattern = /localhost(?::\d+)?|127\.0\.0\.1(?::\d+)?|192\.168\.5\.27:3000|console\.truffles\.kz/;
 const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
 const stayOnBaseOrigin = shouldStayOnBaseOrigin(baseURL);
@@ -13,6 +15,7 @@ const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
 const isLocalBaseURL = /localhost|127\.0\.0\.1/.test(baseURL);
 const quarantineLocal = !!process.env.CI && isLocalBaseURL;
+const consultantVerificationScreenshotDir = process.env.E2E_CONSULTANT_VERIFICATION_SCREENSHOT_DIR;
 
 let resolvedBaseURL = baseURL;
 
@@ -135,8 +138,37 @@ async function resolveConsoleRole(page: import('@playwright/test').Page) {
 
 async function requireOwnerAdminRoleOrSkip(page: import('@playwright/test').Page) {
     const role = await resolveConsoleRole(page);
-    if (role && role !== 'owner' && role !== 'admin') {
-        test.skip(true, `owner/admin credentials required for this lane; current role=${role}`);
+    if (role && role !== 'owner' && role !== 'admin' && role !== 'platform_admin') {
+        test.skip(true, `owner/admin/platform_admin credentials required for this lane; current role=${role}`);
+    }
+}
+
+async function captureConsultantVerificationScreenshots(page: import('@playwright/test').Page) {
+    if (!consultantVerificationScreenshotDir) {
+        return;
+    }
+
+    mkdirSync(consultantVerificationScreenshotDir, { recursive: true });
+    const originalViewport = page.viewportSize();
+    const viewports = [
+        { width: 390, height: 1400 },
+        { width: 1024, height: 1600 },
+        { width: 1280, height: 1600 },
+        { width: 1440, height: 1600 },
+    ];
+
+    await page.evaluate(() => window.scrollTo(0, 0));
+    for (const viewport of viewports) {
+        await page.setViewportSize(viewport);
+        await page.waitForTimeout(750);
+        await page.screenshot({
+            path: join(consultantVerificationScreenshotDir, `consultant-verification-${viewport.width}.png`),
+            fullPage: true,
+        });
+    }
+
+    if (originalViewport) {
+        await page.setViewportSize(originalViewport);
     }
 }
 
@@ -217,6 +249,58 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('subscription-alert')).toBeVisible();
         await expect(page.getByTestId('subscription-forecast-v2')).toBeVisible();
         await expect(page.getByTestId('subscription-actions')).toBeVisible();
+    });
+
+    test('should render consultant verification overview foundation @smoke consultant verification', async ({ page }) => {
+        await requireOwnerAdminRoleOrSkip(page);
+        await expect(page.getByTestId('nav-consultant-verification')).toBeVisible();
+
+        await page.getByTestId('nav-consultant-verification').click();
+        await expect(page).toHaveURL(urlPathPattern('/business/consultant-verification'));
+        await expect(page.getByTestId('consultant-verification-page')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-title')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-status-card')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-readiness-grid')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-examples')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-actions')).toBeVisible();
+    });
+
+    test('should render consultant verification chat workspace, scenario tools, compare, and findings when rollout is enabled @smoke consultant verification chat consultant verification scenarios consultant verification findings consultant verification compare', async ({ page }) => {
+        test.slow();
+        await requireOwnerAdminRoleOrSkip(page);
+        await page.getByTestId('nav-consultant-verification').click();
+        await expect(page).toHaveURL(urlPathPattern('/business/consultant-verification'));
+        const featureGate = page.getByTestId('consultant-verification-feature-gate');
+        if (await featureGate.isVisible().catch(() => false)) {
+            test.skip(true, 'consultant verification rollout disabled for current client');
+        }
+
+        await expect(page.getByTestId('consultant-verification-workspace')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-session-list')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-explainer')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-composer')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-scenario-library')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-session-summary')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-compare')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-findings')).toBeVisible();
+
+        await page.getByTestId('consultant-verification-mode-stress').click();
+        await page.getByTestId('consultant-verification-start-session').click();
+        await page.getByTestId('consultant-verification-composer-input').fill('Какие услуги у вас есть и что вы не можете сделать без менеджера?');
+        await page.getByTestId('consultant-verification-send').click();
+
+        await expect(page.getByTestId('consultant-verification-turn-1')).toBeVisible({ timeout: 30000 });
+        await expect(page.getByTestId('consultant-verification-turn-2')).toBeVisible({ timeout: 30000 });
+        await expect(page.getByTestId('consultant-verification-turn-verdict').first()).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-advanced-details')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-summary-answered')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-summary-gap')).toBeVisible();
+
+        await page.getByTestId('consultant-verification-finding-note').fill('Этот ответ нужно сохранить на разбор.');
+        await page.getByTestId('consultant-verification-create-finding').click();
+        await expect(page.getByTestId('consultant-verification-findings')).toContainText('Найденные слабые места');
+        await expect(page.getByTestId('consultant-verification-compare-last-prompt')).toBeVisible();
+        await captureConsultantVerificationScreenshots(page);
     });
 
     test('should render simple owner settings and explainability surface @smoke', async ({ page }) => {

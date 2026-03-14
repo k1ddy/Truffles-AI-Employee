@@ -508,6 +508,11 @@
     `truffles-api/app/routers/webhook/decision.py` (`get_simulation_time`).
   - Tests/Runbooks: `docs/TASK_PACKAGES/TP-2026-01-25-sim-time-override.md`, `ops/diagnose.py`.
   - Limits/GAP: LLM is skipped unless `simulation_llm=true`; time override only applies when simulation_time is present.
+- **Owner/Admin consultant verification compare override.**
+  - Facts/Code: `truffles-api/app/services/console_consultant_verification.py` (`run_consultant_verification_compare`),
+    `truffles-api/app/services/knowledge_runtime.py` (`set_runtime_truth_override`, `build_runtime_truth_from_payload`).
+  - Tests/Runbooks: `truffles-api/tests/test_console_consultant_verification_api.py`.
+  - Limits/GAP: compare currently runs one prompt/finding at a time; publish gate depends on a recent compare proof for the saved branch draft.
 
 ### S) Admin & ops endpoints (non-console)
 - **Admin token gate (X-Admin-Token / ALERTS_ADMIN_TOKEN).**

@@ -1,0 +1,46 @@
+# SESSION 2026-03-13-owner-consultant-verification-wave1-a920 — Session 2026-03-13-owner-consultant-verification-wave1-a920
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave1-a920.md
+- block_id: CONSOLE-OWNER-CONSULTANT-VERIFICATION-WAVE1-A920
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-13-owner-consultant-verification-program-a920@wave1
+- worktree: /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920
+- base_ref: origin/main
+- scope: Wave1 owner/admin consultant verification entrypoint, overview contract, route shell, and targeted smoke coverage in the existing worktree.
+- done:
+  - Reviewed Wave1 Task Package and current owner/admin business route inventory.
+  - Confirmed the correct implementation order is Wave1 route/overview first, then safe simulation in Wave2.
+  - Added `Business -> Проверка консультанта` route shell, navigation entry, and business-home shortcut.
+  - Added thin backend overview endpoint plus extracted service helper in `truffles-api/app/services/console_consultant_verification.py`.
+  - Synced OpenAPI and generated frontend types for the new owner/admin route.
+  - Ran targeted backend/frontend checks; attempted local Playwright smoke and captured auth-environment blocker explicitly.
+- next:
+  - Start Wave2 safe simulation runtime contract on top of the shipped overview entrypoint.
+  - Keep the existing Keycloak local auth timeout as infra test debt until the shared owner/admin smoke lane is stable again.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave1-a920.md
+  - console-web/src/app/business/consultant-verification/page.tsx
+  - console-web/src/components/ConsoleShell.tsx
+  - console-web/src/app/business/page.tsx
+  - console-web/src/lib/api-client.ts
+  - console-web/src/types/api.generated.ts
+  - console-web/e2e/owner-admin-business.spec.ts
+  - truffles-api/app/routers/console.py
+  - truffles-api/app/schemas/console.py
+  - truffles-api/app/services/console_consultant_verification.py
+  - truffles-api/tests/test_console_owner_business.py
+  - contracts/console_api/openapi.v1.yaml
+  - `pytest -q tests/test_console_owner_business.py -k consultant_verification`
+  - `ruff check app/routers/console.py app/schemas/console.py app/services/console_consultant_verification.py tests/test_console_owner_business.py`
+  - `python3 scripts/generate_openapi.py --check`
+  - `npm run generate:api`
+  - `npm run lint -- --file src/components/ConsoleShell.tsx --file src/app/business/consultant-verification/page.tsx --file src/app/business/page.tsx --file e2e/owner-admin-business.spec.ts`
+  - `npm run build`
+  - `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --grep "consultant verification"` (auth timeout)
+- last_updated: 2026-03-13T20:05:00+05:00

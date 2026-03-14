@@ -1,0 +1,29 @@
+# SESSION 2026-03-14-owner-consultant-verification-wave6-a920 — Session 2026-03-14-owner-consultant-verification-wave6-a920
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-13-owner-consultant-verification-wave6-a920.md
+- block_id: CONSOLE-OWNER-CONSULTANT-VERIFICATION-WAVE6-A920
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-13-owner-consultant-verification-program-a920@wave6
+- worktree: /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920
+- base_ref: origin/main
+- scope: Wave6 live-vs-draft compare, finding retest, and publish-readiness gate for owner consultant verification.
+- done:
+  - Added live-vs-draft compare/readiness APIs and audit-backed readiness proof keyed to the canonical draft hash.
+  - Added owner/admin compare panel with explicit regression markers and finding retest against the saved draft.
+  - Connected compare readiness into `Knowledge -> Publish`, so publish now requires both recent Validate and recent compare proof for the current draft.
+- next:
+  - Close the program with visual proof, rollout evidence, and post-merge monitoring in the closeout TP.
+- evidence:
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/truffles-api && pytest -q tests/test_console_consultant_verification_api.py tests/test_console_knowledge_preflight.py tests/test_console_owner_business.py tests/test_state_service_simulation.py -k 'consultant_verification or knowledge_preflight or simulation or compare or readiness'` (`33 passed, 57 deselected`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/truffles-api && python3 scripts/generate_openapi.py --check` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/console-web && npm run generate:api` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/console-web && npm run lint -- --file src/app/business/consultant-verification/page.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationScenarioLibrary.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationSessionSummaryPanel.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationFindingsPanel.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationComparePanel.tsx --file src/app/business/consultant-verification/_lib/presentation.ts --file src/app/knowledge/page.tsx --file src/lib/api-client.ts --file e2e/owner-admin-business.spec.ts` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/console-web && npm run build` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-13-owner-consultant-verification-program-a920/console-web && npm run start -- --hostname 127.0.0.1 --port 3102` + `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --grep "consultant verification compare"` (`failed: Keycloak auth transition timeout in e2e/support/keycloak-auth.ts:55`)
+- last_updated: 2026-03-14T11:37:50+05:00
