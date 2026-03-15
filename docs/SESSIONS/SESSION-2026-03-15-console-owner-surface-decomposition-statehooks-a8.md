@@ -1,0 +1,34 @@
+# SESSION 2026-03-15-console-owner-surface-decomposition-statehooks-a8 — Session 2026-03-15-console-owner-surface-decomposition-statehooks-a8
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-15-console-owner-surface-decomposition-statehooks-a8.md
+- block_id: UX-52
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-15-console-owner-surface-decomposition-statehooks-a8
+- worktree: /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-statehooks-a8
+- base_ref: origin/main
+- scope: Finish `UX-52` state-hook extraction by moving route-level Knowledge and consultant-verification orchestration into page-local hooks while preserving owner/admin behavior.
+- done:
+  - Synced local `main` after merge `#972`, removed stale untracked TP drift, and started A8 from fresh `origin/main`.
+  - Extracted `Knowledge` route orchestration into `console-web/src/app/knowledge/_hooks/useKnowledgeStudioState.ts` and reduced `console-web/src/app/knowledge/page.tsx` to a thin route shell with extracted fleet/readiness panels.
+  - Extracted consultant verification workspace orchestration into `console-web/src/app/business/consultant-verification/_hooks/useConsultantVerificationWorkspaceState.ts` and reduced `ConsultantVerificationWorkspace.tsx` to a composition shell.
+  - Updated canon/docs/backlog to mark `UX-52` mitigated and track residual hook-level debt as `UX-54`.
+- next:
+  - Open PR for A8 and merge after deterministic checks; if future owner/admin fixes still need large hook edits, start `TP-2026-03-15-console-owner-state-hook-domain-split-a9.md`.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-15-console-owner-surface-decomposition-statehooks-a8.md
+  - console-web/src/app/knowledge/page.tsx
+  - console-web/src/app/knowledge/_hooks/useKnowledgeStudioState.ts
+  - console-web/src/app/knowledge/_components/KnowledgePlatformAdminFleetPanel.tsx
+  - console-web/src/app/knowledge/_components/KnowledgeBranchReadinessPanel.tsx
+  - console-web/src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx
+  - console-web/src/app/business/consultant-verification/_hooks/useConsultantVerificationWorkspaceState.ts
+  - cd /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-statehooks-a8/console-web && npm run lint -- --file src/app/knowledge/page.tsx --file src/app/knowledge/_hooks/useKnowledgeStudioState.ts --file src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx --file src/app/business/consultant-verification/_hooks/useConsultantVerificationWorkspaceState.ts --file e2e/owner-admin-business.spec.ts (`pass`)
+  - cd /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-statehooks-a8/console-web && npm run build (`pass`)
+  - cd /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-statehooks-a8/console-web && npx playwright test e2e/owner-admin-business.spec.ts --project chromium --workers 1 --grep "knowledge owner flow decomposition|consultant verification decomposed lanes" (`2 passed`)
+- last_updated: 2026-03-15T13:40:00+05:00
