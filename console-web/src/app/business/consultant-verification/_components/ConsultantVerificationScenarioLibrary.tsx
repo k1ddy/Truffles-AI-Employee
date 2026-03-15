@@ -18,6 +18,8 @@ export default function ConsultantVerificationScenarioLibrary({
     onFillPrompt,
     onRunScenario,
 }: ScenarioLibraryProps) {
+    const scenarioItems = scenarios ?? [];
+
     return (
         <article
             className="rounded-xl border border-border/60 bg-card p-4"
@@ -30,17 +32,17 @@ export default function ConsultantVerificationScenarioLibrary({
                         Готовые сложные вопросы строятся от домена, reference pack и capabilities текущего бизнеса.
                     </p>
                 </div>
-                <span className="text-xs text-muted-foreground">{scenarios.length}</span>
+                <span className="text-xs text-muted-foreground">{scenarioItems.length}</span>
             </div>
 
-            {scenarios.length === 0 ? (
+            {scenarioItems.length === 0 ? (
                 <p className="mt-3 text-sm text-muted-foreground">
                     Сценарии пока не собраны. Можно проверять вручную через обычный чат.
                 </p>
             ) : null}
 
             <div className="mt-3 space-y-3">
-                {scenarios.map((scenario) => (
+                {scenarioItems.map((scenario) => (
                     <article
                         key={scenario.id}
                         className="rounded-xl border border-border/60 bg-muted/10 p-3"

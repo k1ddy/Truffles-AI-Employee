@@ -26,6 +26,7 @@ export default function ConsultantVerificationComparePanel({
     canCompareLastPrompt,
     onCompareLastPrompt,
 }: ComparePanelProps) {
+    const compareCases = cases ?? [];
     const readinessPresentation = getCompareReadinessPresentation(readiness?.status);
 
     return (
@@ -90,9 +91,9 @@ export default function ConsultantVerificationComparePanel({
                 </div>
             </div>
 
-            {cases.length > 0 ? (
+            {compareCases.length > 0 ? (
                 <div className="mt-4 space-y-3" data-testid="consultant-verification-compare-cases">
-                    {cases.map((item) => {
+                    {compareCases.map((item) => {
                         const deltaPresentation = getCompareDeltaPresentation(item.delta);
                         const liveVerdict = getVerdictPresentation(item.live_turn.business_verdict);
                         const draftVerdict = getVerdictPresentation(item.draft_turn.business_verdict);

@@ -145,16 +145,20 @@
 | `console-web/src/app/insights/page.tsx` | Insights/Analytics page (read-only daily metrics) | Frontend |
 | `console-web/src/app/marketing/page.tsx` | Marketing Pro lifecycle UI (preview/approval/preflight/execute) | Frontend |
 | `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx` | Owner/Admin consultant verification interactive workspace (sessions, transcript, explainer) | Frontend |
+| `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationTeamToolsPanel.tsx` | Secondary team-tools disclosure for consultant verification (`recent sessions`, `compare`, `findings`) | Frontend |
 | `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationComparePanel.tsx` | Owner/Admin consultant verification live-vs-draft compare panel and readiness scorecard | Frontend |
 | `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationFindingsPanel.tsx` | Owner/Admin consultant verification findings list, status updates, and draft retest actions | Frontend |
 | `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationScenarioLibrary.tsx` | Owner/Admin consultant verification scenario catalog cards and quick-run actions | Frontend |
 | `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationSessionSummaryPanel.tsx` | Owner/Admin consultant verification session summary and replay controls | Frontend |
+| `console-web/src/app/knowledge/_components/KnowledgePackInspectorPanel.tsx` | Support-only Client Pack inspector panel used inside `Knowledge` disclosure | Frontend |
+| `console-web/src/app/knowledge/_components/KnowledgeLearningCandidatesPanel.tsx` | Support-only learning-candidates panel used inside `Knowledge` disclosure | Frontend |
 | `console-web/src/app/business/consultant-verification/_lib/presentation.ts` | Owner-facing verdict/explanation presentation helpers for consultant verification | Frontend |
 | `console-web/src/components/TenantsScopedErrorSummary.tsx` | Scoped error summary для Tenants workspace зон | Frontend |
 | `console-web/src/components/TenantsSensitiveIdCell.tsx` | Mask/reveal/copy ячейка чувствительного `instance_id` с audit hook | Frontend |
 | `console-web/src/components/TenantsQuickCreatePanel.tsx` | Вынесенный quick-create блок Tenants (компания/клиент/филиал) с явными label-id для a11y | Frontend |
 | `console-web/src/components/TenantsOperationalKpiPanel.tsx` | Вынесенная панель операционных KPI/alert hooks/weekly snapshots для Tenants (platform_admin) | Frontend |
 | `console-web/src/components/ConsoleOwnerScopeGate.tsx` | Shared owner branch-selection gate reused by `Knowledge` and `Проверка консультанта` | Frontend |
+| `console-web/src/components/ConsoleSupportDisclosure.tsx` | Shared progressive-disclosure wrapper for secondary owner/admin tools | Frontend |
 | `console-web/src/app/tenants/use-tenants-scope-derived-state.ts` | Derived scope/state hook для `/tenants` (context names/maps/filter options) | Frontend |
 | `console-web/src/app/tenants/tenants-page-helpers.ts` | Shared helpers/types/formatters for Tenants page (lifecycle audit, branch patch/snapshot, scope/date labels) | Frontend |
 | `console-web/src/app/tenants/use-tenants-action-queue.ts` | Hook для action-queue orchestration и archive predicate в `/tenants` | Frontend |

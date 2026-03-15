@@ -123,6 +123,9 @@ export default function BusinessConsultantVerificationPage() {
     const canApplyBranchContext = Boolean(branchDraftId && selectedClientId);
     const syncBlocked = Boolean(data?.knowledge_safe_mode) || (data?.knowledge_sync_status ?? "pending") !== "ready";
     const workspaceReady = data?.feature_enabled && !branchSelectionRequired && data?.status === "ready" && !syncBlocked;
+    const readinessCards = data?.readiness_cards ?? [];
+    const stressTestExamples = data?.stress_test_examples ?? [];
+    const actions = data?.actions ?? [];
 
     async function applyBranchContext() {
         if (!canApplyBranchContext) {
@@ -330,7 +333,7 @@ export default function BusinessConsultantVerificationPage() {
                 className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3"
                 data-testid="consultant-verification-readiness-grid"
             >
-                {data.readiness_cards.map((card) => (
+                {readinessCards.map((card) => (
                     <article
                         key={card.id}
                         className="rounded-xl border border-border/60 bg-card p-4"
@@ -364,7 +367,7 @@ export default function BusinessConsultantVerificationPage() {
                 ))}
             </section>
 
-            {workspaceReady ? <ConsultantVerificationWorkspace overview={data} /> : null}
+            {workspaceReady ? <ConsultantVerificationWorkspace overview={data} role={role} /> : null}
 
             <section className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_0.8fr]">
                 <article
@@ -389,7 +392,7 @@ export default function BusinessConsultantVerificationPage() {
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Что спросить</p>
                     <h2 className="mt-1 text-lg font-semibold">Примеры неудобных проверок</h2>
                     <ol className="mt-3 space-y-2 text-sm text-muted-foreground">
-                        {data.stress_test_examples.map((example, index) => (
+                        {stressTestExamples.map((example, index) => (
                             <li key={example} className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
                                 {index + 1}. {example}
                             </li>
@@ -404,10 +407,10 @@ export default function BusinessConsultantVerificationPage() {
             >
                 <div className="mb-3 flex items-center justify-between">
                     <h2 className="text-lg font-semibold">Что сделать сейчас</h2>
-                    <span className="text-xs text-muted-foreground">{data.actions.length} шага</span>
+                    <span className="text-xs text-muted-foreground">{actions.length} шага</span>
                 </div>
                 <div className="space-y-3">
-                    {data.actions.map((action) => (
+                    {actions.map((action) => (
                         <article
                             key={action.id}
                             className="rounded-lg border border-border/60 bg-muted/20 p-3"

@@ -45,6 +45,8 @@ async function mockKnowledgeWorkspace(
         branchContext,
         meSelectedBranchId,
         meBranches,
+        role = 'owner',
+        learningCandidates,
     }: {
         current: Record<string, unknown>;
         readiness?: Record<string, unknown>;
@@ -54,6 +56,8 @@ async function mockKnowledgeWorkspace(
         branchContext?: Record<string, unknown>;
         meSelectedBranchId?: string | null;
         meBranches?: Record<string, unknown>[];
+        role?: string;
+        learningCandidates?: Record<string, unknown>[];
     },
 ) {
     const companyId = '11111111-1111-4111-8111-111111111111';
@@ -75,7 +79,7 @@ async function mockKnowledgeWorkspace(
         await toJsonResponse(route, {
             agent: {
                 id: agentId,
-                role: 'owner',
+                role,
                 name: 'Owner',
             },
             client: {
@@ -116,7 +120,7 @@ async function mockKnowledgeWorkspace(
         });
     }
     await page.route(/.*\/api\/proxy\/learning\/candidates(?:\?.*)?$/, async (route) => {
-        await toJsonResponse(route, { items: [] });
+        await toJsonResponse(route, { items: learningCandidates ?? [] });
     });
     await page.route(/.*\/api\/proxy\/calendar\/specialists(?:\?.*)?$/, async (route) => {
         await toJsonResponse(route, { items: [] });
@@ -146,6 +150,8 @@ function isMockedKnowledgeWorkspaceTest(title: string) {
         || title.includes('knowledge scope gate')
         || title.includes('knowledge sync contradiction')
         || title.includes('consultant verification branch gate')
+        || title.includes('consultant verification owner surface')
+        || title.includes('knowledge support tools disclosure')
         || title.includes('consultant verification readiness')
         || title.includes('knowledge publish sync failure');
 }
@@ -485,13 +491,11 @@ test.describe('Owner/Admin Business Control', () => {
         }
 
         await expect(page.getByTestId('consultant-verification-workspace')).toBeVisible();
-        await expect(page.getByTestId('consultant-verification-session-list')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-team-tools')).toBeVisible();
         await expect(page.getByTestId('consultant-verification-explainer')).toBeVisible();
         await expect(page.getByTestId('consultant-verification-composer')).toBeVisible();
         await expect(page.getByTestId('consultant-verification-scenario-library')).toBeVisible();
         await expect(page.getByTestId('consultant-verification-session-summary')).toBeVisible();
-        await expect(page.getByTestId('consultant-verification-compare')).toBeVisible();
-        await expect(page.getByTestId('consultant-verification-findings')).toBeVisible();
 
         await page.getByTestId('consultant-verification-mode-stress').click();
         await page.getByTestId('consultant-verification-start-session').click();
@@ -505,6 +509,12 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('consultant-verification-summary-answered')).toBeVisible();
         await expect(page.getByTestId('consultant-verification-summary-gap')).toBeVisible();
 
+        const teamTools = page.getByTestId('consultant-verification-team-tools');
+        if (!(await page.getByTestId('consultant-verification-compare').isVisible().catch(() => false))) {
+            await teamTools.locator('summary').click();
+        }
+        await expect(page.getByTestId('consultant-verification-compare')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-findings')).toBeVisible();
         await page.getByTestId('consultant-verification-finding-note').fill('Этот ответ нужно сохранить на разбор.');
         await page.getByTestId('consultant-verification-create-finding').click();
         await expect(page.getByTestId('consultant-verification-findings')).toContainText('Найденные слабые места');
@@ -566,6 +576,61 @@ test.describe('Owner/Admin Business Control', () => {
 
         await page.getByTestId('knowledge-load-saved-draft').click();
         await expect(page.getByTestId('knowledge-draft-textarea')).toHaveValue(/Draft Salon/);
+    });
+
+    test('should hide support tools behind disclosure on knowledge for owner knowledge support tools disclosure', async ({ page }) => {
+        await mockKnowledgeWorkspace(page, {
+            current: {
+                version_id: '55555555-5555-4555-8555-555555555555',
+                payload: {
+                    client_pack: {
+                        salon: { name: 'Published Salon' },
+                    },
+                },
+                content: JSON.stringify({
+                    client_pack: {
+                        salon: { name: 'Published Salon' },
+                    },
+                }, null, 2),
+                updated_at: '2026-03-14T10:00:00Z',
+                edit_base_source: 'published',
+                edit_base_content: JSON.stringify({
+                    client_pack: {
+                        salon: { name: 'Published Salon' },
+                    },
+                }, null, 2),
+                edit_base_updated_at: '2026-03-14T10:00:00Z',
+                sync_status: 'ready',
+                sync_status_label: 'Синхронизировано',
+                knowledge_safe_mode: false,
+                knowledge_safe_mode_reason: null,
+            },
+            learningCandidates: [
+                {
+                    id: 'candidate-1',
+                    status: 'pending',
+                    question_text: 'Есть ли скидка студентам?',
+                    response_text: 'Да, 10% по студенческому.',
+                    created_at: '2026-03-14T12:00:00Z',
+                    retention_expires_at: '2026-04-14T12:00:00Z',
+                    source_name: 'Manager',
+                    source_role: 'manager',
+                    can_approve: true,
+                },
+            ],
+        });
+
+        await page.goto(`${resolvedBaseURL}/knowledge`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByTestId('knowledge-support-tools-disclosure')).toBeVisible();
+        await expect(page.getByTestId('knowledge-pack-inspector')).toBeHidden();
+        await page.getByTestId('knowledge-support-tools-disclosure').locator('summary').click();
+        await expect(page.getByTestId('knowledge-pack-inspector')).toBeVisible();
+
+        await expect(page.getByTestId('knowledge-learning-candidates-disclosure')).toBeVisible();
+        await expect(page.getByTestId('learning-candidates')).toBeHidden();
+        await page.getByTestId('knowledge-learning-candidates-disclosure').locator('summary').click();
+        await expect(page.getByTestId('learning-candidates')).toBeVisible();
+        await expect(page.getByTestId('learning-candidates')).toContainText('Есть ли скидка студентам?');
     });
 
     test('should preserve structured policy objects when building structured draft knowledge structured draft preservation', async ({ page }) => {
@@ -840,6 +905,211 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('consultant-verification-branch-gate')).toBeHidden();
         await expect(page.getByTestId('consultant-verification-scope-card')).toContainText('Almaty Downtown');
         await expect(page.getByTestId('consultant-verification-status-chip')).toContainText('ready');
+    });
+
+    test('should keep owner consultant verification focused until team tools are opened consultant verification owner surface', async ({ page }) => {
+        const companyId = '11111111-1111-4111-8111-111111111111';
+        const clientId = '22222222-2222-4222-8222-222222222222';
+        const branchId = '33333333-3333-4333-8333-333333333333';
+        const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        const assistantTurnId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+        await page.route(/.*\/api\/auth\/session(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, {
+                user: { name: 'Owner', email: 'owner@example.com' },
+                accessToken: 'e2e-owner-token',
+                expires: '2030-01-01T00:00:00.000Z',
+            });
+        });
+        await page.route('**/api/proxy/me', async (route) => {
+            await toJsonResponse(route, {
+                agent: { id: '44444444-4444-4444-8444-444444444444', role: 'owner', name: 'Owner' },
+                client: { id: clientId, company_id: companyId, name: 'Demo Salon', slug: 'demo_salon' },
+                selected_company_id: companyId,
+                selected_branch_id: branchId,
+                branches: [
+                    { id: branchId, client_id: clientId, company_id: companyId, name: 'Almaty Downtown' },
+                ],
+            });
+        });
+        await page.route(/.*\/api\/proxy\/business\/consultant-verification\/overview(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, {
+                generated_at: '2026-03-15T11:30:00Z',
+                feature_enabled: true,
+                status: 'ready',
+                status_label: 'Готово к проверке',
+                summary: 'Можно писать как клиент и проверять ответы по текущему branch.',
+                next_wave_summary: 'Следующий шаг — сохранить слабые места и повторить compare.',
+                branch_selection_required: false,
+                selected_branch_id: branchId,
+                selected_branch_name: 'Almaty Downtown',
+                knowledge_last_published_at: '2026-03-15T10:00:00Z',
+                knowledge_stale_hours: 0,
+                knowledge_sync_status: 'ready',
+                knowledge_sync_status_label: 'Синхронизировано',
+                knowledge_sync_error: null,
+                knowledge_safe_mode: false,
+                knowledge_safe_mode_reason: null,
+                readiness_cards: [],
+                stress_test_examples: ['Сколько стоит маникюр?'],
+                scenario_catalog: [
+                    {
+                        id: 'scenario-1',
+                        title: 'Спросить цену',
+                        description: 'Проверить короткий factual ответ.',
+                        prompt: 'Сколько стоит маникюр?',
+                        category: 'pricing',
+                        recommended_challenge_mode: 'as_client',
+                        source_label: 'Каталог услуг',
+                    },
+                ],
+                actions: [],
+            });
+        });
+        await page.route(/.*\/api\/proxy\/business\/consultant-verification\/sessions(?:\?.*)?$/, async (route) => {
+            if (route.request().method() === 'GET') {
+                await toJsonResponse(route, {
+                    items: [
+                        {
+                            id: sessionId,
+                            title: 'Проверка как клиент',
+                            actor_agent_id: '44444444-4444-4444-8444-444444444444',
+                            actor_role: 'owner',
+                            client_id: clientId,
+                            branch_id: branchId,
+                            source_mode: 'live',
+                            challenge_mode: 'as_client',
+                            status: 'active',
+                            turns_total: 2,
+                            latest_preview: {},
+                            created_at: '2026-03-15T11:30:00Z',
+                            updated_at: '2026-03-15T11:31:00Z',
+                            last_message_at: '2026-03-15T11:31:00Z',
+                            latest_business_verdict: 'answered',
+                            latest_outcome: 'fact',
+                        },
+                    ],
+                });
+                return;
+            }
+            await toJsonResponse(route, {
+                session: {
+                    id: sessionId,
+                    title: 'Проверка как клиент',
+                    actor_agent_id: '44444444-4444-4444-8444-444444444444',
+                    actor_role: 'owner',
+                    client_id: clientId,
+                    branch_id: branchId,
+                    source_mode: 'live',
+                    challenge_mode: 'as_client',
+                    status: 'active',
+                    turns_total: 2,
+                    latest_preview: {},
+                    created_at: '2026-03-15T11:30:00Z',
+                    updated_at: '2026-03-15T11:31:00Z',
+                    last_message_at: '2026-03-15T11:31:00Z',
+                    latest_business_verdict: 'answered',
+                    latest_outcome: 'fact',
+                },
+                turns: [],
+                summary: {
+                    assistant_turns_total: 0,
+                    answered_total: 0,
+                    needs_clarification_total: 0,
+                    handoff_total: 0,
+                    gap_detected_total: 0,
+                    replay_prompt_total: 0,
+                    weak_turns: [],
+                },
+            });
+        });
+        await page.route(`**/api/proxy/business/consultant-verification/sessions/${sessionId}`, async (route) => {
+            await toJsonResponse(route, {
+                session: {
+                    id: sessionId,
+                    title: 'Проверка как клиент',
+                    actor_agent_id: '44444444-4444-4444-8444-444444444444',
+                    actor_role: 'owner',
+                    client_id: clientId,
+                    branch_id: branchId,
+                    source_mode: 'live',
+                    challenge_mode: 'as_client',
+                    status: 'active',
+                    turns_total: 2,
+                    latest_preview: {},
+                    created_at: '2026-03-15T11:30:00Z',
+                    updated_at: '2026-03-15T11:31:00Z',
+                    last_message_at: '2026-03-15T11:31:00Z',
+                    latest_business_verdict: 'answered',
+                    latest_outcome: 'fact',
+                },
+                turns: [
+                    {
+                        id: 'owner-turn-1',
+                        turn_index: 1,
+                        role: 'owner',
+                        content: 'Сколько стоит маникюр?',
+                        created_at: '2026-03-15T11:30:00Z',
+                    },
+                    {
+                        id: assistantTurnId,
+                        turn_index: 2,
+                        role: 'assistant',
+                        content: 'Маникюр стоит 12 000 тенге.',
+                        created_at: '2026-03-15T11:31:00Z',
+                        business_verdict: 'answered',
+                        outcome: 'fact',
+                        source_refs: ['price_list'],
+                        would_book: false,
+                        would_handoff: false,
+                        gap_detected: false,
+                        decision_meta: { reason_code: 'FACT' },
+                        decision_trace: [{ step: 'fact' }],
+                    },
+                ],
+                summary: {
+                    assistant_turns_total: 1,
+                    answered_total: 1,
+                    needs_clarification_total: 0,
+                    handoff_total: 0,
+                    gap_detected_total: 0,
+                    replay_prompt_total: 1,
+                    weak_turns: [],
+                },
+            });
+        });
+        await page.route(/.*\/api\/proxy\/business\/consultant-verification\/findings(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, {
+                items: [
+                    {
+                        id: 'finding-1',
+                        status: 'new',
+                        owner_prompt: 'Сколько стоит маникюр?',
+                        created_at: '2026-03-15T11:31:00Z',
+                    },
+                ],
+            });
+        });
+        await page.route(/.*\/api\/proxy\/business\/consultant-verification\/readiness(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, {
+                readiness: {
+                    status: 'ready',
+                    status_label: 'Сравнение доступно',
+                    summary: 'Можно сравнить live и draft.',
+                    compare_required: false,
+                },
+            });
+        });
+
+        await page.goto(`${resolvedBaseURL}/business/consultant-verification`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByTestId('consultant-verification-workspace')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-team-tools')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-compare')).toBeHidden();
+        await expect(page.getByTestId('consultant-verification-findings')).toBeHidden();
+        await page.getByTestId('consultant-verification-team-tools').locator('summary').click();
+        await expect(page.getByTestId('consultant-verification-compare')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-findings')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-session-0')).toBeVisible();
     });
 
     test('should block consultant verification workspace while sync is pending consultant verification readiness', async ({ page }) => {

@@ -21,10 +21,13 @@ import {
 import { useErrorHandler } from "@/lib/api-hooks";
 import AccessDenied from "@/components/AccessDenied";
 import ConsoleOwnerScopeGate from "@/components/ConsoleOwnerScopeGate";
+import ConsoleSupportDisclosure from "@/components/ConsoleSupportDisclosure";
 import { MISSING_LABELS } from "@/components/provisioning-wizard-domain";
 import api from "@/lib/api";
 import { applyConsoleScopeContext } from "@/lib/console-scope-gate";
 import type { components } from "@/types/api.generated";
+import KnowledgeLearningCandidatesPanel from "./_components/KnowledgeLearningCandidatesPanel";
+import KnowledgePackInspectorPanel from "./_components/KnowledgePackInspectorPanel";
 
 type SessionData = ReturnType<typeof useSession>["data"];
 type FleetAttentionItem = components["schemas"]["ConsoleFleetAttentionItem"];
@@ -93,6 +96,10 @@ type ValidationState = {
     diff: string;
     draftSaved: boolean;
 };
+
+function shouldOpenSupportTools(role: string): boolean {
+    return role === "admin" || role === "platform_admin";
+}
 
 function isApiUnavailable(error: unknown) {
     return axios.isAxiosError(error)
@@ -682,6 +689,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
 
     const role = meData?.agent?.role ?? "manager";
     const isPlatformAdmin = role === "platform_admin";
+    const supportToolsDefaultOpen = shouldOpenSupportTools(role);
     const canRead = canAccessConsole(role, "knowledge", "read");
     const canEdit = canAccessConsole(role, "knowledge", "write");
     const branches = useMemo(
@@ -2443,48 +2451,20 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                     </button>
                                 </div>
 
-                                <div className="mt-4 rounded-lg border border-border/60 bg-background p-3">
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <p className="text-sm font-medium">Client Pack Inspector</p>
-                                        <span className="text-xs text-muted-foreground">
-                                            полей {inspectorSummary.flattenedFieldsCount}
-                                        </span>
-                                    </div>
-                                    <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-                                        <div className="rounded-lg border border-border/60 px-2 py-1">
-                                            services_catalog: {inspectorSummary.servicesCount}
-                                        </div>
-                                        <div className="rounded-lg border border-border/60 px-2 py-1">
-                                            price_list: {inspectorSummary.priceRowsCount}
-                                        </div>
-                                        <div className="rounded-lg border border-border/60 px-2 py-1">
-                                            booking.collect_fields: {inspectorSummary.collectFieldsCount}
-                                        </div>
-                                        <div className="rounded-lg border border-border/60 px-2 py-1">
-                                            policy заполнено: {inspectorSummary.policyFilledCount}/4
-                                        </div>
-                                    </div>
-                                    <label className="mt-3 block text-xs text-muted-foreground">
-                                        Поиск по ключам Client_Pack
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={packInspectorQuery}
-                                            onChange={(event) => setPackInspectorQuery(event.target.value)}
-                                            placeholder="Например: client_pack.booking.collect_fields"
-                                        />
-                                    </label>
-                                    <div className="mt-2 max-h-44 overflow-auto rounded-lg border border-border/60 bg-muted/30 p-2 text-xs">
-                                        {filteredPackPaths.length === 0 && (
-                                            <div className="text-muted-foreground">Совпадений не найдено.</div>
-                                        )}
-                                        {filteredPackPaths.map((item) => (
-                                            <div key={`${item.path}-${item.preview}`} className="mb-1">
-                                                <span className="font-mono text-foreground">{item.path}</span>
-                                                <span className="text-muted-foreground"> = {item.preview}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
+                                <ConsoleSupportDisclosure
+                                    rootTestId="knowledge-support-tools-disclosure"
+                                    title="Инструменты команды"
+                                    description="Инспектор Client Pack нужен для точечной диагностики, а не для первого прохода владельца бизнеса."
+                                    defaultOpen={supportToolsDefaultOpen}
+                                    className="mt-4"
+                                >
+                                    <KnowledgePackInspectorPanel
+                                        summary={inspectorSummary}
+                                        query={packInspectorQuery}
+                                        onQueryChange={setPackInspectorQuery}
+                                        items={filteredPackPaths}
+                                    />
+                                </ConsoleSupportDisclosure>
 
                                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
                                     <label className="text-xs text-muted-foreground">
@@ -3088,91 +3068,28 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                 </div>
             </div>
 
-            <div className="card-surface mt-6 p-5" data-testid="learning-candidates">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                        <h2 className="text-lg font-semibold">Кандидаты обучения</h2>
-                        <p className="text-sm text-muted-foreground">
-                            Pending-кандидаты из ответов менеджера. Одобрение добавляет их в draft.
-                        </p>
-                    </div>
-                    {!canEdit && (
-                        <span className="text-xs text-muted-foreground">Только owner/admin</span>
-                    )}
-                </div>
-
-                {candidatesQuery.isLoading && (
-                    <p className="mt-4 text-sm text-muted-foreground">Загрузка кандидатов...</p>
-                )}
-
-                {!candidatesQuery.isLoading && learningCandidates.length === 0 && (
-                    <p className="mt-4 text-sm text-muted-foreground">Пока нет pending-кандидатов.</p>
-                )}
-
-                {!candidatesQuery.isLoading && learningCandidates.length > 0 && (
-                    <div className="mt-4 space-y-4">
-                        {learningCandidates.map((candidate) => (
-                            <div
-                                key={candidate.id ?? candidate.question_text}
-                                className="rounded-lg border border-border/60 p-4"
-                            >
-                                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                                    <span>Статус: {candidate.status ?? "unknown"}</span>
-                                    <span>Создано: {formatTimestamp(candidate.created_at)}</span>
-                                    <span>Retention: {formatTimestamp(candidate.retention_expires_at)}</span>
-                                </div>
-                                <div className="mt-3 text-sm">
-                                    <div className="font-medium">Вопрос</div>
-                                    <div className="text-muted-foreground">{candidate.question_text}</div>
-                                </div>
-                                <div className="mt-3 text-sm">
-                                    <div className="font-medium">Ответ</div>
-                                    <div className="text-muted-foreground">{candidate.response_text}</div>
-                                </div>
-                                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                    <span>Источник: {candidate.source_name ?? "—"}</span>
-                                    <span>Роль: {candidate.source_role ?? "—"}</span>
-                                </div>
-                                <div className="mt-4 flex flex-wrap items-center gap-2">
-                                    <button
-                                        type="button"
-                                        className="btn-primary"
-                                        onClick={() => {
-                                            if (candidate.id) {
-                                                approveCandidateMutation.mutate(candidate.id);
-                                            }
-                                        }}
-                                        disabled={
-                                            !candidate.id
-                                            || !canEdit
-                                            || !candidate.can_approve
-                                            || approveCandidateMutation.isPending
-                                        }
-                                    >
-                                        {approveCandidateMutation.isPending ? "Одобрение..." : "Одобрить"}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className="btn-ghost"
-                                        onClick={() => {
-                                            if (candidate.id) {
-                                                rejectCandidateMutation.mutate(candidate.id);
-                                            }
-                                        }}
-                                        disabled={!candidate.id || !canEdit || rejectCandidateMutation.isPending}
-                                    >
-                                        {rejectCandidateMutation.isPending ? "Отклонение..." : "Отклонить"}
-                                    </button>
-                                    {!candidate.can_approve && candidate.ineligible_reason && (
-                                        <span className="text-xs text-muted-foreground">
-                                            Блокировка: {candidate.ineligible_reason}
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
+            <div className="card-surface mt-6 p-5">
+                <ConsoleSupportDisclosure
+                    rootTestId="knowledge-learning-candidates-disclosure"
+                    title="Кандидаты обучения"
+                    description="Это вторичный поток для команды: сначала подготовьте branch knowledge, потом разбирайте новые ответы менеджеров."
+                    defaultOpen={supportToolsDefaultOpen}
+                >
+                    <KnowledgeLearningCandidatesPanel
+                        candidates={learningCandidates}
+                        isLoading={candidatesQuery.isLoading}
+                        canEdit={canEdit}
+                        approvePending={approveCandidateMutation.isPending}
+                        rejectPending={rejectCandidateMutation.isPending}
+                        onApprove={(candidateId) => {
+                            approveCandidateMutation.mutate(candidateId);
+                        }}
+                        onReject={(candidateId) => {
+                            rejectCandidateMutation.mutate(candidateId);
+                        }}
+                        formatTimestamp={formatTimestamp}
+                    />
+                </ConsoleSupportDisclosure>
             </div>
 
             {showRollbackConfirm && (

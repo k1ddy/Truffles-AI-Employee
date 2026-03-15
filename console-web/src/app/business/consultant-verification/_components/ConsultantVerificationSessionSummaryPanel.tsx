@@ -56,6 +56,8 @@ export default function ConsultantVerificationSessionSummaryPanel({
         );
     }
 
+    const weakTurns = summary.weak_turns ?? [];
+
     return (
         <article
             className="mt-4 rounded-xl border border-border/60 bg-card p-4"
@@ -111,10 +113,10 @@ export default function ConsultantVerificationSessionSummaryPanel({
                 </button>
             </div>
 
-            {summary.weak_turns.length > 0 ? (
+            {weakTurns.length > 0 ? (
                 <div className="mt-4 space-y-2">
                     <p className="text-sm font-semibold text-foreground">Где система выглядела слабо</p>
-                    {summary.weak_turns.map((weakTurn) => {
+                    {weakTurns.map((weakTurn) => {
                         const verdict = getVerdictPresentation(weakTurn.business_verdict);
                         return (
                             <article

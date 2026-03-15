@@ -273,6 +273,7 @@ export function buildExplanationBlocks(turn?: ConsultantVerificationTurnRecord |
     }
 
     const blocks: ExplanationBlock[] = [];
+    const sourceRefs = turn.source_refs ?? [];
 
     if (turn.business_verdict === "gap_detected") {
         blocks.push({
@@ -300,7 +301,7 @@ export function buildExplanationBlocks(turn?: ConsultantVerificationTurnRecord |
         });
     }
 
-    if (turn.source_refs.length > 0) {
+    if (sourceRefs.length > 0) {
         blocks.push({
             id: "sources",
             title: "На что опирался ответ",
@@ -336,8 +337,10 @@ export function buildTurnSignals(turn?: ConsultantVerificationTurnRecord | null)
         return [];
     }
     const signals: string[] = [];
-    if (turn.source_refs.length > 0) {
-        signals.push(`Источники: ${turn.source_refs.length}`);
+    const sourceRefs = turn.source_refs ?? [];
+    const decisionTrace = turn.decision_trace ?? [];
+    if (sourceRefs.length > 0) {
+        signals.push(`Источники: ${sourceRefs.length}`);
     }
     if (turn.would_book) {
         signals.push("Подготовил бы запись");
@@ -348,8 +351,8 @@ export function buildTurnSignals(turn?: ConsultantVerificationTurnRecord | null)
     if (turn.gap_detected) {
         signals.push("Пробел зафиксирован");
     }
-    if (turn.decision_trace.length > 0) {
-        signals.push(`Trace: ${turn.decision_trace.length}`);
+    if (decisionTrace.length > 0) {
+        signals.push(`Trace: ${decisionTrace.length}`);
     }
     return signals;
 }
